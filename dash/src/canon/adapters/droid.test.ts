@@ -5,28 +5,19 @@
 // `droid`, and dash/src/refresh/registry.ts maps the harness id `droid` onto
 // the source root `~/.factory/sessions`). One harness, one bucket.
 //
-// Two claim paths reach this one adapter, and they are told apart by
-// attribute fingerprint ALONE — never by the span's source name, its file name,
-// or any other string the sender controls:
+// ONE claim path reaches this adapter: the Kyber-owned Factory plugin
+// envelope — spans whose attributes are namespaced `factory.*` and which name
+// the contract they were emitted under in `factory.contract_version`. A span
+// naming a missing or unknown contract version scores zero and is
+// quarantined — see droid-envelope.test.ts.
 //
-//   1. The Kyber-owned Factory plugin envelope: spans whose attributes are
-//      namespaced `factory.*` and which name the contract they were emitted
-//      under in `factory.contract_version`. A span naming a missing or unknown
-//      contract version scores zero and is quarantined — see
-//      droid-envelope.test.ts.
-//   2. Factory's own native OpenTelemetry export, in its `genai` format: spans
-//      carrying `gen_ai.agent.name` = `droid`. The content attributes
-//      (`gen_ai.input.messages`, `gen_ai.output.messages`,
-//      `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`) are gated by a
-//      content-consent flag elsewhere, so the adapter must not require them.
-//
-// A session can be observed by BOTH paths: the native export carries the Droid
-// session id in `gen_ai.conversation.id`, the same id the plugin's session
-// spans carry, so the two are joinable to one session and one turn. The
-// precedence rule is therefore load-bearing: the plugin envelope is checked
-// FIRST, and a native span for a session the plugin already covers is kept as
-// evidence WITHOUT adding to the session's turn, tool and duration totals. A
-// native span for a session no plugin span covers is counted normally.
+// Factory's OWN native OpenTelemetry export is NOT claimed (plan D50). Its
+// `genai` format is recognised only by `gen_ai.agent.name` = `droid`, and the
+// export puts that attribute on the ROOT span alone: a trace of one root and
+// `k` children scores 1/(1+k) at the registry's group vote, against a 0.6
+// threshold, so every real turn is quarantined; the `legacy` format carries
+// no attribute fingerprint at all. A native span is therefore quarantined as
+// `unclaimed`, and the whole decoded packet is kept as the audit evidence.
 //
 // RED: written before `droid.ts` and `droid-envelope.ts` exist. Against the
 // current tree every case below fails with the module under test missing.
@@ -34,7 +25,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { OtlpSpan } from '../../otel/receiver.js'
-import { ingestBatchWithAdapters } from '../ingest.js'
+import { ingestBatch, ingestBatchWithAdapters } from '../ingest.js'
 import { buildSessions } from '../sessions.js'
 import { CanonStore } from '../store.js'
 import type { CanonicalRecord } from '../types.js'
@@ -42,7 +33,7 @@ import type { HarnessAdapter } from './base.js'
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 
-/** The Droid session id both claim paths report for the session they share. */
+/** The Droid session id the plugin envelope reports for the session it covers. */
 const DROID_SESSION = 'droid-session-1'
 /** A session only the native export observed. */
 const NATIVE_ONLY_SESSION = 'droid-session-native-only'
@@ -69,6 +60,11 @@ const NATIVE_DURATION_MS = 5000
 /** The contract version the Kyber-owned plugin emits. */
 const CONTRACT_VERSION = '1'
 
+/** The trace the native export's root span and its children share. */
+const NATIVE_TRACE = 'trace-native-genai'
+/** The span id of the native trace's root. */
+const NATIVE_ROOT = 'native-root'
+
 /**
  * The adapter module under test, loaded on demand.
  *
@@ -87,16 +83,35 @@ function loadDroid(): Promise<typeof import('./droid.js')> {
 /**
  * Factory's native export, in its `genai` format.
  *
- * The attributes are the ones the native export is documented to carry: the
- * operation, the agent identity, the conversation and session ids, the model
- * and the provider on the chat span, and the tool identity on the tool span.
- * No token counter is among them — the native export reports none — and no
- * content attribute either, because content capture is consented elsewhere.
+ * The ROOT span names the agent (`gen_ai.agent.name` = `droid`), the
+ * operation, the conversation and session ids, the model and the provider;
+ * the `chat` and `execute_tool` children carry the operation, the ids and the
+ * model, and NO agent identity — the export names the agent on the root
+ * alone. That is what makes the trace's group vote 1/(1+k), and it is why a
+ * real trace is never claimed.
+ *
+ * No token counter is among the attributes — the native export reports none —
+ * and no content attribute either, because content capture is consented
+ * elsewhere.
  */
-function nativeAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+function nativeRootAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    'gen_ai.operation.name': 'invoke_agent',
+    'gen_ai.agent.name': 'droid',
+    'gen_ai.conversation.id': DROID_SESSION,
+    'session.id': DROID_SESSION,
+    'gen_ai.request.model': NATIVE_MODEL,
+    'gen_ai.provider.name': 'anthropic',
+    'server.address': 'api.anthropic.com',
+    'server.port': 443,
+    ...over,
+  }
+}
+
+/** The native export's child attributes: the operation, the ids and the model. */
+function nativeChildAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     'gen_ai.operation.name': 'chat',
-    'gen_ai.agent.name': 'droid',
     'gen_ai.conversation.id': DROID_SESSION,
     'session.id': DROID_SESSION,
     'gen_ai.request.model': NATIVE_MODEL,
@@ -170,11 +185,11 @@ function pluginTurnSpan(spanId: string): OtlpSpan {
   })
 }
 
-/** The native export's chat span: the same session's model call, seen again. */
+/** The native export's chat span: the session's own model call, seen again. */
 function nativeChatSpan(spanId: string, sessionId: string = DROID_SESSION): OtlpSpan {
   return otlpSpan(
     spanId,
-    nativeAttributes({ 'gen_ai.conversation.id': sessionId, 'session.id': sessionId }),
+    nativeChildAttributes({ 'gen_ai.conversation.id': sessionId, 'session.id': sessionId }),
     {
       name: 'gen_ai.chat',
       resource: { 'service.name': NATIVE_SOURCE },
@@ -183,13 +198,57 @@ function nativeChatSpan(spanId: string, sessionId: string = DROID_SESSION): Otlp
   )
 }
 
+/**
+ * The native trace's root span: the `invoke_agent` span that names the agent
+ * identity, and the only span of the trace that carries it.
+ */
+function nativeRootSpan(
+  spanId: string = NATIVE_ROOT,
+  sessionId: string = DROID_SESSION,
+): OtlpSpan {
+  return otlpSpan(
+    spanId,
+    nativeRootAttributes({ 'gen_ai.conversation.id': sessionId, 'session.id': sessionId }),
+    { name: 'invoke_agent', traceId: NATIVE_TRACE },
+  )
+}
+
+/** The native trace's per-turn chat span: the root's child. */
+function nativeChatChildSpan(spanId: string): OtlpSpan {
+  return otlpSpan(spanId, nativeChildAttributes(), {
+    name: 'gen_ai.chat',
+    traceId: NATIVE_TRACE,
+    parentSpanId: NATIVE_ROOT,
+  })
+}
+
+/** The native trace's per-tool span: the root's other child. */
+function nativeToolChildSpan(
+  spanId: string,
+  over: Record<string, unknown> = {},
+): OtlpSpan {
+  return otlpSpan(
+    spanId,
+    nativeChildAttributes({
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': TOOL_NAME,
+      'gen_ai.tool.call.id': 'call_native_1',
+      'gen_ai.tool.type': 'function',
+      ...over,
+    }),
+    { name: 'gen_ai.execute_tool', traceId: NATIVE_TRACE, parentSpanId: NATIVE_ROOT },
+  )
+}
+
 /** Normalize one span through the adapter seam, as ingest would hand it over. */
 function normalize(
   adapter: HarnessAdapter,
   spanId: string,
   attributes: Record<string, unknown>,
+  source: string = NATIVE_SOURCE,
+  name: string = 'span',
 ): CanonicalRecord {
-  return adapter.normalize(rawSpan({ spanId, source: NATIVE_SOURCE, attributes }))
+  return adapter.normalize(rawSpan({ spanId, source, attributes, name }))
 }
 
 /** The canonical model keys the session projection reads (canon/sessions.ts). */
@@ -327,31 +386,6 @@ function expectCounterReason(
   }
 }
 
-/**
- * Assert that a native path reason is left alone.
- *
- * A native span has no companion settings file of its own to pair with, so
- * its reasons are not rewritten to name the file source the plugin path
- * pairs with.
- */
-function expectNativeReasonUntouched(
-  record: CanonicalRecord,
-  metric: string,
-  metricPattern: RegExp,
-): void {
-  const declared = declarationOf(record, metric)
-  expect(declared, `the native ${metric} class must declare what it cannot measure`).toBeDefined()
-  const reason = declared?.reason ?? ''
-  expect(reason, `the native ${metric} reason must still name the harness`).toMatch(/droid/i)
-  expect(reason, `the native ${metric} reason must still name the metric`).toMatch(metricPattern)
-  expect(reason, `the native ${metric} reason must not name the file source`).not.toMatch(
-    /file|settings/i,
-  )
-  expect(reason, `the native ${metric} reason must not name the session-id pairing`).not.toMatch(
-    /\bsession(?:['’]s)?[\s_-]*(?:ids?|identifier)\b/i,
-  )
-}
-
 /** The session's summary figures, as the dashboard projects them. */
 async function summaryOf(store: CanonStore, sessionId: string): Promise<Record<string, unknown>> {
   await buildSessions(store)
@@ -363,34 +397,69 @@ async function summaryOf(store: CanonStore, sessionId: string): Promise<Record<s
 }
 
 /**
- * The harness's own attributes, as the record keeps them. A vocabulary key
- * that is not bridged onto a canonical field is still readable here, so this
- * is where the export's own words are checked.
+ * The reason a span was quarantined under, or undefined when it was not
+ * quarantined at all.
  */
-function rawAttributesOf(record: CanonicalRecord): Record<string, unknown> {
-  const raw = record.raw
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
-  return raw as Record<string, unknown>
+function quarantineReason(store: CanonStore, spanId: string): string | undefined {
+  return store.getQuarantine(spanId)?.reason
+}
+
+/**
+ * The attributes a quarantined span's stored packet carries, or an empty map.
+ *
+ * The packet is the decoded span, not the normalized record: it is the only
+ * surviving copy of a span nothing claimed, so it is where the export's own
+ * vocabulary is still readable.
+ */
+function quarantinedAttributes(store: CanonStore, spanId: string): Record<string, unknown> {
+  const payload = store.getQuarantine(spanId)?.rawPayload
+  if (typeof payload !== 'string') return {}
+  const parsed = JSON.parse(payload) as { attributes?: Record<string, unknown> }
+  return parsed.attributes ?? {}
 }
 
 describe('the droid adapter — one harness, one bucket', () => {
   it('stamps the canonical harness id on every record it claims', async () => {
     const { droidAdapter } = await loadDroid()
     expect(droidAdapter.name).toBe('droid')
-    expect(normalize(droidAdapter, 'native-chat', nativeAttributes()).harness).toBe('droid')
+    expect(
+      normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE).harness,
+    ).toBe('droid')
   })
 
-  it('claims a native Factory span by its agent identity', async () => {
+  it('claims the plugin envelope with full confidence and its canonical operation', async () => {
     const { droidAdapter } = await loadDroid()
-    const attributed = new AdapterRegistry([droidAdapter]).attribute([
-      rawSpan({
-        spanId: 'native-chat',
-        source: NATIVE_SOURCE,
-        traceId: 'trace-native',
-        attributes: nativeAttributes(),
-      }),
-    ])
-    expect(attributed.get('native-chat')).toBe('droid')
+    const registry = new AdapterRegistry([droidAdapter])
+    const envelope = rawSpan({
+      spanId: 'plugin-turn',
+      source: PLUGIN_SOURCE,
+      traceId: 'trace-plugin',
+      attributes: pluginAttributes(),
+    })
+    expect(registry.scoreGroup(PLUGIN_SOURCE, 'trace-plugin', [envelope])).toEqual({
+      harness: 'droid',
+      confidence: 1,
+    })
+    expect(registry.attribute([envelope]).get('plugin-turn')).toBe('droid')
+    expect(
+      normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE, 'factory.turn').op,
+    ).toBe('llm.invoke')
+  })
+
+  it('claims no native Factory span — the genai vocabulary is not this adapter\'s fingerprint', async () => {
+    const { droidAdapter } = await loadDroid()
+    const registry = new AdapterRegistry([droidAdapter])
+    const native = rawSpan({
+      spanId: 'native-root',
+      source: NATIVE_SOURCE,
+      traceId: NATIVE_TRACE,
+      attributes: nativeRootAttributes(),
+    })
+    expect(droidAdapter.detect(native), 'a native Factory span must score no evidence').toBe(0)
+    expect(
+      registry.attribute([native]).get('native-root'),
+      'a native Factory span must not be attributed to any harness',
+    ).toBeUndefined()
   })
 
   it('does not claim a native span whose agent names another harness', async () => {
@@ -399,7 +468,7 @@ describe('the droid adapter — one harness, one bucket', () => {
       spanId: 'foreign-agent',
       source: NATIVE_SOURCE,
       traceId: 'trace-foreign',
-      attributes: nativeAttributes({ 'gen_ai.agent.name': 'claude-code' }),
+      attributes: nativeRootAttributes({ 'gen_ai.agent.name': 'claude-code' }),
     })
     expect(droidAdapter.detect(span)).toBe(0)
     const attributed = new AdapterRegistry([droidAdapter]).attribute([span])
@@ -408,117 +477,145 @@ describe('the droid adapter — one harness, one bucket', () => {
 
   it('never reads the telemetry source name as evidence', async () => {
     const { droidAdapter } = await loadDroid()
-    // A Droid span under an arbitrary collector name is still claimed.
+    // The plugin envelope under an arbitrary collector name is still claimed.
     const named = rawSpan({
       spanId: 'odd-source',
       source: FOREIGN_SOURCE,
       traceId: 'trace-odd',
-      attributes: nativeAttributes(),
+      attributes: pluginAttributes(),
     })
     expect(new AdapterRegistry([droidAdapter]).attribute([named]).get('odd-source')).toBe('droid')
 
-    // A foreign agent under a Droid-sounding source name is not.
+    // A foreign span under a Droid-sounding source name is not.
     const foreign = rawSpan({
       spanId: 'droid-sounding',
       source: 'droid',
       traceId: 'trace-sounding',
-      attributes: nativeAttributes({ 'gen_ai.agent.name': 'codex' }),
+      attributes: { 'codeburn.provider': 'github-copilot' },
     })
-    expect(new AdapterRegistry([droidAdapter]).attribute([foreign]).get('droid-sounding')).toBeUndefined()
+    expect(
+      new AdapterRegistry([droidAdapter]).attribute([foreign]).get('droid-sounding'),
+    ).toBeUndefined()
   })
 })
 
-describe('the native Factory path — the genai format', () => {
-  it('maps the chat operation onto a canonical turn of the session', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'native-chat', nativeAttributes())
-    expect(record.op).toBe('llm.invoke')
-    expect(record.sessionId).toBe(DROID_SESSION)
+describe('the native Factory export — withdrawn (D50)', () => {
+  it('quarantines the root of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeRootSpan()], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get(NATIVE_ROOT), 'no native span may be stored as a droid record').toBeUndefined()
+    expect(quarantineReason(store, NATIVE_ROOT)).toBe('unclaimed')
+    store.close()
   })
 
-  it('maps the tool operation onto a canonical tool record named after the tool', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-tool',
-      nativeAttributes({
-        'gen_ai.operation.name': 'execute_tool',
-        'gen_ai.tool.name': TOOL_NAME,
-        'gen_ai.tool.call.id': 'call_native_1',
-        'gen_ai.tool.type': 'function',
-      }),
+  it('quarantines the chat child of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeChatChildSpan('native-chat-child')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-chat-child')).toBeUndefined()
+    expect(quarantineReason(store, 'native-chat-child')).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines the tool child of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeToolChildSpan('native-tool-child')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-tool-child')).toBeUndefined()
+    expect(quarantineReason(store, 'native-tool-child')).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines every span of a native trace alike — the root and both children', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch(
+      [
+        nativeRootSpan(),
+        nativeChatChildSpan('native-chat-child'),
+        nativeToolChildSpan('native-tool-child'),
+      ],
+      store,
     )
-    expect(record.op).toBe('tool.invoke')
-    expect(toolNameOf(record)).toBe(TOOL_NAME)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 3, rejected: 0 })
+    expect(store.count(), 'a native trace must leave no record behind').toBe(0)
+    for (const spanId of [NATIVE_ROOT, 'native-chat-child', 'native-tool-child']) {
+      expect(quarantineReason(store, spanId), `${spanId} must be quarantined as unclaimed`).toBe(
+        'unclaimed',
+      )
+    }
+    store.close()
   })
 
-  it('maps the agent operation onto the session root', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-agent',
-      nativeAttributes({
-        'gen_ai.operation.name': 'invoke_agent',
-        'server.address': 'api.anthropic.com',
-        'server.port': 443,
-      }),
-    )
-    expect(record.op).toBe('agent.invoke')
+  it('keeps the whole decoded packet of a quarantined native span as the evidence', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([nativeRootSpan()], store)
+
+    const packet = store.getQuarantine(NATIVE_ROOT)?.rawPayload
+    expect(typeof packet, 'the quarantined span must keep its decoded packet').toBe('string')
+    const attributes = quarantinedAttributes(store, NATIVE_ROOT)
+    expect(attributes['gen_ai.agent.name']).toBe('droid')
+    expect(attributes['gen_ai.conversation.id']).toBe(DROID_SESSION)
+    expect(attributes['gen_ai.request.model']).toBe(NATIVE_MODEL)
+    store.close()
   })
 
-  it('takes the model from the span and never invents one', async () => {
+  it('declares a native span\'s counter classes with the plugin path\'s reasons', async () => {
     const { droidAdapter } = await loadDroid()
-    expect(modelOf(normalize(droidAdapter, 'native-chat', nativeAttributes()))).toBe(NATIVE_MODEL)
-
-    const withoutModel = nativeAttributes()
-    delete withoutModel['gen_ai.request.model']
-    expect(modelOf(normalize(droidAdapter, 'native-chat-no-model', withoutModel))).toBeUndefined()
-  })
-
-  it('does not require the consent-gated content attributes', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'native-chat', nativeAttributes())
-    expect(record.harness).toBe('droid')
-    expect(record.op).toBe('llm.invoke')
-
-    const withContent = normalize(
-      droidAdapter,
-      'native-chat-with-content',
-      nativeAttributes({
-        'gen_ai.input.messages': [{ role: 'user', content: 'hello' }],
-        'gen_ai.output.messages': [{ role: 'assistant', content: 'hi' }],
-      }),
-    )
-    expect(withContent.harness).toBe('droid')
-    expect(withContent.op).toBe('llm.invoke')
-  })
-
-  it('declares the token usage not measurable instead of reporting a measured zero', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'native-chat', nativeAttributes())
-    const declared = tokenUsageOf(record)
-    expect(declared, 'a record with no token counter must declare what it cannot measure').toBeDefined()
-    expect(declared?.availability).toBe('not_measurable')
-    // The reason names the harness and the metric, so the absence is legible.
-    expect(declared?.reason).toMatch(/droid/i)
-    expect(declared?.reason).toMatch(/token/i)
-    // The identity stores zeros; the declaration is what says they are not a
-    // measurement. A zero must never read as "nothing was spent".
-    expect(record.tokens.freshInput).toBe(0)
-    expect(record.tokens.output).toBe(0)
-    for (const metric of ['token_usage', 'output', 'cache_read', 'cache_creation']) {
-      const value = record.measurability?.[metric]
-      if (value !== undefined) {
-        expect(value, `${metric} must not be claimed measured when no counter was reported`).not.toBe('measured')
-      }
+    // The adapter has ONE reason set now: the plugin path's, which names the
+    // file source the counter would come from. The native path's own reasons
+    // are gone, so no record can declare them.
+    const record = normalize(droidAdapter, 'native-root', nativeRootAttributes())
+    for (const { metric, metricPattern } of COUNTER_CLASSES) {
+      expectCounterReason(record, metric, metricPattern)
     }
   })
 
-  it('leaves the native reasons clear of the file source the plugin path pairs with', async () => {
+  it('exports no native-claim symbol', async () => {
+    const module = await loadDroid()
+    expect(Object.keys(module), 'the native claim is withdrawn from the adapter').not.toContain(
+      'isDroidNativeSpan',
+    )
+    expect(Object.keys(module)).not.toContain('isDroidNativeRecord')
+    expect(Object.keys(module)).not.toContain('DROID_NATIVE_SUPERSEDED_REASON')
+  })
+
+  it('claims no native span that rides in on the plugin\'s own source', async () => {
+    // The registry's second pass hands an undecided group the attribution of a
+    // confidently mapped group of the SAME source. A native span that shares
+    // the plugin's source inherits the plugin's harness — and it must still
+    // not become a droid record.
     const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'native-chat', nativeAttributes())
-    for (const { metric, metricPattern } of COUNTER_CLASSES) {
-      expectNativeReasonUntouched(record, metric, metricPattern)
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [
+          pluginTurnSpan('plugin-turn'),
+          otlpSpan(
+            'native-tool',
+            nativeChildAttributes({
+              'gen_ai.operation.name': 'execute_tool',
+              'gen_ai.tool.name': TOOL_NAME,
+              'gen_ai.tool.call.id': 'call_native_1',
+            }),
+            {
+              name: 'gen_ai.execute_tool',
+              traceId: NATIVE_TRACE,
+              resource: { 'service.name': PLUGIN_SOURCE },
+            },
+          ),
+        ],
+        store,
+        [droidAdapter],
+      )
+      expect(store.get('native-tool'), 'a native span must never become a droid record').toBeUndefined()
+      expect(quarantineReason(store, 'native-tool')).toBe('unclaimed')
+    } finally {
+      store.close()
     }
   })
 })
@@ -526,12 +623,12 @@ describe('the native Factory path — the genai format', () => {
 describe('the plugin envelope path', () => {
   it('carries the session id, the model and the tool name onto the droid record', async () => {
     const { droidAdapter } = await loadDroid()
-    const turn = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const turn = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     expect(turn.harness).toBe('droid')
     expect(turn.sessionId).toBe(DROID_SESSION)
     expect(modelOf(turn)).toBe(PLUGIN_MODEL)
 
-    const tool = normalize(droidAdapter, 'plugin-tool', pluginToolAttributes())
+    const tool = normalize(droidAdapter, 'plugin-tool', pluginToolAttributes(), PLUGIN_SOURCE)
     expect(tool.harness).toBe('droid')
     expect(toolNameOf(tool)).toBe(TOOL_NAME)
   })
@@ -541,12 +638,14 @@ describe('the plugin envelope path', () => {
     const attributes = pluginAttributes()
     delete attributes['factory.model.id']
     delete attributes['factory.model']
-    expect(modelOf(normalize(droidAdapter, 'plugin-turn-no-model', attributes))).toBeUndefined()
+    expect(
+      modelOf(normalize(droidAdapter, 'plugin-turn-no-model', attributes, PLUGIN_SOURCE)),
+    ).toBeUndefined()
   })
 
   it('declares the token usage not measurable and names where the counter would come from', async () => {
     const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     const declared = tokenUsageOf(record)
     expect(declared, 'a record with no token counter must declare what it cannot measure').toBeDefined()
     expect(declared?.availability).toBe('not_measurable')
@@ -561,19 +660,19 @@ describe('the plugin envelope path', () => {
 
   it('names the file source and the session-id pairing for the output counter', async () => {
     const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     expectCounterReason(record, 'output', /output/i)
   })
 
   it('names the file source and the session-id pairing for the cache read counter', async () => {
     const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     expectCounterReason(record, 'cache_read', /cache[\s-]?read/i)
   })
 
   it('names the file source and the session-id pairing for the cache creation counter', async () => {
     const { droidAdapter } = await loadDroid()
-    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     expectCounterReason(record, 'cache_creation', /cache[\s-]?creation/i)
   })
 })
@@ -592,12 +691,12 @@ describe('precedence — the plugin envelope is checked first', () => {
     }
   })
 
-  it('excludes a native span from the totals of a session the plugin already covers', async () => {
+  it('quarantines a native span of a session the plugin covers, leaving the plugin\'s totals alone', async () => {
     const { droidAdapter } = await loadDroid()
     const store = new CanonStore(':memory:')
     try {
       ingestBatchWithAdapters(
-        [pluginTurnSpan('plugin-turn'), nativeChatSpan('native-chat')],
+        [pluginTurnSpan('plugin-turn'), nativeRootSpan('native-root')],
         store,
         [droidAdapter],
       )
@@ -605,111 +704,97 @@ describe('precedence — the plugin envelope is checked first', () => {
       // The plugin's counts, not the sum of both sources.
       expect(summary.turn_count).toBe(1)
       expect(summary.duration_ms).toBe(PLUGIN_DURATION_MS)
-      // The native span is retained as evidence — it is excluded from the
-      // totals, never dropped.
-      const retained =
-        store.get('native-chat') !== undefined || store.getQuarantine('native-chat') !== undefined
-      expect(retained, 'the excluded native span must survive as evidence').toBe(true)
+      // The native span is quarantined as unclaimed — there is no native
+      // reason left, and no native claim to supersede.
+      expect(quarantineReason(store, 'native-root')).toBe('unclaimed')
+      expect(store.get('native-root')).toBeUndefined()
     } finally {
       store.close()
     }
   })
 
-  it('counts a native span for a session the plugin does not cover', async () => {
+  it('stores no native turn for a session the plugin does not cover', async () => {
     const { droidAdapter } = await loadDroid()
     const store = new CanonStore(':memory:')
     try {
       ingestBatchWithAdapters(
-        [nativeChatSpan('native-chat-only', NATIVE_ONLY_SESSION)],
+        [nativeRootSpan('native-root-only', NATIVE_ONLY_SESSION)],
         store,
         [droidAdapter],
       )
-      const summary = await summaryOf(store, NATIVE_ONLY_SESSION)
-      expect(summary.turn_count).toBe(1)
-      expect(summary.duration_ms).toBe(NATIVE_DURATION_MS)
+      await buildSessions(store)
+      expect(store.get('native-root-only')).toBeUndefined()
+      expect(
+        store.getSessionPayload(NATIVE_ONLY_SESSION),
+        'a native span must not build a session',
+      ).toBeUndefined()
     } finally {
       store.close()
     }
   })
 })
 
-describe('the native Factory vocabulary — every word the export carries', () => {
-  it('keeps the whole native vocabulary on the claimed record', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-tool',
-      nativeAttributes({
-        'gen_ai.operation.name': 'execute_tool',
-        'gen_ai.tool.name': TOOL_NAME,
-        'gen_ai.tool.call.id': 'call_native_1',
-        'gen_ai.tool.type': 'function',
-        'gen_ai.provider.name': 'anthropic',
-        'server.address': 'api.anthropic.com',
-        'server.port': 443,
-      }),
+describe('the native Factory vocabulary — kept as the quarantine evidence', () => {
+  it('keeps the whole native vocabulary in the quarantined packet', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        nativeRootSpan(),
+        nativeChatChildSpan('native-chat-child'),
+        nativeToolChildSpan('native-tool-child'),
+      ],
+      store,
     )
-    const attributes = rawAttributesOf(record)
-    expect(attributes['gen_ai.agent.name']).toBe('droid')
-    expect(attributes['gen_ai.operation.name']).toBe('execute_tool')
-    expect(attributes['gen_ai.conversation.id']).toBe(DROID_SESSION)
-    expect(attributes['session.id']).toBe(DROID_SESSION)
-    expect(attributes['gen_ai.request.model']).toBe(NATIVE_MODEL)
-    expect(attributes['gen_ai.provider.name']).toBe('anthropic')
-    expect(attributes['gen_ai.tool.name']).toBe(TOOL_NAME)
-    expect(attributes['gen_ai.tool.call.id']).toBe('call_native_1')
-    expect(attributes['gen_ai.tool.type']).toBe('function')
-    expect(attributes['server.address']).toBe('api.anthropic.com')
-    expect(attributes['server.port']).toBe(443)
+
+    const root = quarantinedAttributes(store, NATIVE_ROOT)
+    expect(root['gen_ai.agent.name']).toBe('droid')
+    expect(root['gen_ai.operation.name']).toBe('invoke_agent')
+    expect(root['gen_ai.conversation.id']).toBe(DROID_SESSION)
+    expect(root['session.id']).toBe(DROID_SESSION)
+    expect(root['gen_ai.request.model']).toBe(NATIVE_MODEL)
+    expect(root['gen_ai.provider.name']).toBe('anthropic')
+    expect(root['server.address']).toBe('api.anthropic.com')
+    expect(root['server.port']).toBe(443)
+
+    const tool = quarantinedAttributes(store, 'native-tool-child')
+    expect(tool['gen_ai.operation.name']).toBe('execute_tool')
+    expect(tool['gen_ai.tool.name']).toBe(TOOL_NAME)
+    expect(tool['gen_ai.tool.call.id']).toBe('call_native_1')
+    expect(tool['gen_ai.tool.type']).toBe('function')
+    store.close()
   })
 
-  it('keeps the finish reasons as the array the export sends', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-chat-finish',
-      nativeAttributes({ 'gen_ai.response.finish_reasons': ['stop', 'length'] }),
-    )
+  it('keeps the finish reasons as the array the export sends', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([nativeChatSpan('native-chat-finish')], store)
+
     // An array, not a joined string and not the first element alone.
-    expect(rawAttributesOf(record)['gen_ai.response.finish_reasons']).toEqual(['stop', 'length'])
+    expect(
+      quarantinedAttributes(store, 'native-chat-finish')['gen_ai.response.finish_reasons'],
+    ).toEqual(['stop'])
+    store.close()
   })
 
-  it('surfaces a policy-denied tool call as an error instead of dropping the error type', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-tool-rejected',
-      nativeAttributes({
-        'gen_ai.operation.name': 'execute_tool',
-        'gen_ai.tool.name': TOOL_NAME,
-        'gen_ai.tool.call.id': 'call_native_2',
-        'gen_ai.tool.type': 'function',
-        'error.type': 'rejected',
-      }),
+  it('keeps a policy-denied tool call\'s error type as evidence, and claims no status for it', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [nativeToolChildSpan('native-tool-rejected', { 'error.type': 'rejected' })],
+      store,
     )
-    expect(record.op).toBe('tool.invoke')
-    // A denied tool call is an error, not an ordinary tool call: the record
-    // says so, and the type the export named is kept as the evidence of why.
-    expect(record.status, 'a policy-denied tool call must not read as a plain tool call').toBe(
-      'error',
-    )
-    expect(rawAttributesOf(record)['error.type']).toBe('rejected')
+
+    // The error type is the evidence of WHY the call was denied, and it
+    // survives in the packet. No record is claimed, so no status is stamped.
+    expect(quarantinedAttributes(store, 'native-tool-rejected')['error.type']).toBe('rejected')
+    expect(store.get('native-tool-rejected')).toBeUndefined()
+    store.close()
   })
 
-  it('does not call an ordinary tool call an error', async () => {
-    const { droidAdapter } = await loadDroid()
-    const record = normalize(
-      droidAdapter,
-      'native-tool-allowed',
-      nativeAttributes({
-        'gen_ai.operation.name': 'execute_tool',
-        'gen_ai.tool.name': TOOL_NAME,
-        'gen_ai.tool.call.id': 'call_native_3',
-        'gen_ai.tool.type': 'function',
-      }),
-    )
-    expect(record.status, 'a tool call that was not denied must not read as an error').not.toBe(
-      'error',
-    )
+  it('claims no record for an ordinary native tool call either', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([nativeToolChildSpan('native-tool-allowed')], store)
+
+    expect(store.get('native-tool-allowed')).toBeUndefined()
+    expect(quarantineReason(store, 'native-tool-allowed')).toBe('unclaimed')
+    store.close()
   })
 })

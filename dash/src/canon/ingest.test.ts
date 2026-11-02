@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { ingestBatch } from './ingest.js'
+import { ADAPTERS, ingestBatch, ingestBatchWithAdapters } from './ingest.js'
 import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { buildSessions } from './sessions.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
 import type { OtlpSpan, OtlpStatusCode } from '../otel/receiver.js'
+import { resolveRootByParentage, traceGroup, type HarnessAdapter } from './adapters/base.js'
+import { baseRecord } from './adapters/copilot.js'
+import type { CanonicalRecord } from './types.js'
 import antigravitySpan from './adapters/__fixtures__/antigravity-span.json' with { type: 'json' }
 
 // The live collector had its own normalization that never went through the
@@ -752,24 +755,29 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The stored error status (Factory native export)
+// The stored error status at the receiver-timing seam
 // ---------------------------------------------------------------------------
 //
-// Factory's exporter marks a policy-denied tool call with an `error.type`
-// attribute, and the droid adapter reads that attribute as the record's
-// status: a denied call is an error, not an ordinary tool call. The
-// receiver-timing seam then hands the record the exporter's own OTLP status
-// code — and Factory's exporter does not ALSO mark the transport status as an
-// error. The error is decided correctly at the adapter and thrown away one
-// line later, so the STORED record reads as an ordinary tool call.
+// An adapter can decide that a span FAILED — Factory's exporter marks a
+// policy-denied tool call with an `error.type` attribute, and its adapter
+// reads that attribute as the record's status: a denied call is an error, not
+// an ordinary tool call. The receiver-timing seam then hands the record the
+// exporter's own OTLP status code — and an exporter does not ALSO mark the
+// transport status as an error. The error is decided correctly at the adapter
+// and thrown away one line later, so the STORED record reads as an ordinary
+// tool call.
 //
 // THE RULE: an error status is never downgraded. The seam gives the record the
 // timing and the outcome UNLESS the adapter already determined one.
 //
-// Every case below goes through the production ingest path (`ingestBatch` over
-// the production adapter set). The adapter-level case already passes
-// (canon/adapters/droid.test.ts); the defect only appears after
-// normalization, so a case that stopped at the adapter would prove nothing.
+// The rule is the SEAM's, and the vehicle is interchangeable: the cases below
+// drive it through an adapter that states the outcome itself, because the
+// Factory native claim this branch withdraws (plan D50) was the vehicle the
+// rule was first exercised through.
+//
+// Every case below goes through the production ingest path. The defect only
+// appears after normalization, so a case that stopped at the adapter would
+// prove nothing.
 
 /** The session Factory's native export reports. */
 const NATIVE_SESSION = 'droid-native-session-1'
@@ -780,17 +788,38 @@ const NATIVE_TOOL = 'Read'
 /** The telemetry source Factory's own native export arrives under. */
 const NATIVE_SOURCE = 'droid-native-export'
 
+/** The trace the native export's root span and its children share. */
+const NATIVE_TRACE = 'trace-native-genai'
+
+/** The telemetry source the Kyber-owned Factory plugin's export arrives under. */
+const PLUGIN_SOURCE = 'kyberdash-droid-plugin'
+
 /** The OTLP status codes an exporter can carry. */
 const EXPORTER_STATUS_CODES = ['ok', 'unset', 'error'] as const satisfies readonly OtlpStatusCode[]
 
 /**
  * Factory's native export, in its `genai` format: the agent identity that
- * claims the span, the operation, and the conversation and session ids.
+ * names the span, the operation, and the conversation and session ids.
+ *
+ * The agent identity is on the ROOT alone — the export names it there and
+ * nowhere else, which is what makes a real trace's group vote 1/(1+k).
  */
 function nativeAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    'gen_ai.operation.name': 'chat',
+    'gen_ai.operation.name': 'invoke_agent',
     'gen_ai.agent.name': 'droid',
+    'gen_ai.conversation.id': NATIVE_SESSION,
+    'session.id': NATIVE_SESSION,
+    'gen_ai.request.model': 'claude-sonnet-4-5',
+    'gen_ai.provider.name': 'anthropic',
+    ...over,
+  }
+}
+
+/** The native export's child attributes: the operation, the ids and the model. */
+function nativeChildAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    'gen_ai.operation.name': 'chat',
     'gen_ai.conversation.id': NATIVE_SESSION,
     'session.id': NATIVE_SESSION,
     'gen_ai.request.model': 'claude-sonnet-4-5',
@@ -817,14 +846,14 @@ function nativeSpan(
 
 /** The native export's chat span: the session's own model call. */
 function nativeTurnSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
-  return nativeSpan(spanId, nativeAttributes(), { name: 'gen_ai.chat', ...over })
+  return nativeSpan(spanId, nativeChildAttributes(), { name: 'gen_ai.chat', ...over })
 }
 
 /** The native export's policy-denied tool call: the span carrying `error.type`. */
 function deniedToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
   return nativeSpan(
     spanId,
-    nativeAttributes({
+    nativeChildAttributes({
       'gen_ai.operation.name': 'execute_tool',
       'gen_ai.tool.name': NATIVE_TOOL,
       'gen_ai.tool.call.id': `call_${spanId}`,
@@ -835,18 +864,157 @@ function deniedToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan 
   )
 }
 
-/** The native export's ordinary tool call: the same span with no error evidence. */
-function ordinaryToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
-  return nativeSpan(
-    spanId,
-    nativeAttributes({
-      'gen_ai.operation.name': 'execute_tool',
-      'gen_ai.tool.name': NATIVE_TOOL,
-      'gen_ai.tool.call.id': `call_${spanId}`,
-      'gen_ai.tool.type': 'function',
-    }),
-    { name: 'gen_ai.execute_tool', ...over },
+/**
+ * The native trace's root span: the `invoke_agent` span, and the only span of
+ * a real trace that carries the agent identity.
+ */
+function nativeRootSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(spanId, nativeAttributes(), {
+    name: 'invoke_agent',
+    traceId: NATIVE_TRACE,
+    ...over,
+  })
+}
+
+/**
+ * An adapter that states the outcome itself.
+ *
+ * The seam's rule is about what happens to a status an ADAPTER determined, so
+ * the case needs an adapter that determines one. The stub claims the spans
+ * that carry `outcome.claimed` and judges a denial only when the span says
+ * `outcome.denied`; nothing else about it matters.
+ */
+const outcomeDecidingAdapter: HarnessAdapter = {
+  name: 'outcome-deciding',
+  namespaces: ['outcome'],
+  detect: (span) => (span.attributes['outcome.claimed'] === true ? 1 : 0),
+  relevance: () => 1,
+  normalize(raw) {
+    const record = baseRecord(this, raw)
+    if (raw.attributes['outcome.denied'] === true) record.status = 'error'
+    return record
+  },
+  group: traceGroup,
+  resolveRoot: resolveRootByParentage,
+  validate: () => undefined,
+  unexportedMetrics: () => [],
+}
+
+/** The session the outcome-deciding adapter's spans report. */
+const OUTCOME_SESSION = 'outcome-session-1'
+
+/** The tool the outcome-deciding adapter's span names. */
+const OUTCOME_TOOL = 'Read'
+
+/** A span the outcome-deciding adapter claims, with the exporter's status code. */
+function outcomeSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'gen_ai.tool.name': OUTCOME_TOOL,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.tool',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
   )
+}
+
+/** The same span, with the adapter's own denial evidence on it. */
+function deniedOutcomeSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'outcome.denied': true,
+      'gen_ai.tool.name': OUTCOME_TOOL,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.tool',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
+  )
+}
+
+/** The session's model call: the turn the denied tool call belongs to. */
+function outcomeTurnSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'gen_ai.usage.input_tokens': 1_000,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.turn',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
+  )
+}
+
+/**
+ * The plugin envelope's turn span for a session: the span the Kyber-owned
+ * plugin emits for the session's own model call.
+ */
+function pluginTurnSpan(spanId: string, sessionId: string = NATIVE_SESSION): OtlpSpan {
+  return span(
+    {
+      'factory.contract_version': '1',
+      'factory.session.id': sessionId,
+      'factory.model.id': 'gpt-5-codex',
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'factory.turn',
+      resource: { 'service.name': PLUGIN_SOURCE },
+      status: { code: 'unset' },
+    },
+  )
+}
+
+/**
+ * A native Factory row already in the corpus, as the withdrawn claim left it:
+ * the harness, the session and the export's own agent identity.
+ */
+function storedNativeRecord(): CanonicalRecord {
+  return {
+    spanId: 'native-stored',
+    traceId: 'trace-native-stored',
+    parentSpanId: null,
+    source: NATIVE_SOURCE,
+    harness: 'droid',
+    sessionId: NATIVE_SESSION,
+    name: 'gen_ai.chat',
+    op: 'llm.invoke',
+    kind: 'internal',
+    timestamp: '2026-10-30T12:00:00.000Z',
+    durationMs: 1000,
+    status: 'ok',
+    tokens: {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    },
+    content: {},
+    cost: { basis: 'unknown', status: 'no_rate' },
+    raw: { 'gen_ai.agent.name': 'droid', 'gen_ai.conversation.id': NATIVE_SESSION },
+  }
 }
 
 /**
@@ -878,25 +1046,33 @@ async function projectedToolRows(
 }
 
 describe('ingestBatch — the stored error status at the receiver-timing seam', () => {
-  it('stores a denied native Factory tool call as an error even when the exporter status is unset', () => {
+  it('stores a denied call as an error even when the exporter status is unset', () => {
     const store = new CanonStore(':memory:')
-    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'unset' } })], store)
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
 
-    const record = store.get('native-tool-denied')
-    expect(record?.harness).toBe('droid')
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
     expect(
       record?.status,
-      'a policy-denied Factory tool call must be STORED as an error, whatever the exporter status says',
+      'a denied call must be STORED as an error, whatever the exporter status says',
     ).toBe('error')
     store.close()
   })
 
-  it('stores a denied native Factory tool call as an error even when the exporter status is ok', () => {
+  it('stores a denied call as an error even when the exporter status is ok', () => {
     const store = new CanonStore(':memory:')
-    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'ok' } })], store)
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'ok' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
 
-    const record = store.get('native-tool-denied')
-    expect(record?.harness).toBe('droid')
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
     expect(
       record?.status,
       'an exporter status of ok must not downgrade a status the adapter already determined',
@@ -906,27 +1082,35 @@ describe('ingestBatch — the stored error status at the receiver-timing seam', 
 
   it('stores a span whose exporter status is error as an error', () => {
     const store = new CanonStore(':memory:')
-    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'error' } })], store)
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'error' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
 
-    const record = store.get('native-tool-denied')
-    expect(record?.harness).toBe('droid')
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
     expect(record?.status, 'an exporter error status must reach the stored record').toBe('error')
     store.close()
   })
 
-  it('keeps the exporter status code exactly when the native span carries no error evidence', () => {
+  it('keeps the exporter status code exactly when no adapter determined an outcome', () => {
     // The regression guard: the rule must not turn every record into an
     // error, and it must not keep the adapter's neutral default either. The
     // exporter's own code is the stored status, whatever it says.
     for (const code of EXPORTER_STATUS_CODES) {
       const store = new CanonStore(':memory:')
-      ingestBatch([ordinaryToolSpan(`native-tool-${code}`, { status: { code } })], store)
+      ingestBatchWithAdapters(
+        [outcomeSpan(`outcome-${code}`, { status: { code } })],
+        store,
+        [outcomeDecidingAdapter],
+      )
 
-      const record = store.get(`native-tool-${code}`)
-      expect(record?.harness).toBe('droid')
+      const record = store.get(`outcome-${code}`)
+      expect(record?.harness).toBe('outcome-deciding')
       expect(
         record?.status,
-        `a span with no error evidence must keep the exporter status code "${code}"`,
+        `a span with no adapter-determined outcome must keep the exporter status code "${code}"`,
       ).toBe(code)
       store.close()
     }
@@ -934,37 +1118,39 @@ describe('ingestBatch — the stored error status at the receiver-timing seam', 
 
   it('carries the denied call into the session projection as a tool error', async () => {
     const store = new CanonStore(':memory:')
-    ingestBatch(
+    ingestBatchWithAdapters(
       [
-        nativeTurnSpan('native-turn'),
-        deniedToolSpan('native-tool-denied', { status: { code: 'unset' } }),
+        outcomeTurnSpan('outcome-turn'),
+        deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } }),
       ],
       store,
+      [outcomeDecidingAdapter],
     )
 
-    const rows = await projectedToolRows(store, NATIVE_SESSION)
-    expect(rows.get(NATIVE_TOOL)?.invocations, 'the denied call is a tool invocation').toBe(1)
+    const rows = await projectedToolRows(store, OUTCOME_SESSION)
+    expect(rows.get(OUTCOME_TOOL)?.invocations, 'the denied call is a tool invocation').toBe(1)
     expect(
-      rows.get(NATIVE_TOOL)?.errors,
-      'the denied Factory call must reach the projection as a tool error, not as an ordinary call',
+      rows.get(OUTCOME_TOOL)?.errors,
+      'the denied call must reach the projection as a tool error, not as an ordinary call',
     ).toBe(1)
     store.close()
   })
 
-  it("leaves another harness's stored status alone beside a denied Factory call", () => {
-    // The seam is shared by every harness, so the Factory rule must not move
+  it("leaves another harness's stored status alone beside a denied call", () => {
+    // The seam is shared by every harness, so one harness's rule must not move
     // another harness's records: the copilot span keeps the exporter's own
-    // status code whether or not a denied Factory call sits in the same batch.
+    // status code whether or not a denied call sits in the same batch.
     const alone = new CanonStore(':memory:')
     ingestBatch([span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } })], alone)
 
     const beside = new CanonStore(':memory:')
-    ingestBatch(
+    ingestBatchWithAdapters(
       [
         span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } }),
-        deniedToolSpan('native-tool-denied', { status: { code: 'unset' } }),
+        deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } }),
       ],
       beside,
+      [...ADAPTERS, outcomeDecidingAdapter],
     )
 
     expect(alone.get('other-1')?.harness).toBe('copilot')
@@ -972,16 +1158,112 @@ describe('ingestBatch — the stored error status at the receiver-timing seam', 
     expect(beside.get('other-1')?.status).toBe('unset')
     expect(
       beside.get('other-1')?.status,
-      'another harness must not inherit the Factory error',
+      'another harness must not inherit the denial',
     ).not.toBe('error')
-    // The denied Factory call IS in the batch, so the guard above is not
-    // vacuous: it is the presence of that call that leaves the other
-    // harness's record alone.
+    // The denied call IS in the batch, so the guard above is not vacuous: it is
+    // the presence of that call that leaves the other harness's record alone.
     expect(
-      beside.get('native-tool-denied'),
-      'the denied Factory call is in the batch beside the other harness\'s span',
+      beside.get('outcome-denied'),
+      "the denied call is in the batch beside the other harness's span",
     ).toBeDefined()
     alone.close()
     beside.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The withdrawn native Factory claim (D50)
+// ---------------------------------------------------------------------------
+//
+// Factory's own native OpenTelemetry export is not claimed by this branch: the
+// `droid` adapter's native claim is withdrawn, and a native span is
+// quarantined as `unclaimed` with its decoded packet kept as the evidence.
+//
+// THE RULES: a native span is never stored; the ingest never supersedes a
+// stored native row when the plugin's row for the same session arrives; and
+// the quarantine reason is the ordinary `unclaimed` — no native-specific
+// reason string is left in the seam.
+
+describe('ingestBatch — the withdrawn native Factory claim', () => {
+  it('quarantines the root of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeRootSpan('native-root')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-root'), 'a native span must never become a record').toBeUndefined()
+    expect(store.getQuarantine('native-root')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines a native chat span as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeTurnSpan('native-turn')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-turn')).toBeUndefined()
+    expect(store.getQuarantine('native-turn')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines the tool child of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([deniedToolSpan('native-tool')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-tool')).toBeUndefined()
+    expect(store.getQuarantine('native-tool')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines every span of a native trace alike — the root and both children', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch(
+      [
+        nativeRootSpan('native-root'),
+        nativeTurnSpan('native-chat', { traceId: NATIVE_TRACE, parentSpanId: 'native-root' }),
+        deniedToolSpan('native-tool', { traceId: NATIVE_TRACE, parentSpanId: 'native-root' }),
+      ],
+      store,
+    )
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 3, rejected: 0 })
+    expect(store.count(), 'a native trace must leave no record behind').toBe(0)
+    for (const spanId of ['native-root', 'native-chat', 'native-tool']) {
+      expect(
+        store.getQuarantine(spanId)?.reason,
+        `${spanId} must be quarantined as unclaimed`,
+      ).toBe('unclaimed')
+    }
+    store.close()
+  })
+
+  it('keeps the decoded packet of a quarantined native span as the evidence', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([nativeRootSpan('native-root')], store)
+
+    const packet = store.getQuarantine('native-root')?.rawPayload
+    expect(typeof packet, 'the quarantined span must keep its decoded packet').toBe('string')
+    expect(packet).toContain('gen_ai.agent.name')
+    expect(packet).toContain('droid')
+    store.close()
+  })
+
+  it('no longer supersedes a stored native row when the plugin row for its session arrives', () => {
+    // The precedence rule the withdrawal removes: a native row that reached
+    // the corpus before the plugin's row for its session used to leave it for
+    // quarantine. Nothing supersedes a stored row now — the ingest stores what
+    // it claims and leaves the rest of the corpus alone.
+    const store = new CanonStore(':memory:')
+    store.upsert(storedNativeRecord())
+    ingestBatch([pluginTurnSpan('plugin-turn')], store)
+
+    expect(store.get('native-stored'), 'a stored row must not be deleted by a later batch').toBeDefined()
+    expect(
+      store.getQuarantine('native-stored'),
+      'a stored native row must not be superseded any more',
+    ).toBeUndefined()
+    // The plugin's own row is stored as before.
+    expect(store.get('plugin-turn')?.harness).toBe('droid')
+    store.close()
   })
 })
