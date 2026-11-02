@@ -24,6 +24,13 @@ Amended 2026-11-02: the plugin's `SubagentStop` event produces no span, because 
 documented payload for that event carries no child session id; and the native **span** claim is
 withdrawn, so the native **metrics** path is what remains of the native path.
 
+Amended 2026-11-02: the owned unit is a Kyber-owned **marketplace tree** that KyberDash
+publishes and then installs through the harness's own plugin commands, not a plugin directory
+KyberDash writes into the Factory root. The plugin that runs is the harness's **cached copy** of
+that tree, and `${DROID_PLUGIN_ROOT}` expands to the cached path. The route this record first
+recorded was measured to be false: a plugin directory written under `~/.factory/plugins/` was
+never loaded by the harness.
+
 ## Context
 
 Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only
@@ -39,7 +46,8 @@ Four collection paths were available, and the choice is expensive to revisit:
    is Factory's own example — the loopback address the KyberDash receiver listens on. No collector
    is needed, because Droid pushes OTLP/HTTP directly.
 3. A merge into the owner's `~/.factory/hooks.json`.
-4. A hooks-based plugin KyberDash owns, installed into Factory's plugin directory.
+4. A hooks-based plugin KyberDash owns, published as a marketplace and installed by the
+   harness's own plugin commands.
 
 The native export is real, but it is tokenless by Factory's own documentation — token and cost
 data "are not exported as customer OTEL metrics" — and its `genai` format carries no subagent
@@ -56,11 +64,23 @@ Factory's hook events, then the Kyber-owned `kyberdash-factory` plugin, then OTL
 at contract `1`, then the `droid` canon adapter, then the canonical store, then the shared
 projection, then `/api/kyber/*`.
 
-- **The owned unit is a plugin directory.** `~/.factory/plugins/kyberdash-factory/` holds
-  `.factory-plugin/plugin.json`, `hooks/hooks.json` and `hooks/kyberdash-factory.mjs`, installed
-  and removed as one unit with one receipt, `~/.kyberdash/factory-plugin-receipt.json`, which
-  records the SHA-256 digest of every file KyberDash wrote. Project scope is not used: the
-  capture is per-user, and the owner may work in many projects.
+- **The owned unit is a Kyber-owned marketplace tree.** KyberDash publishes the tree under
+  its own state directory and asks the harness to install the plugin from it: `droid plugin
+  marketplace add <the tree>`, then `droid plugin install kyberdash-factory@kyberdash --scope
+  user`. The tree carries the marketplace manifest and the plugin payload — the manifest's
+  `plugins[]` entry names the plugin and points at the payload by a **relative** path — and the
+  payload holds `.factory-plugin/plugin.json`, `hooks/hooks.json` and
+  `hooks/kyberdash-factory.mjs`. The registered marketplace name is the **source directory's
+  basename**, not the `name` field inside the manifest, so the tree's directory name is
+  load-bearing and the plugin identity is `kyberdash-factory@kyberdash`. The tree is owned and
+  removed as one unit with one receipt, `~/.kyberdash/factory-plugin-receipt.json`, which records
+  the SHA-256 digest of every file KyberDash wrote; the harness's cache copy and its own plugin
+  record are the harness's files, and KyberDash never writes or deletes them by hand — it asks
+  the harness to. The teardown is `droid plugin uninstall kyberdash-factory@kyberdash --scope
+  user` followed by `droid plugin marketplace remove kyberdash`, and KyberDash removes its own
+  tree afterwards, because a local marketplace's source directory survives the harness's
+  removal. Project scope is not used: the capture is per-user, and the owner may work in many
+  projects.
 - **The wire contract is Factory's own.** Version `1`, the `factory.*` attribute namespace, its
   own span names (`factory.session`, `factory.turn`, `factory.tool`),
   and deterministic id derivations. The OpenCode contract-3 keys are not reused: the OpenCode
@@ -102,15 +122,27 @@ projection, then `/api/kyber/*`.
   overrides the file. This differs from the OpenCode writer, whose Settings switch does set
   consent, and the difference is deliberate: for Factory the switch is "install the capture", not
   "start recording my prompts".
-- **The owner's Factory files are never written.** `~/.factory/settings.json`,
-  `~/.factory/hooks.json`, `.factory/settings.json` and `.factory/hooks.json` are never created,
-  read, merged, rewritten or restored — not by enable, not by disable, not by Squad, not by
-  `kyber-weave update`. The Factory writer owns a plugin directory and a consent file, declares
-  no config key, and receipted no key.
-- **Install modes are strict and preserve.** `capture enable` refuses a foreign or owner-edited
-  plugin tree with exit 1 and writes nothing; Squad and `kyber-weave update` keep such a tree
-  with a warning and exit 0. Removal requires every recorded digest to match, so an edited file
-  is left in place.
+- **KyberDash never writes the owner's Factory files; the harness does, on request.**
+  `~/.factory/settings.json`, `~/.factory/hooks.json`, `.factory/settings.json` and
+  `.factory/hooks.json` are never created, read, merged, rewritten or restored **by KyberDash** —
+  not by enable, not by disable, not by Squad, not by `kyber-weave update`. The Factory writer
+  owns the marketplace tree and a consent file, declares no config key, and receipted no key.
+  What changes the owner's settings file is the **delegated install**: the harness's own commands
+  write the `extraKnownMarketplaces` and `enabledPlugins` entries into it, and the harness's
+  uninstall removes the `enabledPlugins` entry. That delegated write is safe because the writer
+  owns a whole separate file and never a shared settings file — KyberDash holds no merge of the
+  owner's settings and no partial edit to restore. The restore criterion is therefore
+  **semantic**, not byte-identity: no entry the install added remains, no entry the owner had is
+  lost, and every other key is unchanged in content. Because the harness's uninstall deletes a
+  pre-existing `enabledPlugins: false` rather than restoring it, the uninstaller handles that
+  case itself rather than assume the harness's commands satisfy the criterion on their own. Any
+  residue the harness's uninstall leaves behind is reported with the exact command that removes
+  it, and is never patched by hand.
+- **Install modes are strict and preserve.** `capture enable` refuses an owned tree it cannot
+  prove — a foreign or owner-edited one, or a name the harness already holds under another owner
+  — with exit 1 and writes nothing; Squad and `kyber-weave update` keep such a tree with a
+  warning and exit 0. Removal requires every recorded digest to match, so an edited file is left
+  in place.
 
 ## Alternatives considered
 
@@ -127,6 +159,12 @@ projection, then `/api/kyber/*`.
    only source of Factory's counters, but it cannot observe a turn boundary.
 5. **Reusing the OpenCode contract-3 keys.** Rejected. The OpenCode adapter claims any span
    carrying them, so the reuse would mis-attribute every Factory row to OpenCode.
+6. **A plugin directory written into the Factory root.** Rejected, and disproven by measurement.
+   `~/.factory/plugins/kyberdash-factory/` looked like the OpenCode writer's shape, but Factory
+   never loaded it: after that install `droid plugin list` reported "No plugins installed" and a
+   real Droid turn produced no plugin spans at all. Factory loads a plugin that came from a
+   marketplace, and the marketplace route is also the harness's own supported lifecycle, so it is
+   the route most likely to survive a Factory upgrade.
 
 ## Consequences
 

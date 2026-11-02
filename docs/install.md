@@ -466,8 +466,8 @@ run, with no second command:
   --preserve --if-installed`. An installed plugin is upgraded. A plugin you never installed is not
   added. An edited plugin file is kept with a warning.
 - **Factory capture plugin.** It runs `kyberdash kyber capture plugin install --harness factory
-  --preserve --if-installed`. An installed plugin directory is upgraded; one you never installed
-  is not added. An edited plugin directory is kept with a warning. The step relays KyberDash's
+  --preserve --if-installed`. An installed plugin tree is upgraded; one you never installed
+  is not added. An edited plugin tree is kept with a warning. The step relays KyberDash's
   own Factory lines, including the consent reminder: `factory: the prompt text is captured only
   after the content consent is turned on: kyberdash kyber capture plugin consent --harness factory --on`.
   The update never turns the Factory content consent on — the prompt text stays uncaptured until

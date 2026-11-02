@@ -286,8 +286,8 @@ or upgrade the plugin, then restart OpenCode: the running service does not hot-r
 
 ### 1c. Factory (Droid) capture: enable and verify
 
-Factory is captured by a Kyber-owned **hooks plugin** installed in Factory's own plugin
-directory, and it declares no Factory config key
+Factory is captured by a Kyber-owned **hooks plugin** that Factory installs from a marketplace
+KyberDash publishes, and it declares no Factory config key
 ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)). Turn it on and check it:
 
 ```bash
@@ -295,11 +295,16 @@ kyberdash kyber capture enable  --harness factory
 kyberdash kyber capture status  --harness factory
 ```
 
-`enable` installs the plugin tree `~/.factory/plugins/kyberdash-factory/` and its receipt
+`enable` publishes the Kyber-owned marketplace tree, asks Factory to install the plugin from
+it (`droid plugin marketplace add <the tree>`, then `droid plugin install
+kyberdash-factory@kyberdash --scope user`), and records its receipt
 `~/.kyberdash/factory-plugin-receipt.json`. It writes no key into `~/.factory/settings.json`,
-never touches `~/.factory/hooks.json`, and never creates either file. `disable` removes the
-plugin tree and turns the content consent off. `status` reports the plugin state, the resolved
-plugin directory, the receipt state and the content consent. The Settings switch
+never touches `~/.factory/hooks.json`, and never creates either file — Factory's own commands
+add the marketplace and enabled-plugin entries to the settings file during that install, not
+KyberDash. `disable` asks Factory to uninstall the plugin (`droid plugin uninstall
+kyberdash-factory@kyberdash --scope user`, then `droid plugin marketplace remove kyberdash`),
+removes the tree KyberDash published, and turns the content consent off. `status` reports the
+plugin state, the receipt state and the content consent. The Settings switch
 "Factory (Droid) Enabled" runs the same `enable` and `disable`.
 
 **Content consent — the switch never turns it on.** The consent file is
@@ -326,9 +331,9 @@ plugin directory, the receipt state and the content consent. The Settings switch
   prompt text reads `not_measurable`, with a reason.
 
 **The install modes.** Strict (`capture enable`, and `capture plugin install` without flags)
-refuses a foreign or owner-edited plugin tree with exit 1 and writes nothing at all. Preserve
+refuses a foreign or owner-edited owned tree with exit 1 and writes nothing at all. Preserve
 (`--preserve`, used by Squad and `kyber-weave update`) keeps such a tree with a warning and exits
-0. `--if-installed` acts only when a plugin tree is already present, and otherwise prints
+0. `--if-installed` acts only when the tree is already present, and otherwise prints
 `skipped-not-installed` and writes nothing. The one-shot verb, for callers outside the Settings
 drawer:
 
@@ -367,8 +372,8 @@ owner-run check and never part of the test suite:
 A failure is reported as a failure, never worked around. Record which of these held: that the
 hook's `session_id` matches the transcript's session id, the exact field names the hook payload
 carries, what identity `Stop` and `SubagentStop` carry, the hook script's exit-code and stdout
-protocol, that the plugin is discovered under `~/.factory/plugins/`, and where the model came
-from.
+protocol, that the plugin is discovered from the harness's plugin cache, and where the model
+came from.
 
 **Test replay.** The e2e spec `dash/e2e/harness-collection.spec.ts` replays recorded Factory hook
 payloads through the production plugin runner, receiver, adapter, projection and dashboard,
@@ -380,12 +385,15 @@ config:
 scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
-**Uninstall.** `kyberdash kyber capture disable --harness factory` turns the consent off and
-removes the plugin tree, provided every recorded digest still matches. An edited tree is left in
-place and reported, with exit 1 — delete `~/.factory/plugins/kyberdash-factory/` yourself if that
-is what you want. The consent file and the receipt are KyberDash's own state under
+**Uninstall.** `kyberdash kyber capture disable --harness factory` turns the consent off, asks
+Factory to uninstall the plugin, and removes the tree KyberDash published, provided every
+recorded digest still matches. An edited tree is left in
+place and reported, with exit 1 — delete the tree KyberDash published yourself if that
+is what you want. Any residue Factory's own uninstall leaves behind is reported with the exact
+command that removes it, and is never patched by hand. The consent file and the receipt are
+KyberDash's own state under
 `~/.kyberdash/`; remove them yourself if you want no trace of the capture. Nothing outside that
-directory and the plugin tree is ever written.
+directory and the tree KyberDash published is ever written by KyberDash.
 
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
@@ -1748,16 +1756,24 @@ the loopback receiver through a bounded outbox. It reads OpenCode's events and h
 OpenCode 1.x is not supported ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The
 pipeline is described in [the architecture](architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
-**Factory capture plugin (`kyberdash-factory`).** KyberDash installs one plugin **directory**,
-`kyberdash-factory/`, into Factory's own plugin directory, `<factory root>/plugins/`. The factory
-root is `$FACTORY_DIR` when set, else `~/.factory` — the same resolution the Factory file
-provider uses. (`--config-dir` is the OpenCode root and does not move the Factory tree.) The tree
-holds `.factory-plugin/plugin.json`, `hooks/hooks.json` and `hooks/kyberdash-factory.mjs`; the
+**Factory capture plugin (`kyberdash-factory`).** KyberDash publishes one **marketplace tree**
+under its own state directory and asks Factory to install the plugin from it, so the plugin that
+runs is the harness's **cached copy** of that tree. The install is `droid plugin marketplace add
+<the tree>` and then `droid plugin install kyberdash-factory@kyberdash --scope user`; the
+teardown is `droid plugin uninstall kyberdash-factory@kyberdash --scope user` and then
+`droid plugin marketplace remove kyberdash`. The registered marketplace name is the tree
+directory's basename, so the directory name is load-bearing. (`--config-dir` is the OpenCode
+root and does not move the Factory tree.) The tree carries the marketplace manifest and the
+plugin payload — `.factory-plugin/plugin.json`, `hooks/hooks.json` and
+`hooks/kyberdash-factory.mjs`; the
 receipt is `~/.kyberdash/factory-plugin-receipt.json` and records the SHA-256 digest of every
-file, so removal requires every digest to match. The plugin posts contract-1 session, turn and
+file KyberDash wrote, so removal requires every digest to match. The plugin posts contract-1
+session, turn and
 tool spans to the loopback receiver, and it never fails Factory: every error is
 swallowed and the hook exits 0. It writes no key into `~/.factory/settings.json` and never
-touches `~/.factory/hooks.json`. Unlike the OpenCode plugin, the Factory switch that installs
+touches `~/.factory/hooks.json` — Factory's own commands change the settings file during an
+install KyberDash requested, and KyberDash never edits it. Unlike the OpenCode plugin, the
+Factory switch that installs
 the capture **does not** turn the content consent on — see
 [§1c](#1c-factory-droid-capture-enable-and-verify) for the consent verb, the live check and the
 uninstall procedure.

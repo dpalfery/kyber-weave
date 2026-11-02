@@ -550,7 +550,7 @@ KyberDash captures Factory through one hooks-plugin pipeline
 
 ```mermaid
 flowchart LR
-    Host["Factory (Droid)<br/>hook events"] --> Plugin["kyberdash-factory<br/>plugin directory"]
+    Host["Factory (Droid)<br/>hook events"] --> Plugin["kyberdash-factory<br/>the harness's cached plugin"]
     Plugin -->|"OTLP/HTTP JSON, contract 1"| Receiver["Loopback receiver<br/>127.0.0.1:4318"]
     Receiver --> Adapter["droid adapter<br/>canon/adapters/droid.ts"]
     Adapter --> Store["canon.db records"]
@@ -559,30 +559,46 @@ flowchart LR
     API --> Dashboard["Web dashboard"]
 ```
 
-Factory reaches KyberDash through a plugin **directory** in its own root, not through a
+Factory reaches KyberDash through a **marketplace** the harness installs from, not through a
 configuration key, so the writer declares no key at all
-(`dash/src/capture/harnesses/factory.ts`). `capture enable --harness factory` installs the tree
-and `capture disable` removes it; neither reads, writes or receipts a config file. The Settings
-row appears because the registry reports it — the drawer is generic, so no web code changed.
+(`dash/src/capture/harnesses/factory.ts`). `capture enable --harness factory` publishes the
+Kyber-owned marketplace tree and asks the harness to install the plugin from it, and
+`capture disable` asks the harness to uninstall it; neither reads, writes or receipts a config
+file. The Settings row appears because the registry reports it — the drawer is generic, so no web
+code changed.
 
-**The owned plugin tree.** KyberDash owns one whole directory under the Factory root
-(`$FACTORY_DIR`, else `~/.factory`), installed and removed as one unit:
+**The owned marketplace tree.** KyberDash owns one whole tree under its own state directory,
+published and then installed by the harness's own commands:
 
 ```text
-~/.factory/plugins/kyberdash-factory/
+<the marketplace tree>/
 ├── .factory-plugin/
-│   └── plugin.json          # Factory plugin manifest
-└── hooks/
-    ├── hooks.json           # registers the script on the seven hook events
-    └── kyberdash-factory.mjs # the bundled capture script
+│   └── marketplace.json     # the marketplace manifest: names the plugin, points at it by a relative path
+└── kyberdash-factory/      # the plugin payload
+    ├── .factory-plugin/
+    │   └── plugin.json      # Factory plugin manifest
+    └── hooks/
+        ├── hooks.json       # registers the script on the seven hook events
+        └── kyberdash-factory.mjs # the bundled capture script
 ```
 
-The receipt is `~/.kyberdash/factory-plugin-receipt.json`
-(`{ "version": 1, "root": ..., "files": [{ "path": ..., "sha256": ... }] }`) — one digest per
-installed file, because the owned unit is a tree and not a single file. Removal requires every
-recorded digest to match, so an edited file is left in place. The owner's
-`~/.factory/settings.json`, `~/.factory/hooks.json` and the project equivalents are never
-created, read, merged, rewritten or restored.
+The install is `droid plugin marketplace add <the marketplace tree>` followed by
+`droid plugin install kyberdash-factory@kyberdash --scope user`, and the teardown is
+`droid plugin uninstall kyberdash-factory@kyberdash --scope user` followed by
+`droid plugin marketplace remove kyberdash`. The registered marketplace name is the tree
+directory's basename rather than the manifest's own `name` field, so the directory name is
+load-bearing and the plugin identity is `kyberdash-factory@kyberdash`. The plugin that runs is
+the **harness's cached copy** of the tree, and `${DROID_PLUGIN_ROOT}` expands to that cached
+path.
+
+The receipt is `~/.kyberdash/factory-plugin-receipt.json` — one digest per owned file, because
+the owned unit is a tree and not a single file, and the tree KyberDash owns is not the harness's
+cache copy. Removal requires every recorded digest to match, so an edited file is left in place.
+KyberDash never creates, reads, merges, rewrites or restores the owner's
+`~/.factory/settings.json`, `~/.factory/hooks.json` or the project equivalents; the harness's
+own commands change the settings file during an install KyberDash requested, and the restore
+criterion is therefore semantic — no entry the install added remains, no entry the owner had is
+lost, and every other key is unchanged in content.
 
 **The wire contract.** Contract version `1`, in the `factory.*` attribute namespace, with its own
 span names (`factory.session`, `factory.turn`, `factory.tool`) and deterministic id derivations
@@ -2232,7 +2248,7 @@ Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 **The registry is eight harnesses.** `CAPTURE_HARNESS_REGISTRY`
 (`dash/src/capture/harnesses/registry.ts`) declares four managed writers — `copilot`,
 `claude-code`, `opencode` (OpenCode owns a plugin file and writes no config key) and `factory`
-(Factory owns a plugin **directory** and writes no config key) — and four `kind: 'pending'`
+(Factory owns a marketplace tree and writes no config key) — and four `kind: 'pending'`
 writers: `codex`, `pi`, `antigravity`,
 and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
 (`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,

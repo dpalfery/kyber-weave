@@ -606,10 +606,10 @@ kyberdash kyber capture plugin install --harness factory --preserve --config-dir
 ```
 
 - **Owner of the files.** KyberDash owns the plugin file or tree, its receipt, and the consent
-  file. Squad passes each harness's resolved global root as `--config-dir`, so both agree on the
-  path. Squad keeps its own receipts for its own files and reads none of KyberDash's. The flag is
-  the **OpenCode** root: the Factory plugin resolves under `$FACTORY_DIR` else `~/.factory`, which
-  is the root Squad resolves for Factory, so the two agree there too.
+  file. Squad passes the OpenCode global root as `--config-dir`, so both agree on the path.
+  Squad keeps its own receipts for its own files and reads none of KyberDash's. The flag is the
+  **OpenCode** root: the Factory verb refuses it, and the Factory plugin is published as a
+  marketplace tree under KyberDash's own state directory rather than under the Factory root.
 - **Non-overwrite (C4).** Preserve mode keeps an edited or foreign plugin file or tree with a
   warning. It creates the consent file with content off only when that file is absent, and never
   touches an existing one. The step never writes `opencode.jsonc`, and it never writes
@@ -640,9 +640,10 @@ kyberdash kyber capture plugin install --harness factory --preserve --config-dir
 ### The Factory plugin subtree Squad does not own
 
 Squad owns `~/.factory/droids/` and `~/.factory/skills/` under the Factory global root
-`~/.factory`. It does **not** own `~/.factory/plugins/` — that subtree is KyberDash's, and it
-holds the `kyberdash-factory` capture plugin directory. The two are distinct subtrees of the same
-root, so they cannot collide, and Squad never writes into the plugin subtree, never adopts it and
+`~/.factory`. It does **not** own `~/.factory/plugins/` — that subtree is the harness's own, and
+KyberDash's `kyberdash-factory` capture plugin is not installed there: it is published as a
+marketplace tree under KyberDash's own state directory and installed by the harness, so the plugin
+that runs is the harness's cached copy. Squad never writes into the plugin subtree, never adopts it and
 never removes it. `squad doctor` does not check it, and `squad uninstall` does not remove it.
 
 ---

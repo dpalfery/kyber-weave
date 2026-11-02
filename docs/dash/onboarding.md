@@ -73,10 +73,12 @@ file and the live gate.
 
 ### Factory capture plugin
 
-KyberDash captures Factory (Droid) through a Kyber-owned **hooks plugin**, installed in
-Factory's own plugin directory at `~/.factory/plugins/kyberdash-factory/`. It declares no Factory
-config key: your `~/.factory/settings.json` and `~/.factory/hooks.json` are never written, and
-the plugin is removed again by `kyberdash kyber capture disable --harness factory`.
+KyberDash captures Factory (Droid) through a Kyber-owned **hooks plugin**, published as a
+marketplace tree that Factory installs from, so the plugin that runs is the harness's cached copy
+of it. It declares no Factory config key: your `~/.factory/settings.json` and
+`~/.factory/hooks.json` are never written by KyberDash — Factory's own commands add the
+marketplace and enabled-plugin entries to the settings file during an install KyberDash requests —
+and the plugin is removed again by `kyberdash kyber capture disable --harness factory`.
 
 **What it collects.** The plugin turns Factory's hook events into session, turn and tool spans:
 the turn boundary, the tool names and their sizes, the timing and the model. Factory's own hook

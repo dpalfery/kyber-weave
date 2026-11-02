@@ -296,9 +296,11 @@ targets' forms.
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
 override for `~/.factory`.
 
-**The plugin subtree.** `~/.factory/plugins/` is **not** Squad's. KyberDash owns the
-`kyberdash-factory` capture plugin directory there, installed by the capture-plugin step under
-[Global Scope](#2-global-scope---global); Squad owns `~/.factory/droids/` and
+**The plugin subtree.** `~/.factory/plugins/` is **not** Squad's, and the
+`kyberdash-factory` capture plugin is **not** installed there: the capture-plugin step publishes a
+marketplace tree under KyberDash's own state directory and asks Factory to install the plugin from
+it, so the plugin that runs is the harness's cached copy — see
+[Global Scope](#2-global-scope---global). Squad owns `~/.factory/droids/` and
 `~/.factory/skills/` and writes nothing into the plugin subtree.
 
 **Model and reasoning effort:** a `factory:` value in `models.yml` may end in
@@ -587,8 +589,7 @@ prints no such warning. Every later run anchors on the same root.
 **Capture plugins (global scope).** When `squad install --global` or `squad update --global`
 resolves a capture-plugin harness and succeeds, Squad also installs or upgrades that harness's
 KyberDash capture plugin, in preserve mode. The step is harness-aware: one plugin call per
-capture-plugin harness, in a fixed order, each call handed its own harness's resolved global
-root.
+capture-plugin harness, in a fixed order, each call handed what its own harness's verb accepts.
 
 - **OpenCode.** The plugin is the file `kyberdash-opencode.js` under the OpenCode root in the
   table above. Squad runs
@@ -596,10 +597,11 @@ root.
   Preserve mode keeps an edited or foreign plugin file with a warning, and it never touches
   `opencode.jsonc`. The consent file `~/.kyberdash/opencode-plugin.json` is created with content
   off only when absent.
-- **Factory.** The plugin is the directory `kyberdash-factory/` under
-  `~/.factory/plugins/`. Squad runs
-  `kyberdash kyber capture plugin install --harness factory --preserve --config-dir <that root>`.
-  The owned unit is a whole directory, so the receipt records a digest per file and the removal
+- **Factory.** The plugin is published as a marketplace tree under KyberDash's own state
+  directory, and Factory installs the plugin from it, so the plugin that runs is the harness's
+  cached copy. Squad runs
+  `kyberdash kyber capture plugin install --harness factory --preserve`.
+  The owned unit is a whole tree, so the receipt records a digest per file and the removal
   requires every digest to match. The consent file `~/.kyberdash/factory-plugin.json` is created
   with content off only when absent.
 
@@ -619,9 +621,10 @@ restart OpenCode.` Squad cannot restart OpenCode. The OpenCode plugin targets Op
 See [Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
 
 **What Squad does not own under `~/.factory/`.** Squad owns `~/.factory/droids/` and
-`~/.factory/skills/`. It does **not** own `~/.factory/plugins/`: that subtree is KyberDash's and
-holds the `kyberdash-factory` capture plugin. The two are distinct subtrees of the same root, so
-they cannot collide, and Squad never writes into the plugin subtree, never adopts it and never
+`~/.factory/skills/`. It does **not** own `~/.factory/plugins/`: that subtree is the harness's own,
+and KyberDash's `kyberdash-factory` capture plugin is not installed there — it is published as a
+marketplace tree under KyberDash's own state directory and installed by the harness. Squad never
+writes into the plugin subtree, never adopts it and never
 removes it. `squad doctor` does not check it and `squad uninstall` does not remove it.
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
