@@ -885,6 +885,13 @@ public sealed class UpdateCommandTests : IDisposable
         "kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"
     ];
 
+    // The Factory plugin is installed with the same verb as the OpenCode one, and the same two flags: the plugin
+    // file is preserved, and it is installed only when the harness already has it.
+    private static readonly string[] FactoryPluginArgs =
+    [
+        "kyber", "capture", "plugin", "install", "--harness", "factory", "--preserve", "--if-installed"
+    ];
+
     // The plugin verb's guidance lines are every stdout line that starts with this prefix (D22). The copy after the
     // prefix belongs to kyberDash, so these tests use neutral text and never pin its wording.
     private const string HarnessPrefix = "harness opencode: ";
@@ -899,7 +906,7 @@ public sealed class UpdateCommandTests : IDisposable
         return new ProcessResult(0, stdout, string.Empty);
     }
 
-    /// <summary>After the binaries commit, the engine runs first, then the tray, then the plugin.</summary>
+    /// <summary>After the binaries commit, the engine runs first, then the tray, then one capture plugin per harness.</summary>
     [Fact]
     public void RunReconcilesAfterCommitInEngineTrayPluginOrder()
     {
@@ -913,11 +920,14 @@ public sealed class UpdateCommandTests : IDisposable
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
         Assert.All(steps.Where(step => step.Name != "tray"), step => Assert.Equal(kyberdash, step.File));
         Assert.Equal(EngineArgs, steps[0].Args);
         Assert.Equal(["menubar", "--update", "--version", "0.10.0"], steps[1].Args);
         Assert.Equal(PluginArgs, steps[2].Args);
+        // The two plugin steps are one per harness, and the order is fixed: OpenCode first, then Factory.
+        Assert.Equal("opencode", HarnessOf(steps[2].Args));
+        Assert.Equal("factory", HarnessOf(steps[3].Args));
     }
 
     /// <summary>The "already on" path still runs the engine, tray and plugin reconciliation, and still does not download.</summary>
@@ -937,7 +947,10 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.10.0", outcome.Message);
-        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
+        // The "already on" path reconciles every harness's plugin, not only the first.
+        Assert.Equal("opencode", HarnessOf(steps[2].Args));
+        Assert.Equal("factory", HarnessOf(steps[3].Args));
         Assert.DoesNotContain(handler.Uris, uri => uri.Contains("SHA256SUMS.txt", StringComparison.Ordinal));
     }
 
@@ -983,7 +996,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains(log, line => line.Contains("already on 0.10.0", StringComparison.Ordinal));
     }
 
-    /// <summary>--no-restart skips the engine and the tray, but the plugin still upgrades when it is installed.</summary>
+    /// <summary>--no-restart skips the engine and the tray, but the plugins still upgrade when they are installed.</summary>
     [Fact]
     public void RunWithNoRestartSkipsEngineAndTrayButStillUpdatesThePlugin()
     {
@@ -1001,7 +1014,10 @@ public sealed class UpdateCommandTests : IDisposable
             steps);
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal<string>(["plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["plugin", "plugin"], steps.Select(step => step.Name));
+        // Skipping the restart skips the engine and the tray, never a harness's plugin.
+        Assert.Equal("opencode", HarnessOf(steps[0].Args));
+        Assert.Equal("factory", HarnessOf(steps[1].Args));
     }
 
     /// <summary>--no-kyberdash skips the engine, the tray and the plugin together.</summary>
@@ -1367,10 +1383,9 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
         ReconcileStep factory = Assert.Single(steps, step => HarnessOf(step.Args) == "factory");
         Assert.Equal(kyberdash, factory.File);
-        string[] verb = ["kyber", "capture", "plugin", "install"];
-        Assert.Equal(verb, factory.Args.Take(4));
-        Assert.Contains("--if-installed", factory.Args);
-        Assert.DoesNotContain("--config-dir", factory.Args);
+        // The whole verb is pinned, not a prefix of it: the install verb, the Factory harness, the preserve
+        // flag, the already-installed flag, and no root.
+        Assert.Equal(FactoryPluginArgs, factory.Args);
     }
 
     /// <summary>
