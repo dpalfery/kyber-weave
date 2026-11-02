@@ -249,20 +249,20 @@ public static class McpWiringInspector
             return null;
 
         // A configuration this check refused to read is not one the repair may write either — it
-        // refuses a link, and a file it may not inspect, for the same reason — so neither can be
-        // offered as a fixable gap. An entry that exists but names no launch command is refused for
-        // the same reason: 5.5 forbids overwriting an entry, so a repair offered here would come back
-        // as KW-MCP-WIRE-005.
+        // refuses a link, a file it may not inspect, and a document whose shape is not the
+        // harness's, for the same reason — so none of them can be offered as a fixable gap. An
+        // entry that exists but names no launch command is refused for the same reason: 5.5 forbids
+        // overwriting an entry, so a repair offered here would come back as KW-MCP-WIRE-005. The
+        // refusal is what says the check could not read the file, so a refusal alone decides this and
+        // a hint that offers the wire command would be the errand this test exists to prevent.
         McpLinkObstruction obstruction = detection.Obstruction.Obstruction;
-        bool writable = obstruction == McpLinkObstruction.None && !detection.EntryUnlaunchable;
+        bool writable = obstruction == McpLinkObstruction.None && detection.Refusal is null;
 
         string hint = obstruction switch
         {
             McpLinkObstruction.Link => LinkedHint(namedPath, detection.Obstruction.Segment!),
             McpLinkObstruction.Denied => DeniedHint(namedPath),
-            _ => detection.EntryUnlaunchable
-                ? UnlaunchableHint(entry, server, namedPath)
-                : NotWiredHint(entry, server, namedPath)
+            _ => GapHint(entry, server, namedPath, detection)
         };
 
         return new McpWiringFinding(
@@ -407,8 +407,25 @@ public static class McpWiringInspector
                             continue;
                         }
 
-                        if (!TryFindEntry(document.RootElement, entry.ServerKeyPath, server.Name, out JsonElement wired))
+                        if (!TryFindEntry(
+                                document.RootElement,
+                                entry.ServerKeyPath,
+                                server.Name,
+                                out JsonElement wired,
+                                out string? obstacle))
+                        {
+                            // A level of the key path that is present and is not an object is not a
+                            // file without the server: it is a file whose server map this check
+                            // could not read, and the two answers lead to opposite decisions. Read
+                            // as "absent", it offered a repair the repairer refuses as structurally
+                            // foreign (5.7) — a remedy guaranteed to fail. It is recorded as a
+                            // refusal instead, so the finding names the reason and offers the edit
+                            // the operator can actually make.
+                            if (obstacle is not null)
+                                refusals.Add($"{file.RelativePath} was not read: {obstacle}");
+
                             continue;
+                        }
 
                         return FromEntryBody(server, ReadEntryBody(wired, entry.CommandShape));
                     }
@@ -476,24 +493,56 @@ public static class McpWiringInspector
                 EntryUnlaunchable: true)
         };
 
-    /// <summary>Reads the servers a JSON document declares at a key path.</summary>
+    /// <summary>
+    /// Finds the entry a JSON document holds for <paramref name="name"/>, or reports why the search
+    /// could not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A false return with a null <paramref name="obstacle"/> is the ordinary miss: the document is
+    /// the right shape and does not declare this server. A non-null obstacle is the different
+    /// answer — the document holds something where the map of servers belongs, and this check could
+    /// not read it — and the caller reports that rather than the miss, because the two lead to
+    /// opposite decisions. The wording is the one the repairer's refusal uses for the same file, so
+    /// the report and the refusal name one fact rather than two spellings of it.
+    /// </para>
+    /// <para>
+    /// A key that is simply absent is the ordinary miss, because the repair can write a map where
+    /// none is: it inserts the path. Every present value that is not an object — an array, a string,
+    /// and <c>null</c> among them — is reported instead, because the repair refuses each of them as
+    /// structurally foreign, so a finding that offered the repair for one would offer a write
+    /// guaranteed to be refused.
+    /// </para>
+    /// </remarks>
     private static bool TryFindEntry(
         JsonElement root,
         IReadOnlyList<string> keyPath,
         string name,
-        out JsonElement entry)
+        out JsonElement entry,
+        out string? obstacle)
     {
         entry = default;
+        obstacle = null;
         JsonElement current = root;
+
+        if (current.ValueKind != JsonValueKind.Object)
+        {
+            obstacle = "its root is not a JSON object";
+            return false;
+        }
 
         foreach (string key in keyPath)
         {
-            if (current.ValueKind != JsonValueKind.Object ||
-                !current.TryGetProperty(key, out current) ||
-                current.ValueKind != JsonValueKind.Object)
+            if (!current.TryGetProperty(key, out JsonElement next))
+                return false;
+
+            if (next.ValueKind != JsonValueKind.Object)
             {
+                obstacle = $"its '{key}' key is not a JSON object";
                 return false;
             }
+
+            current = next;
         }
 
         return current.TryGetProperty(name, out entry);
@@ -974,6 +1023,53 @@ public static class McpWiringInspector
 
         return $"Kyber-Weave does not write {entry.Harness} configuration yet; add {snippet} to "
             + $"{namedPath} by hand.";
+    }
+
+    /// <summary>
+    /// The remedy for a gap whose file was readable: an entry to add, an entry to correct, or a
+    /// document that has to become the shape its harness loads.
+    /// </summary>
+    /// <remarks>
+    /// The three are separate sentences because they are separate problems, and only one of them can
+    /// be closed by the wire command. An entry that exists is never one the repair will touch (5.5),
+    /// and a document this check could not read as the harness's configuration is one the repair
+    /// refuses for the same reason (5.7), so sending either operator to that command would send them
+    /// to a guaranteed <c>KW-MCP-WIRE-005</c>.
+    /// </remarks>
+    private static string GapHint(
+        HarnessMcpEntry entry,
+        RequiredMcpServer server,
+        string namedPath,
+        Detection detection)
+    {
+        if (detection.EntryUnlaunchable)
+            return UnlaunchableHint(entry, server, namedPath);
+
+        return detection.Refusal is null
+            ? NotWiredHint(entry, server, namedPath)
+            : UnreadableDocumentHint(entry, namedPath);
+    }
+
+    /// <summary>
+    /// The remedy for a document this check could not read as the harness's configuration: the file
+    /// itself has to change, and no wire command can do it.
+    /// </summary>
+    /// <remarks>
+    /// The same refusal is what the repair answers for the same file, so the remedy is the edit the
+    /// operator can make — make the file the shape the harness loads — rather than a command. The
+    /// shape is named the way the harness names it: the key path for a JSON row, and, for a TOML row,
+    /// a document whose headers and strings are closed, because that is the whole of what its scanner
+    /// reads.
+    /// </remarks>
+    private static string UnreadableDocumentHint(HarnessMcpEntry entry, string namedPath)
+    {
+        string shape = entry.Shape == McpConfigurationShape.Toml
+            ? "a TOML document whose every header and string is closed"
+            : $"a JSON object holding the server map at '{string.Join('.', entry.ServerKeyPath)}'";
+
+        return $"Fix {namedPath} so it is {shape}, then run the check again. Kyber-Weave writes nothing "
+            + "into a configuration it could not read: a write into a document this harness cannot load "
+            + "replaces a diagnosable gap with a harness that starts with no tools.";
     }
 
     /// <summary>

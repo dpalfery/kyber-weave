@@ -329,6 +329,64 @@ public sealed class McpWiringInspectorTests : IDisposable
     }
 
     /// <summary>
+    /// Documents that parse and hold no map of servers where the harness keeps one.
+    /// </summary>
+    /// <remarks>
+    /// Every document here is valid JSON, so <c>ReadJson</c> hands it back and the check has to
+    /// decide what a present-but-not-an-object level means. An array, a null, a string and a
+    /// non-object root are the shapes an editor or a merge leaves behind, and the repair refuses
+    /// every one of them as structurally foreign (<c>KW-MCP-WIRE-005</c>).
+    /// </remarks>
+    public static TheoryData<string, string, string> NonObjectServerMaps() => new()
+    {
+        // harness, its repository-scope file, a document with no map of servers in it
+        { ClaudeCode, ".mcp.json", """{ "mcpServers": [] }""" },
+        { Factory, ".factory/mcp.json", """{ "mcpServers": null }""" },
+        { Cursor, ".cursor/mcp.json", """{ "mcpServers": "none" }""" },
+        { VsCode, ".vscode/mcp.json", """{ "servers": [] }""" },
+        { ClaudeCode, ".mcp.json", "[]" }
+    };
+
+    /// <summary>
+    /// A level the key path names that is not a map of servers is a refusal, not a repairable gap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gap is real — the server is not wired — but it is not one the repair can close: the same
+    /// file is refused as structurally foreign, so offering the repair sends the operator to a
+    /// command guaranteed to come back as <c>KW-MCP-WIRE-005</c>. A symbolic link and a denial
+    /// already resolve that contradiction the same way, so this follows them: the finding names the
+    /// reason, carries no wire command, and appears in no list of writes to consent to.
+    /// </para>
+    /// <para>
+    /// The remedy is not silence, because an operator can act on it — the file has to become the
+    /// shape the harness loads — so the hint names the file, the key path, and nothing that would be
+    /// refused.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(NonObjectServerMaps))]
+    public void ANonObjectServerMapIsARefusalRatherThanARepairableGap(
+        string harness,
+        string path,
+        string document)
+    {
+        McpWiringFixture.WriteText(Repo, path, document);
+        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+
+        McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
+
+        McpWiringFinding finding = SingleFindingFor(report, harness);
+        Assert.Equal(McpWiringKind.NotWired, finding.Kind);
+        Assert.Equal(NotWiredCode, finding.Code);
+        Assert.Equal(McpWiringFixability.NotFixable, finding.Fixable);
+        Assert.Contains("is not a JSON object", finding.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcp-wire", finding.Hint, StringComparison.Ordinal);
+        Assert.NotEmpty(finding.Hint);
+        Assert.Empty(McpWiringFixes.Derive(report, Repo));
+    }
+
+    /// <summary>
     /// A <c>recommended</c> server reports at <c>info</c> and keeps the same rule id, so the
     /// declared level is what decides severity rather than the gap kind (design DD7).
     /// </summary>
