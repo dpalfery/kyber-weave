@@ -1117,7 +1117,9 @@ dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
 against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
 on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
-runs are reserved strictly for task exit gates and final council review.
+runs are reserved strictly for the final council review, which runs it once per run, on the
+integrated head. A worker's task end runs only the test classes its task touched. A task with no
+covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
 
 ### Standardized 6-field completion digest
 

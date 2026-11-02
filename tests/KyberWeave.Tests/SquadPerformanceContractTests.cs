@@ -84,6 +84,55 @@ public sealed class SquadPerformanceContractTests
         return false;
     }
 
+    /// <summary>
+    ///     A tripwire for the retired wording, not proof that workers obey the new rule; the
+    ///     instruction itself enforces that. When "task end" counted as a full-suite moment, every
+    ///     worker that finished ran the whole suite, and harnesses finish workers together, so
+    ///     several full runs landed on one machine at once. It reads sentences, not lines: hard
+    ///     wraps in Markdown would otherwise hide the old wording, while a task-end clause in the
+    ///     next sentence ("At task end a worker runs only ...") must not be mistaken for it. A
+    ///     blank line, heading, bullet or table row starts a new block, so an unpunctuated bullet
+    ///     never borrows words from its neighbour; "e.g." and "i.e." do not end a sentence.
+    /// </summary>
+    internal static bool ReservesFullSuiteForTaskEnd(string content)
+    {
+        string text = Regex.Replace(content, @"\b(e\.g|i\.e)\.", "$1", RegexOptions.IgnoreCase);
+        foreach (string block in Regex.Split(
+                     text,
+                     @"(?:\r?\n){2,}|\r?\n(?=\s*(?:[-*+]\s|\d+\.\s|#{1,6}\s|\|))|(?<=^#{1,6}[ \t][^\r\n]*)\r?\n",
+                     RegexOptions.Multiline))
+        {
+            string flattened = Regex.Replace(block, @"\s+", " ");
+            foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
+                if (Regex.IsMatch(sentence, @"\breserv(?:e|es|ed|ing|ation|ations)\b", RegexOptions.IgnoreCase) &&
+                    Regex.IsMatch(sentence, @"\bfull[- ](?:test[- ])?suite\b", RegexOptions.IgnoreCase) &&
+                    Regex.IsMatch(sentence, @"\btask[- ](?:end|exit[- ]gates?)\b", RegexOptions.IgnoreCase))
+                    return true;
+        }
+
+        return false;
+    }
+
+    [Theory]
+    [InlineData("Reserve full test suite execution for task end or the final review council.", true)]
+    [InlineData("Full test suite runs are reserved strictly for task exit gates and final council review.", true)]
+    [InlineData("Full test suite\nruns are reserved strictly for task\nexit gates and final council review.", true)]
+    [InlineData(
+        "Reserve full test suite execution for the final review council. A worker's task end runs only the test classes its task touched.",
+        false)]
+    [InlineData("Task end used to be a full-suite moment.", false)]
+    [InlineData("Full suite runs are reserved for task-end verification.", true)]
+    [InlineData("The reservoir holds the full suite at task end.", false)]
+    [InlineData("Reserve the full suite, e.g. at task end.", true)]
+    [InlineData("Reserve the full suite, E.g. at task end.", true)]
+    [InlineData("Full suite reservations cover task end.", true)]
+    [InlineData("- Reserve the full suite for the council\n- At task end run only touched classes", false)]
+    [InlineData("## Reserve the full suite\nAt task end run only touched classes", false)]
+    public void FullSuiteReservationHelperReadsSentencesNotLines(string input, bool expected)
+    {
+        Assert.Equal(expected, ReservesFullSuiteForTaskEnd(input));
+    }
+
     [Theory]
     [InlineData("reserve full suite for task end", true)]
     [InlineData("full suite runs are reserved for task end", true)]
@@ -416,6 +465,60 @@ public sealed class SquadPerformanceContractTests
         Assert.True(
             HasBuildOnceReservationClause(content),
             $"{TestCodingStandardPath} must specify reserving full test suite execution for task end or council.");
+    }
+
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    [InlineData(TestCodingStandardPath)]
+    [InlineData(OnboardingDocPath)]
+    [InlineData(RequirementsDocPath)]
+    public void TaskEndRunsTouchedTestClassesAndLeavesTheFullSuiteToTheCouncil(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
+        Assert.Matches(@"(?i)\bonce per run\b", content);
+        Assert.Matches(@"(?i)\bintegrated\s+head\b", content);
+        Assert.Matches(@"(?i)`TESTS: total=0`\s+with\s+the\s+reason\b", content);
+        Assert.False(
+            ReservesFullSuiteForTaskEnd(content),
+            $"{relativePath} must not reserve the full suite for task end.");
+    }
+
+    [Theory]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    [InlineData(TestCodingStandardPath)]
+    public void WorkerSurfacesAskTheConductorForOneFullRunOnSharedTestInfrastructure(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
+        Assert.Matches(@"(?i)\bask the conductor for one full run\b", content);
+        Assert.Matches(@"(?i)\binstead of starting your own\b", content);
+    }
+
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    public void ConductorSurfacesAloneDispatchOneFullRunOnSharedTestInfrastructure(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
+        Assert.Matches(@"(?i)\bconductor alone dispatches one full run\b", content);
+        Assert.Matches(@"(?i)\bto a single worker\b", content);
+        Assert.Matches(@"(?i)\bworkers never start one\b", content);
+    }
+
+    [Fact]
+    public void TestStandardBoundsSharedTestInfrastructureByCountAndByRun()
+    {
+        string content = ReadRepoFile(TestCodingStandardPath);
+        Assert.Matches(@"(?i)\banything referenced by more than one test class\b", content);
+        Assert.Matches(@"(?i)`codegraph_explore` on the type shows\b", content);
+        Assert.Matches(@"(?i)\btest-project build settings, which every test class depends on\b", content);
+        Assert.Matches(@"(?i)\bat most one full run for the whole run\b", content);
     }
 
     [Theory]
