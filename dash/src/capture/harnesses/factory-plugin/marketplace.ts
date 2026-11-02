@@ -83,6 +83,11 @@ export const FACTORY_MARKETPLACE_FILES = [
 /**
  * The hook events the plugin registers on. `PreCompact` is not one of them: the contract
  * names no span for a compaction, so the hook would only cost a process per compaction.
+ *
+ * `SubagentStop` is not one of them either. Factory's documented payload for that event
+ * carries `task_name`, `task_result`, `task_error` and `stop_hook_active` and no child
+ * session id, so the mapper yields no span for it (D54) and a registration would buy
+ * nothing while costing a process per subagent stop.
  */
 const HOOK_EVENTS = [
   'SessionStart',
@@ -90,7 +95,6 @@ const HOOK_EVENTS = [
   'PreToolUse',
   'PostToolUse',
   'Stop',
-  'SubagentStop',
   'SessionEnd',
 ] as const
 
@@ -116,11 +120,9 @@ const PLUGIN_MANIFEST_SOURCE = `${JSON.stringify(
 
 /** The hooks file: one command per hook event, in the shape Factory's plugin loader reads. */
 const HOOKS_SOURCE = `${JSON.stringify(
-  {
-    hooks: Object.fromEntries(
-      HOOK_EVENTS.map((event) => [event, [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }]]),
-    ),
-  },
+  Object.fromEntries(
+    HOOK_EVENTS.map((event) => [event, [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }]]),
+  ),
   null,
   2,
 )}\n`
