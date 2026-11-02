@@ -19,6 +19,11 @@
 // `<factory root>` is the injected home's `.factory`, and `$FACTORY_DIR` points at the same
 // directory, so the test never depends on which of the two the command resolves. Nothing
 // here touches the developer's own `~/.factory` or `~/.kyberdash`.
+//
+// The verb refuses `--config-dir`: that flag selects the OpenCode config root, and the Factory
+// harness resolves its own root (`$FACTORY_DIR`, else `~/.factory`) — the same one the Factory
+// FILE source reads. A request that carries the flag is a usage error (exit 2) and writes
+// nothing at all.
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,6 +45,8 @@ type PluginInstallCommandOptions = {
   preserve?: boolean
   ifInstalled?: boolean
   dryRun?: boolean
+  /** The OpenCode config root. The Factory verb refuses it: exit 2, nothing written. */
+  configDir?: string
   homeDir: string
   env?: PathEnv
   processEnv?: NodeJS.ProcessEnv
@@ -197,6 +204,65 @@ describe('capture plugin install --harness factory', () => {
     // A refused request writes nothing at all.
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(existsSync(join(f.home, '.kyberdash'))).toBe(false)
+  })
+
+  it('refuses --config-dir for the Factory harness with exit 2 and a message that names the flag', async () => {
+    const f = fixture('factory-command-config-dir-')
+    const openCodeRoot = join(f.home, 'opencode-root')
+
+    const result = await run(f, { configDir: openCodeRoot })
+
+    expect(result.exitCode).toBe(2)
+    // The message names the flag, so the caller knows which argument was refused.
+    expect(result.stderr).toContain('--config-dir')
+    // A usage error, not an install: nothing is reported as installed.
+    expect(result.stdout).not.toContain('factory plugin:')
+  })
+
+  it('a refused --config-dir writes nothing, and the Factory tree still lands in the Factory root', async () => {
+    const f = fixture('factory-command-config-dir-nowrite-')
+    const openCodeRoot = join(f.home, 'opencode-root')
+    // A Factory root the harness owns, and that is NOT the home's `.factory`: the verb resolves
+    // the root the Factory FILE source reads, not a caller's directory.
+    const harnessRoot = join(f.home, 'harness-factory')
+
+    const refused = await run(f, { configDir: openCodeRoot })
+
+    expect(refused.exitCode).toBe(2)
+    // Nothing at all: no plugin tree, no receipt, no consent file.
+    expect(listFiles(f.root)).toEqual([])
+    expect(existsSync(f.receiptFile)).toBe(false)
+    expect(existsSync(f.consentFile)).toBe(false)
+    expect(existsSync(join(f.home, '.kyberdash'))).toBe(false)
+    // The named root never became a Factory tree.
+    expect(existsSync(join(openCodeRoot, 'plugins'))).toBe(false)
+
+    // Without the flag the tree lands in the Factory root the harness resolves itself.
+    const installed = await run(f, { processEnv: { FACTORY_DIR: harnessRoot } })
+
+    expect(installed.exitCode).toBe(0)
+    expect(listFiles(join(harnessRoot, 'plugins', PLUGIN_DIR_NAME))).toEqual([...OWNED_FILES].sort())
+    expect(existsSync(join(f.root, 'plugins'))).toBe(false)
+    expect(existsSync(join(openCodeRoot, 'plugins'))).toBe(false)
+  })
+
+  it('refuses --config-dir whatever else the request carries', async () => {
+    const f = fixture('factory-command-config-dir-modes-')
+    const openCodeRoot = join(f.home, 'opencode-root')
+    const modes: Partial<PluginInstallCommandOptions>[] = [
+      { preserve: true },
+      { ifInstalled: true },
+      { dryRun: true },
+    ]
+
+    for (const mode of modes) {
+      const result = await run(f, { ...mode, configDir: openCodeRoot })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('--config-dir')
+    }
+
+    expect(listFiles(f.root)).toEqual([])
   })
 
   it('refuses a foreign plugin tree in strict mode and writes nothing', async () => {

@@ -441,7 +441,8 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
     /// <summary>
     ///     A global Factory deployment installs the Kyber-owned capture plugin for Factory through the
-    ///     KyberDash verb, in preserve mode, against the Factory global root Squad just deployed to.
+    ///     KyberDash verb, in preserve mode. The call names no root: the verb resolves the Factory
+    ///     harness's own root itself.
     /// </summary>
     [Fact]
     public void GlobalInstallWithFactoryRunsThePluginVerbForFactoryInPreserveMode()
@@ -457,19 +458,19 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         Assert.Equal(FakeKyberDash, call.FileName);
         Assert.Equal(
             [
-                "kyber", "capture", "plugin", "install", "--harness", "factory", "--preserve", "--config-dir",
-                h.GlobalRoot(SquadTarget.Factory)
+                "kyber", "capture", "plugin", "install", "--harness", "factory", "--preserve"
             ],
             call.ArgumentList);
     }
 
     /// <summary>
-    ///     The root the verb receives is the one the repository resolves for Factory, not a guess: the
-    ///     Squad global-root resolver puts the Factory droids and skills under <c>~/.factory</c>, and the
-    ///     verb must be handed that same directory.
+    ///     The Factory call names no root at all. The verb resolves the Factory harness's own root
+    ///     (<c>$FACTORY_DIR</c>, else <c>~/.factory</c>) — the same tree the Factory FILE source reads
+    ///     — so the plugin and the file source always pair from one root, and the deploy hands the
+    ///     verb no directory of its own.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryGivesTheVerbTheResolvedFactoryGlobalRoot()
+    public void GlobalInstallWithFactoryNamesNoRootSoTheVerbResolvesTheFactoryTreeItself()
     {
         string home = Path.Combine(_temp.Path, "factory-home");
         Directory.CreateDirectory(home);
@@ -482,17 +483,21 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
 
         Assert.Equal(0, execution.ExitCode);
+        // The repository resolves the Factory tree to ~/.factory: the tree the verb resolves for itself.
         Assert.Equal(Path.Combine(home, ".factory"), h.GlobalRoot(SquadTarget.Factory));
         ProcessStartInfo call = Assert.Single(executor.Calls);
-        Assert.Equal(h.GlobalRoot(SquadTarget.Factory), ConfigDirOf(call));
+        Assert.Equal(string.Empty, ConfigDirOf(call));
+        Assert.DoesNotContain("--config-dir", call.ArgumentList);
+        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.Factory), call.ArgumentList);
     }
 
     /// <summary>
-    ///     The two steps use different roots: the OpenCode plugin lives under the OpenCode global root
-    ///     and the Factory plugin under the Factory one. Neither step may be handed the other's root.
+    ///     The two steps never share a root: the OpenCode plugin lives under the OpenCode global root
+    ///     and keeps its <c>--config-dir</c>, while the Factory step names no root at all, so it can
+    ///     never be handed the OpenCode one.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithOpenCodeAndFactoryGivesEachPluginStepItsOwnGlobalRoot()
+    public void GlobalInstallWithOpenCodeAndFactoryGivesOnlyTheOpenCodeStepARoot()
     {
         using Harness h = new(Path.Combine(_temp.Path, "install-opencode-factory-roots"));
         FakeProcessExecutor executor = new();
@@ -503,9 +508,15 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         IReadOnlyList<ProcessStartInfo> calls = executor.Calls;
         Assert.Equal(2, calls.Count);
+        // The OpenCode step keeps its own root: that flag still selects the OpenCode config root.
         Assert.Equal(h.GlobalRoot(SquadTarget.OpenCode), ConfigDirOf(calls[0]));
-        Assert.Equal(h.GlobalRoot(SquadTarget.Factory), ConfigDirOf(calls[1]));
+        // The Factory step names no root, so it cannot be handed the OpenCode one.
+        Assert.Equal(string.Empty, ConfigDirOf(calls[1]));
+        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.OpenCode), calls[1].ArgumentList);
         Assert.NotEqual(h.GlobalRoot(SquadTarget.OpenCode), h.GlobalRoot(SquadTarget.Factory));
+        // The order is unchanged: OpenCode first, Factory second.
+        Assert.Equal("opencode", HarnessOf(calls[0]));
+        Assert.Equal("factory", HarnessOf(calls[1]));
     }
 
     /// <summary>
