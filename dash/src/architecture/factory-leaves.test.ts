@@ -39,6 +39,7 @@ const LEAVES = [
   'capture/harnesses/factory-plugin/contract.ts',
   'capture/harnesses/factory-plugin/mapper.ts',
   'capture/harnesses/factory-plugin/consent.ts',
+  'capture/harnesses/factory-plugin/native-export.ts',
 ]
 
 export type LeafReason = 'third-party' | 'outside-capture' | 'opencode-plugin'
