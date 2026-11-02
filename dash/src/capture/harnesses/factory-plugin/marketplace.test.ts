@@ -39,6 +39,7 @@ import {
   readFactoryHarnessResidue,
   readFactoryHarnessState,
   resolveFactoryHarnessCli,
+  writeMarketplaceTree,
   type FactoryHarnessRegistry,
 } from './marketplace.js'
 import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
@@ -698,5 +699,56 @@ describe('the driver that runs the harness', () => {
     expect(answer.stdout).toContain('aaaa')
     expect(answer.stderr).toContain('bbbb')
     expect(answer.exitCode).toBe(0)
+  })
+})
+
+describe('the tree writer', () => {
+  /**
+   * The tree writer's failure, provoked FOR REAL: a file cannot be renamed onto a directory,
+   * so the second file of the tree cannot land where it must go and the filesystem's own
+   * errno is what fails. Nothing is mocked, so the failure is the one an owner hits.
+   */
+  function writeTreeThatFails(root: string): NodeJS.ErrnoException | undefined {
+    const blocked = join(root, 'kyberdash-factory', '.factory-plugin', 'plugin.json')
+    mkdirSync(blocked, { recursive: true })
+    writeFileSync(join(blocked, 'owner.txt'), "// the owner's own file\n")
+    try {
+      writeMarketplaceTree(root)
+      return undefined
+    } catch (error) {
+      return error as NodeJS.ErrnoException
+    }
+  }
+
+  it('leaves no staged sibling behind when a rename fails', () => {
+    const root = temp('factory-marketplace-staged-')
+
+    const thrown = writeTreeThatFails(root)
+
+    // The writer must not swallow the I/O failure.
+    expect(thrown, 'the writer must not swallow the I/O failure').toBeDefined()
+    expect(thrown?.code, "the failure is the filesystem's own errno").toMatch(/^EISDIR$|^ENOTEMPTY$/)
+
+    // A staged sibling left behind is a file KyberDash did not write, and the classifier
+    // reads any such file as a foreign tree: the owner's own tree could then neither be
+    // installed nor uninstalled, and only a manual deletion cleared it.
+    expect(
+      listFiles(root).filter((relative) => relative.endsWith('.tmp')),
+      'no staged file is left behind',
+    ).toEqual([])
+  })
+
+  it('leaves no part of the tree behind when a rename fails', () => {
+    const root = temp('factory-marketplace-partial-')
+
+    const thrown = writeTreeThatFails(root)
+
+    expect(thrown, 'the writer must not swallow the I/O failure').toBeDefined()
+    // The tree is written whole or not at all: a file that was renamed into place before the
+    // failure is part of the tree too, and half a tree is not a tree.
+    expect(
+      listFiles(root).filter((relative) => OWNED_FILES.includes(relative)),
+      'no file of the tree is left behind',
+    ).toEqual([])
   })
 })
