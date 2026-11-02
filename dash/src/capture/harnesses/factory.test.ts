@@ -10,6 +10,12 @@
 // that implements it is shaped. The tree it installs is the one the installer contract pins
 // (`./factory-plugin/install.test.ts`).
 //
+// The Settings switch starts the capture; it does not opt the prompt text in. The content
+// consent is the owner's own decision, made through
+// `kyberdash kyber capture plugin consent --harness factory --on` or by editing the consent
+// file by hand. `enable` installs the plugin and leaves that decision exactly as it was;
+// `disable` removes the plugin and turns the content off.
+//
 // Every path is under a temporary home. The Factory root is that home's `.factory`, and
 // `$FACTORY_DIR` points at the same directory, so the test never depends on WHICH of the
 // two ways the writer resolves the root, and the developer's own `~/.factory` and
@@ -105,10 +111,24 @@ function factoryPluginWriter(): PluginOnlyWriter {
   return writer
 }
 
-/** The consent file's text, or '' when there is none. */
-function consentText(f: Fixture): string {
+/**
+ * The consent file's `content` value, or undefined when there is no file. The file is
+ * `{ "version": 1, "content": <boolean> }`.
+ */
+function consentContent(f: Fixture): boolean | undefined {
   const path = join(f.home, '.kyberdash', 'factory-plugin.json')
-  return existsSync(path) ? readFileSync(path, 'utf8') : ''
+  if (!existsSync(path)) return undefined
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const content = (parsed as Record<string, unknown>)['content']
+  return typeof content === 'boolean' ? content : undefined
+}
+
+/** The owner's own consent file, written by hand. */
+function writeConsent(f: Fixture, content: boolean): void {
+  const path = join(f.home, '.kyberdash', 'factory-plugin.json')
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, `${JSON.stringify({ version: 1, content }, null, 2)}\n`)
 }
 
 describe('the Factory (Droid) capture writer', () => {
@@ -200,22 +220,60 @@ describe('the Factory (Droid) capture writer', () => {
     expect(readFileSync(f.settingsFile, 'utf8')).toBe(owner)
   })
 
-  it('turns the capture consent on with enable and off with disable', async () => {
-    const f = fixture('factory-writer-consent-')
+  it('enables the capture without recording the prompt text: the consent file is created with content off', async () => {
+    const f = fixture('factory-writer-consent-absent-')
     await runCapture('enable', {
       homeDir: f.home,
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
     })
-    expect(consentText(f)).toMatch(/true/i)
+    // The switch starts the capture; it does not opt the prompt text in.
+    expect(existsSync(f.pluginDir)).toBe(true)
+    expect(consentContent(f)).toBe(false)
+  })
 
+  it('leaves an owner content consent on when enable installs the capture', async () => {
+    const f = fixture('factory-writer-consent-on-')
+    writeConsent(f, true)
+    await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+    })
+    expect(existsSync(f.pluginDir)).toBe(true)
+    expect(consentContent(f)).toBe(true)
+  })
+
+  it('leaves an owner content consent off when enable installs the capture', async () => {
+    const f = fixture('factory-writer-consent-off-')
+    writeConsent(f, false)
+    await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+    })
+    expect(consentContent(f)).toBe(false)
+  })
+
+  it('disable uninstalls the plugin and turns the content consent off', async () => {
+    const f = fixture('factory-writer-consent-disable-')
+    writeConsent(f, true)
+    await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+    })
     await runCapture('disable', {
       homeDir: f.home,
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
     })
-    expect(consentText(f)).not.toMatch(/true/i)
+    expect(existsSync(f.pluginDir)).toBe(false)
+    expect(consentContent(f)).toBe(false)
   })
 })

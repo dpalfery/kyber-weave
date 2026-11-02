@@ -1,12 +1,13 @@
-// RED tests for `kyberdash kyber capture plugin install --harness factory`.
-//
-// The module under test is `./install-command.ts`, which does not exist yet: this file is
-// the contract the implementation is written against, and the run that proves it is a RED
-// run whose only failure is the missing module.
+// Tests for `kyberdash kyber capture plugin install --harness factory`.
 //
 // The verb is the one-shot install for the callers outside the Settings drawer (Squad,
 // `kyber-weave update`): it installs the Factory capture plugin DIRECTORY, it keeps the
 // owner's Factory settings untouched, and it never writes a configuration key.
+//
+// The install never turns the content consent on: it creates the consent file with the
+// content off when nothing is there, and leaves the owner's own value exactly as it was.
+// Only `kyberdash kyber capture plugin consent --harness factory --on` (or the owner
+// editing that file by hand) records the decision to capture the prompt text.
 //
 // The tree, the receipt and the consent file are the ones the installer contract pins
 // (`./install.test.ts`):
@@ -60,6 +61,28 @@ async function loadRunner(): Promise<PluginInstallCommandRunner> {
   throw new Error('the factory plugin install command exports no runner')
 }
 
+type FactoryPluginConsentOptions = {
+  harness?: string
+  on?: boolean
+  off?: boolean
+  homeDir: string
+  env?: PathEnv
+}
+
+/** The consent runner: the only path that turns the content consent on. */
+async function loadConsentRunner(): Promise<
+  (options: FactoryPluginConsentOptions) => PluginInstallCommandResult
+> {
+  const module = (await import('./install-command.js')) as unknown as Record<string, unknown>
+  const candidate = module['runFactoryPluginConsent']
+  if (typeof candidate !== 'function') {
+    throw new Error('the factory plugin install command exports no consent runner')
+  }
+  return candidate as unknown as (
+    options: FactoryPluginConsentOptions,
+  ) => PluginInstallCommandResult
+}
+
 type Fixture = {
   /** The injected home: KyberDash's own state lives in `<home>/.kyberdash`. */
   home: string
@@ -71,6 +94,8 @@ type Fixture = {
   settingsFile: string
   /** The plugin's own receipt, beside the consent file. */
   receiptFile: string
+  /** The content consent file: the owner's decision about the prompt text. */
+  consentFile: string
 }
 
 const tempDirs: string[] = []
@@ -91,7 +116,26 @@ function fixture(prefix: string): Fixture {
     pluginDir: join(root, 'plugins', PLUGIN_DIR_NAME),
     settingsFile: join(root, 'settings.json'),
     receiptFile: join(home, '.kyberdash', 'factory-plugin-receipt.json'),
+    consentFile: join(home, '.kyberdash', 'factory-plugin.json'),
   }
+}
+
+/**
+ * The consent file's `content` value, or undefined when there is no file. The file is
+ * `{ "version": 1, "content": <boolean> }`.
+ */
+function consentContent(f: Fixture): boolean | undefined {
+  if (!existsSync(f.consentFile)) return undefined
+  const parsed: unknown = JSON.parse(readFileSync(f.consentFile, 'utf8'))
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const content = (parsed as Record<string, unknown>)['content']
+  return typeof content === 'boolean' ? content : undefined
+}
+
+/** The owner's own consent file, written by hand. */
+function writeConsent(f: Fixture, content: boolean): void {
+  mkdirSync(join(f.consentFile, '..'), { recursive: true })
+  writeFileSync(f.consentFile, `${JSON.stringify({ version: 1, content }, null, 2)}\n`)
 }
 
 /** Every file under a directory, as sorted relative posix-style paths. */
@@ -206,5 +250,41 @@ describe('capture plugin install --harness factory', () => {
     expect(result.stdout).toMatch(/would/i)
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(existsSync(f.receiptFile)).toBe(false)
+  })
+
+  it('installing the plugin never turns the content consent on: the file is created with content off', async () => {
+    const f = fixture('factory-command-consent-')
+    const result = await run(f)
+    expect(result.exitCode).toBe(0)
+    expect(consentContent(f)).toBe(false)
+  })
+
+  it('installing the plugin leaves an owner content consent on', async () => {
+    const f = fixture('factory-command-consent-on-')
+    writeConsent(f, true)
+    const result = await run(f)
+    expect(result.exitCode).toBe(0)
+    expect(consentContent(f)).toBe(true)
+  })
+
+  it('preserving the plugin leaves an owner content consent on', async () => {
+    const f = fixture('factory-command-consent-preserve-')
+    writeConsent(f, true)
+    const result = await run(f, { preserve: true })
+    expect(result.exitCode).toBe(0)
+    expect(consentContent(f)).toBe(true)
+  })
+
+  it('turns the content consent on only when the owner asks for it', async () => {
+    const f = fixture('factory-command-consent-verb-')
+    const runner = await loadConsentRunner()
+    const result = runner({
+      harness: 'factory',
+      on: true,
+      homeDir: f.home,
+      env: { platform: process.platform },
+    })
+    expect(result.exitCode).toBe(0)
+    expect(consentContent(f)).toBe(true)
   })
 })
