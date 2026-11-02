@@ -561,7 +561,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     }
 
     /// <summary>
-    /// The real confirmation: one question naming every file and every server the repair would write.
+    /// The real confirmation: the write scope printed in full, then the question about it.
     /// </summary>
     /// <remarks>
     /// It defaults to no. The repair writes files a harness will load and a receipt into version
@@ -569,13 +569,50 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private static bool ConfirmRepair(IReadOnlyList<McpWiringFix> fixes)
     {
-        string targets = string.Join(
-            "; ",
-            fixes.Select(fix => $"{fix.Harness} ({fix.Path}) adding {string.Join(", ", fix.Servers)}"));
+        PrintRepairScope(fixes);
 
         return AnsiConsole.Confirm(
-            Markup.Escape(TerminalText.Line($"Wire the declared MCP servers now? This writes {targets}.")),
+            $"Wire the declared MCP servers into those {fixes.Count} files now?",
             defaultValue: false);
+    }
+
+    /// <summary>
+    /// Prints the write scope the question covers: one line per file, naming the harness it belongs
+    /// to and every server the repair would add to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The scope is printed rather than folded into the question because the scope <em>is</em> the
+    /// consent, and the two render differently. A finding is one message with a capped line, where a
+    /// truncated value is a better outcome than an unreadable one. A consent is the opposite: an
+    /// operator confirming a write they cannot fully see has not consented to it, so the list of
+    /// files and servers may not be cut — and a repository using four or five harnesses exceeds what
+    /// one capped line holds.
+    /// </para>
+    /// <para>
+    /// A file to a line, printed unfolded, rather than one long sentence: the terminal is what wraps
+    /// the list, so every file and every server survives however narrow the console is. Each value
+    /// still goes through <see cref="TerminalText.Line"/> — a harness name and a path are somebody
+    /// else's text — but per value, so the cap bounds one name and never the whole scope.
+    /// </para>
+    /// </remarks>
+    internal static void PrintRepairScope(IReadOnlyList<McpWiringFix> fixes)
+    {
+        ArgumentNullException.ThrowIfNull(fixes);
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            AnsiConsole.MarkupLine("This writes:");
+
+            foreach (McpWiringFix fix in fixes)
+            {
+                string path = Markup.Escape(TerminalText.Line(fix.Path));
+                string harness = Markup.Escape(TerminalText.Line(fix.Harness));
+                string servers = Markup.Escape(TerminalText.Line(string.Join(", ", fix.Servers)));
+
+                AnsiConsole.MarkupLine($"  [bold]{path}[/] [grey]({harness})[/] adding {servers}");
+            }
+        });
     }
 
     /// <summary>

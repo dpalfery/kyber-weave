@@ -312,6 +312,68 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     }
 
     /// <summary>
+    /// R4.1: the question <em>is</em> the consent, so the scope it names is the message rather than
+    /// detail beneath one. A repository using several harnesses produces a scope wider than the 512
+    /// characters a single rendered line is capped at, and a consent cut short asks the operator to
+    /// approve a write they cannot see — the one thing a consent prompt may not do.
+    /// </summary>
+    /// <remarks>
+    /// The scope is printed a file to a line, so asserting per line is what proves every file is
+    /// still there with its own servers after it. A case that only joined the output and searched it
+    /// would pass on a prompt that had dropped a file, dropped a server, or attributed one harness's
+    /// servers to another.
+    /// </remarks>
+    [Fact]
+    public void TheConsentScopeNamesEveryFileAndServerEvenWhenItExceedsOneLine()
+    {
+        // Five declared servers on six harnesses is an ordinary adoption, and it is already wider
+        // than one capped line — which is the whole point: the cap is not a hypothetical hazard.
+        string[] servers = [KyberWeaveServer, "codegraph", "documentation-index", "playwright", "github"];
+
+        IReadOnlyList<McpWiringFix> fixes =
+        [
+            new("claude-code", ".mcp.json", servers, Create: false),
+            new(Cursor, CursorConfigRelativePath, servers, Create: true),
+            new("vscode", ".vscode/mcp.json", servers, Create: true),
+            new("opencode", "opencode.json", servers, Create: true),
+            new(Factory, ".factory/mcp.json", servers, Create: false),
+            new("codex", ".codex/config.toml", servers, Create: true)
+        ];
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            DocsInitCommand.PrintRepairScope(fixes);
+            return 0;
+        });
+
+        // The fixture has to be wider than the cap this change removes, or it proves nothing about a
+        // scope the operator could not see.
+        Assert.True(
+            execution.Output.Length > 512,
+            $"The fixture renders {execution.Output.Length} characters, which the 512-character cap would not have cut.");
+
+        string[] lines = execution.Output.Split(
+            Environment.NewLine,
+            StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (McpWiringFix fix in fixes)
+        {
+            string owner = Assert.Single(
+                lines,
+                line => line.Contains(fix.Path, StringComparison.Ordinal));
+
+            Assert.Contains(fix.Harness, owner, StringComparison.Ordinal);
+
+            foreach (string server in fix.Servers)
+            {
+                Assert.Contains(server, owner, StringComparison.Ordinal);
+            }
+        }
+
+        Assert.DoesNotContain("…", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// R4.7: the question sits behind a successful scaffold. A failed scaffold exits 1 with the
     /// reason and never reaches an interactive prompt — the operator is being told the command did
     /// not do its job, and a question about wiring would bury that.
