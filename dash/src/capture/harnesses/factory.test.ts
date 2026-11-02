@@ -27,7 +27,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { isPluginOnly, runCapture, type PluginOnlyWriter } from '../index.js'
+import { DEFAULT_CAPTURE_ENDPOINT, isPluginOnly, runCapture, type PluginOnlyWriter } from '../index.js'
 import type { PathEnv } from '../paths.js'
 import { harnessWriterFor, type CaptureHarnessWriter } from './registry.js'
 
@@ -129,6 +129,105 @@ function writeConsent(f: Fixture, content: boolean): void {
   const path = join(f.home, '.kyberdash', 'factory-plugin.json')
   mkdirSync(join(path, '..'), { recursive: true })
   writeFileSync(path, `${JSON.stringify({ version: 1, content }, null, 2)}\n`)
+}
+
+/** The receiver's address without its scheme: what the row must name when it is pointed here. */
+const RECEIVER_ADDRESS = DEFAULT_CAPTURE_ENDPOINT.replace(/^https?:\/\//, '')
+
+/**
+ * The machine environment variable Factory's native export reads, and the documented
+ * fallback beside it. Both are stubbed, so the developer's own shell cannot decide the
+ * fixture and the fallback cannot answer for the variable.
+ */
+function setNativeEndpoint(endpoint: string | undefined): void {
+  vi.stubEnv('OTEL_TELEMETRY_ENDPOINT', endpoint)
+  vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', undefined)
+}
+
+/**
+ * The organisation's managed settings, as the machine holds them. The organisation's
+ * `telemetry` block pins the endpoint and OVERRIDES the machine environment variable; it
+ * reaches the machine both as the cached view under the Factory root and as the
+ * system-managed file. Both are written here, under the temporary home, carrying the same
+ * endpoint, so the fixture never depends on which of the two the reader consults — and
+ * the machine's own organisation settings are never read.
+ */
+function writeOrgTelemetry(home: string, root: string, endpoint: string): void {
+  const telemetry = { endpoint }
+  mkdirSync(root, { recursive: true })
+  writeFileSync(
+    join(root, 'org-managed-settings.cache.json'),
+    `${JSON.stringify(
+      {
+        orgId: 'org-test',
+        userId: 'user-test',
+        managedSettings: { telemetry },
+        factoryTier: 'team_annual',
+        revision: 1,
+        cachedAt: 0,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  const systemDir =
+    HOST === 'win32'
+      ? join(home, 'AppData', 'Roaming', 'Factory')
+      : HOST === 'linux'
+        ? join(home, 'etc', 'factory')
+        : join(home, 'Library', 'Application Support', 'Factory')
+  mkdirSync(systemDir, { recursive: true })
+  writeFileSync(join(systemDir, 'settings.json'), `${JSON.stringify({ telemetry }, null, 2)}\n`)
+}
+
+/**
+ * The printed status of one harness: the lines under its harness heading. The row's own
+ * lines are what the native export is reported in, so nothing outside the row can answer
+ * for it.
+ */
+function harnessBlock(lines: readonly string[], id: string): string[] {
+  const start = lines.findIndex((line) => line.startsWith(`harness ${id} (`))
+  if (start === -1) throw new Error(`no ${id} harness block in ${JSON.stringify(lines)}`)
+  const block: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith('  ')) break
+    block.push(line)
+  }
+  return block
+}
+
+/**
+ * The row's own lines about the native OpenTelemetry export. A row that says nothing about
+ * the native path is the defect these tests exist to catch, so the helper fails loudly
+ * instead of returning an empty string.
+ */
+function nativeText(lines: readonly string[]): string {
+  const named = lines.filter((line) => /native|otel|telemetry/i.test(line))
+  const candidates = named.length > 0 ? named : lines.filter((line) => /export/i.test(line))
+  if (candidates.length === 0) {
+    throw new Error(`the row says nothing about the native export: ${JSON.stringify(lines)}`)
+  }
+  return candidates.join('\n')
+}
+
+/**
+ * The text with its unavailability claims removed. What is left is any claim that the
+ * native path is working — the one claim the row must never make wrongly.
+ */
+function workingClaim(text: string): string {
+  return text.replace(/\bunavailable\b/gi, '').replace(/\bnot\s+available\b/gi, '')
+}
+
+/** The Factory row as `capture status` prints it. */
+async function printedStatus(home: string): Promise<string[]> {
+  const result = await runCapture('status', {
+    homeDir: home,
+    platform: HOST,
+    harnessIds: ['factory'],
+    fetchHealth: NO_LISTENER,
+  })
+  expect(result.exitCode).toBe(0)
+  return harnessBlock(result.stdout.split('\n'), 'factory')
 }
 
 describe('the Factory (Droid) capture writer', () => {
@@ -275,5 +374,58 @@ describe('the Factory (Droid) capture writer', () => {
     })
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(consentContent(f)).toBe(false)
+  })
+})
+
+describe('the Factory row and the native OpenTelemetry export', () => {
+  it('reports the native export as available when the machine variable points at this receiver', async () => {
+    const f = fixture('factory-avail-')
+    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
+
+    const text = nativeText(await printedStatus(f.home))
+
+    expect(text).toMatch(/\bavailable\b/i)
+    expect(text).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    // The row says which endpoint the native export is pointed at.
+    expect(text).toContain(RECEIVER_ADDRESS)
+  })
+
+  it('reports the native export as unavailable when the machine variable points elsewhere', async () => {
+    const f = fixture('factory-elsewhere-')
+    setNativeEndpoint('http://otel.example.com:4318')
+
+    const text = nativeText(await printedStatus(f.home))
+
+    expect(text).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    // The reason names that the endpoint points somewhere other than this receiver.
+    expect(text).toMatch(/\bpoint(s|ed|ing)?\b|\belsewhere\b|\bother\b|\bdifferent\b|\bnot\b/i)
+  })
+
+  it('reports the native export as unavailable and names the organisation that pins it', async () => {
+    const f = fixture('factory-orgpin-')
+    // The machine variable is set correctly, and the organisation's pinned endpoint
+    // overrides it: the organisation's endpoint is the one that receives the traffic.
+    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
+    writeOrgTelemetry(f.home, f.root, 'https://otlp.acme.example')
+
+    const text = nativeText(await printedStatus(f.home))
+
+    expect(text).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    // The cause is named: an organisation-pinned endpoint, not the machine variable.
+    expect(text).toMatch(/\borgani[sz]ation\b|\borg-managed\b|\bmanaged settings\b|\benterprise\b/i)
+    // Never reported as working, whatever the machine variable says.
+    expect(workingClaim(text)).not.toMatch(/\bavailable\b/i)
+  })
+
+  it('reports the native export as not configured when nothing configures it', async () => {
+    const f = fixture('factory-unset-')
+    setNativeEndpoint(undefined)
+
+    const text = nativeText(await printedStatus(f.home))
+
+    // "Not configured" is its own verdict: neither working, nor unavailable for a reason.
+    expect(text).toMatch(/\bnot\s+configured\b/i)
+    expect(text).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    expect(workingClaim(text)).not.toMatch(/\bavailable\b/i)
   })
 })
