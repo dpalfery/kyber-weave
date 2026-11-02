@@ -496,6 +496,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
         Assert.Matches(@"(?i)\bask the conductor for one full run\b", content);
+        Assert.Matches(@"(?i)\binstead of starting your own\b", content);
     }
 
     [Theory]
@@ -506,6 +507,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
         Assert.Matches(@"(?i)\bconductor alone dispatches one full run\b", content);
+        Assert.Matches(@"(?i)\bto a single worker\b", content);
         Assert.Matches(@"(?i)\bworkers never start one\b", content);
     }
 
@@ -514,6 +516,8 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(TestCodingStandardPath);
         Assert.Matches(@"(?i)\banything referenced by more than one test class\b", content);
+        Assert.Matches(@"(?i)`codegraph_explore` on the type shows\b", content);
+        Assert.Matches(@"(?i)\btest-project build settings, which every test class depends on\b", content);
         Assert.Matches(@"(?i)\bat most one full run for the whole run\b", content);
     }
 
