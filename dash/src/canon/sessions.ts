@@ -17,6 +17,7 @@ import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { costBasisMismatchOf, measuredInput, sumCosts, type CostBasisMismatch } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
+import { splitDroidSessionRecords } from './droid-pairing.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
@@ -1449,7 +1450,19 @@ export function buildSessionRow(
   for (const record of records) {
     if (!views.has(record.spanId)) views.set(record.spanId, reduceRecordParts(record, countTokens))
   }
-  const turnRecords = turnsOf(records)
+  // Factory is one harness reached through two capture sources, and a session
+  // both sources observed has to say which source owns which half of it: the
+  // plugin source owns the turns and the session's structure, the file source
+  // owns the counters. A session only one source observed keeps the default
+  // path, where every record stands for itself.
+  const split = splitDroidSessionRecords(records)
+  const paired = split.turnRecords.length > 0 && split.counterRecords.length > 0
+  const turnRecords = paired ? turnsOf(split.turnRecords) : turnsOf(records)
+  // The file row is the counter source of the turn the plugin source
+  // reported. It is not a turn of its own: it is not a timeline entry, not a
+  // request root, not a tool invocation, and its duration is not added.
+  const structureRecords = paired ? split.turnRecords : records
+  const counterRecords = paired ? split.counterRecords : []
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
   // `run`, `execution` and `listHarnesses` are all keyed canonically, and
@@ -1471,6 +1484,15 @@ export function buildSessionRow(
   const contextRecords = mainThreadRecords.length > 0 ? mainThreadRecords : turnRecords
   const measuredTurns = contextRecords.filter((record) => measuredInput(record.tokens) > 0)
   const unmeasuredTurns = contextRecords.length - measuredTurns.length
+  // The context analysis reads the turn records. When no turn record carries
+  // a measured input — a paired Factory session's plugin turns report no
+  // counter at all — the counter records' input stands in for it, so the
+  // session's context input is the file source's measured figure and never a
+  // zero.
+  const counterInput =
+    counterRecords.length > 0
+      ? counterRecords.reduce((sum, record) => sum + measuredInput(record.tokens), 0)
+      : undefined
   // Some harnesses (Copilot) send the system prompt on the first request only,
   // yet every later request still carries it in its input. The last one seen
   // stands in for turns that report none; a turn's own always wins. Done here,
@@ -1505,10 +1527,17 @@ export function buildSessionRow(
   // window (G1-Q2 = (b)).
   const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
-  // Token totals are summed over the turns, so their availability is the
-  // turns' availability too. A declaration on a non-turn span (a tool call,
-  // an app span) must not make the session's turn totals look measured.
-  const turnMeasurability = mergeMeasurability(turnRecords)
+  // Token totals are summed over the records that carry the counters, so
+  // their availability is those records' availability too. A declaration on
+  // a non-turn span (a tool call, an app span) must not make the session's
+  // turn totals look measured.
+  //
+  // A paired Factory session's counters live in the file source's row, so
+  // the totals and their availability are read from there. The plugin source
+  // reports no counter at all and declares every class absent, and that
+  // declaration must not blank the counters the file source measured.
+  const totalRecords = counterRecords.length > 0 ? counterRecords : turnRecords
+  const totalMeasurability = mergeMeasurability(totalRecords)
   const carriedBuckets = carriedBucketsOf(records, views)
   const context = analyzeContext(contextTurns, {
     contextLimit: analysisLimit,
@@ -1520,8 +1549,8 @@ export function buildSessionRow(
   })
 
   const definitions = toolDefinitionsOf(records, views)
-  const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
-  const toolRecords = records.filter((r) => r.op === 'tool.invoke')
+  const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(structureRecords), undefined, measurability)
+  const toolRecords = structureRecords.filter((r) => r.op === 'tool.invoke')
 
   const invocationCounts = new Map<string, number>()
   const errorCounts = new Map<string, number>()
@@ -1651,7 +1680,7 @@ export function buildSessionRow(
       : Object.keys(unavailableContextBuckets).length > 0
         ? unavailableContextBuckets
         : {},
-    reported_input: unavailableFor(turnMeasurability, 'token_usage') ?? reportedInput,
+    reported_input: unavailableFor(totalMeasurability, 'token_usage') ?? reportedInput,
   })
   const serialized = serializeContext(context)
   // Drop the analysis placeholder. A stored 200K limit, or a pressure figure
@@ -1675,21 +1704,34 @@ export function buildSessionRow(
   const contextShape = {
     ...publishedContext,
     contextLimitSource: window.contextLimitSource,
-    first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
+    first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? counterInput ?? 0),
     last: contextBucket(
       analyzedTurns[analyzedTurns.length - 1],
-      measuredTurns[measuredTurns.length - 1]?.tokens.reportedInput ?? 0,
+      measuredTurns[measuredTurns.length - 1]?.tokens.reportedInput ?? counterInput ?? 0,
     ),
     unmeasuredTurns,
   }
 
-  const timeline = buildTimeline([...records])
-  const cost = sumCosts(turnRecords.map((record) => record.cost))
+  const timeline = buildTimeline([...structureRecords])
+  // The session's cost covers the union of its turn records and its counter
+  // records: the two sets are disjoint, so nothing is counted twice.
+  //
+  // A paired Factory session's plugin turn reports no rate of its own, so its
+  // block carries no figure and no basis to blend with the file source's
+  // priced figure. A block that holds no figure contributes no basis, so the
+  // sum runs over the figures the sources actually reported. Every other
+  // session sums every block, so a disagreement between two bases is still
+  // refused there.
+  const costBlocks = [...turnRecords, ...counterRecords].map((record) => record.cost)
+  const pricedBlocks = costBlocks.filter(
+    (block) => typeof block.value === 'number' && Number.isFinite(block.value),
+  )
+  const cost = sumCosts(paired && pricedBlocks.length > 0 ? pricedBlocks : costBlocks)
   // The same refusal, as a verdict the payload carries: the panel renders this
   // text, so the browser never re-runs the sum itself (rule R1).
-  const costBasisMismatch = costBasisMismatchOf(turnRecords.map((record) => record.cost), cost)
+  const costBasisMismatch = costBasisMismatchOf(costBlocks, cost)
 
-  const totals = turnRecords.reduce(
+  const totals = totalRecords.reduce(
     (acc, record) => ({
       input: acc.input + measuredInput(record.tokens),
       output: acc.output + record.tokens.output,
@@ -1720,7 +1762,7 @@ export function buildSessionRow(
     if (!toolCallsLowerBound) {
       toolCalls = toolRecords.length
     }
-    toolsInvoked = Array.from(new Set(invocationsOf(records)))
+    toolsInvoked = Array.from(new Set(invocationsOf(structureRecords)))
   } else {
     const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'
     const toolCallsAvailability = measurability?.tool_calls ?? (isClaude ? 'measured' : undefined)
@@ -1772,15 +1814,15 @@ export function buildSessionRow(
   // `totals.cacheRead` is 0 either way. Reading the stored 0 behind only the
   // vocabulary check printed a 0% ratio / "on 0 turns" for a turn that
   // declared the counter unmeasurable.
-  const summaryTotalInput = unavailableFor(turnMeasurability, 'token_usage') ?? totals.input
+  const summaryTotalInput = unavailableFor(totalMeasurability, 'token_usage') ?? totals.input
   const summaryTotalOutput =
-    unavailableFor(turnMeasurability, 'output') ??
-    unavailableFor(turnMeasurability, 'output_tokens') ??
+    unavailableFor(totalMeasurability, 'output') ??
+    unavailableFor(totalMeasurability, 'output_tokens') ??
     totals.output
   const summaryTotalCacheRead =
-    unavailableFor(turnMeasurability, 'cache_read') ?? totals.cacheRead
+    unavailableFor(totalMeasurability, 'cache_read') ?? totals.cacheRead
   const summaryTotalCacheCreation =
-    unavailableFor(turnMeasurability, 'cache_creation') ?? totals.cacheCreation
+    unavailableFor(totalMeasurability, 'cache_creation') ?? totals.cacheCreation
   const cacheHitRatio =
     typeof summaryTotalInput === 'number' &&
     summaryTotalInput > 0 &&
@@ -1790,13 +1832,17 @@ export function buildSessionRow(
       : undefined
   // Review re-review (Kilo 2): the ratio beside this already requires input
   // > 0 — a measured zero input emits neither key.
+  //
+  // The coverage counts the records the counters were read from, so it can
+  // never say "on 0 turns" beside a measured cache-creation total: a paired
+  // Factory session's cache creation lives in the file source's row.
   const cacheCreationCoverage =
     typeof summaryTotalInput === 'number' &&
     summaryTotalInput > 0 &&
     typeof summaryTotalCacheCreation === 'number' &&
     turnRecords.length > 0 &&
     harnessExportsCacheCounter(harness, 'creation')
-      ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
+      ? totalRecords.filter((record) => record.tokens.cacheCreation > 0).length
       : undefined
 
   // The skills view (T2). The engine decides what is listed and invoked; this
@@ -1834,9 +1880,11 @@ export function buildSessionRow(
   })
   // The session's request roots, the turns each one owns, and whether the records nest at
   // all: a nested session's duration is its requests', not every span's (D3).
-  const requestRoots = records.filter((record) => record.parentSpanId === null)
-  const turnsByRequest = turnsByRequestRoot(records, turnRecords)
-  const isNested = requestRoots.length > 0 && hasNesting(records)
+  // The roots come from the session's structure: the file row is the counter
+  // source of a turn the plugin source reported, not a request of its own.
+  const requestRoots = structureRecords.filter((record) => record.parentSpanId === null)
+  const turnsByRequest = turnsByRequestRoot(structureRecords, turnRecords)
+  const isNested = requestRoots.length > 0 && hasNesting(structureRecords)
 
   const payload: AsadSessionPayload = {
     id: sessionId,
@@ -1858,7 +1906,10 @@ export function buildSessionRow(
       ...(cacheCreationCoverage !== undefined
         ? { cache_creation_coverage: cacheCreationCoverage }
         : {}),
-      duration_ms: (isNested ? requestRoots : records).reduce((sum, record) => sum + record.durationMs, 0),
+      duration_ms: (isNested ? requestRoots : structureRecords).reduce(
+        (sum, record) => sum + record.durationMs,
+        0,
+      ),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
       ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
