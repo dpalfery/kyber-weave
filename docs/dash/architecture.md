@@ -597,6 +597,24 @@ only through undocumented tolerance.
 The receipt is `~/.kyberdash/factory-plugin-receipt.json` — one digest per owned file, because
 the owned unit is a tree and not a single file, and the tree KyberDash owns is not the harness's
 cache copy. Removal requires every recorded digest to match, so an edited file is left in place.
+
+**The upgrade path.** A tree the receipt proves KyberDash wrote, whose bytes still match that
+receipt, and whose content is **not** the current bundle is an **upgrade** — the sixth kind
+beside `absent`, `unreadable`, `foreign`, `edited` and `same`. A tree whose bytes drifted stays
+`edited` (the owner's edit is the owner's), and a tree no receipt proves stays `foreign`,
+because matching an older bundle's bytes never establishes ownership. On an upgrade the
+Kyber-owned tree and its receipt are rewritten with the current bundle, and the harness's
+**cached copy** is then refreshed through the harness's own command, chosen from the harness's
+own registry rather than guessed: the plugin **installed** → `droid plugin update
+kyberdash-factory@kyberdash --scope user`; the plugin **not installed** and the marketplace
+**registered** → `droid plugin install kyberdash-factory@kyberdash --scope user`; and the
+plugin **installed** while the marketplace is **not** registered → the registration is restored
+**first**, because `droid plugin update` fails without it ("Marketplace \"kyberdash\" not
+found"). `droid plugin install` is **never** run against an installed plugin, because the harness
+refuses it ("already installed at user scope"). `unchanged` therefore means **both** a current
+tree and an installed harness copy, so a routine `kyber-weave update` or Squad call that finds
+everything current runs no harness command and mutates nothing.
+
 KyberDash never creates, reads, merges, rewrites or restores the owner's
 `~/.factory/settings.json`, `~/.factory/hooks.json` or the project equivalents; the harness's
 own commands change the settings file during an install KyberDash requested, and the restore

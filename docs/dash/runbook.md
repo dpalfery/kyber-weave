@@ -342,6 +342,24 @@ refuses a foreign or owner-edited owned tree with exit 1 and writes nothing at a
 kyberdash kyber capture plugin install --harness factory --preserve
 ```
 
+**The upgrade.** Re-running that verb after a KyberDash release **upgrades** the plugin rather
+than leaving it where it was. A tree KyberDash wrote, whose bytes still match its receipt, and
+whose content is not the current bundle is recognised as an upgrade: the published tree and its
+receipt are rewritten, and the harness's cached copy — the copy that actually runs — is refreshed
+with `droid plugin update kyberdash-factory@kyberdash --scope user`. The verdict line says
+`factory plugin: upgraded <dir>`.
+
+Two harness behaviours make the exact sequence what it is. `droid plugin install` is **refused**
+for a plugin that is already installed ("already installed at user scope"), so it is never run
+against one. And `droid plugin update` **fails without the marketplace registration** ("Marketplace
+\"kyberdash\" not found"), so when the harness holds the plugin but the marketplace is not
+registered, the registration is restored first and the update follows. A routine `kyber-weave
+update` or Squad deploy that finds everything current reports `factory plugin: unchanged <dir>`,
+runs no harness command and changes nothing.
+
+If the harness refuses a command, the verb reports the refusal with the harness's own stderr and
+never claims the capture is working.
+
 **If new Factory sessions do not show, restart Factory.** KyberDash cannot restart your Factory
 process for you.
 
