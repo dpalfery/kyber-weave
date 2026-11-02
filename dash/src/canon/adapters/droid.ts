@@ -28,6 +28,15 @@
 // `not_measurable` with a reason naming the harness and the metric. The token
 // identity keeps its zeros, and the declaration is what says they are not a
 // measurement — a zero must never read as "nothing was spent".
+//
+// The plugin path's reason also names WHERE the counter would come from: the
+// Factory session file's companion settings, supplied when this session's id
+// matches a file-sourced session. The adapter cannot know at that point
+// whether a file row will pair with this session — the pairing happens later,
+// in the projection, on exact session-id equality — so the reason names the
+// RULE, never the outcome, and never claims the counter was measured. The
+// native export has no companion settings of its own to pair with, so its
+// reasons stay clear of the file source.
 
 import type { HarnessAdapter, RawSpan } from './base.js'
 import { resolveRootByParentage, traceGroup } from './base.js'
@@ -217,27 +226,75 @@ function availability(measured: boolean, absentReason: string): MetricAvailabili
   return measured ? 'measured' : notMeasurable(absentReason)
 }
 
+/** The counter classes a record declares its token usage under. */
+type CounterClass = 'token_usage' | 'output' | 'cache_read' | 'cache_creation'
+
+/** The reason each counter class declares when it cannot be measured. */
+type CounterReasons = Readonly<Record<CounterClass, string>>
+
+/**
+ * The plugin path's reasons.
+ *
+ * The plugin's spans carry no token counters, so every class is absent — but
+ * the numbers exist elsewhere: the Factory session file's companion settings
+ * hold the session's token totals, and the projection pairs them with this
+ * session on exact session-id equality. The reason therefore states where the
+ * counter WOULD come from, never that it is there, so a reader can tell
+ * "never measured" from "not joined yet".
+ */
+const PLUGIN_COUNTER_REASONS: CounterReasons = {
+  token_usage:
+    "Droid telemetry did not report token usage for this span; the Factory session file's companion settings supply it when this session's id matches a file-sourced session.",
+  output:
+    "Droid telemetry did not report output token usage for this span; the Factory session file's companion settings supply it when this session's id matches a file-sourced session.",
+  cache_read:
+    "Droid did not export a cache read counter; the Factory session file's companion settings supply it when this session's id matches a file-sourced session.",
+  cache_creation:
+    "Droid did not export a cache creation counter; the Factory session file's companion settings supply it when this session's id matches a file-sourced session.",
+}
+
+/**
+ * The native export's reasons.
+ *
+ * A native Factory span has no companion settings file of its own to pair
+ * with, so its reasons name the harness and the metric alone. Naming the file
+ * source here would point at a pairing that can never happen.
+ */
+const NATIVE_COUNTER_REASONS: CounterReasons = {
+  token_usage: 'Droid telemetry did not report token usage for this span.',
+  output: 'Droid telemetry did not report output token usage for this span.',
+  cache_read: 'Droid did not export a cache read counter.',
+  cache_creation: 'Droid did not export a cache creation counter.',
+}
+
 /**
  * The token counters the span reported, and the declaration of each class.
  *
  * Neither claim path reports a counter today, so the common case is a record
  * whose token identity keeps its zeros and whose every class is declared
- * `not_measurable` with a reason naming the harness and the metric. A counter
- * that IS reported is measured, and only that class is.
+ * `not_measurable` with the reason the claim path gives. A counter that IS
+ * reported is measured, and only that class is.
+ *
+ * The reasons are the caller's, because the two claim paths say different
+ * things: only the plugin path's counters are supplied by the file source's
+ * companion settings, so only its reasons name that pairing.
  */
-function applyUsage(record: CanonicalRecord, attributes: Record<string, unknown>): void {
+function applyUsage(
+  record: CanonicalRecord,
+  attributes: Record<string, unknown>,
+  reasons: CounterReasons,
+): void {
   const input = readOptionalCounter(attributes, INPUT_TOKEN_KEYS)
   const output = readOptionalCounter(attributes, OUTPUT_TOKEN_KEYS)
   const cacheRead = readOptionalCounter(attributes, CACHE_READ_KEYS)
   const cacheCreation = readOptionalCounter(attributes, CACHE_CREATION_KEYS)
 
   if (input === undefined && output === undefined && cacheRead === undefined && cacheCreation === undefined) {
-    const reason = 'Droid telemetry did not report token usage for this span.'
     const declared: Measurability = {
-      token_usage: notMeasurable(reason),
-      output: notMeasurable('Droid telemetry did not report output token usage for this span.'),
-      cache_read: notMeasurable('Droid did not export a cache read counter.'),
-      cache_creation: notMeasurable('Droid did not export a cache creation counter.'),
+      token_usage: notMeasurable(reasons.token_usage),
+      output: notMeasurable(reasons.output),
+      cache_read: notMeasurable(reasons.cache_read),
+      cache_creation: notMeasurable(reasons.cache_creation),
     }
     record.measurability = { ...record.measurability, ...declared }
     return
@@ -252,10 +309,10 @@ function applyUsage(record: CanonicalRecord, attributes: Record<string, unknown>
   })
   record.measurability = {
     ...record.measurability,
-    token_usage: availability(input !== undefined, 'Droid telemetry did not report token usage for this span.'),
-    output: availability(output !== undefined, 'Droid telemetry did not report output token usage for this span.'),
-    cache_read: availability(cacheRead !== undefined, 'Droid did not export a cache read counter.'),
-    cache_creation: availability(cacheCreation !== undefined, 'Droid did not export a cache creation counter.'),
+    token_usage: availability(input !== undefined, reasons.token_usage),
+    output: availability(output !== undefined, reasons.output),
+    cache_read: availability(cacheRead !== undefined, reasons.cache_read),
+    cache_creation: availability(cacheCreation !== undefined, reasons.cache_creation),
   }
 }
 
@@ -357,9 +414,10 @@ export const droidAdapter: HarnessAdapter = {
 
   normalize(raw) {
     const record = baseRecord(this, raw)
-    if (isDroidPluginSpan(raw)) applyPluginEnvelope(record, raw)
+    const plugin = isDroidPluginSpan(raw)
+    if (plugin) applyPluginEnvelope(record, raw)
     else if (isDroidNativeSpan(raw)) applyNativeExport(record, raw)
-    applyUsage(record, raw.attributes)
+    applyUsage(record, raw.attributes, plugin ? PLUGIN_COUNTER_REASONS : NATIVE_COUNTER_REASONS)
     return record
   },
 
