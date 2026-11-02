@@ -25,6 +25,7 @@ import {
   decodeOtlpLogJson,
   decodeOtlpLogProtobuf,
   decodeOtlpJson,
+  decodeOtlpMetricsJson,
   decodeOtlpProtobuf,
   type OtlpLog,
   type OtlpSpan,
@@ -1262,5 +1263,134 @@ describe('OtlpReceiver metrics signal (the native OTLP path)', () => {
     expect(store.recordedLogs).toHaveLength(1)
     // The metrics sink saw nothing: a log request is not a metrics request.
     expect(store.recordedMetrics).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The metric decode seam — identity stripping
+// ---------------------------------------------------------------------------
+
+/**
+ * The identity keys a metric point may carry. A metric point is not a span,
+ * but its attributes come from the same exporter resource, so the account
+ * identity rides along in them.
+ */
+const METRIC_IDENTITY_KEYS = [
+  'user.email',
+  'user.id',
+  'organization.id',
+  'enduser.id',
+  'account.id',
+]
+
+/** The correlation and usage keys a metric point must keep. */
+const METRIC_RETAINED_ATTRIBUTES: Record<string, string> = {
+  'session.id': 'synth-session-1',
+  'conversation.id': 'synth-conversation-1',
+  'gen_ai.request.model': 'synth-model',
+}
+
+/** The metric shapes whose points carry their own attributes. */
+type MetricPointShape = 'sum' | 'histogram' | 'summary'
+
+/**
+ * An OTLP/JSON metrics body whose single data point carries identity
+ * attributes beside the correlation and usage attributes. The resource
+ * carries identity too, so the point's own attributes are the only place
+ * the leak can hide.
+ */
+function metricIdentityBody(shape: MetricPointShape): string {
+  const attributes = Object.entries({
+    ...Object.fromEntries(
+      METRIC_IDENTITY_KEYS.map((key) => [key, `synth-${key}`] as const),
+    ),
+    ...METRIC_RETAINED_ATTRIBUTES,
+  }).map(([key, value]) => ({ key, value: { stringValue: value } }))
+  const point = {
+    timeUnixNano: '1756478400123456789',
+    attributes,
+    // A sum point carries a value; a histogram or summary point carries a
+    // count and a sum instead.
+    ...(shape === 'sum' ? { asDouble: 4200 } : { count: '3', sum: 12.5 }),
+  }
+  return JSON.stringify({
+    resourceMetrics: [
+      {
+        resource: {
+          attributes: [
+            { key: 'service.name', value: { stringValue: 'droid' } },
+            { key: 'user.email', value: { stringValue: 'synth-resource-email' } },
+          ],
+        },
+        scopeMetrics: [
+          {
+            scope: { name: 'droid.telemetry', version: '1.0.0' },
+            metrics: [
+              {
+                name: 'droid.code.files_modified',
+                [shape]: { aggregationTemporality: 2, dataPoints: [point] },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
+
+/** The attribute keys a decoded metric point carries. */
+function metricPointAttributeKeys(attributes: Record<string, unknown> | undefined): string[] {
+  return Object.keys(attributes ?? {})
+}
+
+describe('the metric decode seam (identity stripping)', () => {
+  it('strips identity keys from a decoded metric point and retains session/conversation/gen_ai', () => {
+    const metrics = decodeOtlpMetricsJson(metricIdentityBody('sum'))
+    expect(metrics).toHaveLength(1)
+    const point = metrics[0]?.dataPoints[0]
+    expect(point, 'the metric must carry its data point').toBeDefined()
+
+    const keys = metricPointAttributeKeys(point?.attributes)
+    for (const key of METRIC_IDENTITY_KEYS) {
+      expect(keys, `metric point attribute ${key} must not survive the decode`).not.toContain(key)
+    }
+    for (const [key, value] of Object.entries(METRIC_RETAINED_ATTRIBUTES)) {
+      expect(point?.attributes?.[key], `metric point attribute ${key} must survive the decode`).toBe(
+        value,
+      )
+    }
+    // The metric's own resource attributes are stripped on the same seam.
+    expect(metricPointAttributeKeys(metrics[0]?.resource)).not.toContain('user.email')
+  })
+
+  it('strips identity keys from a histogram point that carries a count and a sum', () => {
+    const metrics = decodeOtlpMetricsJson(metricIdentityBody('histogram'))
+    expect(metrics).toHaveLength(1)
+    const point = metrics[0]?.dataPoints[0]
+    expect(point, 'the histogram must carry its data point').toBeDefined()
+    // The count and the sum still travel; only the identity goes.
+    expect(point?.count).toBe(3)
+    expect(point?.sum).toBe(12.5)
+
+    const keys = metricPointAttributeKeys(point?.attributes)
+    for (const key of METRIC_IDENTITY_KEYS) {
+      expect(keys, `histogram point attribute ${key} must not survive the decode`).not.toContain(key)
+    }
+    expect(point?.attributes?.['session.id']).toBe(METRIC_RETAINED_ATTRIBUTES['session.id'])
+  })
+
+  it('strips identity keys from a summary point', () => {
+    const metrics = decodeOtlpMetricsJson(metricIdentityBody('summary'))
+    expect(metrics).toHaveLength(1)
+    const point = metrics[0]?.dataPoints[0]
+    expect(point, 'the summary must carry its data point').toBeDefined()
+
+    const keys = metricPointAttributeKeys(point?.attributes)
+    for (const key of METRIC_IDENTITY_KEYS) {
+      expect(keys, `summary point attribute ${key} must not survive the decode`).not.toContain(key)
+    }
+    expect(point?.attributes?.['gen_ai.request.model']).toBe(
+      METRIC_RETAINED_ATTRIBUTES['gen_ai.request.model'],
+    )
   })
 })

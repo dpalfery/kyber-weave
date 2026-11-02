@@ -258,6 +258,43 @@ describe('the canon store as the native OTLP metrics destination', () => {
     }
   })
 
+  it('stores the point without the identity attributes the decode seam stripped', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const capable = metricsStore(store)
+      capable.upsertMetrics(
+        decode([
+          gauge([
+            {
+              value: 4200,
+              attributes: {
+                'session.id': 'session-a',
+                'user.email': 'owner@example.test',
+                'user.id': 'synth-user-id',
+                'organization.id': 'synth-organization-id',
+              },
+            },
+          ]),
+        ]),
+      )
+
+      const rows = capable.getMetricPoints()
+      expect(rows).toHaveLength(1)
+      // The row keeps the correlation attributes and loses the identity
+      // ones: the receiver strips identity before anything is stored, so
+      // what never reaches a decoded point cannot reach the stored row.
+      const keys = Object.keys(rows[0]?.attributes ?? {})
+      for (const key of ['user.email', 'user.id', 'organization.id']) {
+        expect(keys, `stored metric point attribute ${key} must not survive the decode`).not.toContain(
+          key,
+        )
+      }
+      expect(rows[0]?.attributes?.['session.id']).toBe('session-a')
+    } finally {
+      store.close()
+    }
+  })
+
   it('keeps a value the point did not carry absent rather than zero', () => {
     const store = new CanonStore(':memory:')
     try {
