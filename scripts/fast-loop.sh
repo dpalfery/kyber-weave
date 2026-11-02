@@ -39,6 +39,14 @@
 # every ancestor directory (cost scales with how crowded $TMPDIR is) and per-file fsync.
 # Tests now skip fsync (SquadTestDurability) and the lookup is cheaper, which took the
 # full suite from ~14 minutes to ~89s. Keep $TMPDIR clean; a crowded one slows these again.
+#
+# FULL RUNS TAKE TURNS ON A SHARED MACHINE
+#
+# One full run saturates every core, and several agent harnesses can start one at the same
+# time. Full runs therefore take the machine-wide `dotnet-test` slot (`proc-guard.sh run --slot`):
+# a second one queues, names the holder, and runs when the first ends. `--full` gets it from the
+# declared `test` gate; `--regenerate` passes the slot itself. The fast tier and `--class` /
+# `--method` runs are partial, so they never queue, and neither do the build and format steps.
 
 set -euo pipefail
 
@@ -86,7 +94,8 @@ if [[ "${1:-}" == "--regenerate" ]]; then
   if [[ -z "${timings}" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings="$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")"
-    scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
+    # Waits as long as the declared `test` gate does (--slot-wait 900): same slot, same bound.
+    scripts/proc-guard.sh run --slot dotnet-test --slot-wait 900 -- dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
   fi
   python3 - "${timings}" "${CLASS_LIST}" <<'PY'
 import sys, xml.etree.ElementTree as ET

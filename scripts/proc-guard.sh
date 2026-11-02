@@ -7,13 +7,18 @@
 # anything it started is still alive.
 #
 # Usage:
-#   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty] -- <cmd...>
+#   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]
+#                             [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]
+#                             -- <cmd...>
 #   scripts/proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]
 #
 # Exit codes:
 #   86   a cap tripped (stderr names max-tree or max-node); the whole tree was killed
 #   87   processes survived the command (run: only when the command itself succeeded)
+#   88   --slot-wait elapsed while every slot stayed held; the command never started
 #   124  --timeout elapsed; the whole tree was killed (same code as timeout(1))
+#   143  the guard itself got SIGINT or SIGTERM, queued or running; a running tree was killed first.
+#        A wrapped command that died of SIGTERM also exits 143, which is its own exit code.
 #   2    usage error, or fail-closed: bad root, unreadable clock or process table
 #   else the wrapped command's own exit code
 #
@@ -27,6 +32,29 @@
 # watchdog fires, so by default stdin is redirected from /dev/null in that case (guarded
 # commands are non-interactive test and gate runs). --tty keeps the terminal as stdin instead;
 # a command that then reads the terminal is stopped by SIGTTIN and ends only by --timeout.
+#
+# Test slot: several agent harnesses share one machine, and a full test run saturates its cores,
+# so overlapping full runs slow each other down and flake the load-sensitive classes. A run that
+# passes --slot NAME takes one of --slot-count N (default 1) machine-wide slots first, and a
+# busy caller queues. It is opt-in: only the full test suite passes it, and builds and format
+# checks go through the same guard without a slot.
+#   --slot NAME        slot name, a single path component (letters, digits, . _ -)
+#   --slot-count N     how many runs may hold NAME at once (default 1; one run uses every core)
+#   --slot-wait S      give up with exit 88 after S seconds queued (default 540, 0 = do not queue,
+#                      at most 86400; no leading zero)
+#   --task LABEL       what to show other callers while this run holds the slot (default: the
+#                      checkout's directory name and the command; cut to 100 characters)
+#   --slot-dir DIR     absolute directory for the locks instead of the default below. For the
+#                      guard's own tests: callers with different directories do not queue behind
+#                      each other, so this is a flag, never an environment variable.
+# The slot is machine-wide for one user account (the default directory is under $HOME), not
+# across accounts. A slot is the lock directory ~/.cache/kyber-weave/test-slots/NAME.<n>.lock,
+# taken with an atomic mkdir because macOS has no flock. Its holder file records this guard's pid, process
+# start time, task and start. A queued caller prints who holds the slot and polls every half
+# second; it is not first-in-first-out, the first caller to retry after a release wins. A lock is
+# stale, and is recovered, when its holder pid is gone, when that pid now belongs to a process
+# with a different start time, or when the lock directory has had no holder file for 30 seconds.
+# The time spent queued does not count against --timeout, which starts with the command.
 #
 # Test hook: KW_PROC_GUARD_PS names an executable that prints the process table
 # (rows: "<pid> <ppid> <user> <comm> <args...>") instead of the real ps.
@@ -44,9 +72,18 @@ set -uo pipefail
 
 readonly EXIT_CAP=86
 readonly EXIT_LEFTOVERS=87
+readonly EXIT_SLOT_WAIT=88
 readonly EXIT_TIMEOUT=124
 readonly POLL_INTERVAL=0.5
 readonly KILL_GRACE=1
+readonly SLOT_POLL_INTERVAL=0.5
+readonly SLOT_DEFAULT_WAIT=540
+readonly SLOT_MAX_COUNT=64
+readonly SLOT_MAX_WAIT=86400
+# A lock directory may lack its holder file this long (mkdir and the holder write are two steps);
+# an abandoned break mutex is cleared after the same time.
+readonly SLOT_ORPHAN_GRACE=30
+readonly SLOT_REPORT_EVERY=30
 
 # Owner comparison: the real table prints the numeric uid (ps truncates long user names on some
 # systems); a fixture table (KW_PROC_GUARD_PS) prints the account name.
@@ -58,7 +95,9 @@ fi
 self_pid=$$
 
 usage() {
-  printf 'usage: proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] -- <cmd...>\n' >&2
+  printf 'usage: proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]\n' >&2
+  printf '                         [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]\n' >&2
+  printf '                         -- <cmd...>\n' >&2
   printf '       proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]\n' >&2
 }
 
@@ -358,14 +397,231 @@ check_leftovers() {
   return 0
 }
 
+# The lock directory this guard holds, or empty. A global because the EXIT trap reads it.
+slot_lock=""
+
+# Where the lock directories live: --slot-dir ($1) when given, else under the home directory.
+# Empty when there is neither.
+slot_base() {
+  if [[ -n "${1:-}" ]]; then
+    printf '%s\n' "$1"
+  elif [[ -n "${HOME:-}" ]]; then
+    printf '%s\n' "${HOME}/.cache/kyber-weave/test-slots"
+  fi
+}
+
+# One field of a lock's holder file ("key=value" lines); empty when the file or the field is missing.
+holder_field() {
+  awk -F= -v k="$2" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$1/holder" 2>/dev/null
+}
+
+# A process's start time as ps prints it, whitespace squeezed; empty when ps cannot answer. With
+# the pid it identifies a process even after the pid is reused. The C locale is pinned because
+# ps localises this column and callers run under different locales: a holder recorded under one
+# would otherwise look like a reused pid to a caller under another.
+process_start() {
+  LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+
+# Succeeds only when pid $1 is positively gone. An empty answer from ps is also what a ps that
+# failed under load prints, so "gone" is believed only when kill -0 cannot reach the pid, ps does
+# not list it, and ps can still find this very process. Anything less leaves the lock alone: a
+# wrongly recovered lock starts a second full run beside the holder's.
+pid_is_gone() {
+  local pid="$1"
+  kill -0 "${pid}" 2>/dev/null && return 1
+  [[ -z "$(ps -o pid= -p "${pid}" 2>/dev/null)" ]] || return 1
+  [[ -n "$(ps -o pid= -p "${self_pid}" 2>/dev/null)" ]]
+}
+
+# Modification time of a path in epoch seconds; empty when unreadable.
+mtime_of() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    stat -f %m "$1" 2>/dev/null
+  else
+    stat -c %Y "$1" 2>/dev/null
+  fi
+}
+
+# Succeeds when lock directory $1 can no longer have a live holder.
+slot_is_stale() {
+  local lock="$1" holder_pid recorded current modified now
+  [[ -d "${lock}" ]] || return 1
+  holder_pid="$(holder_field "${lock}" pid)"
+  if [[ ! "${holder_pid}" =~ ^[0-9]+$ ]]; then
+    # No readable holder file: its creator may be between the mkdir and the write, so only age tells.
+    modified="$(mtime_of "${lock}")"
+    [[ "${modified}" =~ ^[0-9]+$ ]] || return 1
+    now="$(real_now)" || return 1
+    ((now - modified > SLOT_ORPHAN_GRACE))
+    return
+  fi
+  if pid_is_gone "${holder_pid}"; then
+    return 0
+  fi
+  recorded="$(holder_field "${lock}" started)"
+  if [[ -n "${recorded}" ]]; then
+    current="$(process_start "${holder_pid}")"
+    [[ -n "${current}" && "${current}" != "${recorded}" ]] && return 0
+  fi
+  return 1
+}
+
+# Remove lock directory $1 when it is stale; succeeds only when this call removed it. Callers
+# that find the same lock stale are serialised by a break mutex (a directory made with mkdir):
+# without it the second would remove the lock the first had taken right after clearing it. The
+# verdict is read again under the mutex.
+recover_stale_slot() {
+  local lock="$1" breaker="${1%.lock}.break" who modified now removed=1
+  if ! mkdir "${breaker}" 2>/dev/null; then
+    # Another caller is judging this lock. A breaker that died leaves its mutex behind.
+    modified="$(mtime_of "${breaker}")"
+    if [[ "${modified}" =~ ^[0-9]+$ ]] && now="$(real_now)" && ((now - modified > SLOT_ORPHAN_GRACE)); then
+      rmdir "${breaker}" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  if slot_is_stale "${lock}"; then
+    who="$(holder_field "${lock}" pid)"
+    if [[ -n "${who}" ]]; then
+      who="holder pid ${who} is gone or was reused"
+    else
+      who="no holder was ever recorded"
+    fi
+    if rm -rf -- "${lock}"; then
+      removed=0
+      printf 'proc-guard: recovered stale slot lock %s (%s)\n' "${lock##*/}" "${who}" >&2
+    fi
+  fi
+  rmdir "${breaker}" 2>/dev/null || true
+  return "${removed}"
+}
+
+# Release the slot this guard holds. Called from the EXIT trap, so every way out of run releases
+# it; a SIGKILL cannot, and the next caller recovers that lock as stale.
+release_slot() {
+  local lock="${slot_lock:-}"
+  [[ -n "${lock}" ]] || return 0
+  slot_lock=""
+  # A lock another caller recovered and retook while this guard was alive is theirs, not ours.
+  if [[ ! -f "${lock}/holder" || "$(holder_field "${lock}" pid)" == "${self_pid}" ]]; then
+    rm -rf -- "${lock}"
+  fi
+}
+
+# Try to take lock directory $1 for this guard: 0 taken, 1 held by someone else, 2 the holder
+# file could not be written (the lock is not kept).
+take_slot() {
+  local lock="$1" task="$2" cmd="$3" since started tmp
+  mkdir "${lock}" 2>/dev/null || return 1
+  # Recorded before the holder file exists, so an interrupt in between still releases the lock.
+  slot_lock="${lock}"
+  if ! since="$(real_now)"; then
+    release_slot
+    return 2
+  fi
+  started="$(process_start "${self_pid}")"
+  if [[ -z "${started}" ]]; then
+    # Without a start time, a later caller could never tell this holder's reused pid from the holder.
+    printf 'proc-guard: cannot read this process'"'"'s start time (ps failed); refusing to hold a slot that pid reuse could wedge\n' >&2
+    release_slot
+    return 2
+  fi
+  tmp="${lock}/holder.tmp"
+  # Written aside and renamed, so a reader never sees half a holder file.
+  if ! { printf 'pid=%s\nstarted=%s\nsince=%s\ntask=%s\nroot=%s\ncmd=%s\n' \
+           "${self_pid}" "${started}" "${since}" "${task}" "${KW_PROC_GUARD_ROOT}" "${cmd}" >"${tmp}" \
+         && mv -f "${tmp}" "${lock}/holder"; } 2>/dev/null; then
+    printf 'proc-guard: cannot write the slot holder file under %s\n' "${lock}" >&2
+    release_slot
+    return 2
+  fi
+  return 0
+}
+
+# "pid N (task: T, for Ns)" for the holder recorded in lock directory $1.
+describe_holder() {
+  local lock="$1" holder_pid task since now age=""
+  holder_pid="$(holder_field "${lock}" pid)"
+  task="$(holder_field "${lock}" task)"
+  since="$(holder_field "${lock}" since)"
+  if [[ "${since}" =~ ^[0-9]{1,12}$ ]] && now="$(real_now 2>/dev/null)" && ((now >= 10#${since})); then
+    age=", for $((now - 10#${since}))s"
+  fi
+  printf 'pid %s (task: %s%s)' "${holder_pid:-unknown}" "${task:-unknown}" "${age}"
+}
+
+# Every current holder of slot $2 (of $3) under $1, "; " separated.
+describe_holders() {
+  local base="$1" name="$2" count="$3" i lock out=""
+  for ((i = 1; i <= count; i++)); do
+    lock="${base}/${name}.${i}.lock"
+    [[ -d "${lock}" ]] || continue
+    out+="${out:+; }$(describe_holder "${lock}")"
+  done
+  printf '%s' "${out:-no holder recorded}"
+}
+
+# Take one of $3 slots named $2 under $1, queueing for up to $4 seconds. Returns 0 holding a slot
+# (slot_lock is set), EXIT_SLOT_WAIT when the wait ran out, 2 when it failed closed.
+acquire_slot() {
+  local base="$1" name="$2" count="$3" wait_s="$4" task="$5" cmd="$6"
+  local i lock rc started now waited last_report=-1 queued=0
+  if ! mkdir -p "${base}" 2>/dev/null; then
+    printf 'proc-guard: cannot create the slot directory %s\n' "${base}" >&2
+    return 2
+  fi
+  started="$(real_now)" || return 2
+  # Nothing runs yet, so an interrupt only has to leave; the EXIT trap releases a lock taken meanwhile.
+  trap 'exit 143' INT TERM
+  while :; do
+    for ((i = 1; i <= count; i++)); do
+      lock="${base}/${name}.${i}.lock"
+      take_slot "${lock}" "${task}" "${cmd}"
+      rc=$?
+      if ((rc == 1)) && recover_stale_slot "${lock}"; then
+        take_slot "${lock}" "${task}" "${cmd}"
+        rc=$?
+      fi
+      if ((rc == 0)); then
+        if ((queued == 1)); then
+          printf "proc-guard: slot '%s' acquired after %ss queued\n" "${name}" "$(($(real_now) - started))" >&2
+        fi
+        return 0
+      fi
+      ((rc == 2)) && return 2
+    done
+    now="$(real_now)" || return 2
+    waited=$((now - started))
+    if ((waited >= wait_s)); then
+      printf "proc-guard: --slot-wait %ss elapsed; slot '%s' is still held by %s; the command did not run\n" \
+        "${wait_s}" "${name}" "$(describe_holders "${base}" "${name}" "${count}")" >&2
+      return "${EXIT_SLOT_WAIT}"
+    fi
+    if ((last_report < 0 || now - last_report >= SLOT_REPORT_EVERY)); then
+      printf "proc-guard: slot '%s' is busy, held by %s; waiting up to %ss\n" \
+        "${name}" "$(describe_holders "${base}" "${name}" "${count}")" "${wait_s}" >&2
+      last_report="${now}"
+      queued=1
+    fi
+    sleep "${SLOT_POLL_INTERVAL}"
+  done
+}
+
 run_guarded() {
   local max_node=128 max_tree=64 timeout_s=0 keep_tty=0
+  local slot="" slot_given=0 slot_count=1 slot_wait="${SLOT_DEFAULT_WAIT}" task_label="" slot_dir="" extras_given=0
   while (($#)); do
     case "$1" in
       --max-node) max_node="${2:-}"; shift 2 ;;
       --max-tree) max_tree="${2:-}"; shift 2 ;;
       --timeout) timeout_s="${2:-}"; shift 2 ;;
       --tty) keep_tty=1; shift ;;
+      --slot) (($# >= 2)) || { usage; return 2; }; slot="$2"; slot_given=1; shift 2 ;;
+      --slot-count) (($# >= 2)) || { usage; return 2; }; slot_count="$2"; extras_given=1; shift 2 ;;
+      --slot-wait) (($# >= 2)) || { usage; return 2; }; slot_wait="$2"; extras_given=1; shift 2 ;;
+      --task) (($# >= 2)) || { usage; return 2; }; task_label="$2"; extras_given=1; shift 2 ;;
+      --slot-dir) (($# >= 2)) || { usage; return 2; }; slot_dir="$2"; extras_given=1; shift 2 ;;
       --) shift; break ;;
       *) usage; return 2 ;;
     esac
@@ -377,6 +633,32 @@ run_guarded() {
       return 2
     fi
   done
+  if ((slot_given == 0 && extras_given == 1)); then
+    printf 'proc-guard: --slot-count, --slot-wait, --task and --slot-dir need --slot\n' >&2
+    return 2
+  fi
+  if ((slot_given == 1)); then
+    # The name becomes a file name under the slot directory, so it cannot carry a path.
+    if [[ ! "${slot}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+      printf 'proc-guard: --slot must be a name of letters, digits, . _ and - (it becomes a file name)\n' >&2
+      return 2
+    fi
+    if [[ ! "${slot_count}" =~ ^[1-9][0-9]{0,2}$ ]] || ((slot_count > SLOT_MAX_COUNT)); then
+      printf 'proc-guard: --slot-count must be an integer from 1 to %s\n' "${SLOT_MAX_COUNT}" >&2
+      return 2
+    fi
+    # An absolute path other than /: a relative one would be a different place for each caller's
+    # working directory, which is the opposite of one shared queue.
+    if [[ -n "${slot_dir}" && ( "${slot_dir}" != /* || "${slot_dir}" =~ ^/+$ || -z "${slot_dir%%/}" ) ]]; then
+      printf 'proc-guard: --slot-dir must be an absolute directory other than /\n' >&2
+      return 2
+    fi
+    # No leading zero: bash would read 08 as a bad octal number and the wait would never expire.
+    if [[ ! "${slot_wait}" =~ ^(0|[1-9][0-9]{0,5})$ ]] || ((slot_wait > SLOT_MAX_WAIT)); then
+      printf 'proc-guard: --slot-wait must be an integer from 0 to %s seconds\n' "${SLOT_MAX_WAIT}" >&2
+      return 2
+    fi
+  fi
   if (($# == 0)); then
     usage
     return 2
@@ -386,12 +668,34 @@ run_guarded() {
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || root=""
   validate_root "${root}" || return 2
   export KW_PROC_GUARD_ROOT="${root}"
-  started_at="$(real_now)" || return 2
   # With the real process table, an empty read means ps failed: every cap would silently pass.
   if [[ -z "${KW_PROC_GUARD_PS:-}" && -z "$(table)" ]]; then
     printf 'proc-guard: cannot read the process table (ps failed); refusing to run unguarded\n' >&2
     return 2
   fi
+
+  if ((slot_given == 1)); then
+    local base cmd_line slot_rc
+    base="$(slot_base "${slot_dir}")"
+    if [[ -z "${base}" ]]; then
+      printf 'proc-guard: cannot place the slot directory: HOME is not set and no --slot-dir was given\n' >&2
+      return 2
+    fi
+    cmd_line="$*"
+    cmd_line="${cmd_line//[$'\n\r']/ }"
+    task_label="${task_label//[$'\n\r']/ }"
+    # Every queued caller prints the holder's task, so the label is cut like the command is.
+    task_label="${task_label:0:100}"
+    trap release_slot EXIT
+    acquire_slot "${base}" "${slot}" "${slot_count}" "${slot_wait}" \
+      "${task_label:-${root##*/}: ${cmd_line:0:100}}" "${cmd_line:0:300}"
+    slot_rc=$?
+    if ((slot_rc != 0)); then
+      return "${slot_rc}"
+    fi
+  fi
+  # Started only now: time spent queued for a slot must not count against --timeout.
+  started_at="$(real_now)" || return 2
 
   # Own process group (job control), and the command learns its own pid before it execs.
   set -m
