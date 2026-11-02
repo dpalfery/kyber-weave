@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using Spectre.Console;
@@ -29,6 +32,29 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     ///     fetch is stopped and the skill reported as not deployed.
     /// </summary>
     private static readonly TimeSpan ApmInstallTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Whether this run may ask the operator a question, defaulting to the terminal's own answer.
+    /// </summary>
+    /// <remarks>
+    /// A seam rather than a parameter because the question it gates has to be unreachable in a test
+    /// that does not want it asked, and a redirected stream cannot answer one. The default asks three
+    /// things of the ambient console because a prompt needs all three: a stdin to read the answer
+    /// from, a stdout that may receive interactive markup, and a console Spectre has not been told is
+    /// non-interactive — which is how a capturing or piped console identifies itself, and attempting
+    /// a prompt there throws rather than asking.
+    /// </remarks>
+    internal static Func<bool>? InteractiveCheckOverride { get; set; }
+
+    /// <summary>
+    /// Decides whether to perform the offered repair, defaulting to an
+    /// <see cref="AnsiConsole"/> confirmation naming every file and server.
+    /// </summary>
+    /// <remarks>
+    /// The answer is the consent, so it is taken through a seam the tests can answer with a fixed
+    /// value: a case that exercised the real prompt would block on a terminal it does not have.
+    /// </remarks>
+    internal static Func<IReadOnlyList<McpWiringFix>, bool>? ConfirmFixOverride { get; set; }
 
     /// <summary>
     ///     The bound for a provisioning run's CodeGraph child. It matches the doctor verb's default, so
@@ -82,6 +108,16 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         }
 
         ReportRetiredSkills(settings);
+
+        // The wiring check sits after the scaffold, the skill deploy and the retired-skill warnings,
+        // and before the Next: block, because it is only meaningful once the declaration exists: a
+        // fresh repository has just been handed its `mcp:` section, and that section is what the
+        // check reads. Failing a scaffold therefore never reaches the question (R4.7).
+        int wiringExitCode = ReportMcpWiring(settings);
+        if (wiringExitCode != 0)
+        {
+            return wiringExitCode;
+        }
 
         AnsiConsole.MarkupLine("[bold]Next:[/]");
         AnsiConsole.MarkupLine($"  1. Replace the example row in [grey]{Markup.Escape(result.DocsRoot)}/catalog.md[/] with your real components and owners.");
@@ -176,7 +212,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private static void PrintReviewGates(ReviewGatesOutcome review)
     {
-        WriteUnfolded(() => PrintReviewGatesUnfolded(review));
+        CommandHelpers.WriteUnfolded(() => PrintReviewGatesUnfolded(review));
     }
 
     private static void PrintReviewGatesUnfolded(ReviewGatesOutcome review)
@@ -326,7 +362,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                     continue;
                 }
 
-                WriteUnfolded(() =>
+                CommandHelpers.WriteUnfolded(() =>
                 {
                     AnsiConsole.MarkupLine(
                         $"  [yellow]warn[/] Retired skill '{Markup.Escape(name)}' still present at [bold]{Markup.Escape(staleDir)}[/]. " +
@@ -340,25 +376,302 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// Checks whether each declared MCP server reaches the harnesses this repository is in play for,
+    /// prints the report, and offers the repair when a terminal can be asked.
+    /// </summary>
+    /// <returns>
+    /// Zero whenever the scaffold succeeded, whatever the report found: an unwired harness is the
+    /// normal state of a fresh adoption, not a failure of the command that scaffolded the corpus
+    /// (R3.4). One only when the declaration itself cannot be loaded, which is the existing
+    /// <c>KW-CONFIG-001</c> path rather than a wiring finding (R3.6).
+    /// </returns>
+    /// <remarks>
+    /// The declaration is loaded from disk after the scaffold rather than taken from it, so the run
+    /// that just wrote a repository's <c>mcp:</c> section checks that section instead of the empty
+    /// one the repository had a moment earlier.
+    /// </remarks>
+    private static int ReportMcpWiring(DocsInitSettings settings)
+    {
+        if (settings.NoMcpCheck)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("MCP wiring not checked (--no-mcp-check).");
+            return 0;
+        }
+
+        string root = Path.GetFullPath(settings.Path);
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+
+        if (!loaded.Success)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(KyberWeaveConfigLoader.ConfigLoadErrorCode)}[/]: "
+                + Markup.Escape(loaded.Error ?? "kyber-weave.yml could not be read."));
+            return 1;
+        }
+
+        // A repository that declares no servers has nothing to check, and printing one
+        // not-detectable line per harness for it would be pure noise (R1.4). The section is read as
+        // one condition across the whole chain, because "declares no servers" is the same case
+        // whether the section is empty, absent, or missing from the configuration object the loader
+        // returned — and R3.4 keeps every one of them at exit zero, never at the one dereference
+        // this command would otherwise throw after the corpus was already scaffolded.
+        if (loaded.Config is not { Mcp.RequiredServers.Count: > 0 } config)
+            return 0;
+
+        McpConfig mcp = config.Mcp;
+        McpWiringReport report = McpWiringInspector.Inspect(root, mcp);
+
+        AnsiConsole.WriteLine();
+        PrintWiringSection(report, mcp);
+        AnsiConsole.WriteLine();
+
+        IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, root);
+        if (fixes.Count > 0 && CanPrompt())
+            OfferRepair(root, mcp, fixes);
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Prints the section unfolded: one <c>ok</c> line per harness whose declared servers are all
+    /// wired and launchable, and a finding line carrying its rule id for every gap, with the remedy
+    /// on its own line beneath.
     /// </summary>
     /// <remarks>
-    /// A redirected console folds at 80 columns, splitting a long path across lines and
-    /// corrupting the copy-pastable cleanup command the warning exists for. The same
-    /// unfolded-write pattern lives in <c>SquadCommandComposition</c> for the same reason;
-    /// it is repeated here so the Docs branch does not depend on the Squad branch.
+    /// Unfolded for the reason <see cref="ReportRetiredSkills"/> is: a redirected console folds at 80
+    /// columns, and a finding whose rule id, server name and path are split across lines is neither
+    /// readable nor copy-pasteable.
     /// </remarks>
-    private static void WriteUnfolded(Action write)
+    private static void PrintWiringSection(McpWiringReport report, McpConfig config)
     {
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
-        try
+        RequiredMcpServer[] declared =
+        [
+            .. config.RequiredServers.Values.OrderBy(server => server.Name, StringComparer.Ordinal)
+        ];
+
+        CommandHelpers.WriteUnfolded(() =>
         {
-            write();
-        }
-        finally
-        {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : 80;
-        }
+            AnsiConsole.MarkupLine("[bold]MCP wiring:[/]");
+
+            foreach (HarnessMcpEntry row in HarnessMcpCatalog.Rows)
+            {
+                McpWiringFinding? undetectable = report.Findings.FirstOrDefault(
+                    finding => string.Equals(finding.Harness, row.Harness, StringComparison.Ordinal)
+                        && finding.Kind == McpWiringKind.NotDetectable);
+
+                if (undetectable is not null)
+                {
+                    PrintFinding(undetectable);
+                    continue;
+                }
+
+                // A harness with no finding and no not-detectable line is in play and fully wired:
+                // that is what the absence of both means, so the section can confirm it rather than
+                // only ever complaining (R3.5).
+                List<McpWiringFinding> gaps =
+                [
+                    .. declared
+                        .Select(server => report.Findings.FirstOrDefault(
+                            finding => string.Equals(finding.Harness, row.Harness, StringComparison.Ordinal)
+                                && string.Equals(finding.Server, server.Name, StringComparison.Ordinal)
+                                && finding.Kind != McpWiringKind.NotDetectable))
+                        .OfType<McpWiringFinding>()
+                ];
+
+                if (gaps.Count == 0 && declared.Length > 0)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"  [green]ok[/]    {Markup.Escape(row.Harness)}: "
+                        + $"{Markup.Escape(TerminalText.Line(string.Join(", ", declared.Select(server => server.Name))))} wired");
+                    continue;
+                }
+
+                foreach (McpWiringFinding gap in gaps)
+                    PrintFinding(gap);
+            }
+        });
     }
+
+    /// <summary>Prints one finding with its rule id, then its remedy on the line beneath.</summary>
+    /// <remarks>
+    /// The message names the declared server and the hint quotes the declared and the wired command,
+    /// so both are text somebody else wrote — <c>kyber-weave.yml</c> or a harness's own configuration
+    /// — and both go through <see cref="TerminalText"/> before the terminal sees them.
+    /// </remarks>
+    private static void PrintFinding(McpWiringFinding finding)
+    {
+        string level = finding.Severity switch
+        {
+            Severity.Error or Severity.Critical => "[red]error[/]",
+            Severity.Warning => "[yellow]warn[/] ",
+            _ => "[grey]info[/] "
+        };
+
+        AnsiConsole.MarkupLine(
+            $"  {level} {Markup.Escape(finding.Code)} {Markup.Escape(finding.Harness)}: "
+            + Markup.Escape(TerminalText.Line(finding.Message)));
+
+        // A not-detectable line's hint is a paragraph of advice about a harness nobody claimed to
+        // use; every other finding's hint is the command that closes it, and that is printed
+        // verbatim so it can be copied. The Copilot coding agent is the exception the rule has to
+        // make room for: its hint *is* its report, because there is no file in the tree to read or
+        // write (2.5), and suppressing it left the operator told to configure a harness with no
+        // statement of how. The exception is decided by the catalog's shape — repository settings,
+        // not a file — rather than by the harness's name.
+        if (AdviceBelongsToOperator(finding) && !string.IsNullOrWhiteSpace(finding.Hint))
+            AnsiConsole.MarkupLine($"        [grey]{Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
+    }
+
+    /// <summary>
+    /// Whether a finding's hint is the operator's to act on, rather than advice about a harness this
+    /// repository may not use at all (2.4).
+    /// </summary>
+    private static bool AdviceBelongsToOperator(McpWiringFinding finding) =>
+        finding.Kind != McpWiringKind.NotDetectable
+        || (!string.IsNullOrWhiteSpace(finding.Harness)
+            && HarnessMcpCatalog.Find(finding.Harness)?.Shape == McpConfigurationShape.RepositorySettings);
+
+    /// <summary>Whether this run may ask the operator, honouring the seam when a test set it.</summary>
+    private static bool CanPrompt() =>
+        InteractiveCheckOverride?.Invoke()
+            ?? (!Console.IsInputRedirected
+                && !Console.IsOutputRedirected
+                && AnsiConsole.Profile.Capabilities.Interactive);
+
+    /// <summary>
+    /// Asks whether to perform the repair, and performs it through the same bounded write path as the
+    /// dedicated repair command when the answer is yes (R4.1–R4.3).
+    /// </summary>
+    /// <remarks>
+    /// Declining is not declining the diagnosis: the findings and their manual command were printed
+    /// before the question and stand as the operator's route to the same repair. Nothing is written
+    /// on a decline, and nothing is written when the prompt could not be shown at all — the
+    /// <see cref="CanPrompt"/> gate is the caller's, so a redirected run never reaches this method.
+    /// </remarks>
+    private static void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    {
+        Func<IReadOnlyList<McpWiringFix>, bool> confirm = ConfirmFixOverride ?? ConfirmRepair;
+
+        if (!confirm(fixes))
+            return;
+
+        WriteRepair(root, config, fixes);
+    }
+
+    /// <summary>
+    /// The real confirmation: the write scope printed in full, then the question about it.
+    /// </summary>
+    /// <remarks>
+    /// It defaults to no. The repair writes files a harness will load and a receipt into version
+    /// control, and a bare Enter is not a considered yes for that.
+    /// </remarks>
+    private static bool ConfirmRepair(IReadOnlyList<McpWiringFix> fixes)
+    {
+        PrintRepairScope(fixes);
+
+        return AnsiConsole.Confirm(
+            $"Wire the declared MCP servers into those {fixes.Count} files now?",
+            defaultValue: false);
+    }
+
+    /// <summary>
+    /// Prints the write scope the question covers: one line per file, naming the harness it belongs
+    /// to and every server the repair would add to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The scope is printed rather than folded into the question because the scope <em>is</em> the
+    /// consent, and the two render differently. A finding is one message with a capped line, where a
+    /// truncated value is a better outcome than an unreadable one. A consent is the opposite: an
+    /// operator confirming a write they cannot fully see has not consented to it, so the list of
+    /// files and servers may not be cut — and a repository using four or five harnesses exceeds what
+    /// one capped line holds.
+    /// </para>
+    /// <para>
+    /// A file to a line, printed unfolded, rather than one long sentence: the terminal is what wraps
+    /// the list, so every file and every server survives however narrow the console is. Each value
+    /// still goes through <see cref="TerminalText.Line"/> — a harness name and a path are somebody
+    /// else's text — but per value, so the cap bounds one name and never the whole scope.
+    /// </para>
+    /// </remarks>
+    internal static void PrintRepairScope(IReadOnlyList<McpWiringFix> fixes)
+    {
+        ArgumentNullException.ThrowIfNull(fixes);
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            AnsiConsole.MarkupLine("This writes:");
+
+            foreach (McpWiringFix fix in fixes)
+            {
+                string path = Markup.Escape(TerminalText.Line(fix.Path));
+                string harness = Markup.Escape(TerminalText.Line(fix.Harness));
+                string servers = Markup.Escape(TerminalText.Line(string.Join(", ", fix.Servers)));
+
+                AnsiConsole.MarkupLine($"  [bold]{path}[/] [grey]({harness})[/] adding {servers}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Runs the repair over the harnesses the fixes name and reports what reached disk, per file, with
+    /// the receipt's location (R4.2).
+    /// </summary>
+    /// <remarks>
+    /// The same call the dedicated repair command makes, with the same resolver, so a confirmation
+    /// here and an explicit run of that command cannot write different bytes. A refused target is
+    /// reported with its own rule id and remedy and does not fail the run: the corpus was scaffolded,
+    /// which is what this command exists to do.
+    /// </remarks>
+    private static void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    {
+        // The root goes to the resolver so this repair and the dedicated verb read a relative launch
+        // command the same way; without it the same confirmation would write different bytes
+        // depending on the directory the operator ran `docs init` from.
+        McpWiringRepairReport repair = McpWiringRepairer.Repair(
+            root,
+            config,
+            LaunchCommandResolver.FromEnvironment(root),
+            McpWiringFixes.Harnesses(fixes));
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            bool wrote = false;
+
+            foreach (McpWiringFileChange change in repair.Files)
+            {
+                string path = change.Path ?? change.Harness;
+
+                if (change.Written)
+                {
+                    wrote = true;
+                    AnsiConsole.MarkupLine(
+                        $"  [green]wrote[/]  {Markup.Escape(path)} ({Markup.Escape(TerminalText.Line(string.Join(", ", change.Servers)))})");
+
+                    if (!string.IsNullOrWhiteSpace(change.Message))
+                        AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
+
+                    continue;
+                }
+
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]refused[/] {Markup.Escape(change.Code ?? McpWiringRepairer.RefusalCode)} "
+                    + Markup.Escape(TerminalText.Line(change.Message ?? $"{path} was not written.")));
+
+                if (!string.IsNullOrWhiteSpace(change.Hint))
+                    AnsiConsole.MarkupLine($"          [grey]{Markup.Escape(TerminalText.Line(change.Hint))}[/]");
+            }
+
+            if (wrote)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  Receipt: [grey]{Markup.Escape(McpWiringReceipt.RelativePath)}[/]");
+            }
+
+            AnsiConsole.WriteLine();
+        });
+    }
+
 }

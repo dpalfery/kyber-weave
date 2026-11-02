@@ -38,14 +38,7 @@ public sealed class DocsInitCommandTests : IDisposable
         Assert.False(defaultSettings.KyberStandards);
 
         // 2. CommandApp binds --kyber-standards from command line arguments
-        CommandApp app = new CommandApp();
-        app.Configure(config =>
-        {
-            config.AddBranch("docs", docs =>
-            {
-                docs.AddCommand<DocsInitCommand>("init");
-            });
-        });
+        CommandApp app = CommandAppFixture.DocsInit();
 
         // Driving a real CommandApp writes through the process-global AnsiConsole. Another
         // test holding ProcessConsoleCapture's gate swaps that console for a StringWriter and
