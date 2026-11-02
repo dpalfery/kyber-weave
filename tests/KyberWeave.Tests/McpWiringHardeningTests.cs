@@ -775,6 +775,67 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
     }
 
+    /// <summary>
+    /// A write that never landed does not discard the record of the write that did.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Re-wiring a file that already has a receipt record replaces that record and persists the
+    /// replacement before the write. When the write then fails, the new record is taken back out —
+    /// and taking it out used to take the displaced one with it. The failed re-wire wrote nothing, so
+    /// the file still holds exactly the bytes the earlier record describes: that record is the undo of
+    /// a write that is on disk, and discarding it leaves the operator a file this tool wrote with
+    /// nothing left to prove it. Removal then refuses the file as one Kyber-Weave never touched.
+    /// </para>
+    /// <para>
+    /// Arranged by denying writes to the repository root, which is where the target file lands and
+    /// where the atomic write puts its temporary sibling. The receipt lives in its own directory
+    /// below that root, so the record saves are unaffected and only the harness write fails.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFailedReWireKeepsTheRecordOfTheWriteThatLanded()
+    {
+        byte[] pre = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
+        byte[] landed = Encoding.UTF8.GetBytes("""{"mcpServers": {"other-server": {}}}""");
+        McpWiringFixture.WriteBytes(Repo, ".mcp.json", landed);
+        WriteReceipt(Record(
+            ".mcp.json",
+            McpWiringWriteMode.Inserted,
+            Digest(pre),
+            Convert.ToBase64String(pre),
+            Digest(landed),
+            ["other-server"]));
+
+        DenyWritesToDirectory(Repo);
+
+        try
+        {
+            McpWiringFileChange change = SingleChange(Repair(ClaudeCode), ClaudeCode);
+
+            Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+            Assert.False(change.Written);
+
+            // The refusal this case is about is the write, not a refusal reached before a record was
+            // ever taken: the write failure is what runs the discard.
+            Assert.Contains("could not be written", DiagnosticText(change), StringComparison.Ordinal);
+            Assert.Equal(landed, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+        }
+        finally
+        {
+            AllowTraversal(Repo);
+        }
+
+        McpWiringReceiptRecord? kept = McpWiringReceipt.Load(Repo).Find(".mcp.json");
+        string? keptPost = kept?.PostSha256;
+
+        Assert.True(
+            keptPost == Digest(landed),
+            $"the failed re-wire discarded the record of the write that landed (the receipt holds {(keptPost is null ? "no record" : "another record")}), so .mcp.json can no longer be unwired");
+        Assert.NotNull(kept);
+        Assert.Equal(["other-server"], kept.Servers);
+    }
+
     // ---- A template is data, and data that is the wrong shape is refused, not overwritten.
 
     /// <summary>
@@ -1092,5 +1153,43 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
+    /// <summary>
+    /// Removes this process's permission to create files in <paramref name="directory"/>, or skips the
+    /// calling test where that cannot be arranged.
+    /// </summary>
+    /// <remarks>
+    /// The check is the write itself rather than the account's name, for the reason
+    /// <see cref="DenyTraversal"/> gives: a probe file that can still be created proves the account
+    /// bypassed the bits, and the probe is deleted again so the directory left behind is the one the
+    /// case arranged. Restoring is the caller's job, because the case needs the denial in place while
+    /// it drives the code and the skip paths restore before they leave.
+    /// </remarks>
+    private static void DenyWritesToDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This platform has no Unix permission bits, so a directory this process may not write cannot be arranged here.");
+        }
+        else
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        }
+
+        string probe = Path.Combine(directory, ".write-probe");
+
+        try
+        {
+            File.WriteAllText(probe, string.Empty);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        File.Delete(probe);
+        AllowTraversal(directory);
+        Assert.Skip("This account can write inside a directory whose permission bits deny it, so the denial cannot be arranged here.");
     }
 }

@@ -1327,6 +1327,8 @@ public static class McpWiringRepairer
     {
         private readonly string _root;
         private readonly List<McpWiringReceiptRecord> _records;
+        private readonly Dictionary<string, (int Position, McpWiringReceiptRecord? Record)> _displaced =
+            new(StringComparer.Ordinal);
 
         public ReceiptJournal(string root, List<McpWiringReceiptRecord> records)
         {
@@ -1351,33 +1353,65 @@ public static class McpWiringRepairer
 
             string? failure = McpWiringReceipt.Save(_root, _records);
 
+            if (failure is null)
+            {
+                // What this record displaced is remembered while it is still the record the receipt
+                // holds, because the write it describes has not happened yet: if that write fails, the
+                // file it was about is the one the displaced record describes, and that record is the
+                // undo that has to survive.
+                _displaced[Key(record.Path)] = (position, displaced);
+
+                return null;
+            }
+
             // A receipt that could not be written must not read as though it had been, so the
             // in-memory copy goes back to what is on disk before the caller is told — and that includes
             // the record this one displaced. Dropping the file's records instead would lose an undo
             // that is still owed: the file on disk is the one that earlier record describes, so the
             // next record that saves would persist only itself and leave those pre-write bytes
             // unreachable from the removal path.
-            if (failure is not null)
-            {
-                _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
+            _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
 
-                if (displaced is not null)
-                    _records.Insert(Math.Min(position, _records.Count), displaced);
-            }
+            if (displaced is not null)
+                _records.Insert(Math.Min(position, _records.Count), displaced);
 
             return failure;
         }
 
         /// <summary>
-        /// Takes a record back out after the write it described failed. Best effort: a receipt that
-        /// cannot be saved again leaves a record the removal recognises as an interrupted write, which
-        /// is the smaller harm than failing a run that has nothing written to show for it.
+        /// Takes a record back out after the write it described failed, putting back the record it
+        /// displaced. Best effort: a receipt that cannot be saved again leaves a record the removal
+        /// recognises as an interrupted write, which is the smaller harm than failing a run that has
+        /// nothing written to show for it.
         /// </summary>
+        /// <remarks>
+        /// The record being taken out describes a write that never landed, so it must not outlive it.
+        /// The record it displaced describes a write that did, and the failed write left the file
+        /// exactly as that record describes it — dropping both would leave a file this tool wrote with
+        /// nothing left to prove it, and the removal would refuse it as drift.
+        /// </remarks>
         public void Discard(string relativePath)
         {
-            if (_records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, relativePath)) > 0)
-                _ = McpWiringReceipt.Save(_root, _records);
+            bool recorded = _displaced.Remove(
+                Key(relativePath),
+                out (int Position, McpWiringReceiptRecord? Record) pending);
+
+            int removed = _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, relativePath));
+
+            if (removed == 0 && !recorded)
+                return;
+
+            if (pending.Record is not null)
+                _records.Insert(Math.Min(pending.Position, _records.Count), pending.Record);
+
+            _ = McpWiringReceipt.Save(_root, _records);
         }
+
+        /// <summary>
+        /// The spelling <see cref="McpWiringReceipt.SamePath"/> compares on, so an entry is found again
+        /// by the path's value rather than by how the path was written.
+        /// </summary>
+        private static string Key(string relativePath) => relativePath.Replace('\\', '/');
     }
 
     private static McpWiringFileChange Refused(
