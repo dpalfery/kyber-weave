@@ -19,8 +19,11 @@
 // no attribute fingerprint at all. A native span is therefore quarantined as
 // `unclaimed`, and the whole decoded packet is kept as the audit evidence.
 //
-// RED: written before `droid.ts` and `droid-envelope.ts` exist. Against the
-// current tree every case below fails with the module under test missing.
+// RED: written before the native claim was withdrawn. Against the shipped
+// claim the cases below fail: the adapter still scores a native span, the
+// root of a native trace is still claimed and stored, the native reasons are
+// still the ones a record declares, and the ingest still supersedes a stored
+// native row.
 
 import { describe, expect, it } from 'vitest'
 
@@ -677,7 +680,7 @@ describe('the plugin envelope path', () => {
   })
 })
 
-describe('precedence — the plugin envelope is checked first', () => {
+describe('the plugin envelope is the only claim path', () => {
   it('counts the plugin turn of a session the plugin covers', async () => {
     const { droidAdapter } = await loadDroid()
     const store = new CanonStore(':memory:')
