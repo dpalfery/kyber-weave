@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { ingestBatch } from './ingest.js'
 import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
+import { buildSessions } from './sessions.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
-import type { OtlpSpan } from '../otel/receiver.js'
+import type { OtlpSpan, OtlpStatusCode } from '../otel/receiver.js'
 import antigravitySpan from './adapters/__fixtures__/antigravity-span.json' with { type: 'json' }
 
 // The live collector had its own normalization that never went through the
@@ -747,5 +748,240 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     expect(conversationHistory(store, 'llm-2')).toEqual([])
     expect(notMeasurableReason(store, 'llm-1', 'conversation_history')).toMatch(/OTEL_LOG_USER_PROMPTS=1/)
     store.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The stored error status (Factory native export)
+// ---------------------------------------------------------------------------
+//
+// Factory's exporter marks a policy-denied tool call with an `error.type`
+// attribute, and the droid adapter reads that attribute as the record's
+// status: a denied call is an error, not an ordinary tool call. The
+// receiver-timing seam then hands the record the exporter's own OTLP status
+// code — and Factory's exporter does not ALSO mark the transport status as an
+// error. The error is decided correctly at the adapter and thrown away one
+// line later, so the STORED record reads as an ordinary tool call.
+//
+// THE RULE: an error status is never downgraded. The seam gives the record the
+// timing and the outcome UNLESS the adapter already determined one.
+//
+// Every case below goes through the production ingest path (`ingestBatch` over
+// the production adapter set). The adapter-level case already passes
+// (canon/adapters/droid.test.ts); the defect only appears after
+// normalization, so a case that stopped at the adapter would prove nothing.
+
+/** The session Factory's native export reports. */
+const NATIVE_SESSION = 'droid-native-session-1'
+
+/** The tool the native export names on its tool span. */
+const NATIVE_TOOL = 'Read'
+
+/** The telemetry source Factory's own native export arrives under. */
+const NATIVE_SOURCE = 'droid-native-export'
+
+/** The OTLP status codes an exporter can carry. */
+const EXPORTER_STATUS_CODES = ['ok', 'unset', 'error'] as const satisfies readonly OtlpStatusCode[]
+
+/**
+ * Factory's native export, in its `genai` format: the agent identity that
+ * claims the span, the operation, and the conversation and session ids.
+ */
+function nativeAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    'gen_ai.operation.name': 'chat',
+    'gen_ai.agent.name': 'droid',
+    'gen_ai.conversation.id': NATIVE_SESSION,
+    'session.id': NATIVE_SESSION,
+    'gen_ai.request.model': 'claude-sonnet-4-5',
+    'gen_ai.provider.name': 'anthropic',
+    ...over,
+  }
+}
+
+/** A native export span, carrying the exporter's own OTLP status code. */
+function nativeSpan(
+  spanId: string,
+  attributes: Record<string, unknown>,
+  over: Partial<OtlpSpan> = {},
+): OtlpSpan {
+  return span(attributes, {
+    spanId,
+    traceId: `trace-${spanId}`,
+    name: 'gen_ai.chat',
+    resource: { 'service.name': NATIVE_SOURCE },
+    status: { code: 'unset' },
+    ...over,
+  })
+}
+
+/** The native export's chat span: the session's own model call. */
+function nativeTurnSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(spanId, nativeAttributes(), { name: 'gen_ai.chat', ...over })
+}
+
+/** The native export's policy-denied tool call: the span carrying `error.type`. */
+function deniedToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(
+    spanId,
+    nativeAttributes({
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': NATIVE_TOOL,
+      'gen_ai.tool.call.id': `call_${spanId}`,
+      'gen_ai.tool.type': 'function',
+      'error.type': 'rejected',
+    }),
+    { name: 'gen_ai.execute_tool', ...over },
+  )
+}
+
+/** The native export's ordinary tool call: the same span with no error evidence. */
+function ordinaryToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(
+    spanId,
+    nativeAttributes({
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': NATIVE_TOOL,
+      'gen_ai.tool.call.id': `call_${spanId}`,
+      'gen_ai.tool.type': 'function',
+    }),
+    { name: 'gen_ai.execute_tool', ...over },
+  )
+}
+
+/**
+ * The tool rows a session's projection published, by tool name.
+ *
+ * `getSessionPayload` hands back the projection's own stored document, so the
+ * shape is read through a local type: this reads the one field the session's
+ * error surface is (canon/sessions.ts counts a tool record as an error when
+ * its stored status is `error`).
+ */
+async function projectedToolRows(
+  store: CanonStore,
+  sessionId: string,
+): Promise<Map<string, { invocations: number; errors: number | undefined }>> {
+  await buildSessions(store)
+  const payload = store.getSessionPayload(sessionId) as
+    | { tools?: Array<{ name?: unknown; invocations?: unknown; errors?: unknown }> }
+    | undefined
+  if (payload === undefined) throw new Error(`no session payload was built for ${sessionId}`)
+  const rows = new Map<string, { invocations: number; errors: number | undefined }>()
+  for (const tool of payload.tools ?? []) {
+    if (typeof tool.name !== 'string') continue
+    rows.set(tool.name, {
+      invocations: typeof tool.invocations === 'number' ? tool.invocations : 0,
+      errors: typeof tool.errors === 'number' ? tool.errors : undefined,
+    })
+  }
+  return rows
+}
+
+describe('ingestBatch — the stored error status at the receiver-timing seam', () => {
+  it('stores a denied native Factory tool call as an error even when the exporter status is unset', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'unset' } })], store)
+
+    const record = store.get('native-tool-denied')
+    expect(record?.harness).toBe('droid')
+    expect(
+      record?.status,
+      'a policy-denied Factory tool call must be STORED as an error, whatever the exporter status says',
+    ).toBe('error')
+    store.close()
+  })
+
+  it('stores a denied native Factory tool call as an error even when the exporter status is ok', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'ok' } })], store)
+
+    const record = store.get('native-tool-denied')
+    expect(record?.harness).toBe('droid')
+    expect(
+      record?.status,
+      'an exporter status of ok must not downgrade a status the adapter already determined',
+    ).toBe('error')
+    store.close()
+  })
+
+  it('stores a span whose exporter status is error as an error', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([deniedToolSpan('native-tool-denied', { status: { code: 'error' } })], store)
+
+    const record = store.get('native-tool-denied')
+    expect(record?.harness).toBe('droid')
+    expect(record?.status, 'an exporter error status must reach the stored record').toBe('error')
+    store.close()
+  })
+
+  it('keeps the exporter status code exactly when the native span carries no error evidence', () => {
+    // The regression guard: the rule must not turn every record into an
+    // error, and it must not keep the adapter's neutral default either. The
+    // exporter's own code is the stored status, whatever it says.
+    for (const code of EXPORTER_STATUS_CODES) {
+      const store = new CanonStore(':memory:')
+      ingestBatch([ordinaryToolSpan(`native-tool-${code}`, { status: { code } })], store)
+
+      const record = store.get(`native-tool-${code}`)
+      expect(record?.harness).toBe('droid')
+      expect(
+        record?.status,
+        `a span with no error evidence must keep the exporter status code "${code}"`,
+      ).toBe(code)
+      store.close()
+    }
+  })
+
+  it('carries the denied call into the session projection as a tool error', async () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        nativeTurnSpan('native-turn'),
+        deniedToolSpan('native-tool-denied', { status: { code: 'unset' } }),
+      ],
+      store,
+    )
+
+    const rows = await projectedToolRows(store, NATIVE_SESSION)
+    expect(rows.get(NATIVE_TOOL)?.invocations, 'the denied call is a tool invocation').toBe(1)
+    expect(
+      rows.get(NATIVE_TOOL)?.errors,
+      'the denied Factory call must reach the projection as a tool error, not as an ordinary call',
+    ).toBe(1)
+    store.close()
+  })
+
+  it("leaves another harness's stored status alone beside a denied Factory call", () => {
+    // The seam is shared by every harness, so the Factory rule must not move
+    // another harness's records: the copilot span keeps the exporter's own
+    // status code whether or not a denied Factory call sits in the same batch.
+    const alone = new CanonStore(':memory:')
+    ingestBatch([span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } })], alone)
+
+    const beside = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } }),
+        deniedToolSpan('native-tool-denied', { status: { code: 'unset' } }),
+      ],
+      beside,
+    )
+
+    expect(alone.get('other-1')?.harness).toBe('copilot')
+    expect(alone.get('other-1')?.status).toBe('unset')
+    expect(beside.get('other-1')?.status).toBe('unset')
+    expect(
+      beside.get('other-1')?.status,
+      'another harness must not inherit the Factory error',
+    ).not.toBe('error')
+    // The denied Factory call IS in the batch, so the guard above is not
+    // vacuous: it is the presence of that call that leaves the other
+    // harness's record alone.
+    expect(
+      beside.get('native-tool-denied'),
+      'the denied Factory call is in the batch beside the other harness\'s span',
+    ).toBeDefined()
+    alone.close()
+    beside.close()
   })
 })
