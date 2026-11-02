@@ -122,6 +122,12 @@ public sealed record RequiredMcpServer
     }
 
     /// <summary>
+    /// The suffix a Windows install appends to an executable's file name, which is how a program is
+    /// spelled there rather than which program it is.
+    /// </summary>
+    private const string WindowsExecutableSuffix = ".exe";
+
+    /// <summary>
     /// Whether a launch command runs the binary Kyber-Weave ships, which is the only thing
     /// <see cref="McpProvenance.FirstParty"/> can truthfully be claimed about.
     /// </summary>
@@ -132,8 +138,14 @@ public sealed record RequiredMcpServer
     /// binary a declaration names": the check probes it, and a harness launches it. Matching any
     /// later element would let <c>[wrapper, --server, kyber-weave-mcp]</c> pass as first-party while
     /// the thing a missing-binary finding would be about is <c>wrapper</c>.
-    /// The match is a containment rather than an equality so a locally built or renamed copy of the
-    /// shipped server still counts, and it ignores case because the file name on Windows does.
+    /// The file name is then compared as a whole name rather than searched for the shipped one inside
+    /// it. Containment accepted <c>fake-kyber-weave-mcp</c> and every other lookalike that happens to
+    /// carry the name, and a first-party claim is what both remedies are built on: the absence of the
+    /// binary is reported as a broken Kyber-Weave installation and remedied with
+    /// <c>kyber-weave update</c>, which is honest only for the program Kyber-Weave ships.
+    /// Spelling is still not identity: a directory prefix, the case a file system ignores, and the
+    /// executable suffix a platform appends are all the same program, and the suffix is accepted on
+    /// every platform because a committed declaration is read on each of them.
     /// </remarks>
     public static bool NamesShippedBinary(IReadOnlyList<string> command)
     {
@@ -144,7 +156,11 @@ public sealed record RequiredMcpServer
 
         string program = Path.GetFileName(command[0]);
 
-        return program.Contains(ShippedBinary, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(program, ShippedBinary, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                program,
+                ShippedBinary + WindowsExecutableSuffix,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The server's name, as the declaration keyed it and as an MCP client sees it.</summary>

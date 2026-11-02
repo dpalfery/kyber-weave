@@ -40,6 +40,14 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 {
     private const string ServerName = "kyber-weave";
 
+    /// <summary>
+    /// The file name the stand-in for the shipped server carries. A first-party declaration is a claim
+    /// about the binary Kyber-Weave ships, and that claim is tested against the whole file name, so a
+    /// lookalike standing in for it would be refused before any case reached the behaviour it tests.
+    /// The file is a stub, but the name it is given is the shipped one.
+    /// </summary>
+    private const string FirstPartyBinaryName = "kyber-weave-mcp";
+
     /// <summary>The second server a two-server declaration names, and the file its command names.</summary>
     private const string SecondServerName = "codegraph";
 
@@ -83,7 +91,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     {
         Directory.CreateDirectory(Repo);
         Directory.CreateDirectory(Bin);
-        McpWiringFixture.WriteExecutable(Bin, "fake-kyber-weave-mcp");
+        McpWiringFixture.WriteExecutable(Bin, FirstPartyBinaryName);
     }
 
     private string Repo => Path.Combine(_root.Path, "repo");
@@ -95,7 +103,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     /// The declared command. A path rather than a name, so the declaration resolves on every machine
     /// without the test reaching into the process environment.
     /// </summary>
-    private string BinaryPath => Path.Combine(Bin, "fake-kyber-weave-mcp");
+    private string BinaryPath => Path.Combine(Bin, FirstPartyBinaryName);
 
     /// <summary>The second declared server, and the binary its command names.</summary>
     private string SecondBinaryPath => Path.Combine(Bin, SecondBinaryName);

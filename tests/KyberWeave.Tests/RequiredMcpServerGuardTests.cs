@@ -75,6 +75,56 @@ public sealed class RequiredMcpServerGuardTests
     }
 
     /// <summary>
+    /// A program whose file name merely carries the shipped binary's name inside it is a different
+    /// program, so a first-party claim about it is false.
+    /// </summary>
+    /// <remarks>
+    /// The claim is what every downstream remedy is built on, and one of them is "run
+    /// <c>kyber-weave update</c>". Accepting a lookalike made that advice a promise about a program
+    /// Kyber-Weave never shipped: the operator would run the update, the missing binary would stay
+    /// missing, and the report would keep asserting the installation was broken.
+    /// </remarks>
+    [Theory]
+    [InlineData("fake-kyber-weave-mcp")]
+    [InlineData("kyber-weave-mcp-helper")]
+    [InlineData("my-kyber-weave-mcp")]
+    [InlineData("kyber-weave-mcp.bak")]
+    [InlineData("./tools/fake-kyber-weave-mcp")]
+    public void TheDeclaredRecordRefusesAFirstPartyClaimAboutALookalikeName(string program)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new RequiredMcpServer("kyber-weave", [program, "--repo-root", "."], McpProvenance.FirstParty));
+    }
+
+    /// <summary>
+    /// The shipped name is compared as a whole file name, so how a platform spells that name is not
+    /// a different program: a directory prefix, the case a file system ignores, and the executable
+    /// suffix a Windows install appends all still launch the binary Kyber-Weave ships.
+    /// </summary>
+    /// <remarks>
+    /// The suffix is accepted on any platform on purpose. A declaration is committed, so the same
+    /// <c>kyber-weave.yml</c> is read on a machine that installed the binary as
+    /// <c>kyber-weave-mcp.exe</c> and on one that did not, and a host whose declaration loads on one
+    /// platform and is refused on another would make the guard an accident of where it ran.
+    /// </remarks>
+    [Theory]
+    [InlineData("kyber-weave-mcp")]
+    [InlineData("./bin/kyber-weave-mcp")]
+    [InlineData("/opt/kyber/bin/kyber-weave-mcp")]
+    [InlineData("KYBER-WEAVE-MCP")]
+    [InlineData("kyber-weave-mcp.exe")]
+    [InlineData("/opt/kyber/bin/kyber-weave-mcp.exe")]
+    [InlineData("kyber-weave-mcp.EXE")]
+    public void TheDeclaredRecordAcceptsTheShippedBinaryHoweverAPlatformSpellsIt(string program)
+    {
+        RequiredMcpServer server =
+            new("kyber-weave", [program, "--repo-root", "."], McpProvenance.FirstParty);
+
+        Assert.Equal(McpProvenance.FirstParty, server.Provenance);
+        Assert.Equal(program, server.Command[0]);
+    }
+
+    /// <summary>
     /// A third-party server is a binary Kyber-Weave does not ship by definition, so its command is
     /// somebody else's program and there is nothing to refuse.
     /// </summary>

@@ -640,10 +640,11 @@ absent first-party binary is reported as *this Kyber-Weave installation is broke
 shipped one. So the claim is checked at load time against argv[0] — the element the check
 probes and a harness launches — and a declaration that claims it about any other program
 fails to load as `KW-CONFIG-001`, naming the offending program. The match is a
-case-insensitive filename containment rather than an equality, so a locally built or renamed
-copy of `kyber-weave-mcp` still qualifies, and a wrapper command cannot pass a claim about
-the thing it wraps. A binary you install yourself is `third-party` whatever it does, even
-when it serves this repository's documentation.
+case-insensitive filename **equality** rather than a containment — a directory prefix and
+the `.exe` suffix a Windows install appends still qualify, and a wrapper command cannot pass
+a claim about the thing it wraps, but a program that merely carries the shipped name inside
+it (`fake-kyber-weave-mcp`) is somebody else's binary. A binary you install yourself is
+`third-party` whatever it does, even when it serves this repository's documentation.
 
 `docs init` scaffolds the section with exactly one server when it creates a host
 configuration, and appends it — leaving every other byte alone — when an existing file has

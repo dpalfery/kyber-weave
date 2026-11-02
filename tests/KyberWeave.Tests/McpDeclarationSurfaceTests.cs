@@ -88,10 +88,18 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
     /// Kyber-Weave's, so a claim whose command runs some other program is refused instead of being
     /// loaded and acted on.
     /// </summary>
+    /// <remarks>
+    /// A lookalike counts as another program. The claim was once tested by containment, which made
+    /// <c>fake-kyber-weave-mcp</c> load as first-party and turned the update remedy into a promise
+    /// about a binary Kyber-Weave never shipped.
+    /// </remarks>
     [Theory]
     [InlineData("codegraph, serve, --mcp")]
     [InlineData("dotnet, tool, run, some-other-tool")]
     [InlineData("codegraph")]
+    [InlineData("fake-kyber-weave-mcp")]
+    [InlineData("kyber-weave-mcp-helper")]
+    [InlineData("kyber-weave-mcp.bak")]
     public void AFirstPartyDeclarationNamingAnotherBinaryIsRefusedAsKwConfig001(string command)
     {
         string configPath = WriteDeclaration(
@@ -107,14 +115,14 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
     }
 
     /// <summary>
-    /// The rule refuses only what it can prove false. A bare name, an absolute path and a locally
-    /// built copy all name the binary Kyber-Weave ships, so all three stay loadable — the guard is
-    /// not an allow-list of one string.
+    /// The rule refuses only what it can prove false. A bare name, an absolute path and the
+    /// executable suffix a Windows install appends all name the binary Kyber-Weave ships, so all
+    /// three stay loadable — the guard is not an allow-list of one string.
     /// </summary>
     [Theory]
     [InlineData(ShippedBinary)]
     [InlineData("/opt/kyber/bin/kyber-weave-mcp")]
-    [InlineData("fake-kyber-weave-mcp")]
+    [InlineData(ShippedBinary + ".exe")]
     public void AFirstPartyDeclarationNamingTheShippedBinaryLoads(string executable)
     {
         WriteDeclaration(

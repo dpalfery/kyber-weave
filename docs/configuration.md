@@ -477,7 +477,8 @@ The provenance decides the remedy an absent binary gets, and the first-party rem
 "this Kyber-Weave installation is broken; run `kyber-weave update`" — advice about a program
 the repository never installed if the server were somebody else's. The claim is therefore
 checked against argv[0] at load time, and the comparison is a case-insensitive filename
-containment so a locally built or renamed copy of the shipped server still counts. Declare a
+**equality** — a directory prefix and the `.exe` suffix a Windows install appends still
+count, but a program that merely carries the shipped name inside it does not. Declare a
 binary you install yourself as `third-party`, whatever it does.
 
 The declaration is independent of Squad: it is not Squad's `toolchain.yml`
