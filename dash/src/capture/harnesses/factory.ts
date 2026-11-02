@@ -1,11 +1,10 @@
 // Factory (Droid) capture writer: plugin-only.
 //
-// Factory reaches KyberDash through a capture plugin DIRECTORY in its own root
-// (`<factory root>/plugins/kyberdash-factory`), not through a configuration key. The row
-// therefore declares no key at all: `enable` installs the plugin tree and `disable` removes
-// it. The owner's own `~/.factory/settings.json` is never written, merged or receipted —
-// `resolvePath` only names where Factory keeps its settings, which is where the harness is
-// found.
+// Factory reaches KyberDash through a capture plugin, installed through the harness's own
+// marketplace commands, not through a configuration key. The row therefore declares no key
+// at all: `enable` installs the plugin and `disable` removes it. The owner's own
+// `~/.factory/settings.json` is never written, read, merged or receipted — the capture
+// lives in the marketplace KyberDash owns, and `resolvePath` names that marketplace.
 //
 // The CONTENT consent is the owner's own decision, and it is deliberately NOT the Settings
 // switch: `enable` installs the capture and leaves that decision exactly as it was, and only
@@ -38,7 +37,7 @@ import {
   type NativeExportShapeSource,
   type NativeExportVerdict,
 } from './factory-plugin/native-export.js'
-import { resolveFactoryHarnessCli } from './factory-plugin/marketplace.js'
+import { resolveFactoryHarnessCli, FACTORY_MARKETPLACE_MANIFEST } from './factory-plugin/marketplace.js'
 import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
@@ -62,11 +61,20 @@ function narrow(result: FactoryPluginResult) {
 }
 
 /**
- * Where Factory keeps its own settings. Named, never written: KyberDash installs a plugin,
- * not a key, so this path is the harness's place and nothing more.
+ * Where the capture lives: the marketplace KyberDash owns, under its own state directory.
+ *
+ * The owner's `~/.factory/settings.json` is no longer named here. That file is neither a
+ * write target, nor a read target, nor install evidence: the capture is a plugin in a
+ * marketplace, and the harness's own registry — read through the harness's own commands —
+ * is what says the harness holds it.
+ *
+ * The path names a FILE inside that marketplace, because this is a single-file surface:
+ * the status surface reads it as one. The tree itself is reported by the row's own
+ * `plugin directory:` line.
  */
-function factorySettingsPath(home: string, env?: PathEnv): string {
-  return envJoin(env, factoryPluginPaths(home, env).root, 'settings.json')
+function factoryMarketplaceManifest(home: string, env?: PathEnv): string {
+  const tree = factoryPluginPaths(home, env).pluginDir
+  return envJoin(env, tree, ...FACTORY_MARKETPLACE_MANIFEST.split('/'))
 }
 
 /**
@@ -232,7 +240,7 @@ export const factoryHarness: ManagedHarnessWriter = {
   id: FACTORY_HARNESS_ID,
   displayName: 'Factory (Droid)',
   format: 'json',
-  resolvePath: factorySettingsPath,
+  resolvePath: factoryMarketplaceManifest,
   // Plugin-only: no config key is declared, so the engine reads, writes and receipts none.
   desiredKeys: () => ({}),
   filePlugin: factoryFilePlugin,
