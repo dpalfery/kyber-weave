@@ -1,5 +1,5 @@
 // Wire contract v1 for the Factory (Droid) capture plugin: the `factory.*` attribute namespace, the
-// four span names, and the deterministic id derivation the hook mapper uses.
+// three span names, and the deterministic id derivation the hook mapper uses.
 //
 // This module is a LEAF: it imports only `node:` built-ins, so the plugin bundle never drags
 // engine code in and the canon adapter never depends on the plugin.
@@ -20,7 +20,6 @@ export const FACTORY_CONTRACT_VERSION = '1'
 export const FACTORY_KEYS = {
   contractVersion: 'factory.contract_version',
   sessionId: 'factory.session.id',
-  parentSessionId: 'factory.parent.session.id',
   cwd: 'factory.cwd',
   messageId: 'factory.message.id',
   turnOperation: 'factory.turn.operation',
@@ -34,8 +33,8 @@ export const FACTORY_KEYS = {
   toolResultBytes: 'factory.tool.result_bytes',
 } as const
 
-/** The four span kinds of the Factory contract. */
-export type FactorySpanKind = 'session' | 'turn' | 'tool' | 'child_session'
+/** The three span kinds of the Factory contract. */
+export type FactorySpanKind = 'session' | 'turn' | 'tool'
 
 /**
  * The roles a turn's spans play: the prompt the user submitted and the completion the turn
@@ -46,13 +45,12 @@ export type FactoryTurnRole = 'prompt' | 'completion'
 
 /**
  * Span names, one per kind. The key and the kind are the same word, so `SPAN_NAMES[kind]` is the
- * name of that kind: `child_session`, not `childSession`.
+ * name of that kind.
  */
 export const SPAN_NAMES = {
   session: 'factory.session',
   turn: 'factory.turn',
   tool: 'factory.tool',
-  child_session: 'factory.child_session',
 } as const satisfies Record<FactorySpanKind, string>
 
 function sha256Hex(text: string): string {

@@ -1,5 +1,5 @@
 // Wire contract v1 for the Factory (Droid) capture plugin: the `factory.*` attribute namespace, the
-// four span names, and the deterministic id derivation the hook mapper uses.
+// three span names, and the deterministic id derivation the hook mapper uses.
 //
 // The contract module is written by the next task, so every test here fails until contract.ts
 // exists. The module is loaded inside each test rather than imported at the top of the file, so
@@ -16,8 +16,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SESSION = 'ses_factory_01'
 const ANCHOR = 'msg_factory_01'
 
-/** The four span kinds of the Factory contract, as the contract names them. */
-const KINDS = ['session', 'turn', 'tool', 'child_session'] as const
+/** The three span kinds of the Factory contract, as the contract names them. */
+const KINDS = ['session', 'turn', 'tool'] as const
 
 /**
  * The attribute keys of the Factory contract, in the contract's own spelling. The plugin claims
@@ -28,7 +28,6 @@ const KINDS = ['session', 'turn', 'tool', 'child_session'] as const
 const EXPECTED_KEYS = {
   contractVersion: 'factory.contract_version',
   sessionId: 'factory.session.id',
-  parentSessionId: 'factory.parent.session.id',
   cwd: 'factory.cwd',
   messageId: 'factory.message.id',
   turnOperation: 'factory.turn.operation',
@@ -43,14 +42,13 @@ const EXPECTED_KEYS = {
 }
 
 /**
- * The four span names of the Factory contract, keyed by the span kind they belong to. The key and
+ * The three span names of the Factory contract, keyed by the span kind they belong to. The key and
  * the kind are the same word, so `SPAN_NAMES[kind]` is the name of that kind.
  */
 const EXPECTED_SPAN_NAMES = {
   session: 'factory.session',
   turn: 'factory.turn',
   tool: 'factory.tool',
-  child_session: 'factory.child_session',
 }
 
 async function contract() {
@@ -105,14 +103,51 @@ describe('the Factory wire contract v1', () => {
     for (const [name, value] of Object.entries(EXPECTED_KEYS)) {
       expect(keys[name], `the ${name} attribute key`).toBe(value)
     }
+    // The contract declares exactly these keys: a key nothing writes is a claim the wire does
+    // not keep, and a key the contract dropped but the map still carries is a claim the plugin
+    // still makes.
+    expect(Object.keys(keys).sort(), 'the attribute keys the contract declares').toEqual(
+      Object.keys(EXPECTED_KEYS).sort(),
+    )
   })
 
-  it('the span names are factory.session, factory.turn, factory.tool and factory.child_session', async () => {
+  it('the span names are factory.session, factory.turn and factory.tool', async () => {
     const { SPAN_NAMES } = await contract()
     const names = SPAN_NAMES as unknown as Record<string, unknown>
     for (const [kind, value] of Object.entries(EXPECTED_SPAN_NAMES)) {
       expect(names[kind], `the ${kind} span name`).toBe(value)
     }
+    // The contract declares exactly these names: a name the plugin never emits is a kind that
+    // does not exist, and a name the plugin emits but the contract no longer declares is a span
+    // the wire has no name for.
+    expect(Object.keys(names).sort(), 'the span kinds the contract declares').toEqual(
+      Object.keys(EXPECTED_SPAN_NAMES).sort(),
+    )
+    expect(Object.values(names).sort(), 'the span names the contract declares').toEqual(
+      Object.values(EXPECTED_SPAN_NAMES).sort(),
+    )
+  })
+
+  it('the contract declares exactly the span names the plugin emits', async () => {
+    // The contract is the plugin's wire format, so the names it declares must be the names the
+    // plugin writes and no others. Every documented hook event is mapped here, so a span the
+    // plugin writes under a name the contract does not declare fails this case, and so does a
+    // declared name the plugin never writes.
+    const { SPAN_NAMES } = await contract()
+    const { FACTORY_HOOK_EVENTS, mapHookEvent } = await mapper()
+    const emitted = new Set<string>()
+    for (const event of FACTORY_HOOK_EVENTS) {
+      for (const span of mapHookEvent({
+        hook_event_name: event,
+        session_id: SESSION,
+        message_id: ANCHOR,
+        tool_call_id: ANCHOR,
+      })) {
+        emitted.add(span.name)
+      }
+    }
+    const declared = Object.values(SPAN_NAMES as unknown as Record<string, unknown>).map(String)
+    expect([...emitted].sort(), 'the span names the plugin emits').toEqual([...declared].sort())
   })
 
   it('no attribute key and no span name claims the OpenCode namespace', async () => {
