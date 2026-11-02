@@ -1,5 +1,5 @@
 // Hook-to-span mapping for the Factory (Droid) capture plugin (contract 1): the eight documented
-// hook events onto the four `factory.*` span names, the attributes each event's row of the
+// hook events onto the three `factory.*` span names, the attributes each event's row of the
 // contract carries, and every attribute the payload does not carry left off the wire.
 //
 // The mapper module is written by the next task, so every test here fails until mapper.ts exists.
@@ -14,6 +14,8 @@
 //     exactly when the payload carries the value it counts;
 //   - a tool outcome travels in the payload (`tool_status`, `tool_error_type`); the mapper never
 //     invents an outcome the payload did not state.
+//   - `SubagentStop` yields no span at all: Factory's documented payload for that event carries no
+//     child session id, so a span there would name the parent session as the child.
 
 import { describe, expect, it } from 'vitest'
 
@@ -362,25 +364,35 @@ describe('the Factory hook-to-span mapping', () => {
     expect(stringAttr(span, 'factory.message.id')).toBe(MESSAGE)
   })
 
-  it('a SubagentStop hook yields one factory.child_session span carrying the child and the parent session id separately', async () => {
-    const span = await mapOne({
+  it('a SubagentStop hook yields no span: the documented payload carries no child session id', async () => {
+    const spans = await mapSpans({
+      hook_event_name: 'SubagentStop',
+      session_id: SESSION,
+      task_name: 'reviewer',
+      task_result: 'the review is done',
+      stop_hook_active: false,
+    })
+    expect(spans).toHaveLength(0)
+  })
+
+  it('a SubagentStop hook that names the task and its failure still yields no span', async () => {
+    const spans = await mapSpans({
+      hook_event_name: 'SubagentStop',
+      session_id: SESSION,
+      task_name: 'reviewer',
+      task_error: 'the task failed',
+      stop_hook_active: false,
+    })
+    expect(spans).toHaveLength(0)
+  })
+
+  it('a SubagentStop hook yields no span even when the payload names a parent session', async () => {
+    const spans = await mapSpans({
       hook_event_name: 'SubagentStop',
       session_id: SESSION,
       parent_session_id: PARENT_SESSION,
     })
-    expect(span.name).toBe('factory.child_session')
-    expect(stringAttr(span, 'factory.session.id')).toBe(SESSION)
-    expect(stringAttr(span, 'factory.parent.session.id')).toBe(PARENT_SESSION)
-    expect(stringAttr(span, 'factory.parent.session.id')).not.toBe(SESSION)
-  })
-
-  it('a SubagentStop hook without a parent session id carries no parent session id', async () => {
-    const span = await mapOne({
-      hook_event_name: 'SubagentStop',
-      session_id: SESSION,
-    })
-    expect(stringAttr(span, 'factory.session.id')).toBe(SESSION)
-    expect(attributeOf(span, 'factory.parent.session.id')).toBeUndefined()
+    expect(spans).toHaveLength(0)
   })
 
   it('a SessionEnd hook yields one factory.session span with the session id', async () => {
@@ -404,6 +416,32 @@ describe('the Factory hook-to-span mapping', () => {
       session_id: SESSION,
     })
     expect(spans).toHaveLength(0)
+  })
+
+  it('the span names the mapper emits are exactly factory.session, factory.turn and factory.tool', async () => {
+    const names = new Set<string>()
+    for (const event of HOOK_EVENTS) {
+      for (const span of await mapSpans(payloadFor(event))) {
+        names.add(String(span.name))
+      }
+    }
+    expect([...names].sort()).toEqual(['factory.session', 'factory.tool', 'factory.turn'])
+  })
+
+  it('every event that yields a span yields exactly one span of its own name', async () => {
+    const expected: Record<string, string> = {
+      SessionStart: 'factory.session',
+      UserPromptSubmit: 'factory.turn',
+      PreToolUse: 'factory.tool',
+      PostToolUse: 'factory.tool',
+      Stop: 'factory.turn',
+      SessionEnd: 'factory.session',
+    }
+    for (const [event, name] of Object.entries(expected)) {
+      const spans = await mapSpans(payloadFor(event))
+      expect(spans.length, `the ${event} event`).toBe(1)
+      expect(spans[0]?.name, `the ${event} span name`).toBe(name)
+    }
   })
 
   it('every hook event yields at most one span, and every span names the contract version', async () => {
