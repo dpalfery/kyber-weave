@@ -805,7 +805,10 @@ function dataPointFromJson(raw: unknown, where: string): OtlpMetricDataPoint {
       ? {}
       : attributesFromJson(attributesRaw, `${where}.attributes`)
   return {
-    attributes,
+    // A point's own attributes come from the same exporter resource as a
+    // span's, so they carry the same account identity: they are stripped on
+    // this seam too, before anything is stored.
+    attributes: stripIdentityAttributes(attributes),
     timeUnixNano: optionalNanos(point.timeUnixNano, `${where}.timeUnixNano`),
     startTimeUnixNano: optionalNanos(point.startTimeUnixNano, `${where}.startTimeUnixNano`),
     // `asInt` is an int64, which proto3 JSON encodes as a string; `asDouble`
