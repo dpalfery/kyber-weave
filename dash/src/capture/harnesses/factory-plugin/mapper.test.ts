@@ -105,6 +105,14 @@ function numberAttr(span: RawSpan, key: string): number | undefined {
   throw new Error(`the ${key} attribute must carry a numeric value`)
 }
 
+/** The span id of a span, or a failure when the span carries none. */
+function spanIdOf(span: RawSpan): string {
+  if (typeof span.spanId !== 'string') {
+    throw new Error('a span must carry a span id')
+  }
+  return span.spanId
+}
+
 /** The size of a payload value as it travels on the wire, in bytes. */
 function jsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length
@@ -476,5 +484,60 @@ describe('the Factory hook-to-span mapping', () => {
       prompt: 'first prompt',
     })
     expect(turn.spanId).not.toBe(session.spanId)
+  })
+
+  it('the prompt span and the completion span of one turn are distinct spans under one trace', async () => {
+    // The prompt and the completion of one turn are two spans of one turn: two span ids, so the
+    // completion cannot land on the prompt's row, and one trace id, so the turn stays one unit of
+    // work. The two payloads carry the same message id on purpose: nothing in the contract
+    // promises that Factory's reply id differs from the user's message id, so the two spans must
+    // be distinct by construction.
+    const prompt = await mapOne({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION,
+      message_id: MESSAGE,
+      prompt: 'first prompt',
+      model: 'factory-model-01',
+    })
+    const completion = await mapOne({
+      hook_event_name: 'Stop',
+      session_id: SESSION,
+      message_id: MESSAGE,
+    })
+    expect(prompt.name).toBe('factory.turn')
+    expect(completion.name).toBe('factory.turn')
+    expect(prompt.spanId).toMatch(/^[0-9a-f]{16}$/)
+    expect(completion.spanId).toMatch(/^[0-9a-f]{16}$/)
+    expect(spanIdOf(completion), 'the completion span id').not.toBe(spanIdOf(prompt))
+    expect(prompt.traceId).toMatch(/^[0-9a-f]{32}$/)
+    expect(completion.traceId, 'the trace id of the turn').toBe(prompt.traceId)
+  })
+
+  it('the completion span of a turn does not replace the prompt span: the prompt text and the model survive', async () => {
+    // The store keys a span row by its span id, so two spans of one turn that share an id are one
+    // row and the second overwrites the first. The prompt text and the model live only on the
+    // prompt's span, so a shared id loses them.
+    const prompt = await mapOne({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION,
+      message_id: MESSAGE,
+      prompt: 'first prompt',
+      model: 'factory-model-01',
+    })
+    const completion = await mapOne({
+      hook_event_name: 'Stop',
+      session_id: SESSION,
+      message_id: MESSAGE,
+    })
+    const rows = new Map<string, RawSpan>()
+    rows.set(spanIdOf(prompt), prompt)
+    rows.set(spanIdOf(completion), completion)
+    expect(rows.size, 'the rows one turn writes').toBe(2)
+    const prompts = [...rows.values()].filter(
+      (row) => stringAttr(row, 'factory.turn.prompt.text') !== undefined,
+    )
+    expect(prompts, 'the row carrying the prompt text').toHaveLength(1)
+    expect(stringAttr(prompts[0], 'factory.turn.prompt.text')).toBe('first prompt')
+    expect(stringAttr(prompts[0], 'factory.model.id')).toBe('factory-model-01')
   })
 })

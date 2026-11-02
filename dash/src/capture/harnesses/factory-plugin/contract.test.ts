@@ -57,6 +57,15 @@ async function contract() {
   return import('./contract.js')
 }
 
+/**
+ * The hook-to-span mapper. The contract owns the id derivation, but the mapper is the only place
+ * that names the two roles of a turn, so the contract's guarantee about the two spans of one turn
+ * is observed through it.
+ */
+async function mapper() {
+  return import('./mapper.js')
+}
+
 /** Every module specifier the file imports or re-exports, including type-only and dynamic imports. */
 function importSpecifiers(source: string): string[] {
   const file = ts.createSourceFile('contract.ts', source, ts.ScriptTarget.Latest, true)
@@ -179,5 +188,32 @@ describe('the Factory wire contract v1', () => {
       (specifier) => !specifier.startsWith('node:') && !specifier.startsWith('.'),
     )
     expect(offenders, `contract.ts must not import a package; found ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('the two spans of one turn carry different span ids and one trace id', async () => {
+    // The contract's id derivation gives the two spans of one turn two span ids and one trace id.
+    // What the two roles must never share is the span id: a shared one lets the completion
+    // replace the prompt. What they must always share is the trace id: a turn's prompt and its
+    // completion are one unit of work.
+    const { mapHookEvent } = await mapper()
+    const prompt = mapHookEvent({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION,
+      message_id: ANCHOR,
+    })
+    const completion = mapHookEvent({
+      hook_event_name: 'Stop',
+      session_id: SESSION,
+      message_id: ANCHOR,
+    })
+    expect(prompt, 'the spans of the prompt').toHaveLength(1)
+    expect(completion, 'the spans of the completion').toHaveLength(1)
+    const promptSpan = prompt[0]
+    const completionSpan = completion[0]
+    expect(promptSpan.spanId).toMatch(/^[0-9a-f]{16}$/)
+    expect(completionSpan.spanId).toMatch(/^[0-9a-f]{16}$/)
+    expect(completionSpan.spanId, 'the completion span id').not.toBe(promptSpan.spanId)
+    expect(promptSpan.traceId).toMatch(/^[0-9a-f]{32}$/)
+    expect(completionSpan.traceId, 'the trace id of the turn').toBe(promptSpan.traceId)
   })
 })
