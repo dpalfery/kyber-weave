@@ -22,10 +22,16 @@ public enum McpConfigurationShape
 }
 
 /// <summary>How a harness's JSON server entry holds the launch command.</summary>
+/// <remarks>
+/// This describes the <em>JSON</em> entry body. A TOML row carries it because it has no JSON body to
+/// describe, and its reader reads the table's <c>command</c> regardless; which is why the check
+/// decides what to compare from the read it made and not from this value. Two rows share
+/// <see cref="McpEntryCommandShape.Undetermined"/> and only one of them has a body nothing reads.
+/// </remarks>
 public enum McpEntryCommandShape
 {
     /// <summary>
-    /// The entry body is either absent (TOML, repository settings) or unpinned in this
+    /// This row's JSON entry body is either absent (repository settings) or unpinned in this
     /// repository (ZCode), so a wired entry is compared by name only.
     /// </summary>
     Undetermined,

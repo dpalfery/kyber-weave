@@ -806,6 +806,60 @@ public sealed class McpWiringInspectorTests : IDisposable
         Assert.Equal(McpWiringKind.NotWired, finding.Kind);
     }
 
+    /// <summary>
+    /// A Codex entry that names another binary is a difference, not a pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The entry body is read — the TOML reader reads the table's <c>command</c> — so the comparison
+    /// the specification asks for applies: name the declaration and the wired command and report
+    /// <c>KW-MCP-WIRE-002</c>. Skipping it because the catalog marks the row's command shape
+    /// undetermined reported a server wired to <c>ls</c> as <c>ok</c>: the executable that check
+    /// looked at was the wired entry's own, and it resolved, so nothing was reported at all.
+    /// </para>
+    /// <para>
+    /// Arguments are not compared here, because this reader does not read them. The wired executable
+    /// is the whole of what the body established, and it is what the difference is about.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ACodexEntryNamingAnotherBinaryIsADifference()
+    {
+        McpWiringFixture.WriteText(Repo,
+            ".codex/config.toml",
+            string.Join('\n', "[mcp_servers.kyber-weave]", "command = \"ls\""));
+        McpWiringFixture.WriteExecutable(Bin, "ls");
+
+        McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
+
+        McpWiringFinding finding = SingleFindingFor(report, Codex);
+        Assert.Equal(McpWiringKind.CommandDiffers, finding.Kind);
+        Assert.Equal(CommandDiffersCode, finding.Code);
+        Assert.Contains($"'{BinaryName} --repo-root .'", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("'ls'", finding.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A ZCode entry body is compared by name alone, however its command reads.
+    /// </summary>
+    /// <remarks>
+    /// This is the other half of the rule above: the comparison happens when the body was read, and
+    /// a body the catalog pins nowhere is never read. ZCode's entry body inside <c>mcp.servers</c> is
+    /// recorded as pinned nowhere in this repository (the archived design's DG3, decided as DD18), so
+    /// comparing an argv nobody verified against the declaration would report a difference the
+    /// specification does not ask for.
+    /// </remarks>
+    [Fact]
+    public void AZCodeEntryBodyIsComparedByNameOnly()
+    {
+        McpWiringFixture.WriteText(Repo, "zcode.json", ZCodeServersDocument("/somewhere/else"));
+        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+
+        McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
+
+        AssertNoFindingFor(report, ZCode);
+    }
+
     private McpWiringReport Inspect(McpConfig config, params string[] searchPaths) =>
         McpWiringInspector.Inspect(Repo, config, new LaunchCommandResolver(searchPaths));
 

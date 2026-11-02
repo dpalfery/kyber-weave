@@ -200,7 +200,7 @@ public static class McpWiringInspector
 
         if (detection.Wired &&
             detection.LaunchCommand is { Count: > 0 } wiredCommand &&
-            !MatchesDeclaredCommand(entry, wiredCommand, server.Command))
+            !MatchesDeclaredCommand(entry, wiredCommand, server.Command, detection.LaunchCommandComplete))
         {
             return new McpWiringFinding(
                 McpWiringKind.CommandDiffers,
@@ -296,16 +296,24 @@ public static class McpWiringInspector
     /// substitutes nothing, and an agent reading it would be pointed at a directory literally named
     /// <c>${workspaceFolder}</c>. Everything else compares exactly.
     /// </para>
+    /// <para>
+    /// Only what was read is compared. <paramref name="complete"/> is false when the reader
+    /// established the entry's executable and not its arguments, and the comparison is then against
+    /// the declared executable alone: the wired command is a prefix of the declaration, and a
+    /// difference is reported only when that prefix differs. Without the flag, every entry a partial
+    /// reader touched would compare as a shorter argv and be reported as a difference nobody saw.
+    /// </para>
     /// </remarks>
     private static bool MatchesDeclaredCommand(
         HarnessMcpEntry entry,
         IReadOnlyList<string> wired,
-        IReadOnlyList<string> declared)
+        IReadOnlyList<string> declared,
+        bool complete)
     {
-        if (wired.Count != declared.Count)
+        if (wired.Count > declared.Count || (complete && wired.Count != declared.Count))
             return false;
 
-        for (int index = 0; index < declared.Count; index++)
+        for (int index = 0; index < wired.Count; index++)
         {
             if (!TokenMatches(entry, declared[index], wired[index]))
                 return false;
@@ -388,7 +396,7 @@ public static class McpWiringInspector
                     // The scanner answers which tables a document declares and nothing about their
                     // bodies, so a header alone says only that the name is there. What the check has
                     // to know is whether a launch is there, and that is read from the table.
-                    return FromEntryBody(entry, server, ReadTomlEntryBody(tomText, entry.ServerKeyPath, server.Name));
+                    return FromEntryBody(server, ReadTomlEntryBody(tomText, entry.ServerKeyPath, server.Name));
 
                 case McpConfigurationShape.Json:
                     using (JsonDocument? document = ReadJson(file.AbsolutePath))
@@ -402,7 +410,7 @@ public static class McpWiringInspector
                         if (!TryFindEntry(document.RootElement, entry.ServerKeyPath, server.Name, out JsonElement wired))
                             continue;
 
-                        return FromEntryBody(entry, server, ReadEntryBody(wired, entry.CommandShape));
+                        return FromEntryBody(server, ReadEntryBody(wired, entry.CommandShape));
                     }
 
                 default:
@@ -427,24 +435,33 @@ public static class McpWiringInspector
     /// an entry that names no launch command is.
     /// </summary>
     /// <remarks>
-    /// A row whose <see cref="HarnessMcpEntry.CommandShape"/> is
-    /// <see cref="McpEntryCommandShape.Undetermined"/> keeps only the executable: the catalog records
-    /// that harness's entry body as pinned nowhere in this repository, so comparing an argv read
-    /// here against the declaration would report a difference nobody verified the meaning of. The
-    /// executable is enough to answer the question the body is read for — whether the binary a
-    /// launch would run is there.
+    /// <para>
+    /// What is compared is what was read. A readable body names a launch, so its command is compared
+    /// with the declaration; a body that is pinned nowhere was never read, so only the name can be
+    /// compared. That distinction is a property of the read rather than of the catalog row, which is
+    /// why it is decided here and not from <see cref="HarnessMcpEntry.CommandShape"/>: two rows share
+    /// the undetermined shape and only one of them has a reader, so deciding from the shape skipped
+    /// the comparison for the row whose body <em>is</em> read — and a Codex table naming <c>ls</c>
+    /// reported as wired, because the executable that check resolved was the wired entry's own.
+    /// </para>
+    /// <para>
+    /// A body that names only its executable is compared by that token, and
+    /// <see cref="Detection.LaunchCommandComplete"/> says so. The declaration's arguments are
+    /// compared only where the body's reader established arguments; claiming a difference against
+    /// arguments nobody read would report a fault in the file for a gap in this reader.
+    /// </para>
     /// </remarks>
     private static Detection FromEntryBody(
-        HarnessMcpEntry entry,
         RequiredMcpServer server,
         EntryBody body) =>
         body.Reading switch
         {
             McpEntryReading.Readable => new Detection(
                 true,
-                entry.CommandShape == McpEntryCommandShape.Undetermined ? null : body.Tokens,
+                body.Tokens,
                 null,
-                Executable: body.Tokens[0]),
+                Executable: body.Tokens[0],
+                LaunchCommandComplete: body.ArgumentsRead),
             McpEntryReading.Unpinned => new Detection(true, null, null),
 
             // The entry exists but cannot start anything. It stays a KW-MCP-WIRE-001 gap and not a
@@ -573,7 +590,8 @@ public static class McpWiringInspector
     /// document is closed, and this only has to know where that table's region ends and what it
     /// names as its command. Anything it does not recognise answers an unreadable body, which the
     /// caller reports as a gap. Arguments are deliberately not read — they do not decide whether an
-    /// entry can launch, and this repository pins no full argv for the harness to compare against.
+    /// entry can launch — so the body it answers says its arguments were not read, and the caller
+    /// compares the executable against the declaration and nothing more.
     /// </para>
     /// </remarks>
     private static EntryBody ReadTomlEntryBody(
@@ -608,7 +626,7 @@ public static class McpWiringInspector
             }
 
             return ReadTomlString(line[(assignment + 1)..]) is { } command
-                ? EntryBody.FromCommandLine([command])
+                ? EntryBody.FromCommandLine([command], argumentsRead: false)
                 : EntryBody.Unreadable;
         }
 
@@ -1103,13 +1121,19 @@ public static class McpWiringInspector
     /// repair names the same distinction for the same file.
     /// </param>
     /// <param name="Executable">
-    /// The program a launch of the wired entry would run, when the check could read it. Kept apart
-    /// from <paramref name="LaunchCommand"/> because an entry body can name its executable without a
-    /// full argv the catalog pins far enough to compare.
+    /// The program a launch of the wired entry would run, when the check could read it. It is what the
+    /// binary-resolution check tests, which is a question about one token rather than about the
+    /// argv: a body that names its executable and nothing else still answers it.
     /// </param>
     /// <param name="EntryUnlaunchable">
     /// Whether an entry exists but names no launch command this check could read. That is a gap, not
     /// a pass, and it is not one a second entry can repair.
+    /// </param>
+    /// <param name="LaunchCommandComplete">
+    /// Whether <paramref name="LaunchCommand"/> is the entry's whole argv. It is not when the reader
+    /// established the executable and nothing else — Codex's TOML table, whose reader reads
+    /// <c>command</c> and not <c>args</c> — and the comparison is then against the declared
+    /// executable alone rather than a difference claimed against arguments nobody read.
     /// </param>
     private readonly record struct Detection(
         bool Wired,
@@ -1117,7 +1141,8 @@ public static class McpWiringInspector
         string? Refusal,
         McpLinkProbe Obstruction = default,
         string? Executable = null,
-        bool EntryUnlaunchable = false);
+        bool EntryUnlaunchable = false,
+        bool LaunchCommandComplete = true);
 
     /// <summary>What reading one entry body established about the launch it names.</summary>
     private enum McpEntryReading
@@ -1142,7 +1167,15 @@ public static class McpWiringInspector
     /// <summary>The launch command an entry body names, or why it names none.</summary>
     /// <param name="Reading">What reading the body established.</param>
     /// <param name="Tokens">The command's argv, empty unless <paramref name="Reading"/> is readable.</param>
-    private readonly record struct EntryBody(McpEntryReading Reading, IReadOnlyList<string> Tokens)
+    /// <param name="ArgumentsRead">
+    /// Whether <paramref name="Tokens"/> is the whole argv rather than its executable alone. A reader
+    /// that cannot establish the arguments says so here, so the comparison is made against the part
+    /// of the declaration the body actually answered for.
+    /// </param>
+    private readonly record struct EntryBody(
+        McpEntryReading Reading,
+        IReadOnlyList<string> Tokens,
+        bool ArgumentsRead = true)
     {
         /// <summary>A body the catalog row does not pin, so only its name is compared.</summary>
         public static EntryBody Unpinned { get; } = new(McpEntryReading.Unpinned, []);
@@ -1154,10 +1187,10 @@ public static class McpWiringInspector
         /// A body's command, or the empty-command gap it is. A blank program is as unlaunchable as
         /// an empty list, and a launch of either starts nothing.
         /// </summary>
-        public static EntryBody FromCommandLine(IReadOnlyList<string> tokens) =>
+        public static EntryBody FromCommandLine(IReadOnlyList<string> tokens, bool argumentsRead = true) =>
             tokens.Count == 0 || string.IsNullOrWhiteSpace(tokens[0])
                 ? new EntryBody(McpEntryReading.EmptyCommand, [])
-                : new EntryBody(McpEntryReading.Readable, tokens);
+                : new EntryBody(McpEntryReading.Readable, tokens, argumentsRead);
     }
 
     /// <summary>
