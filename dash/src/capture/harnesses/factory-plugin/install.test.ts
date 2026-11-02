@@ -938,6 +938,38 @@ describe('the plugin KyberDash installed itself', () => {
     ])
     expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
   })
+
+  it('uninstalls the plugin the receipt proves is ours, when the marketplace registration is gone', () => {
+    const f = fixture('factory-own-plugin-uninstall-')
+    writeOwnReceipt(f)
+    // The tree is gone and the marketplace registration went with it — the harness's own
+    // teardown, or an organisation policy, removed the registration and left the plugin
+    // behind. The receipt survives, and it is the proof that the plugin is KyberDash's own.
+    f.fake.plugins.add(PLUGIN_IDENTITY)
+    f.fake.statuses.set(PLUGIN_IDENTITY, 'Enabled')
+
+    const result = uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    // The plugin is ours, so the uninstall removes it through the harness's own command.
+    // The argv is asserted exactly, and in order: the registry is READ through the
+    // harness's list commands, and the mutating command is the one that runs.
+    const commands = fakeCommandLines(f.fake).filter(
+      (line) => !line.startsWith('plugin marketplace list') && !line.startsWith('plugin list'),
+    )
+    expect(commands).toEqual([`plugin uninstall ${PLUGIN_IDENTITY} --scope user`])
+    expect(f.fake.plugins.has(PLUGIN_IDENTITY), 'the plugin is no longer installed').toBe(false)
+    // The uninstall did not take the conflict path: it does not claim the harness was left
+    // alone, and it does not throw the proof away while the plugin keeps capturing.
+    expect(result.out.join('\n')).not.toContain('left alone')
+    expect(
+      existsSync(f.receiptFile) && f.fake.plugins.has(PLUGIN_IDENTITY),
+      'the uninstall must not delete the proof and leave the plugin installed',
+    ).toBe(false)
+    expect(result.exitCode).toBe(0)
+  })
 })
 
 describe('a name the harness holds that KyberDash does not own', () => {

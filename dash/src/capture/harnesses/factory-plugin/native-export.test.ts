@@ -41,7 +41,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { readNativeExport, type NativeExportSources } from './native-export.js'
+import { readNativeExport, type NativeExportSources, type NativeExportVerdict } from './native-export.js'
 
 const tempDirs: string[] = []
 afterEach(() => {
@@ -123,6 +123,11 @@ function writeSystemTelemetry(f: Fixture, telemetry: Record<string, unknown>): v
 /** The reader, with the machine environment injected rather than read from the shell. */
 function read(f: Fixture, processEnv: NodeJS.ProcessEnv = {}) {
   return readNativeExport(f.sources, { processEnv })
+}
+
+/** The endpoint a verdict names, when it names one. */
+function endpointOf(verdict: NativeExportVerdict): string | undefined {
+  return 'endpoint' in verdict ? verdict.endpoint : undefined
 }
 
 describe("the native export's effective shape", () => {
@@ -436,5 +441,107 @@ describe('the native export verdict the shape travels with', () => {
     const f = fixture('factory-verdict-unset-')
 
     expect(read(f, {}).state).toBe('not-configured')
+  })
+})
+
+describe("the organisation's cached settings live in the harness's own directory", () => {
+  /** The endpoint the organisation pins in its cached view. */
+  const ORG_ENDPOINT = 'https://otlp.pinned.example.test/v1/traces'
+  /** The endpoint the machine variable names: this KyberDash receiver. */
+  const MACHINE_ENDPOINT = 'http://127.0.0.1:4318/v1/traces'
+
+  /**
+   * A machine whose `FACTORY_DIR` points somewhere else.
+   *
+   * `FACTORY_DIR` moves the harness's SESSIONS tree and nothing else (D55): the harness
+   * still keeps its own settings and its cached organisation settings in its OWN
+   * directory, `<home>/.factory`. The two directories are therefore separate here, and
+   * the reader is handed the redirected one as its Factory root.
+   */
+  function redirected(prefix: string): {
+    sources: NativeExportSources
+    /** The directory `FACTORY_DIR` points at. */
+    factoryDir: string
+    /** The harness's own directory. */
+    harnessDir: string
+  } {
+    const home = mkdtempSync(join(tmpdir(), prefix))
+    tempDirs.push(home)
+    const harnessDir = join(home, '.factory')
+    mkdirSync(harnessDir, { recursive: true })
+    const factoryDir = mkdtempSync(join(tmpdir(), `${prefix}factory-dir-`))
+    tempDirs.push(factoryDir)
+    return {
+      sources: { factoryRoot: factoryDir, home, platform: process.platform },
+      factoryDir,
+      harnessDir,
+    }
+  }
+
+  /**
+   * The organisation's cached view, as the harness caches it: the `managedSettings.telemetry`
+   * block under `org-managed-settings.cache.json` in the directory it was given.
+   */
+  function writeCachedOrganisationSettings(dir: string, telemetry: Record<string, unknown>): void {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'org-managed-settings.cache.json'),
+      `${JSON.stringify(
+        {
+          orgId: 'org-test',
+          userId: 'user-test',
+          managedSettings: { telemetry },
+          factoryTier: 'team_annual',
+          revision: 1,
+          cachedAt: 0,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+  }
+
+  it("reads the organisation's pin from the harness's own directory, not from the directory FACTORY_DIR points at", () => {
+    const f = redirected('factory-org-cache-own-dir-')
+    // The organisation's cached settings are where the harness writes them: in its own
+    // directory. The directory FACTORY_DIR points at holds no such file.
+    writeCachedOrganisationSettings(f.harnessDir, {
+      endpoint: ORG_ENDPOINT,
+      format: 'genai',
+      enabled: false,
+    })
+
+    const verdict = readNativeExport(f.sources, {
+      processEnv: { OTEL_TELEMETRY_ENDPOINT: MACHINE_ENDPOINT },
+    })
+
+    // The organisation's pin wins over the machine variable, so the verdict names the
+    // organisation's endpoint and never the machine's.
+    expect(endpointOf(verdict), 'the organisation pin wins over the machine variable').toBe(
+      ORG_ENDPOINT,
+    )
+    expect(endpointOf(verdict)).not.toBe(MACHINE_ENDPOINT)
+    expect(verdict.state).toBe('unavailable')
+    expect(verdict).toMatchObject({ source: 'organisation', cause: 'organisation-pinned' })
+    // The shape travels from the same cached block.
+    expect(verdict.shape.format).toEqual({ value: 'genai', source: 'organisation' })
+    expect(verdict.shape.enabled).toEqual({ value: false, source: 'organisation' })
+  })
+
+  it('does not read the organisation pin from the directory FACTORY_DIR points at', () => {
+    const f = redirected('factory-org-cache-factory-dir-')
+    // A file with that name under FACTORY_DIR is not where the harness writes its cached
+    // organisation settings, so it is not the organisation's pin.
+    writeCachedOrganisationSettings(f.factoryDir, { endpoint: ORG_ENDPOINT })
+
+    const verdict = readNativeExport(f.sources, {
+      processEnv: { OTEL_TELEMETRY_ENDPOINT: MACHINE_ENDPOINT },
+    })
+
+    expect(endpointOf(verdict), 'the file under FACTORY_DIR is not the organisation pin').not.toBe(
+      ORG_ENDPOINT,
+    )
+    expect(endpointOf(verdict)).toBe(MACHINE_ENDPOINT)
+    expect(verdict).toMatchObject({ state: 'available', source: 'OTEL_TELEMETRY_ENDPOINT' })
   })
 })
