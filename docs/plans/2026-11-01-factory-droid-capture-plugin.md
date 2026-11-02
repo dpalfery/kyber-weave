@@ -597,7 +597,7 @@ directory, and the harness's plugin cache is the harness's file.**
     ├── .factory-plugin/
     │   └── plugin.json     # Factory plugin manifest
     └── hooks/
-        ├── hooks.json      # registers the script on the seven hook events, keyed directly by event name (D53)
+        ├── hooks.json      # registers the script on the six hook events, keyed directly by event name (D53)
         └── kyberdash-factory.mjs # the bundled capture script
 ```
 
@@ -881,8 +881,11 @@ override as the cause; it never reports the native path as working when no nativ
 On this machine no organisation pins an endpoint (§2.5), so the caveat is real but not universal.
 **AMENDED (D51):** the row now reports the export's **effective shape** — format, granularity and
 the content switch beside the endpoint verdict, each resolved with Factory's own precedence rules
-— and states that the metrics are persisted, that **no native span is claimed**, and that no
-Factory content is stored while KyberDash's consent is off.
+— and states that the metrics are persisted, that **no native span is claimed**, and — in the words
+D58 fixes — that while KyberDash's consent is off, **KyberDash's own Factory capture stores no
+prompt text**. **AMENDED (D57):** the earlier *no Factory content is stored* was **false**, because
+the Factory **file source** stores the first user-message fragment whatever the consent file
+says; the row names that route separately as one the consent does **not** govern.
 
 ### 3.5 The paired Factory session (D28, D29, D30)
 
