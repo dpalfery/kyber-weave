@@ -353,7 +353,7 @@ type Classified =
   | { kind: 'foreign'; detail: string }
   | { kind: 'edited'; detail: string }
   | { kind: 'upgrade'; detail: string }
-  | { kind: 'same' }
+  | { kind: 'same'; receiptProven: boolean }
 
 /**
  * Decide what the tree is.
@@ -414,7 +414,7 @@ function classify(paths: FactoryPluginPaths): Classified {
         detail: `${superseded.join(', ')} holds the bundle KyberDash wrote before, not the current one`,
       }
     }
-    return { kind: 'same' }
+    return { kind: 'same', receiptProven: true }
   }
 
   for (const relative of FACTORY_MARKETPLACE_FILES) {
@@ -422,7 +422,8 @@ function classify(paths: FactoryPluginPaths): Classified {
       return { kind: 'foreign', detail: `${relative} is not the file KyberDash writes` }
     }
   }
-  return { kind: 'same' }
+  // The tree holds exactly what KyberDash writes, but nothing proves KyberDash wrote it.
+  return { kind: 'same', receiptProven: false }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -702,9 +703,10 @@ export function installFactoryPlugin(
     // refreshed by the harness's own command below (D65).
     writeTree(paths)
     writeReceipt(paths)
-  } else if (found.kind === 'same' && receipt === undefined) {
-    // The tree holds exactly what KyberDash writes, but nothing proves KyberDash wrote
-    // it, so the receipt that proves it for the next upgrade is written now.
+  } else if (found.kind === 'same' && !found.receiptProven) {
+    // The tree holds exactly what KyberDash writes, but nothing proves KyberDash wrote it,
+    // so the receipt that proves it — and makes the NEXT upgrade possible — is written now
+    // (D67).
     writeReceipt(paths)
   }
 

@@ -781,6 +781,24 @@ describe('the upgrade path', () => {
     expect(result.out.join('\n')).toContain(`factory plugin: would-upgrade ${f.pluginDir}`)
   })
 
+  it('writes the receipt that proves a current tree it cannot prove, so the next upgrade is possible', () => {
+    const f = fixture('factory-receipt-repair-')
+    strict(f)
+    // The receipt is gone. The tree holds exactly what KyberDash writes, but nothing
+    // proves KyberDash wrote it, and without the receipt the NEXT bundle change would
+    // make the tree foreign — refused, forever.
+    rmSync(f.receiptFile, { force: true })
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(f.receiptFile)).toBe(true)
+    expect(readReceipt(f.receiptFile).root).toBe(f.pluginDir)
+    // And the tree is still upgradeable: a later bundle is recognised as an upgrade.
+    supersede(f)
+    expect(strict(f).disposition).toBe('upgraded')
+  })
+
   it('leaves an owner-edited tree alone: that is drift, not an upgrade', () => {
     const f = fixture('factory-upgrade-edited-')
     strict(f)
