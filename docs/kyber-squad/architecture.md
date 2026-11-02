@@ -21,6 +21,7 @@ decided-by:
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
+  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
 sections:
   "#":
     keywords:
@@ -591,22 +592,28 @@ completed global copy and project import, so migration is one-shot per source:
 - A malformed or unreadable ledger is treated as empty, and a warning says so. The next successful write
   replaces it with a valid one.
 
-### Global OpenCode capture-plugin step
+### Global capture-plugin step
 
-KyberDash's OpenCode capture plugin is global capture, not a Squad pack resource, so Squad does not
-render it. After a successful `squad install --global` or `squad update --global` whose resolved
-targets include OpenCode, the command runs one KyberDash verb through an injectable process runner:
+KyberDash's capture plugins are global capture, not a Squad pack resource, so Squad does not
+render them. After a successful `squad install --global` or `squad update --global` whose resolved
+targets include a capture-plugin harness, the command runs one KyberDash verb per such harness
+through an injectable process runner. The step is **harness-aware**: the OpenCode call keeps its
+place and the Factory call follows it, each call handed its own harness's resolved global root.
 
 ```text
 kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <Squad-resolved OpenCode root>
+kyberdash kyber capture plugin install --harness factory --preserve --config-dir <Squad-resolved Factory root>
 ```
 
-- **Owner of the file.** KyberDash owns the plugin file, its receipt, and the consent file. Squad
-  passes its resolved OpenCode global root as `--config-dir`, so both agree on the path. Squad keeps
-  its own receipts for its own files and reads none of KyberDash's.
-- **Non-overwrite (C4).** Preserve mode keeps an edited or foreign plugin file with a warning. It
-  creates the consent file with content off only when that file is absent, and never touches an
-  existing one. The step never writes `opencode.jsonc`.
+- **Owner of the files.** KyberDash owns the plugin file or tree, its receipt, and the consent
+  file. Squad passes each harness's resolved global root as `--config-dir`, so both agree on the
+  path. Squad keeps its own receipts for its own files and reads none of KyberDash's. The flag is
+  the **OpenCode** root: the Factory plugin resolves under `$FACTORY_DIR` else `~/.factory`, which
+  is the root Squad resolves for Factory, so the two agree there too.
+- **Non-overwrite (C4).** Preserve mode keeps an edited or foreign plugin file or tree with a
+  warning. It creates the consent file with content off only when that file is absent, and never
+  touches an existing one. The step never writes `opencode.jsonc`, and it never writes
+  `~/.factory/settings.json` or `~/.factory/hooks.json`.
 - **Locating the verb.** `kyberdash` is found beside `kyber-weave` in the install directory, then on
   `PATH`. When it is absent, Squad logs one skip line that names `kyber-weave update`.
 - **Failure isolation.** A non-zero exit from the verb prints a warning line that names the retry
@@ -614,14 +621,29 @@ kyberdash kyber capture plugin install --harness opencode --preserve --config-di
   verb prints a named skip.
 - **Scope and opt-out.** Project-scope runs do not run the step. `--no-capture-plugin` on `squad install`
   or `squad update` skips it, and `--dry-run` passes `--dry-run` through to the verb.
-- **Consent.** Install never turns content capture on. The Settings switch (or `kyberdash kyber capture
-  enable --harness opencode`) does that. Until then the verb's own consent line, which Squad relays, says so.
-- **Guidance wording.** Squad prints no OpenCode restart line of its own. It relays the `harness opencode: `
-  lines the verb prints, and KyberDash owns their wording (ADR 0031). After an install or
-  upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
+- **Consent.** Install never turns content capture on. For OpenCode the Settings switch (or
+  `kyberdash kyber capture enable --harness opencode`) does that. For Factory the Settings switch
+  does **not**: the Factory switch installs the capture and leaves the content consent exactly as
+  the owner left it, and only `kyberdash kyber capture plugin consent --harness factory --on` (or
+  the owner editing the consent file) records the decision to capture the prompt text. The verb's
+  own consent line, which Squad relays, says so.
+- **Guidance wording.** Squad prints no OpenCode or Factory restart line of its own. It relays the
+  `harness opencode: ` lines the verb prints, and KyberDash owns their wording (ADR 0031). After an
+  install or upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
   for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.`
-- **Support.** The plugin targets OpenCode 2.x only. Squad does not check the OpenCode version before it
-  runs the verb ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+- **Support.** The OpenCode plugin targets OpenCode 2.x only. Squad does not check the OpenCode
+  version before it runs the verb
+  ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The Factory plugin
+  targets Factory's documented plugin layout
+  ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)).
+
+### The Factory plugin subtree Squad does not own
+
+Squad owns `~/.factory/droids/` and `~/.factory/skills/` under the Factory global root
+`~/.factory`. It does **not** own `~/.factory/plugins/` — that subtree is KyberDash's, and it
+holds the `kyberdash-factory` capture plugin directory. The two are distinct subtrees of the same
+root, so they cannot collide, and Squad never writes into the plugin subtree, never adopts it and
+never removes it. `squad doctor` does not check it, and `squad uninstall` does not remove it.
 
 ---
 

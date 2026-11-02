@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-02
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -116,6 +116,23 @@ file. Both also run a one-time migration: they restore the `experimental.openTel
 builds wrote into `opencode.jsonc`, from the key receipt, and drop that receipt entry. A value changed since is
 left in place with a warning. The OpenCode harness declares no key, so `status` renders no OTLP environment
 snippet for it. The key-level rules of decisions 1 to 3 still govern every other harness and this one-time restore.
+
+Amended 2026-11-02 (Factory (Droid) capture plugin, [ADR 0053](0053-factory-capture-is-a-hooks-plugin-pipeline.md)):
+Factory joins the plugin-only writers. Its capture writer owns a whole plugin **directory**,
+`~/.factory/plugins/kyberdash-factory/`, with its receipt at
+`~/.kyberdash/factory-plugin-receipt.json` and its consent file at
+`~/.kyberdash/factory-plugin.json`. It declares **no config key**, so nothing is read, written or
+receipted in a config file: `enable` installs the plugin tree and `disable` removes it. The
+owner's `~/.factory/settings.json` and `~/.factory/hooks.json` — and the project equivalents —
+are never created, read, merged, rewritten or restored, by `enable`, `disable`, Squad or
+`kyber-weave update`. Two things differ from the OpenCode writer and are deliberate: the Factory
+install is a **tree**, so its receipt records a path and a SHA-256 per file and removal requires
+every digest to match; and the Factory **Settings switch never turns the content consent on** —
+the switch installs the capture, and only the explicit consent verb
+(`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner editing the
+consent file records the decision to capture the prompt text. Nothing else in this record moves:
+the key-level rules of decisions 1 to 3 still govern every other harness, and the departure from
+ADR 0026 stays scoped to KyberDash's own plugin tree.
 
 ## Context
 
@@ -235,4 +252,6 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
   — the tray's ownership of the receiver
 - [ADR 0029: Per-Bucket, OTel-First Content Precedence](0029-kyberdash-per-bucket-otel-first-content-precedence.md)
   — how captured content is reconciled with file content
+- [ADR 0053: Factory (Droid) Capture Is a Hooks-Plugin Pipeline](0053-factory-capture-is-a-hooks-plugin-pipeline.md)
+  — the Factory writer this record's plugin-tree rules now cover
 - [KyberDash architecture](../dash/architecture.md)

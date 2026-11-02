@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 ---
 
 # Installing Kyber-Weave
@@ -465,6 +465,13 @@ run, with no second command:
 - **OpenCode capture plugin.** It runs `kyberdash kyber capture plugin install --harness opencode
   --preserve --if-installed`. An installed plugin is upgraded. A plugin you never installed is not
   added. An edited plugin file is kept with a warning.
+- **Factory capture plugin.** It runs `kyberdash kyber capture plugin install --harness factory
+  --preserve --if-installed`. An installed plugin directory is upgraded; one you never installed
+  is not added. An edited plugin directory is kept with a warning. The step relays KyberDash's
+  own Factory lines, including the consent reminder: `factory: the prompt text is captured only
+  after the content consent is turned on: kyberdash kyber capture plugin consent --harness factory --on`.
+  The update never turns the Factory content consent on — the prompt text stays uncaptured until
+  you run that verb yourself or edit `~/.kyberdash/factory-plugin.json`.
 
 `--no-restart` skips the engine and tray steps. The plugin step still runs when the plugin is
 installed. `--no-kyberdash` skips all three. A failed step is reported by name and does not roll back

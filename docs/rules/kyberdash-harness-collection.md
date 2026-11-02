@@ -4,9 +4,10 @@ title: KyberDash harness collection standard
 doc-type: rule
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-02
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
 ---
 
 # KyberDash harness collection standard
@@ -33,6 +34,7 @@ zero, never silently skipped, and never labelled complete.
 | `claude-code` | Reference harness. Counters plus content through the primary mechanism. | Measured counters and content-derived dimensions as real values. The completeness bar for every other row. |
 | `opencode` native OpenTelemetry | Not collected by design. OpenCode 2.2.x exports no usage in native spans, and no adapter claims them ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). | Documented absence. Native spans appear only as unclaimed quarantine, never as an OpenCode session, never as a zero. |
 | `opencode` V2 plugin | Contract-3 request, step and tool spans from the `kyberdash-opencode` plugin. Usage and reported cost are measured; system prompt, tool definitions, skills listing and prompt text are content, captured only under consent. | Every OpenCode request is a visible session with its usage, cost, duration and turn count. With consent off, content dimensions render `not_measurable` with a reason, never zero. Live capture is verified by the OpenCode live gate, which passed on 2026-10-31 and runs only on request. |
+| `factory` (Droid) plugin | Contract-1 session, turn, tool and child-session spans from the `kyberdash-factory` plugin. The turn boundary, the tool invocations, the timing, the model and the byte sizes are measured; the prompt text is content, captured only under consent. The plugin's hooks are the PRIMARY mechanism; the Factory file source is the **token source** — it reads the session's counters from the companion `<session-id>.settings.json`, and the plugin itself reports no counter at all. The content consent is **off by default**, and the Settings switch that installs the capture **never turns it on**: only the explicit consent verb (`kyberdash kyber capture plugin consent --harness factory --on`) or the owner editing the consent file turns the prompt recording on. This is deliberate, and it differs from OpenCode, whose switch also sets consent — it is a privacy control, so a capture install is never also a decision to record prompts. | Every Factory request is a visible session with its turn and tool structure. The token classes render `not_measurable` with a reason that names the file source and the session-id pairing as where the number comes from — never zero, and never a number borrowed from another session. A plugin session the file source also observed is the same session, joined on exact session-id equality; a near-miss id stays its own session. Live capture is proved by an owner-run check, not by CI; the recorded replay proves only what the dashboard renders from the replay. |
 | `pi` | Capture-side stopped exporter. Environment fact, not a pipeline defect. | Honest-empty with the stated reason. No fabricated values. |
 | `copilot (chat)` | Capture-side stopped exporter. Environment fact, not a pipeline defect. | Honest-empty with the stated reason. No fabricated values. |
 | `antigravity` | Capture-side stopped exporter. Environment fact, not a pipeline defect. | Honest-empty with the stated reason. No fabricated values. |

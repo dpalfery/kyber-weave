@@ -1,0 +1,146 @@
+---
+id: adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
+doc-type: adr
+status: current
+owner: dpalfery
+last-reviewed: 2026-11-02
+code-refs:
+  - droidAdapter
+  - installFactoryPlugin
+  - mapHookEvent
+  - FACTORY_CONTRACT_VERSION
+---
+
+# ADR 0053: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
+
+## Status
+
+Accepted, 2026-11-02, with the Factory (Droid) capture plan. It amends
+[ADR 0031](0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) in place for the
+Factory writer.
+
+## Context
+
+Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only
+as a **file** source, with no Settings row and no capture plugin. The file source loses the turn
+and tool timing (it splits one session-level token total evenly across the session's assistant
+calls), and the model it attributes is the session's model rather than the per-turn one.
+
+Four collection paths were available, and the choice is expensive to revisit:
+
+1. A status-only row: the harness is reported, nothing is captured.
+2. Factory's own native OpenTelemetry export: Factory's documentation confirms the endpoint is
+   configurable by machine environment variables, and `export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"`
+   is Factory's own example — the loopback address the KyberDash receiver listens on. No collector
+   is needed, because Droid pushes OTLP/HTTP directly.
+3. A merge into the owner's `~/.factory/hooks.json`.
+4. A hooks-based plugin KyberDash owns, installed into Factory's plugin directory.
+
+The native export is real, but it is tokenless by Factory's own documentation — token and cost
+data "are not exported as customer OTEL metrics" — and its `genai` format carries no subagent
+lineage: a subagent's trace is a separate trace root, so it cannot be joined to its parent's. The
+Factory transcript's own `parentId` does carry that linkage, and the plugin's `SubagentStop` event
+carries the child session id.
+
+## Decision
+
+KyberDash captures Factory through one hooks-plugin pipeline:
+
+Factory's hook events, then the Kyber-owned `kyberdash-factory` plugin, then OTLP/HTTP JSON spans
+at contract `1`, then the `droid` canon adapter, then the canonical store, then the shared
+projection, then `/api/kyber/*`.
+
+- **The owned unit is a plugin directory.** `~/.factory/plugins/kyberdash-factory/` holds
+  `.factory-plugin/plugin.json`, `hooks/hooks.json` and `hooks/kyberdash-factory.mjs`, installed
+  and removed as one unit with one receipt, `~/.kyberdash/factory-plugin-receipt.json`, which
+  records the SHA-256 digest of every file KyberDash wrote. Project scope is not used: the
+  capture is per-user, and the owner may work in many projects.
+- **The wire contract is Factory's own.** Version `1`, the `factory.*` attribute namespace, its
+  own span names (`factory.session`, `factory.turn`, `factory.tool`, `factory.child_session`),
+  and deterministic id derivations. The OpenCode contract-3 keys are not reused: the OpenCode
+  adapter claims every span carrying them, so an `opencode.*` key here would attribute every
+  Factory row to OpenCode.
+- **One canonical harness id: `droid`.** It is the id the Factory file source already stores, so
+  the dashboard shows Factory once and the plugin's turns sit beside the file source's counters.
+  One adapter, named `droid`, claims both the plugin envelope (`factory.contract_version = 1`)
+  and Factory's native `gen_ai.*` export.
+- **The plugin envelope is claimed first.** A native span for a session the plugin already covers
+  is not counted with it: it leaves the corpus for quarantine under a fixed reason, so a session
+  observed through both paths is counted once. The two are told apart by attribute fingerprint,
+  never by the span's source name.
+- **Native OpenTelemetry is an authorized second path, never the primary one.** The receiver
+  serves `POST /v1/metrics` beside `/v1/traces` and `/v1/logs`, and the `droid` adapter claims
+  the native `genai` vocabulary (`gen_ai.agent.name = droid`, `gen_ai.operation.name`,
+  `gen_ai.conversation.id` as the session id). The native path carries no token or cost counter
+  and no subagent lineage, so it complements the plugin rows and the file source's counters; it
+  replaces neither. Factory's endpoint is set by machine environment variables
+  (`OTEL_TELEMETRY_ENDPOINT` and its siblings), and an organisation-managed `telemetry` block
+  overrides them, so a deployment under such an override exports nothing locally and the plugin
+  path is unaffected.
+- **Content consent is off by default, and installing the capture never turns it on.** The
+  consent file is `~/.kyberdash/factory-plugin.json` (`{ "version": 1, "content": <boolean> }`),
+  created with `content: false` only when absent. The Settings switch installs the capture and
+  leaves the owner's decision exactly as it was; only the consent verb
+  (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner editing
+  the file records the decision to capture the prompt text. `KYBERDASH_FACTORY_CONTEXT=1|0`
+  overrides the file. This differs from the OpenCode writer, whose Settings switch does set
+  consent, and the difference is deliberate: for Factory the switch is "install the capture", not
+  "start recording my prompts".
+- **The owner's Factory files are never written.** `~/.factory/settings.json`,
+  `~/.factory/hooks.json`, `.factory/settings.json` and `.factory/hooks.json` are never created,
+  read, merged, rewritten or restored — not by enable, not by disable, not by Squad, not by
+  `kyber-weave update`. The Factory writer owns a plugin directory and a consent file, declares
+  no config key, and receipted no key.
+- **Install modes are strict and preserve.** `capture enable` refuses a foreign or owner-edited
+  plugin tree with exit 1 and writes nothing; Squad and `kyber-weave update` keep such a tree
+  with a warning and exit 0. Removal requires every recorded digest to match, so an edited file
+  is left in place.
+
+## Alternatives considered
+
+1. **A status-only row.** Rejected. It reports a harness KyberDash can already read, and leaves
+   the turn and tool timing unmeasured for the same reason as before.
+2. **Native OpenTelemetry as the primary path.** Rejected. It is tokenless by Factory's own
+   documentation, so it can never carry a session's token totals, and its `genai` format carries
+   no subagent lineage, so a subagent's turn cannot be joined to its parent. It is authorized as
+   a complementary path instead.
+3. **Merging into the owner's `~/.factory/hooks.json`.** Rejected. It edits a shared harness
+   settings file, which is exactly what ADR 0026 forbids and what ADR 0031's file-plugin
+   amendments avoid by owning a separate tree.
+4. **File-only ingest.** Rejected as an end state. It stays the token source, because it is the
+   only source of Factory's counters, but it cannot observe a turn boundary.
+5. **Reusing the OpenCode contract-3 keys.** Rejected. The OpenCode adapter claims any span
+   carrying them, so the reuse would mis-attribute every Factory row to OpenCode.
+
+## Consequences
+
+- The plugin is a one-shot process per hook event, not a long-lived one, so it parks an
+  undelivered event in a bounded file-backed spool under KyberDash's own state directory and
+  drains it on the next run. It never fails the host: every error is swallowed and the hook
+  exits 0.
+- Factory's token totals come from the file source, joined to the plugin's rows on **exact
+  session-id equality** — no fuzzy join, no time window, no counter-equality join. A plugin
+  row's own counters are never measured and never zero: it declares them `not_measurable` with
+  a reason that names the file source and the session-id pairing as where the number comes
+  from. No token value is ever fabricated and none is reported as zero.
+- The Factory file source's own even split of the session's token total across its assistant
+  calls stays as it is. It is a known lossy approximation, and the per-call data that would
+  remove it is tracked separately.
+- Where an organisation pins a telemetry endpoint, the native path is silently absent. KyberDash
+  reports what it observes — native spans arriving or not — and the plugin path is unaffected.
+- The live proof of capture is an owner-run check, like the OpenCode live gate: a live Droid
+  turn calls a model and cannot be a CI gate. The recorded replay through the production
+  pipeline proves what the dashboard renders from that replay, not that a live turn is captured.
+- Any future Factory collection source is a new decision, and it must state how it avoids double
+  counting against the plugin and the file source.
+
+## Related
+
+- [ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys](0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)
+  — the record this one amends for the Factory writer
+- [ADR 0026: Kyber Utilities Deploys Owned Files and Never Owns Harness Settings](0026-kyber-utilities-owned-files-not-settings.md)
+  — the bar on writing a shared harness settings file
+- [ADR 0048: OpenCode Capture Is a V2-Only Plugin Pipeline](0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)
+  — the precedent this pipeline follows
+- [KyberDash architecture](../dash/architecture.md) — the pipeline in detail
