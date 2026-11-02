@@ -681,7 +681,7 @@ public sealed class ProcGuardSlotTests : IDisposable
         startInfo.ArgumentList.Add("proc-guard-slot-test");
         startInfo.ArgumentList.Add(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "proc-guard.sh"));
         // The slot directory is a flag, never an environment variable, so a stray exported value cannot move the queue.
-        bool takesSlot = guardArguments.Contains("--slot");
+        bool takesSlot = guardArguments.TakeWhile(arg => arg != "--").Contains("--slot");
         for (int index = 0; index < guardArguments.Length; index++)
         {
             startInfo.ArgumentList.Add(guardArguments[index]);
