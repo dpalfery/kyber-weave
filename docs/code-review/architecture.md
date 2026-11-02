@@ -563,7 +563,7 @@ processes for this user: `node`, `nodejs`, `bun`, `deno`, `tsx`), and it fails t
 watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
 or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
 
-The `test` gate also takes the machine-wide `dotnet-test` slot (`--slot dotnet-test --slot-wait 900`). Each
+The `test` gate also takes the `dotnet-test` slot, machine-wide for one user account (the lock directory is under `$HOME`), (`--slot dotnet-test --slot-wait 900`). Each
 conductor's final council runs one full `dotnet test`, and several councils on one machine used to overlap; with the
 slot they queue, and the queued gate prints who holds it. The gate's `timeout-seconds` is 1800, the 900-second wait plus
 the 900 seconds the run had before, because the runner starts that clock when it starts the gate and cannot tell a queued

@@ -1375,7 +1375,7 @@ layers now guard against a repeat:
 
 A fourth, separate concern is load rather than runaway processes: several harnesses on one machine
 can each start a full `dotnet test` run at the same moment. Full suite runs take turns through a
-machine-wide test slot ([Taking turns: the test slot](#taking-turns-the-test-slot)).
+machine-wide test slot, shared by every process of one user account ([Taking turns: the test slot](#taking-turns-the-test-slot)).
 
 **Rule: every local test, gate and e2e command runs through the watchdog, from the repository root.**
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
@@ -1397,7 +1397,7 @@ the safety limit.
 | `--max-tree M` | 64 | Descendants of the wrapped command reach M |
 | `--timeout S` | none | S seconds of wall clock pass |
 | `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
-| `--slot NAME` | none | Takes a machine-wide slot before the command starts and queues while it is held. For full test suites only. |
+| `--slot NAME` | none | Takes a slot (machine-wide for one user account) before the command starts and queues while it is held. For full test suites only. |
 | `--slot-count N` | 1 | How many runs may hold the slot at once. Needs `--slot`. |
 | `--slot-wait S` | 540 | Queues at most S seconds, then exits 88. 0 means do not queue. Needs `--slot`. |
 | `--task LABEL` | checkout name and command | What other callers see while this run holds the slot (cut to 100 characters). Needs `--slot`. |
@@ -1427,6 +1427,7 @@ Exit codes:
 | 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
 | 88 | `--slot-wait` elapsed and every slot stayed held. The command never started. | The message names the holder (pid, task, how long it has held the slot). Wait and rerun. Do not delete the lock by hand: a lock whose process is gone is recovered by the next caller. |
 | 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
+| 143 | The guard itself was interrupted (SIGINT or SIGTERM), while queued for a slot or while the command ran; a running command's tree was killed first. A wrapped command that died of SIGTERM also exits 143, as its own code. | Someone or something stopped the run. Rerun it. |
 | any other | The wrapped command's own exit code. | Normal failure. |
 
 The watchdog (`scripts/proc-guard.sh`) is POSIX-only and runs on macOS and Linux. Windows has no
@@ -1454,7 +1455,10 @@ scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tes
   a flag only, like the caps.
 - **The slot is a lock directory.** `~/.cache/kyber-weave/test-slots/<name>.<n>.lock`, created with
   an atomic `mkdir` because macOS has no `flock`. Its `holder` file records the guard's pid and
-  process start time, the task label, the checkout and the command. The directory is per user.
+  process start time, the task label, the checkout and the command. The directory is under the user's
+  home, so the queue is machine-wide for one user account: harnesses run by different accounts on the
+  same Mac do not queue behind each other, and a second account's full run is not held back by the
+  first's. Run the harnesses that share the machine as the same user.
 - **A queued caller says who holds the slot.** It prints the holder's pid, task and how long the
   holder has had the slot, repeats that every 30 seconds, and polls every half second. It is not
   first in, first out: the first caller to retry after a release gets the slot.

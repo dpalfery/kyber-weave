@@ -145,17 +145,18 @@ each one decided its own spawn options and nothing else.
 - **The guard is only as strict as the environment it runs in.** A process started outside the
   test runner, with `deny` unset, is allowed to spawn. The watchdog and CI leftover step cover
   that case; this decision does not.
-- **Full test runs take turns on one machine.** The watchdog also carries an opt-in, machine-wide
-  test slot (`proc-guard.sh run --slot`). Load, not runaway processes, is the problem it answers:
+- **Full test runs take turns on one machine.** The watchdog also carries an opt-in test slot, machine-wide
+  for one user account (`proc-guard.sh run --slot`). Load, not runaway processes, is the problem it answers:
   several harnesses on one machine each started a full `dotnet test` run, and the overlapping runs
   slowed each other and flaked the load-sensitive classes. The slot is an atomic `mkdir` lock
-  directory under `~/.cache/kyber-weave/test-slots`, because macOS has no `flock`. A queued caller
-  names the holder, the wait is bounded by `--slot-wait` with its own exit code 88, the queue wait
-  does not count against `--timeout`, and a lock whose holder is gone is recovered. Alternatives
-  rejected: serialising every guarded command (builds and format checks do not compete with a
-  test run), and an OS-level limit, which cannot tell a full test run from other work. The count
-  and the wait are flags, never environment variables, like the caps; the runbook documents the
-  slot ([Taking turns: the test slot](../dash/runbook.md#taking-turns-the-test-slot)).
+  directory under `~/.cache/kyber-weave/test-slots`, because macOS has no `flock`. It is under
+  `$HOME`, so harnesses run by different accounts on one Mac do not queue behind each other. A
+  queued caller names the holder, the wait is bounded by `--slot-wait` with its own exit code 88,
+  the queue wait does not count against `--timeout`, and a lock whose holder is gone is recovered.
+  Alternatives rejected: serialising every guarded command (builds and format checks do not
+  compete with a test run), and an OS-level limit, which cannot tell a full test run from other
+  work. The count, the wait and the directory are flags, never environment variables, like the
+  caps; the runbook documents the slot ([Taking turns: the test slot](../dash/runbook.md#taking-turns-the-test-slot)).
 - **Windows has no watchdog.** The guard and the refusals run on every platform, and the
   ledger runs on Windows in ledger-entry-only mode: it checks the children it recorded by pid
   liveness and skips the descendant and orphan scans. It cannot tell a reused pid from its child.

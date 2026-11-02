@@ -17,6 +17,8 @@
 #   87   processes survived the command (run: only when the command itself succeeded)
 #   88   --slot-wait elapsed while every slot stayed held; the command never started
 #   124  --timeout elapsed; the whole tree was killed (same code as timeout(1))
+#   143  the guard itself got SIGINT or SIGTERM, queued or running; a running tree was killed first.
+#        A wrapped command that died of SIGTERM also exits 143, which is its own exit code.
 #   2    usage error, or fail-closed: bad root, unreadable clock or process table
 #   else the wrapped command's own exit code
 #
