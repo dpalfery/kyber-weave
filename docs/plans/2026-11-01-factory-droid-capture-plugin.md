@@ -15,9 +15,10 @@ impact-components: [KyberDash, KyberSquad]
 # Factory (Droid) capture — a hooks-based Factory plugin and a KyberDash Settings row for Factory
 
 **Status: Ready — approved for execution 2026-11-01 (D22).** Execution authority is the task
-list in §5: T1–T21, each with its RED/GREEN split, acceptance criteria and test command. The
+list in §5: T1–T21, plus the rework tasks T22–T30 added by the D28–D32 amendments below, each
+with its RED/GREEN split, acceptance criteria and test command. The
 conductor dispatches them; no task runs before it does. The reconciliation of the external
-evidence digest and the local-environment digest (D12, D23–D26, A1–A8) is folded into this
+evidence digest and the local-environment digest (D12, D23–D26, A1–A10) is folded into this
 version; the two documentation checks must be re-run by the conductor after these edits, because
 the architect session cannot run them (§2.1).
 
@@ -28,6 +29,36 @@ status vocabulary is closed (`current`, `draft`, `needs-review`, `superseded` �
 (`products/kyber-squad/agents/architect/references/plan-authoring.md`, "Start or resume"), so
 **Ready** is this plan's lifecycle state, and the `## Active Plans` row in
 `docs/plans/README.md` states it.
+
+**Amendment (D28–D30, T22–T26).** The pairing test written under T13
+(`dash/src/canon/sessions.droid-pairing.test.ts`) proved three gaps in this plan's accounting
+rules, and this amendment decides them. **D28** states the Factory source-precedence rule — in a
+`droid` session holding both plugin rows and file rows, the plugin rows are the session's turns
+and the file rows are its counters, and neither source is counted twice. **D29** moves the child
+session's token source from the parent's `childInclusiveTokenUsageBySessionId` map to the child's
+**own** companion file, which changes D25's meaning. **D30** requires the plugin adapter's four
+`not_measurable` reasons to name the file-source pairing, which D8 and D9 already required and the
+shipped wording did not. D21's scope boundary is amended by the same stroke: a droid-scoped change
+to the shared projection's session derivation is now in scope, and nothing else is. The plan's
+lifecycle state is unchanged (**Ready**): this is the scope decision T13's acceptance criteria
+required before a projection change was made, recorded as a decision and dispatched as ordinary
+tasks. The `## Design harvest` table keeps every row it had and gains two (H13, H14). Provenance:
+**autonomous: recommendation accepted**.
+
+**Amendment 2 (D31, D32, T27–T30).** The native-OpenTelemetry group (T15/T16) is implemented and
+green, and the implementer flagged two seams where the production path differs from the tested
+path. **D31** decides where Factory's native OTLP metrics GO: a new canon store table,
+`otel_metric`, holding the decoded metric points, written by the production sink through a new
+canon-layer module; the canon projection does **not** consume metrics in this branch (a todo); and
+the writer's "never accepted-and-dropped" rule does **not** change. **D32** decides the status
+rule at the normalization seam: an error status is never downgraded, so the `droid` adapter's
+`error.type` status survives into the stored record — a rule that is inert for every other
+harness, because the `droid` adapter is the only adapter that assigns a status. The amendment also
+records two further divergences the implementer did not flag (the persisted-fact hook omits
+metrics, so a metrics-only commit never moves the receiver's last-persisted fact; and the metrics
+path has no test below the receiver's decode seam), and the harvest table gains two rows (H15,
+H16). The plan's lifecycle state is unchanged (**Ready**). Provenance:
+**autonomous: recommendation accepted**.
 
 **Development mode:** `test-first` (supplied in the packet). **Autonomy:** `autonomous` (supplied
 in the packet; matches the repository root `AGENTS.md` Config Reg `<autonomy>`).
@@ -107,7 +138,9 @@ and its index registration, over a CodeGraph-indexed checkout:
 
 So the plan and its index row are schema-conformant and drift-free. The two checks must be re-run
 after every further change to this plan or to the index, because the architect session cannot
-run them itself.
+run them itself. **The D28–D30 and D31–D32 amendments are such changes**: the two checks must be
+re-run by the conductor against this amended plan, for the same reason and with the same
+`--merge-ready` gate (the plan still sits in the active plans folder, so `mergeReady` stays false).
 
 ### 2.2 What the repository already provides (the reusable seams)
 
@@ -160,6 +193,7 @@ child-session rules.
 | **No `~/.factory/hooks.json`** exists on this machine, and there is no `~/.factory/plugins/hooks` | The byte-identity criterion must still be proven for an owner who *does* have one: the test **creates** `~/.factory/hooks.json` (and a project `.factory/hooks.json`) and proves both are byte-identical after install, enable, disable and uninstall (T7) |
 | `~/.factory/settings.json` exists and its keys are `compactionModel`, `compactionTokenLimit`, `keepAwakeEnabled`, `logoAnimation`, `missionModelSettings`, `sessionDefaultSettings`, `subagentModelSettings`, `trustedFolders`. **There is no top-level `model` key**; the model lives in nested blocks (`sessionDefaultSettings.model`, `missionModelSettings.workerModel`, `subagentModelSettings.{light,medium,heavy}Model`, `compactionModel`) | **The issue's premise is wrong about this file's shape.** The model-resolution chain is corrected in D24; no nested settings block is ever read as "the model" |
 | Every session directory holds a `<session-id>.settings.json` beside `<session-id>.jsonl`, with keys `model` (`minimax-m3.1-flash`), `tokenUsage` (`inputTokens`, `outputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `thinkingTokens`, `factoryCredits`), `lastCallTokenUsage`, `inclusiveTokenUsage`, `childInclusiveTokenUsageBySessionId`, `providerLock`, `apiProviderLock`, `toolExecutionModeModelId`, `reasoningEffort`, `interactionMode`, `autonomyLevel`, `artifacts`, `allowSubagentsInScripts`, `compactionThresholdCheckEnabled`, `specModeModel` | The companion file — **not** `~/.factory/settings.json` — is the token and model source, which is what `dash/src/providers/droid.ts:129-135` already reads. D9 stands and is strengthened. `childInclusiveTokenUsageBySessionId` gives child-session tokens keyed by child session id (D25) |
+| A Factory **child (subagent) session is a first-class session on disk**: the parent session `5f50fd96-…`'s companion file names the child `bfde2f1a-…` with input 368047 / output 41735 / cacheRead 1617280, and the child's **own** `<child-id>.settings.json` beside its own `<child-id>.jsonl` carries exactly those counters. The child's transcript's `session_start` names the child's id and its `callingSessionId` names the parent; the parent's `inclusiveTokenUsage` (369300 / 47551 / 1938106) equals the parent's own `tokenUsage` (1253 / 5816 / 320826) plus every child's entry | The child session is discovered by the file source as its own session, so a child's tokens come from **its own** companion file through the ordinary exact-id pairing (D29) and **no file-import change is needed**; the parent's `childInclusiveTokenUsageBySessionId` map is the parent's aggregate view of its children, never a token source, and a child's usage is never folded into the parent's totals. The characterization test that pins the map as ignored stays correct and unchanged (A9, A10) |
 | Each transcript record carries `type` (`session_start`), `id`, `timestamp`, `message`, `seq`, `parentId`, `messageIndex`, `title`, `cwd`, `hostId`, `turnId`, `reason`, `resultKind`; an assistant `message` carries `modelId` (`minimax-m3.1-flash`), `apiProvider` (`fireworks`), `reasoningEffort`, `userMessageSource`, `openaiMessageId`. **No `usage` field exists on any message** | The per-message model is `message.modelId`, the third link of D24's chain. `parentId` gives parent/child turn linkage that the native `genai` OTLP format does not carry (D2) |
 | `~/.factory/org-managed-settings.cache.json` holds `factoryTier` (`team_annual`) and a `managedSettings` object with **only** `modelPolicy` and `routedModelVisibilityPolicy` — **no `telemetry` block** | For this user no organisation pins an endpoint, so a machine environment variable would take effect. The org-override caveat (D12, D26) is real but not universal |
 | The installed Factory CLI reports version **1.1.0** | The version is recorded in the status surface and the live check so a future Factory change is diagnosable |
@@ -189,13 +223,18 @@ child-session rules.
 | D18 | Does Squad / `kyber-weave update` install the plugin? | **Yes, in preserve mode, exactly as the OpenCode plugin is installed.** `KyberDashCapturePluginStep` runs `kyberdash kyber capture plugin install --harness factory --preserve --config-dir <factory global root>` after a global Factory deploy; `SelfUpdater` runs the same with `--if-installed`. The Settings row carries a manual note naming both. | The Factory global root is `~/.factory` with no environment override (`src/KyberWeave.Core/Squad/Deployment/SquadGlobalRoots.cs:24,54,124`), and Squad already owns `~/.factory/droids/` and `~/.factory/skills/` — the plugin directory is a third, distinct subtree, so no collision (`docs/kyber-squad/onboarding.md:576`). The step never changes Squad's exit code. | ANSWERED — autonomous: decided from the OpenCode step (`KyberDashCapturePluginStep.cs:161-169`) and the Factory global-root rule |
 | D19 | Documentation impact | **`extends-component`; `impact-components: [KyberDash, KyberSquad]`.** A new ADR records the Factory capture decision; ADR 0031 is amended in place for the Factory row. | The choice — a hooks plugin and a Kyber-owned plugin directory rather than a settings edit or a native-OTel dependency — constrains future Factory work and had viable rejected alternatives. The KyberSquad component is touched only by the global-install step and its documentation. | ANSWERED — autonomous: decided from the ADR criteria and the repository's scale vocabulary |
 | D20 | Live verification | **A live Droid turn is an owner live check, not a CI gate.** The automated proof is the unit suite plus a replay e2e through the production pipeline. The live procedure (install, one scripted turn, read the dashboard) is documented in the runbook and executed by the owner. | The OpenCode live gate is likewise owner-run and never part of the test suite (`docs/dash/runbook.md` §1b). A live check that calls a model cannot be a CI gate. | ANSWERED — autonomous: decided from the OpenCode precedent |
-| D21 | Scope boundaries | **Out of scope:** the sibling coverage gap named in the issue (Cursor, Warp, ZCode, Devin, Command Code) — captured as a todo under the todo index, not implemented here; a Factory *file* import rewrite (the even token split in `providers/droid.ts` stays as it is, with a follow-up todo filed — see the supporting column); any change to the shared projection's session-derivation rules; any change to `dash/web` or `dash/tray`; Factory's own `settings.json`/`hooks.json` content. | The issue names the sibling gap as a separate concern. On the even split: the local evidence shows the companion `<session-id>.settings.json` carries **`lastCallTokenUsage`** and **`childInclusiveTokenUsageBySessionId`** beside `tokenUsage`, so the even split of the session total across assistant calls (`dash/src/providers/droid.ts:196-232`) is a **known lossy approximation** that better per-call data exists for — not an accident. It stays out of scope for this plan (the plugin work does not depend on it), but T20 must file a todo under the todo index recording the loss and the two fields that would remove it, so the limitation is tracked rather than forgotten. | ANSWERED — autonomous: decided; the even-split follow-up is recorded as a todo requirement in T20 |
+| D21 | Scope boundaries | **Out of scope:** the sibling coverage gap named in the issue (Cursor, Warp, ZCode, Devin, Command Code) — captured as a todo under the todo index, not implemented here; a Factory *file* import rewrite (the even token split in `providers/droid.ts` stays as it is, with a follow-up todo filed — see the supporting column); any change to `dash/web` or `dash/tray`; Factory's own `settings.json`/`hooks.json` content. **AMENDED (D28): any change to the shared projection's session-derivation rules** is no longer out of scope without limit — **one droid-scoped change is now in scope**, the Factory source-precedence rule (D28), and it is inert for every other harness. Every other projection change stays out of scope. | The issue names the sibling gap as a separate concern. On the even split: the local evidence shows the companion `<session-id>.settings.json` carries **`lastCallTokenUsage`** and **`childInclusiveTokenUsageBySessionId`** beside `tokenUsage`, so the even split of the session total across assistant calls (`dash/src/providers/droid.ts:196-232`) is a **known lossy approximation** that better per-call data exists for — not an accident. It stays out of scope for this plan (the plugin work does not depend on it), but T20 must file a todo under the todo index recording the loss and the two fields that would remove it, so the limitation is tracked rather than forgotten. **AMENDED (D29):** of those two fields, `lastCallTokenUsage` is the better per-call data; `childInclusiveTokenUsageBySessionId` is the parent's aggregate of its children (A9), not a per-call breakdown, so the todo's evidence is the `lastCallTokenUsage` field. The projection carve-out is narrow on purpose: the T13 test proved that the plugin's and the file's rows cannot be reconciled by any join, so one harness needs one explicit rule, and the alternative — making every file-sourced record in the corpus declare `token_usage` as measured — would change every harness's published declarations to fix a Factory problem. | ANSWERED — autonomous: decided; the even-split follow-up is recorded as a todo requirement in T20; the projection carve-out is **amended** by D28 |
 | D22 | The plan's own approval gate | **APPROVED. The plan moves to Ready and is executable; execution authority is the task list in §5.** Scale `extends-component` with `impact-components: [KyberDash, KyberSquad]`, `development-mode: test-first` and `autonomy: autonomous` are confirmed. Every autonomous row D0–D27 is accepted as recorded, including the five rows added by the reconciliation (D23–D27) and the correction of the model-resolution rule (D24). No task runs until the conductor dispatches it. | The conductor supplied explicit `AUTONOMOUS_APPROVAL: approve-and-execute` under resolved autonomy `autonomous` (repository root `AGENTS.md` Config Reg). `products/kyber-squad/agents/architect/references/plan-authoring.md` ("Ready and finalization"). The two documentation checks had already been run by the conductor against this plan and index (`docs validate .` and `docs drift .`: 0 errors, 0 warnings, 150 documents) and must be re-run after the reconciliation edits, since the architect session cannot run them. | ANSWERED — autonomous: recommendation accepted (`AUTONOMOUS_APPROVAL: approve-and-execute`) |
 | D23 | Double counting between native spans and plugin rows in the same `droid` bucket | **Precedence rule, in this order: (1) the plugin envelope is claimed first; (2) a native `genai` span is claimed only when the session has no plugin rows; (3) a native span for a session that already has plugin rows is NOT summed with them — it is attributed to the session as corroborating evidence and excluded from the session's turn, tool and duration totals.** The adapter distinguishes the two sources by their attribute fingerprints, never by name: the plugin envelope carries `factory.contract_version = 1` plus a `factory.` marker; a native span carries `gen_ai.agent.name = 'droid'` and `gen_ai.operation.name` and **no** `factory.` attribute. | The native `gen_ai.conversation.id` **is** the Droid session id, and `session.id` is present on every native data point, so a native span and a plugin row are joinable to the same session and the same turn — summing them would double count turns, tools and duration. The native format also has no per-turn identity that matches the plugin's, and no subagent lineage at all (D2). The rule is deterministic, testable at the adapter seam, and stated in the ADR before the branch ships (H11). The consequence for the dashboard: a session with plugin rows shows the plugin's turns and tools; a native span for that session is visible as evidence (the claim is recorded) but adds no turn, no tool and no duration. | ANSWERED — autonomous: decided from the native attribute vocabulary (D12) and the existing no-double-count rule the OpenCode pipeline follows |
 | D24 | How is the model resolved? (The issue's premise is wrong about the settings file's shape.) | **Corrected chain, in order: (1) the model on the hook payload, when the event carries one; (2) the companion per-session file `<session-id>.settings.json`'s `model` key; (3) the transcript's per-assistant-record `message.modelId`; (4) otherwise the model is ABSENT — never guessed, never defaulted, and never taken from a nested block of `~/.factory/settings.json`.** The plugin itself resolves (1) and (2); (3) is the file source's, which already reads the same companion file. | The local evidence shows `~/.factory/settings.json` has **no top-level `model` key** — the model lives in nested blocks (`sessionDefaultSettings.model`, `missionModelSettings.workerModel`, `subagentModelSettings.{light,medium,heavy}Model`, `compactionModel`), so the issue's "otherwise the `model` in `~/.factory/settings.json`" would have read a key that does not exist and, worse, would have had to guess among nested blocks (a subagent's `mediumModel` is not the parent's model). The companion per-session file carries the session's actual `model` (`minimax-m3.1-flash` on this machine), and the transcript carries `message.modelId` per assistant record. The plugin reads the companion file **read-only** for this one key; it never writes it, and the token counters stay the file source's job (D9). Reading a file is not reading the owner's settings for a *write* purpose, so ADR 0026 is not engaged. | ANSWERED — autonomous: decided from the local environment evidence (the actual file shapes) |
-| D25 | Child (subagent) sessions and their tokens | **A child session's tokens are paired from the companion file's `childInclusiveTokenUsageBySessionId`, keyed by the child session id.** A child session whose id is **not** in that map reads `not_measurable` with a stated reason; one that is in the map is paired, and the pairing is exact-match only. The plugin's `SubagentStop` event supplies the child session id; the parent-child linkage is exact-match only, and a child with no linkable parent stays an unlinked child, never a fabricated one. | The local evidence shows the companion file carries `childInclusiveTokenUsageBySessionId` — child-session token usage is locally available, keyed by child session id, so the honest-unobservability rule for child rows can be stated precisely instead of blanket "not measurable". The native `genai` format carries no subagent lineage at all (D2), which is a further reason the plugin path is primary. `DROID_PARENT_SESSION_ID` is a machine environment variable that adds `parent_session.id` for linking headless/CI sub-sessions **across processes** — it is not a subagent-to-parent link within a session, so it is not used for this. | ANSWERED — autonomous: decided from the local environment evidence and Factory's data reference |
+| D25 | Child (subagent) sessions and their tokens | **AMENDED (D29) — this row's subject changes: a child session's tokens are paired from the child's OWN companion file, not from the parent's child-usage map.** A child session's tokens are paired from **its own** `<child-id>.settings.json`, through D8's exact session-id pairing: a Factory child session is a first-class Factory session with its own transcript and its own companion file, the file source discovers it as its own session, and the plugin's `SubagentStop` span carries the same child session id — so the child's plugin rows and the child's file row pair by exact id, exactly as any other Factory session pairs. A child session whose own companion file is absent (or carries no `tokenUsage`) reads `not_measurable` with a stated reason; it never borrows the parent's counters and never borrows another child's. The parent's `childInclusiveTokenUsageBySessionId` map is **not** a token source, and a child's usage is never folded into the parent's session totals. The plugin's `SubagentStop` event still supplies the child session id; the parent-child linkage is exact-match only, and a child with no linkable parent stays an unlinked child, never a fabricated one. | The original row's subject was the parent's `childInclusiveTokenUsageBySessionId` map, on the evidence that the companion file carries it. That evidence holds, and it shows something the original row missed: the map is the parent's **aggregate view** of its children, and on this machine each entry is byte-for-byte the child's own companion-file counters, while the parent's `inclusiveTokenUsage` is the parent's own `tokenUsage` plus every child's entry (A9). The child session is therefore already a session the file source discovers, with its own usage already stated by its own file — so the child pairing needs **no file-import change at all**, and D21's boundary holds untouched. Folding a map entry into the parent would double count the child's tokens (they are the child session's own totals); folding it into the child would give the child a second source for a number its own file already states. The native `genai` format carries no subagent lineage at all (D2), which is a further reason the plugin path is primary. `DROID_PARENT_SESSION_ID` is a machine environment variable that adds `parent_session.id` for linking headless/CI sub-sessions **across processes** — it is not a subagent-to-parent link within a session, so it is not used for this. The characterization test that pins the map as ignored (`dash/src/providers/droid.test.ts:274`) stays exactly as it is: under this rule its title and its assertions are both correct. | ANSWERED — autonomous: **amended** by D29; the original answer (the parent's child-usage map as the source) is superseded by the child's own companion file, on the local evidence in A9 |
 | D26 | What does KyberDash report when an organisation pins a telemetry endpoint? | **The native path is reported as unavailable, never as working.** The Factory row's status states that native OpenTelemetry export is configured by machine environment variables, that an organisation-managed `telemetry` block **overrides** those variables, and that where it does, Droid sends nothing to the local receiver — so the plugin path is the only capture path in that deployment. The status never claims the native path is available; it reports what is observed (native spans arriving or not) and names the override as the reason a deployment sees none. | Org-managed values override the machine environment variables, and a missing `${VAR}` reference disables the customer sink for that session — so a developer whose organisation pins an endpoint gets **no local export, silently**. The local evidence shows this user's org cache holds only `modelPolicy` and `routedModelVisibilityPolicy` and **no `telemetry` block**, so the caveat is real but not universal on this machine. The machine variables are documented as advisory ("Environment variables live on the developer's machine, which makes them advisory"), and only the org-managed `telemetry` block is a manager capability (`Settings → Enterprise Controls → Raw Configuration`). KyberDash cannot read an organisation's managed settings, so the honest report is the observed behaviour plus the named cause, not a guess about the organisation's configuration. | ANSWERED — autonomous: decided from the research digest's org-override rule and the local org-cache evidence |
 | D27 | How is the Ready lifecycle state represented, given the ontology's closed status vocabulary? | **The frontmatter `status` stays inside the vocabulary — `current` — and the plan's lifecycle state is stated in the body, which is authoritative.** The body status line reads "Ready — approved for execution 2026-11-01 (D22)", and the `## Active Plans` row in `docs/plans/README.md` shows Ready. A `status: ready` frontmatter would be a `docs validate` error, because the ontology's vocabulary is `current`, `draft`, `needs-review`, `superseded` and any other value is `InvalidVocabulary` at Error severity. | `src/KyberWeave.Core/Configuration/OntologyConfig.cs:30-31` (the default status vocabulary) and `src/KyberWeave.Core/Docs/Validation/DocSpecValidator.cs:203-212` (the closed-vocabulary check); `products/kyber-squad/agents/architect/references/plan-authoring.md` ("Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree."). Archived plans use `archived`/`complete` only because the loader excludes the archive folder from the corpus. The choice keeps `docs validate` at zero findings while the lifecycle state stays unambiguous to a reader of the plan and of the index. | ANSWERED — autonomous: decided from the validator's closed vocabulary and the plan-authoring rule that the body status is authoritative |
+| D28 | How a `droid` session that holds **both** plugin rows and file rows is accounted for — the paired session's token totals and its turn count | **The Factory source-precedence rule: each source is used for what only that source can measure, and neither source is counted twice.** In a `droid` session holding at least one plugin row and at least one file row: (1) the **turn records** are the **plugin rows** — the turn count, the timeline's turns, the request roots, the per-turn model, the tool invocations, the duration and the context turns are read from the plugin, because the plugin is the PRIMARY mechanism (D2) and it alone observes the turn boundary, the tools and the timing; (2) the **counter records** are the **file rows** — the session's token totals (input, output, cacheRead, cacheCreation) and the availability that gates them are read from the file rows, because the file source is the only source of counters (D9) and its counters are a **session-level** total split evenly across assistant calls, so they belong to the session and never to a turn; (3) the file row in such a session contributes **nothing else** — it is not a turn, not a timeline entry, not a request root, not a tool invocation, and its duration is not added to the session's duration; it contributes its counters and its cost; (4) the session's **cost** is summed over the turn records and the counter records together (the two sets are disjoint, so no cost is counted twice), and the cost-basis verdict is computed over that same union; (5) the **context analysis** reads the turn records, and where no turn record carries a measured input it reads the counter records, so a Factory session keeps the context figures the file source gave it before the plugin arrived. A `droid` session with plugin rows and **no** file row keeps today's behaviour: the plugin rows are both the turn records and the counter records, so the plugin's `not_measurable` declarations and their reasons gate the totals. A `droid` session with file rows and **no** plugin row keeps today's behaviour: the file rows are both. Every other harness is untouched — the rule is inert outside `droid`. The rule is exact-match only: no fuzzy join, no time window, no counter-equality join. It never fabricates: a paired session's totals are the file row's counters, and a plugin-only session's totals are absent, never zero. | This generalizes D23's precedence principle — the plugin envelope wins and the other source is evidence only — from the native export to the file source, with the one difference the local evidence forces: the file row is **not** quarantined, because it carries the only counters and the only priced cost, so it stays as a counter carrier rather than being dropped. A turn-level **join** was rejected and cannot work: the twin-join rule pairs a file row with a non-file row only over **identical reported counters** (`dash/src/canon/twin-dedupe.ts:293-320`), the plugin row carries zeros, and an all-zero row is excluded from the counter clustering because it identifies nothing (`dash/src/canon/twin-dedupe.ts:191-196`); and because the file row's counters are a session total split evenly across assistant calls, there is **no turn-level correspondence** between a plugin turn and a file row to join over — a join would both mis-attribute the split and drop the counters of the rows it did not join. Before this rule the paired session read its totals as `not_measurable` — the plugin row's declaration won the merge because the file row's declaration map lists only what a file source **cannot** measure (`dash/src/canon/measurability.ts:425-486`, `dash/src/synth/synth.ts:534-537`) and says nothing about `token_usage` — and it counted two turns for one Factory turn. The alternative fix — making every file-sourced record declare `token_usage` as `measured` — was rejected: it would change what every file-sourced session in the corpus declares, for every harness, to fix a Factory problem, and it would have to guess whether a stored zero is a measured zero or an absent counter. The file source's rows carry no content and no tool records of their own (the Factory reader yields no reader turn, so `synthesizeToolCalls` returns none — `dash/src/synth/synth.ts:845-847`), so demoting the file row to a counter carrier loses no text, no tool and no attribution. | ANSWERED — autonomous: recommendation accepted |
+| D29 | Where a child (subagent) session's tokens come from | **From the child's own companion file, through D8's exact session-id pairing — never from the parent's `childInclusiveTokenUsageBySessionId` map.** The map is the parent's aggregate view of its children, not the child's own usage, and the child's own companion file already states the child's own usage. A child session with no companion file of its own reads `not_measurable` with a stated reason; it never borrows the parent's counters and never borrows another child's. A child's usage is never folded into the parent's session totals. The parent-child linkage stays exact-match only, and a child with no linkable parent stays an unlinked child, never a fabricated one. | This is the amendment of D25, and the evidence is local and read-only (A9): the parent session's companion file names the child with counters that are exactly the child's own companion-file counters, the child's own transcript's `session_start` names the child's id (and its `callingSessionId` names the parent), and the parent's `inclusiveTokenUsage` is the parent's own `tokenUsage` plus every child's entry. So the child session is already a session the file source discovers, with its own usage already stated by its own file: the pairing is the ordinary D8 exact-id pairing and **no file-import change is needed**, which is what lets D21's boundary stand. The characterization test that pins the map as ignored (`dash/src/providers/droid.test.ts:274`) therefore stays exactly as it is — its title and its assertions are both correct under this rule — and no assertion is weakened anywhere. | ANSWERED — autonomous: recommendation accepted |
+| D30 | Must the plugin adapter's `not_measurable` reasons name the file-source pairing? | **Yes, and D30 fixes the wording.** All four of the plugin adapter's counter-class reasons name the file-source pairing that would supply the counters, while still naming the harness and the metric. The reason is static — the adapter cannot know whether a file row will pair — so it names the **rule**, not the outcome: `token_usage` — "Droid telemetry did not report token usage for this span; the Factory session file's companion settings supply it when this session's id matches a file-sourced session."; `output` — the same sentence with "output token usage"; `cache_read` — "Droid did not export a cache read counter; the Factory session file's companion settings supply it when this session's id matches a file-sourced session."; `cache_creation` — the same sentence with "cache creation counter". | D8 and D9 already require the reason to name the file-source pairing ("a reason naming the file-source pairing", "a reason that names the file-source pairing"); the shipped wording — "Droid telemetry did not report token usage for this span." — did not, so the requirement was unmet rather than optional, and the adapter test only asserted the harness and the metric, which is why it passed. Under D28 the reason surfaces exactly where it should: a paired session's availability comes from the file rows, so the plugin's reason is published only when the pairing did **not** resolve — which is why a static rule-naming reason is accurate where it is published, and no projection-side rewrite is needed. The reason is never a claim that the tokens exist. | ANSWERED — autonomous: recommendation accepted |
+| D31 | Where Factory's native OTLP metrics GO, and what "accepted" means for them | **The destination is a new canon store table, `otel_metric`, holding the decoded metric points. The canon projection does NOT consume metrics in this branch (a todo). The writer's "never accepted-and-dropped" rule does NOT change.** (1) **The destination.** One row per decoded metric data point, carrying the metric's name, its kind (`gauge`/`sum`/`histogram`/`exponentialHistogram`/`summary`), its unit, the aggregation temporality, the point's timestamp, the point's value — or, for a histogram or a summary, its count and its sum — the point's attributes, the resource attributes, the scope name, and the exporter's `service.name` as the row's **source**. A point that carries no value keeps it absent, never zero (`docs/rules/honest-unobservability.md`). The canon layer gains `dash/src/canon/metric-ingest.ts` with `ingestMetricBatch(metrics, canon)`, mirroring `ingestLogBatch(logs, canon)`. The table is added to `SCHEMA_SQL` as an `IF NOT EXISTS` statement, so **no schema-version bump and no migration step are needed** — the store applies the full schema on every open, and the `model_context_window_catalog` table landed the same way (`dash/src/canon/store.ts:553-565`, `:2983`). (2) **The production sink.** `dash/src/otel/service.ts`'s `toCanon` gains `upsertMetrics`, which calls `ingestMetricBatch` and then writes the fenced audit row `canon.logIngest('otlp:metrics', <points received>)` — the shape the span sink uses for its per-source rows and the log sink uses for its `otlp:logs` row. A metrics batch changes no projected record, so it requests no projection (the pending-log precedent). The metric rows carry the exporter's `service.name` as their source and **no harness attribution**: the source name is never harness evidence (R6.2), and a metric point has no span for the fingerprint vote to run on. The full corpus wipe clears the table; a scoped per-harness wipe does not, because those rows' harness attribution is unknown — the standing the unclaimed quarantine rows already have (`dash/src/canon/store.ts:145-151`). (3) **The writer's rule is unchanged.** It stays: a sink that cannot persist metrics does not offer the port, and the batch is refused rather than accepted-and-dropped (`dash/src/otel/writer.ts:50-58`, `:463-479`). The production sink now offers the port, so the refusal is unreachable in production and remains the writer's answer for a sink without one; the refusal path is currently untested and is pinned by T27. (4) **"Accepted and counted but not projected" is NOT compatible with that rule, and the rule is not weakened to accommodate it.** The rule's purpose is that the exporter's 200 means the batch was persisted; a count-only receipt keeps the batch's size and drops its values. An OTLP exporter pushes on its own cadence and does not resend a batch KyberDash answered 200 for, so the values would be gone permanently; and the repo has no "received and discarded" state — `ingest_log` records RECEIVED activity, the tables record STORED facts, and every other signal has a table (spans → `records`, logs → `pending_logs`/`quarantined_logs`). If a later build chooses to discard metric values, that is a change to the writer's rule and must be stated as one: the port's contract would become "durably receipted, values not persisted", the telemetry inventory would have to say so, and the loss would be accepted deliberately. | The production consequence of the seam as it stands: `dash/src/otel/service.ts:144` builds the production sink as `{ upsertMany, upsertLogs }` — no `upsertMetrics` — so a metrics batch finds no port in the writer, the writer refuses it (`writer.ts:463-479`), and the receiver answers **500** with the body code `OTLP_INTERNAL` while recording `OTLP_PERSISTENCE_FAILED` in the rolling failure window (`dash/src/otel/receiver.ts:1549-1562`). The refusal is not a corner case: it is every metrics request the running service receives, and it fills the window the receiver's greenness rule reads (`dash/src/jobs/receiver-host.ts:84-91`), so a Factory deployment with the native endpoint configured makes the receiver report failures and go not-green. The root cause is a coverage gap rather than a wiring mistake: the receiver's metrics cases hand the route a `RecordingStore` that offers the port directly (`dash/src/otel/receiver.test.ts:1103-1143`), so **nothing below the receiver's decode seam is exercised at all** — not the writer's queue, not the writer's refusal, not the production sink, not the store's persistence. The `pending_logs`-style pattern was considered and rejected: it exists because a log may arrive before the model call it enriches, and a metric point has no such dependency, so a pending table would be a terminal store wearing the wrong name. A service-owned metrics ledger was rejected too: the canon database is the one datastore (`docs/rules/kyberdash-display-layer.md`), and a second store would be invisible to the CLI and the dashboard. Two further divergences were found while checking this one, and both are repaired by T27/T28: the writer's persisted-fact hook counts spans and logs but not metrics (`writer.ts:666-676`), so a metrics-only commit — which is exactly Factory's default export shape (A6) — never moves the receiver's `lastAcceptedAt`; and the writer's metrics refusal has no test. | ANSWERED — autonomous: recommendation accepted |
+| D32 | The rule for a normalized record's status at the receiver-timing seam | **An error status is never downgraded.** `growWithReceiverTiming` keeps the record's own `error` status and takes the exporter's OTLP status code for every other value: `record.status = record.status === 'error' ? 'error' : span.status.code`. The repair lives in `growWithReceiverTiming` (`dash/src/canon/ingest.ts:143-147`), whose doc is amended: it gives the record the timing, and the outcome **unless the adapter already determined one**. A native Factory span carrying `error.type` therefore keeps the status the `droid` adapter set (`dash/src/canon/adapters/droid.ts:307-313`), so the stored record reads `error` and the policy-denied tool call counts as an error in the session's tool error counts (`dash/src/canon/sessions.ts:1534`) and in the run outcome derivation (`dash/src/canon/outcome.ts:296`, `:504`) — which is the whole point of the adapter's rule. The error type itself stays in the record's raw attributes: it is the evidence of **why** the call was denied, and the status only says that it was. | **The rule is inert for every other harness, and the proof is in the code:** `baseRecord` stamps `status: 'unspecified'` (`dash/src/canon/adapters/copilot.ts:666-694`), and the `droid` adapter is the **only** adapter under `dash/src/canon/adapters/` that assigns `record.status` — every other adapter's record still carries `'unspecified'` when `growWithReceiverTiming` runs, so its stored status remains the exporter's status code, byte for byte. The three alternatives were considered and rejected: (a) repairing it at the call site (`dash/src/canon/ingest.ts:641`) would split the function's contract across two places and would still have to ask "did the adapter set a status?", which the call site cannot answer; (b) making the adapter's error a separate field the projection reads would leave `record.status` wrong for every consumer that reads it — the stored column (`dash/src/canon/store.ts:3116`), the session's tool error counts, the run row (`dash/src/canon/runs.ts:219`) and the outcome derivation — and would change the projection for every harness; (c) repairing it in the adapter's record shape is the same as (b). The defect is invisible at the adapter seam because the adapter-level case asserts the record the adapter returned (`dash/src/canon/adapters/droid.test.ts:540`), while the production path calls `growWithReceiverTiming` immediately afterwards (`ingest.ts:641`): the RED test must therefore pin the **stored** record, which is what the production path writes. | ANSWERED — autonomous: recommendation accepted |
 
 ## Design harvest
 
@@ -215,6 +254,10 @@ child-session rules.
 | H10 | KyberDash | reference | `docs/install.md` §Updating: the plugin step's Factory guidance line (D18). |
 | H11 | KyberDash | architecture | `docs/dash/architecture.md`: the authorized native-OpenTelemetry path for Factory — `OTEL_TELEMETRY_ENDPOINT`, the `genai` attribute vocabulary, the `POST /v1/metrics` route, the plugin-first precedence rule (D23), the tokenless and lineage-free limits, and the organisation-override reporting rule (D26). |
 | H12 | KyberDash | reference | `docs/dash/telemetry-inventory.md`: the Factory model-resolution chain (D24) and the child-session token pairing rule (D25), stated as the model and token facts the Factory rows carry. |
+| H13 | KyberDash | architecture | `docs/dash/architecture.md`: the Factory source-precedence rule (D28) — in a `droid` session holding both plugin rows and file rows, the plugin rows are the session's turns (count, timeline, per-turn model, tools, duration, context) and the file rows are the session's counters (the totals and the availability that gates them) and its cost; neither source is counted twice, and the rule is inert for every other harness. |
+| H14 | KyberDash | reference | `docs/dash/telemetry-inventory.md`: the child-session token source (D29) — a child session's tokens come from the child's **own** companion file through the exact-id pairing, and the parent's `childInclusiveTokenUsageBySessionId` map is the parent's aggregate view and never a token source; and the plugin rows' `not_measurable` reasons name the file-source pairing (D30). H12's child-pairing half is superseded by this row. |
+| H15 | KyberDash | architecture | `docs/dash/architecture.md` and `docs/dash/telemetry-inventory.md`: the native OTLP metrics destination (D31) — the decoded metric points are persisted in the canon store's `otel_metric` table through the production sink's `upsertMetrics`; nothing projects them yet (a todo); the receiver activity records the batch as `otlp:metrics`; and the writer's rule is unchanged — a sink that cannot persist metrics is refused, never accepted-and-dropped. |
+| H16 | KyberDash | architecture | `docs/dash/architecture.md`: the status rule at the normalization seam (D32) — an error status is never downgraded, so the `droid` adapter's `error.type` reaches the stored record and the policy-denied tool call counts as an error; the rule is inert for every other harness. |
 
 ## 3. The design, in detail
 
@@ -268,11 +311,16 @@ nested per-role blocks, and reading one would attribute a subagent's model to it
 file source's third link — the transcript's per-assistant `message.modelId` — fills the model for
 file-derived rows, not for plugin rows.
 
-**Child sessions (D25).** `SubagentStop` carries the child session id; the parent linkage is an
-exact match only, and a child that cannot be linked stays an unlinked child rather than a
-fabricated one. A child session's tokens are paired from the companion file's
-`childInclusiveTokenUsageBySessionId`, keyed by that child session id; a child with no entry there
-reads `not_measurable` with a stated reason.
+**Child sessions (D25, amended by D29).** `SubagentStop` carries the child session id; the parent
+linkage is an exact match only, and a child that cannot be linked stays an unlinked child rather
+than a fabricated one. A child session's tokens are paired from the **child's own** companion file
+`<child-id>.settings.json`, through the same exact-id pairing as any other Factory session: a
+child session is a first-class Factory session with its own transcript and its own companion file,
+so the file source discovers it as its own session and the plugin's child rows pair with it. A
+child with no companion file of its own reads `not_measurable` with a stated reason, and never
+borrows the parent's counters. The parent's `childInclusiveTokenUsageBySessionId` map is the
+parent's aggregate view of its children, not the child's own usage: it is never a token source, and
+a child's usage is never folded into the parent's session totals (A9).
 
 ### 3.3 Install, status and the Settings row
 
@@ -300,6 +348,17 @@ decoded to a metrics shape and handed to a metrics sink port with the same admis
 health-window discipline as the span path (`dash/src/otel/receiver.ts:1119-1121,1370-1386`). Only
 OTLP/HTTP is documented for Factory — port 4318, no gRPC, no 4317 — so no other protocol is
 added. **Logs are never exported by Droid**, so `/v1/logs` is untouched by this branch.
+
+**Where the metrics go (D31).** The metrics sink port is backed by the **canon store**: the
+production sink implements `upsertMetrics`, which writes the decoded metric points to a new
+`otel_metric` table — one row per data point, carrying the metric's name, kind, temporality, the
+point's timestamp and value (or its count and sum), the point's attributes, the resource
+attributes and the scope — and then records the batch as receiver activity under the source
+`otlp:metrics`. The writer's rule is unchanged: a sink that cannot persist metrics does not offer
+the port, and the batch is **refused**, never accepted and dropped. **Nothing projects metrics
+yet** — the canon projection and the dashboard have no metric concept, and the metrics' projection
+is a todo, not part of this branch. The table is a destination that keeps the values; the
+projection that would read them is later work.
 
 **The native claim.** The `droid` adapter recognises the native `genai` fingerprint. The exact
 vocabulary to recognise (D12):
@@ -336,6 +395,34 @@ locally. KyberDash reports that state as observed — native export unavailable 
 override as the cause; it never reports the native path as working when no native span arrives.
 On this machine no organisation pins an endpoint (§2.5), so the caveat is real but not universal.
 
+### 3.5 The paired Factory session (D28, D29, D30)
+
+One Factory session is observed by two sources. The **plugin** observes the turn boundary, the
+tools, the timing and (under consent) the prompt; it observes **no counters at all**. The **file
+source** observes the counters, the cost and the model; it observes **no turn boundary and no
+content**. The two are therefore never joined and never merged into one turn: they are **split by
+what each can measure**.
+
+| The session's figure | Read from | Why |
+|---|---|---|
+| turn count, timeline turns, request roots, per-turn model, tool invocations, duration, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism (D2) and alone observes the turn boundary, the tools and the timing |
+| token totals (input, output, cacheRead, cacheCreation) and the availability that gates them | the **file rows** | the file source is the only source of counters (D9), and its counters are a session total split evenly across assistant calls — a session-level fact, never a turn-level one |
+| cost | the turn records **and** the counter records | the file row carries the only priced cost; the two sets are disjoint, so no cost is counted twice |
+
+The file row in a paired session is a **counter carrier**: it contributes its counters and its
+cost and nothing else — it is not a turn, not a timeline entry, not a request root, not a tool
+invocation, and its duration is not added to the session's duration. A plugin-only session keeps
+the plugin's own declarations, so its totals read `not_measurable` with the reason D30 fixes. A
+file-only session is unchanged. Every other harness is unchanged: the rule is inert outside
+`droid`.
+
+The rule is exact-match only — no fuzzy join, no time window, no counter-equality join — and it
+never fabricates: a paired session's totals are the file row's counters, and a plugin-only
+session's totals are absent, never zero.
+
+A **child** session is paired the same way, from the child's own companion file (D29), and the
+plugin's `not_measurable` reasons name this pairing (D30).
+
 ## 4. Test contract (test-first)
 
 Every unit has a RED task (tests only) and a GREEN task (implementation), authored by different
@@ -356,7 +443,7 @@ behaviour before the implementation landed; GREEN uses the same test, unweakened
 | T10 | same as T9 | same as T9 | The Factory writer, its registry row, the detect probes, the status lines and the plugin-install verb exist | — | T9 green |
 | T11 | `dash/src/canon/adapters/droid.test.ts`, `dash/src/canon/adapters/droid-envelope.test.ts` | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/adapters/droid.test.ts src/canon/adapters/droid-envelope.test.ts` | The adapter claims only the Factory plugin envelope under contract `1`; an unknown contract version scores 0 and quarantines; a native `gen_ai.agent.name=droid` span is claimed only when the native branch is authorized; a plugin record without paired tokens declares `not_measurable` with a reason, never 0; the adapter stamps `harness: 'droid'` | The files exist and fail | Same tests pass; the OpenCode adapter cases stay green |
 | T12 | same as T11 | same as T11 | The `droid` adapter, the envelope leaf and the `ADAPTERS` registration exist | — | T11 green |
-| T13 | `dash/src/canon/sessions.droid-pairing.test.ts` | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/sessions.droid-pairing.test.ts` | A plugin row and a file row with the same session id form one session and the file row's tokens are the session's; different ids stay separate and the plugin row's tokens read `not_measurable` with a reason; no token is invented; a child session whose id is in the companion file's `childInclusiveTokenUsageBySessionId` is paired, and one that is not reads `not_measurable` with a stated reason (D25) | The file exists and fails (or passes with **no production change** — see the task note) | The pairing rule holds; a needed production change is a scope-checked edit, not a weakening |
+| T13 | `dash/src/canon/sessions.droid-pairing.test.ts` | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/sessions.droid-pairing.test.ts` | A plugin row and a file row with the same session id form one session and the file row's tokens are the session's; different ids stay separate and the plugin row's tokens read `not_measurable` with a reason; no token is invented; a child session whose id is in the companion file's `childInclusiveTokenUsageBySessionId` is paired, and one that is not reads `not_measurable` with a stated reason (D25) | The file exists and fails (or passes with **no production change** — see the task note) | The pairing rule holds; a needed production change is a scope-checked edit, not a weakening. **The scope decision this cell required has been made: D28, D29 and D30, and the follow-on work is T22–T26. The child clause of this row's observable behaviour is superseded by D29** — the child is paired from its **own** companion file, not from the parent's child-usage map — and the two child cases move to T26. |
 | T14 | `dash/src/providers/droid.test.ts` (Factory token cases), `dash/src/refresh/refresh.integration.test.ts` (droid job) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/providers/droid.test.ts src/refresh/refresh.integration.test.ts` | `dash refresh` still yields a `droid` session whose tokens come from the companion `*.settings.json` `tokenUsage`; the refresh job is unaffected by the plugin work | The new cases exist and fail or pass unchanged | The file source is proven unchanged by the plugin work |
 | T15 | `dash/src/otel/receiver.test.ts` (metrics path cases), `dash/src/canon/adapters/droid.test.ts` (native claim) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/otel/receiver.test.ts src/canon/adapters/droid.test.ts` | `POST /v1/metrics` is served and answers 200/4xx per the existing discipline; a wrong path still 404s; a native span carrying `gen_ai.agent.name=droid` and `gen_ai.operation.name` is claimed; a native span for a session that already has plugin rows is claimed as evidence and is **excluded** from that session's turn, tool and duration totals (D23); a native span carries no token counter, so no token is taken from it | The cases exist and fail | Same cases pass |
 | T16 | same as T15 | same as T15 | The metrics route and the native claim exist | — | T15 green |
@@ -365,6 +452,15 @@ behaviour before the implementation landed; GREEN uses the same test, unweakened
 | T19 | `dash/e2e/harness-collection.spec.ts` (Factory replay scenario) | `scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts` | A recorded Factory hook payload, replayed through the production plugin → receiver → `droid` adapter → projection → dashboard, renders a Factory session with model and tool attribution and honest token state | The scenario exists and fails | The scenario passes with the isolated config; the other scenarios stay green |
 | T20 | governed documents | `scripts/proc-guard.sh run -- dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` and `scripts/proc-guard.sh run -- dotnet run --project src/KyberWeave.Cli -- docs drift .` | Every H-row's target document carries the durable item; the plan moves to the archive folder with its closeout mapping | The documents fail the harvest checks | Both commands report zero findings |
 | T21 | **No automated test — this is the manual, owner-run live verification** that replaces one. Read-only procedure documented in `docs/dash/runbook.md`; evidence written to the gitignored `artifacts/evidence/factory-capture-live/<UTC-stamp>/` | `scripts/proc-guard.sh run -- npm --prefix dash run dev -- kyber capture status --harness factory`, then one scripted Droid turn, then the dashboard | A live Droid turn produces a dashboard-visible Factory session with model and tool attribution; tokens are paired from the file source or honestly `not_measurable`; content is absent unless the consent file says `content: true`; the check records which of A1–A5 and A8 held | n/a — manual verification | The runbook procedure is executed and its result reported; a failure is reported as a failure |
+| T22 | `dash/src/canon/sessions.droid-pairing.test.ts` (amended), `dash/src/canon/droid-pairing.test.ts` (new) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/sessions.droid-pairing.test.ts src/canon/droid-pairing.test.ts` | A paired session carries the FILE row's counters **and** counts ONE Factory turn (the plugin's), and keeps the file row's cost; a file-only session's own turns, counters and cost are unchanged; the split helper returns the plugin rows as the turn records and the file rows as the counter records for a mixed `droid` session, and no split for a plugin-only, file-only or non-`droid` session (D28) | The amended cases exist and fail on the turn count and the cost; the leaf's test fails against the absent module | Same tests pass, unweakened; the six cases that already passed still pass, and the child-pairing case stays RED until T26 corrects its fixture |
+| T23 | same as T22 | same as T22 | The source-precedence rule exists in the projection and is inert for every other harness | — | T22 green; `dash/src/canon/sessions.test.ts` and the whole dash unit suite stay green |
+| T24 | `dash/src/canon/adapters/droid.test.ts` (the plugin-path reason case), `dash/src/canon/sessions.droid-pairing.test.ts` (the plugin-only session's published reason) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/adapters/droid.test.ts src/canon/sessions.droid-pairing.test.ts` | Every one of the plugin adapter's four counter-class reasons names the file source and the session-id pairing, while still naming the harness and the metric; the session's published reason names it too (D30) | The strengthened assertions exist and fail against the shipped wording | Same tests pass; the native path's reasons are unchanged |
+| T25 | same as T24 | same as T24 | The adapter's four reasons carry D30's wording | — | T24 green |
+| T26 | `dash/src/canon/sessions.droid-pairing.test.ts` (the two child cases) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/sessions.droid-pairing.test.ts` | The child case's fixture is the real Factory shape — the child session is its own session with its own companion file carrying the child's usage, and the parent's companion file keeps its child-usage map so the parent's own counters stay the parent's own — and the child session carries the child's own usage, never the parent's (D29); the unmapped child still reads `not_measurable` with a reason | The corrected fixture is committed with the evidence that it passes against the projection as D28 specifies — a test-only correction, no production change | The child cases pass; `dash/src/providers/droid.test.ts` is unchanged and green |
+| T27 | `dash/src/canon/metric-ingest.test.ts` (new), `dash/src/otel/service.test.ts` (the production-wiring case), `dash/src/otel/writer.test.ts` (the metrics cases) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/metric-ingest.test.ts src/otel/service.test.ts src/otel/writer.test.ts` | The canon store persists the decoded metric points, one row per data point, with no value dropped and none fabricated; a `POST /v1/metrics` against the **running collector service** answers 200 and the points are in the store; a writer whose sink cannot persist metrics **refuses** the batch and queues nothing; the batch is recorded as receiver activity under `otlp:metrics`; a metrics-only commit moves the receiver's last-persisted fact; a metrics batch requests no projection (D31) | The cases exist and fail: the production-wiring case answers 500, the store has no table, the writer's refusal is unpinned | Same tests pass, unweakened |
+| T28 | same as T27 | same as T27 | The metrics destination exists: the `otel_metric` table, the canon metric ingest, the production sink's `upsertMetrics`, and the persisted-fact rule that counts metrics | — | T27 green; the schema version does **not** change (an `IF NOT EXISTS` table needs no migration step); an existing store opens unchanged; the metric rows carry the exporter's source and no harness attribution; the writer's refusal path is unchanged |
+| T29 | `dash/src/canon/ingest.test.ts` (the stored-record case) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/canon/ingest.test.ts src/canon/adapters/droid.test.ts` | A native Factory span carrying `error.type` is stored with the status `error`, even when the exporter's own OTLP status is `unset` or `ok`; a span whose exporter status is `error` is still stored as `error`; a span with no error evidence keeps the exporter's status code exactly (D32) | The stored-record case exists and fails (the status reads `unset`/`ok`); the adapter-level case still passes | Same tests pass, unweakened; every other harness's stored status is unchanged |
+| T30 | same as T29 | same as T29 | The status rule exists at the receiver-timing seam | — | T29 green; `growWithReceiverTiming`'s doc states that it gives the outcome only when the adapter did not determine one |
 
 ## 5. Dispatchable tasks
 
@@ -549,6 +645,12 @@ before it is made, never a weakening of the assertion.
 **Depends on.** T12.
 **Skills.** `test-dev`, `typescript-dev`.
 
+**Outcome and follow-on (D28–D30).** The test exists and six of its eight cases pass. The two
+that fail proved three gaps, and the scope decision this task required has been made: **D28**
+(the Factory source-precedence rule), **D29** (the child session's token source) and **D30** (the
+adapter's reasons name the pairing). The projection change is therefore specified, not improvised,
+and it is delivered by **T22–T26**; the two child cases move to **T26**.
+
 ### T14 — The file source stays the token source
 
 **Objective.** Prove that `dash refresh` still produces the `droid` session with tokens from the
@@ -656,6 +758,159 @@ resolution link (D24). A failure is reported as a failure, never worked around.
 **Depends on.** T20.
 **Skills.** `app-docs-standard`.
 
+### T22 — RED: the Factory source-precedence contract (D28)
+
+**Objective.** Pin the accounting rule of D28 in the pairing test: a paired session carries the FILE
+row's counters **and** counts ONE Factory turn (the plugin's), and keeps the file row's cost; a
+file-only session is unchanged.
+**Files.** `dash/src/canon/sessions.droid-pairing.test.ts` (amended),
+`dash/src/canon/droid-pairing.test.ts` (new).
+**Acceptance criteria.** The paired-session case is **extended, never weakened**: every existing
+assertion stays, and the case adds `expect(summary.turn_count).toBe(1)` and the cost assertion (the
+session's cost is the file row's priced cost, not the plugin's unknown one). A new case — "counts
+one Factory turn for a paired session, and the file row is not a second turn" — fails today on the
+turn count (it is 2). A new case — "keeps a file-only session's own turns, counters and cost" — is
+a guard that passes today. A new case — "keeps the paired session's context figures" — pins that
+the file source's context figures survive the plugin's arrival. The new leaf's test pins the split
+helper's contract: for a mixed `droid` session it returns the plugin rows as the turn records and
+the file rows as the counter records; for a plugin-only session, a file-only session and a
+non-`droid` session it returns no split at all. The two child cases are **not** touched here — they
+move to T26, and the child-pairing case stays RED until T26 corrects its fixture, which is
+expected and is not a failure of this task.
+**Depends on.** T12, T13.
+**Skills.** `test-dev`.
+
+### T23 — GREEN: the Factory source-precedence rule (D28)
+
+**Objective.** Implement the split and apply it in the session projection.
+**Files.** `dash/src/canon/droid-pairing.ts` (new leaf),
+`dash/src/canon/sessions.ts` (the session row's derivation).
+**Acceptance criteria.** T22 green, unweakened. In a mixed `droid` session the turn count, the
+timeline's turns, the request roots, the per-turn model, the tool invocations, the duration and the
+context turns are read from the plugin rows, and the token totals and the availability that gates
+them are read from the file rows; the file row contributes its counters and its cost and nothing
+else; the cost is summed over the turn records and the counter records together, and the
+cost-basis verdict is computed over that same union; the context analysis falls back to the counter
+records when no turn record carries a measured input. A plugin-only `droid` session and a
+file-only `droid` session behave exactly as they do today, and **every other harness is
+unchanged** — `dash/src/canon/sessions.test.ts` and the whole dash unit suite stay green. No
+counter is summed twice and no zero is fabricated.
+**Depends on.** T22.
+**Skills.** `typescript-dev`.
+
+### T24 — RED: the pairing reasons name the file-source pairing (D30)
+
+**Objective.** Strengthen the reason assertions so the requirement D8 and D9 already state is
+pinned.
+**Files.** `dash/src/canon/adapters/droid.test.ts` (the plugin-path reason case),
+`dash/src/canon/sessions.droid-pairing.test.ts` (the plugin-only session's published reason).
+**Acceptance criteria.** Each of the adapter's four counter-class reasons must name the file source
+and the session-id pairing (a regex over the file source's name and the session), while the
+existing assertions (the reason names the harness and the metric) keep holding. The plugin-only
+session's **published** reason must name it too. The strengthened assertions fail against the
+shipped wording.
+**Depends on.** T12, T13.
+**Skills.** `test-dev`.
+
+### T25 — GREEN: the adapter's reason wording (D30)
+
+**Objective.** Implement D30's wording.
+**Files.** `dash/src/canon/adapters/droid.ts`.
+**Acceptance criteria.** T24 green; the four reasons are exactly D30's; the native path's reasons
+are unchanged; no other adapter case moves; the reason never claims the tokens exist.
+**Depends on.** T24.
+**Skills.** `typescript-dev`.
+
+### T26 — The child-pairing fixture correction (D29; test-only, no production change)
+
+**Objective.** Correct the two child cases' fixture to the real Factory shape, and record that the
+child pairing needs no production change beyond D28's split.
+**Files.** `dash/src/canon/sessions.droid-pairing.test.ts` (the two child cases).
+**Acceptance criteria.** The fixture writes the child session as its **own** Factory session — its
+own `<child-id>.jsonl` and its own `<child-id>.settings.json` carrying the child's usage — and the
+parent's companion file **keeps** its `childInclusiveTokenUsageBySessionId` map, so the parent's own
+counters stay the parent's own. The child case asserts that the child session carries the child's
+own usage and never the parent's; the unmapped child still reads `not_measurable` with a reason.
+The corrected cases pass against the projection as D28 specifies, with **no production change** —
+that is the evidence this task exists to record. `dash/src/providers/droid.test.ts` is **unchanged**
+and green: its characterization case ("ignores the companion file child-usage map, so the child
+tokens never reach the session") is correct under D29 and stays.
+**Depends on.** T23.
+**Skills.** `test-dev`.
+
+### T27 — RED: the native metrics destination and the production wiring (D31)
+
+**Objective.** Pin where the native OTLP metrics go, and pin the production path itself — the
+seam the receiver's own tests cannot reach.
+**Files.** `dash/src/canon/metric-ingest.test.ts` (new),
+`dash/src/otel/service.test.ts` (the production-wiring case),
+`dash/src/otel/writer.test.ts` (the metrics cases).
+**Acceptance criteria.**
+1. **The canon store persists the metric points.** A decoded metrics batch lands in the store's
+   `otel_metric` table, one row per data point, carrying the metric's name, kind, unit, the
+   aggregation temporality, the point's timestamp, the point's value — or, for a histogram or a
+   summary, its count and its sum — the point's attributes, the resource attributes, the scope and
+   the exporter's `service.name`. The rows survive a reopen of the store. **No metric value is
+   dropped and none is fabricated**: a point that carries no value keeps it absent, never a zero.
+2. **The production wiring serves the path.** A `POST /v1/metrics` against the **running
+   collector service** — the real `toCanon` sink, not a store double — answers **200**, and the
+   points are in the store. This is the case that fails today: the production sink has no metrics
+   port, so the batch is refused and the receiver answers 500.
+3. **The writer refuses a batch a sink cannot persist.** `writeMetrics` on a sink without the
+   metrics port throws and queues nothing — never accepts-and-drops.
+4. **The receiver activity records the metrics.** The batch writes one `ingest_log` row with the
+   source `otlp:metrics`, sized to the points received, and the write is fenced: a failing audit
+   write never fails the ingest it audits.
+5. **A metrics-only commit moves the receiver's last-persisted fact.** The persisted-fact hook
+   counts metrics as well as spans and logs, so a Factory deployment whose export is
+   metrics-only (A6) is not left reporting a stale last-persisted time.
+6. **A metrics batch requests no projection** — it changes no projected record.
+**Depends on.** T16 (the route and the native claim exist).
+**Skills.** `test-dev`.
+
+### T28 — GREEN: the native metrics destination (D31)
+
+**Objective.** Implement the destination and the production sink.
+**Files.** `dash/src/canon/store.ts` (the `otel_metric` DDL in `SCHEMA_SQL` and the store method
+that writes the points), `dash/src/canon/metric-ingest.ts` (new — the OTLP-metric → row mapping,
+mirroring `log-ingest.ts`), `dash/src/otel/service.ts` (the sink's `upsertMetrics`),
+`dash/src/otel/writer.ts` (the persisted-fact hook counts metrics).
+**Acceptance criteria.** T27 green, unweakened. The **schema version does not change** — an
+`IF NOT EXISTS` table needs no migration step, so an existing store opens unchanged, exactly as
+`model_context_window_catalog` landed. The metric rows carry the exporter's `service.name` as
+their source and **no harness attribution** (R6.2): the source name is never harness evidence, and
+a metric point has no span for the fingerprint vote to run on. The full corpus wipe clears the
+table; a scoped per-harness wipe does not, because those rows' harness attribution is unknown.
+The audit write is fenced. No projection is requested for a metrics batch. The writer's refusal
+path is unchanged — a sink without the port still refuses the batch.
+**Depends on.** T27.
+**Skills.** `typescript-dev`.
+
+### T29 — RED: the stored native error status (D32)
+
+**Objective.** Pin the outcome at the seam the defect actually lives at: the **stored** record.
+**Files.** `dash/src/canon/ingest.test.ts` (the stored-record case).
+**Acceptance criteria.** A native Factory span carrying `error.type` is **stored** with the status
+`error`, even when the exporter's own OTLP status is `unset` or `ok`; a span whose exporter status
+is `error` is still stored as `error`; a span with no error evidence keeps the exporter's status
+code exactly, so every other harness's stored records are unchanged. The case goes through the
+production ingest path (`ingestBatch`), not the adapter alone: the adapter-level case already
+passes, and the defect appears only after normalization.
+**Depends on.** T16.
+**Skills.** `test-dev`.
+
+### T30 — GREEN: the status rule at the receiver-timing seam (D32)
+
+**Objective.** Implement the rule so an error status is never downgraded.
+**Files.** `dash/src/canon/ingest.ts` (`growWithReceiverTiming`).
+**Acceptance criteria.** T29 green, unweakened. The function keeps the record's own `error` status
+and takes the exporter's status code for every other value; its doc states that it gives the
+record the timing, and the outcome **unless the adapter already determined one**. The change is
+confined to that function: the adapter, the projection, the store and every other harness's stored
+records are untouched.
+**Depends on.** T29.
+**Skills.** `typescript-dev`.
+
 ## 6. Dependency graph
 
 ```
@@ -670,6 +925,10 @@ T15 ─► T16 (needs T11, T12) ────────────────
 T14 (independent)                              │
 T17 ─► T18 ─────────────────────────────────────┤
 T19 (needs T4, T12) ────────────────────────────┤
+T13 ─► T22 ─► T23 ─► T26 ──────────────────────┤
+T12 ─► T24 ─► T25 ─────────────────────────────┤
+T16 ─► T27 ─► T28 ─────────────────────────────┤
+T16 ─► T29 ─► T30 ─────────────────────────────┤
                                               ▼
                                              T20 ─► T21
 ```
@@ -691,15 +950,26 @@ scopes and may run concurrently.
 | Two adapters named `droid` | low | D7 pins one adapter with two claim rules, checked in that order; the registry throws on a duplicate name |
 | Native spans and plugin rows double-count in one `droid` session | medium | D23 pins the precedence rule (plugin envelope first; a native span for a session that already has plugin rows is evidence, excluded from turns, tools and duration), T15 pins it in a test, and the rule is stated in the ADR (H11) before the branch ships |
 | Native export is silently absent where an organisation pins an endpoint | medium | D26 makes the row report the native path as unavailable with that named cause, never as working; on this machine no organisation pins an endpoint (§2.5). The plugin path is unaffected either way |
+| Plugin rows and file rows double-count in one `droid` session | **high — it is the observed defect** | D28 pins the source-precedence rule (the plugin defines the session's turns, the file defines its counters, neither is counted twice); T22 pins it in the pairing test and T23 implements it; the rule is inert for every other harness, and the paired session's totals are the file row's counters rather than a sum of two sources |
+| The source-precedence rule changes a published figure for a Factory session that has no plugin rows | low | the rule applies only to a **mixed** session; a file-only and a plugin-only `droid` session keep today's figures, and `dash/src/canon/sessions.test.ts` stays green (T23) |
+| A child session's tokens are unavailable because the child has no companion file of its own | medium | D29 pairs a child from its **own** companion file through the ordinary exact-id pairing, and the parent's child-usage map is never a token source (A9); a child with no companion file of its own reads `not_measurable` with a stated reason and never the parent's counters |
+
+| The native metrics path answers 500 in production | **high — it is every metrics request the running service receives** | D31 gives the metrics a destination (the canon store's `otel_metric` table) and the production sink the port that persists them; T27 pins the production wiring and T28 implements it. The writer's refusal rule is unchanged, so a sink that still cannot persist refuses the batch rather than dropping it |
+| The metrics are persisted but nothing projects them | medium | D31 keeps the destination and makes the projection a todo (T20); the telemetry inventory states that the metrics are stored and not yet projected, so no reader is told a metric was measured and shown as one (the honest-unobservability rule) |
+| The stored record's status loses the adapter's error evidence | **high — a policy-denied tool call reads as an ordinary one** | D32's rule never downgrades an error status at the receiver-timing seam, and it is inert for every other harness (the `droid` adapter is the only adapter that assigns a status); T29 pins the stored record and T30 implements it |
 
 ## 8. Out of scope
 
 The sibling harness coverage gap (Cursor, Warp, ZCode, Devin, Command Code) is filed as a todo
 under the todo index, not implemented here (D21). So is the Factory file source's even token
-split, with the evidence that `lastCallTokenUsage` and `childInclusiveTokenUsageBySessionId`
-exist and would remove the approximation. A rewrite of the Factory file import is not in scope.
+split, with the evidence that `lastCallTokenUsage` exists and would remove the approximation (the
+companion file's `childInclusiveTokenUsageBySessionId` is the parent's aggregate of its children,
+not a per-call breakdown — A9, D29). A rewrite of the Factory file import is not in scope.
 No change to `dash/web` or `dash/tray`. No change to the shared projection's derivation rules
-beyond what T13 proves is missing. No write to any Factory settings or hooks file, ever.
+beyond what T13 proves is missing **and D28 specifies** — the one droid-scoped change, the Factory
+source-precedence rule, and nothing else. The canon projection's **consumption** of the native
+OTLP metrics is out of scope too: the metrics are persisted (D31), not projected, and their
+projection is a todo for T20 to file. No write to any Factory settings or hooks file, ever.
 
 ## 9. Verification gates
 
@@ -749,10 +1019,13 @@ local-environment digest), or **open** (still to be confirmed by the live check)
 | A6 | Whether the native export needs `OTEL_LOG_MESSAGE_CONTENT` for spans | **RESOLVED, and the issue's phrasing is only half right.** Default is metrics only, delta temporality, 60-second flush. Under the **`legacy`** format, spans exist only as the content spans `droid.message.user`, `droid.message.assistant`, `droid.tool.call`, `droid.tool.result`, and only when `OTEL_LOG_MESSAGE_CONTENT=true`; `aggregate` + `legacy` is metrics only with zero spans. Under the **`genai`** format, the trace structure is emitted whenever a customer endpoint is configured and the content flag gates only the four content attributes; `aggregate` + `genai` keeps the full trace with the content attributes stripped. **Tokens and cost are never exported**, in either format | The research digest; no further check needed | Nothing — the plan states both branches and never asserts the `legacy`-only rule as general |
 | A7 | Whether Factory's native OTLP endpoint is user-configurable | **RESOLVED: YES.** `OTEL_TELEMETRY_ENDPOINT` (base URL; metrics → `{endpoint}/v1/metrics`, spans → `{endpoint}/v1/traces`; falls back to `OTEL_EXPORTER_OTLP_ENDPOINT`) and its sibling variables are machine environment variables; there is no personal `settings.json` telemetry key; Factory's own documented example is `export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"`. **Caveat (D26)**: an organisation-managed `telemetry` block overrides the machine variables, so a pinned organisation gets no local export. On this machine the org cache holds no `telemetry` block | The research digest; the live check exercises the local case | None for the plugin path; D26 governs how the native path is reported |
 | A8 | The model's resolution when the hook payload carries none | **Observed**: `~/.factory/settings.json` has no top-level `model` key (its model lives in nested per-role blocks), the companion `<session-id>.settings.json` carries the session's `model`, and each transcript assistant record carries `message.modelId` | D24's chain; the live check records which link supplied the model | The model is absent on the row — never guessed |
+| A9 | A Factory child (subagent) session is a **first-class session on disk**: it has its own transcript and its own companion settings file, and the file source discovers it as its own session | **Observed** (read-only inspection of this machine, 2026-11-01): the parent session `5f50fd96-…`'s companion file names the child `bfde2f1a-…`; the child's own `<child-id>.settings.json` carries exactly the counters the parent names for it; the child's own transcript's `session_start` names the child's id, and its `callingSessionId` names the parent | D29 pairs the child from its **own** companion file; T26's corrected fixture is the evidence | A child session with no companion file of its own reads `not_measurable` with a stated reason — honest, never the parent's counters |
+| A10 | The parent's `childInclusiveTokenUsageBySessionId` map holds the **same numbers** the child's own companion file holds, and the parent's `inclusiveTokenUsage` is the parent's own `tokenUsage` plus every child's entry | **Observed** (read-only inspection of this machine, 2026-11-01): the parent `5f50fd96-…` reports `tokenUsage` input 1253 / output 5816 / cacheRead 320826 and `inclusiveTokenUsage` input 369300 / output 47551 / cacheRead 1938106 — the difference is exactly its child's entry (368047 / 41735 / 1617280) | D29's rule that the map is never a token source, and that a child's usage is never folded into the parent's totals | Folding a map entry into the parent would double count the child's tokens; the rule prevents it, and the characterization test that pins the map as ignored stays correct |
+| A11 | What an OTLP exporter does with a metrics batch the receiver refuses | **Documented (OTLP, not Factory-specific):** an exporter retries a failed export on its own schedule, and a 5xx is a retryable failure. The receiver's own failure window records each refusal, so the refusals are observable without knowing the exporter's retry policy | The live check in T21, if the native endpoint is configured | A deployment whose exporter retries sees repeated refusals and a filled failure window — which is the production consequence D31 repairs. The plan does not depend on the retry: with a destination, the path succeeds |
 
 ## 13. Investigation record
 
-Three evidence sources, each labelled by who produced it and what it can prove:
+Five evidence sources, each labelled by who produced it and what it can prove:
 
 1. **Repository evidence (architect session).** `codegraph_explore`, `docs_explore`,
    `docs_for_symbol` and `docs_glossary` are not loadable in the architect session (§2.1), so the
@@ -767,3 +1040,51 @@ Three evidence sources, each labelled by who produced it and what it can prove:
    in the `## Decisions` table. Where the two disagree with the issue text — the shape of
    `~/.factory/settings.json` and the "spans need `OTEL_LOG_MESSAGE_CONTENT`" claim — the
    corrected form is recorded (D24, A6) and the issue's form is not carried forward.
+4. **The D28–D30 amendment (architect session, 2026-11-01).** The same tooling limits apply: the
+   CodeGraph MCP tool and the Kyber-Weave MCP documentation tools are not loadable in this
+   session, and this session has no shell, so the `codegraph explore` CLI fallback is unavailable
+   too — the discovery below is direct reads and targeted greps. **Discovery: codegraph 0, docs 0,
+   direct reads 15 files and 8 targeted greps** — `dash/src/canon/measurability.ts`,
+   `dash/src/canon/sessions.ts`, `dash/src/canon/sessions.droid-pairing.test.ts`,
+   `dash/src/canon/twin-dedupe.ts`, `dash/src/canon/adapters/droid.ts`,
+   `dash/src/canon/ingest.ts`, `dash/src/canon/store.ts`, `dash/src/canon/types.ts`,
+   `dash/src/canon/runs.ts`, `dash/src/providers/droid.ts`, `dash/src/providers/droid.test.ts`,
+   `dash/src/synth/synth.ts`, `dash/src/synth/readers/` (a directory listing),
+   `dash/src/analysis/signals.ts`, and this plan; the greps covered `measurability`,
+   `childInclusive`, `synthesizeCall(`, `.measurability`, `turnsOf` and `droidAdapter`. The reads
+   were necessary because the semantic index could not be loaded at all, and each one answered a
+   specific question the three findings raised: the file-source declaration table and the merge
+   rule (Finding 1), the twin-join rule and its all-zero exclusion (Findings 1 and 3), the
+   session projection's derivation of the turn set, the totals, the availability, the cost, the
+   timeline and the duration (Findings 1 and 3), the adapter's reason wording (the small
+   finding), and the file source's companion-file reader (Finding 2). **Local evidence (read-only,
+   outside the repository):** three files under this machine's real `~/.factory/sessions/` — the
+   parent session `5f50fd96-…`'s companion settings file, the child session `bfde2f1a-…`'s own
+   companion settings file, and the child's own transcript — which is the evidence for A9 and A10
+   and therefore for D29. No file outside the plan was written. **The two documentation checks
+   could not be re-run in this session** for the reason in §2.1 and must be re-run by the
+   conductor against this amended plan.
+5. **The D31–D32 amendment (architect session, 2026-11-01).** The same tooling limits apply: the
+   CodeGraph MCP tool and the Kyber-Weave MCP documentation tools are not loadable in this
+   session, and this session has no shell, so the `codegraph explore` CLI fallback is unavailable
+   too — the discovery below is direct reads and targeted greps. **Discovery: codegraph 0, docs 0,
+   direct reads 11 files and 9 targeted greps** — `dash/src/otel/service.ts`,
+   `dash/src/otel/writer.ts`, `dash/src/otel/receiver.ts`, `dash/src/otel/receiver.test.ts`,
+   `dash/src/canon/ingest.ts`, `dash/src/canon/ingest.test.ts`, `dash/src/canon/store.ts`,
+   `dash/src/canon/log-ingest.ts`, `dash/src/canon/adapters/droid.ts`,
+   `dash/src/canon/adapters/droid.test.ts`, `dash/src/canon/adapters/copilot.ts`, and this plan;
+   the greps covered `writeMetrics`, `OTLP_PERSISTENCE_FAILED`, `growWithReceiverTiming`,
+   `baseRecord`, `record.status`, `CREATE TABLE`, `lastAcceptedAt`, `metrics`, and the writer's
+   and service's construction sites. The reads were necessary because the semantic index could
+   not be loaded at all, and each one answered a specific question the two seams raised: the
+   production sink's shape and the writer's metrics port and refusal rule (Seam 1); the receiver's
+   metrics route, its error mapping and its health window (Seam 1); the canon schema's
+   `IF NOT EXISTS` discipline and the store's wipe scope (Seam 1); the log-ingest module the
+   metrics ingest mirrors (Seam 1); the normalization seam's status write and the adapters that
+   assign a status (Seam 2); and the consumers of a stored record's status — the session's tool
+   error counts, the run row and the outcome derivation (Seam 2). Four governed documents were read
+   directly because the Kyber-Weave MCP documentation tools are unavailable: `docs/rules/
+   honest-unobservability.md`, and the receiver-activity passages of `docs/dash/architecture.md`,
+   `docs/dash/runbook.md` and `docs/dash/telemetry-inventory.md`. No file outside the plan was
+   written. **The two documentation checks could not be re-run in this session** for the reason in
+   §2.1 and must be re-run by the conductor against this amended plan.
