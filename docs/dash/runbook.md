@@ -1399,7 +1399,7 @@ the safety limit.
 | `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
 | `--slot NAME` | none | Takes a slot (machine-wide for one user account) before the command starts and queues while it is held. For full test suites only. |
 | `--slot-count N` | 1 | How many runs may hold the slot at once. Needs `--slot`. |
-| `--slot-wait S` | 540 | Queues at most S seconds, then exits 88. 0 means do not queue. Needs `--slot`. |
+| `--slot-wait S` | 540 | Queues at most S seconds (at most 86400, no leading zero), then exits 88. 0 means do not queue. Needs `--slot`. |
 | `--task LABEL` | checkout name and command | What other callers see while this run holds the slot (cut to 100 characters). Needs `--slot`. |
 | `--slot-dir DIR` | `~/.cache/kyber-weave/test-slots` | Absolute directory for the locks. For the guard's own tests only. Needs `--slot`. |
 
