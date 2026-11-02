@@ -36,7 +36,8 @@ import { isAbsolute, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sha256Hex } from '../../receipt.js'
-import { factoryPluginPaths, installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
+import { describeFactoryPluginStatus, factoryPluginPaths, installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
+import { FACTORY_MARKETPLACE_CONTENT, FACTORY_MARKETPLACE_FILES } from './marketplace.js'
 import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
 
 /** The marketplace the tree is registered as. Pinned as a literal, not read from the module. */
@@ -812,6 +813,130 @@ describe('the upgrade path', () => {
     expect(result.exitCode).toBe(1)
     expect(result.reason).toBe('drift')
     expect(fakeCommandLines(f.fake).slice(before)).toEqual([])
+  })
+
+  it('reports a superseded tree as an older version, not as an owner edit', () => {
+    const f = fixture('factory-status-upgrade-')
+    strict(f)
+    supersede(f)
+
+    const lines = describeFactoryPluginStatus(f.home, undefined, { processEnv: f.env })
+
+    // The tree is KyberDash's own, the owner never touched it, and it holds the bundle
+    // KyberDash wrote before: that is an OLD VERSION, not an owner edit and not a tree
+    // KyberDash did not write. The wording says so, so it cannot drift back.
+    expect(lines).toContain('plugin: installed (an older version than this build)')
+    expect(lines).not.toContain('plugin: modified since install or not written by KyberDash')
+  })
+})
+
+describe('the tree is gone and the harness already holds the plugin', () => {
+  /** The commands that CHANGE the harness's own state; the list commands only read it. */
+  const mutating = (fake: FakeHarness): string[] =>
+    fakeCommandLines(fake).filter(
+      (line) => !line.startsWith('plugin marketplace list') && !line.startsWith('plugin list'),
+    )
+
+  /**
+   * The harness holds KyberDash's own marketplace, registered from KyberDash's own tree,
+   * and the plugin is installed and enabled — but the tree itself is gone.
+   */
+  function harnessHoldsThePlugin(f: Fixture): void {
+    f.fake.marketplaces.add(MARKETPLACE_NAME)
+    f.fake.sources.set(MARKETPLACE_NAME, f.pluginDir)
+    f.fake.plugins.add(PLUGIN_IDENTITY)
+    f.fake.statuses.set(PLUGIN_IDENTITY, 'Enabled')
+  }
+
+  it('refreshes the harness\'s cached copy, because the tree it runs was written again', () => {
+    const f = fixture('factory-absent-refresh-')
+    harnessHoldsThePlugin(f)
+    expect(existsSync(f.pluginDir)).toBe(false)
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(0)
+    // The tree was written again, so the copy the harness RUNS is stale until the harness
+    // re-copies it. Without `plugin update` the harness keeps running the bundle it
+    // cached while KyberDash reports a successful install.
+    expect(mutating(f.fake)).toContain(`plugin update ${PLUGIN_IDENTITY} --scope user`)
+    expect(result.disposition).toMatch(/^(installed|upgraded)$/)
+    expect(result.outcome).toBe('wrote')
+    expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
+    expect(existsSync(f.receiptFile)).toBe(true)
+  })
+
+  it('refreshes the harness\'s cached copy under --if-installed too', () => {
+    const f = fixture('factory-absent-refresh-ifinst-')
+    harnessHoldsThePlugin(f)
+    expect(existsSync(f.pluginDir)).toBe(false)
+
+    const result = strict(f, { ifInstalled: true })
+
+    expect(result.exitCode).toBe(0)
+    // `--if-installed` is the update path: the harness already holds the plugin, so the
+    // install refreshes the copy the harness runs.
+    expect(mutating(f.fake)).toContain(`plugin update ${PLUGIN_IDENTITY} --scope user`)
+    expect(result.disposition).toMatch(/^(installed|upgraded)$/)
+    expect(result.outcome).toBe('wrote')
+    expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
+    expect(existsSync(f.receiptFile)).toBe(true)
+  })
+})
+
+describe('the plugin KyberDash installed itself', () => {
+  /**
+   * The receipt KyberDash wrote: it names the marketplace, the plugin identity and the
+   * tree, with a digest per owned file. The tree itself is gone; the receipt is the proof
+   * that the tree was KyberDash's own.
+   */
+  function writeOwnReceipt(f: Fixture): void {
+    mkdirSync(f.stateDir, { recursive: true })
+    const files = FACTORY_MARKETPLACE_FILES.map((relative) => ({
+      path: join(f.pluginDir, ...relative.split('/')),
+      sha256: sha256Hex(FACTORY_MARKETPLACE_CONTENT[relative] ?? ''),
+    }))
+    writeFileSync(
+      f.receiptFile,
+      `${JSON.stringify(
+        {
+          version: 1,
+          marketplace: MARKETPLACE_NAME,
+          plugin: PLUGIN_IDENTITY,
+          root: f.pluginDir,
+          files,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+  }
+
+  it('is not a conflict when the receipt names the marketplace and the plugin identity', () => {
+    const f = fixture('factory-own-plugin-')
+    writeOwnReceipt(f)
+    // The harness holds the plugin, and no marketplace named `kyberdash` is registered:
+    // the registration went with the tree.
+    f.fake.plugins.add(PLUGIN_IDENTITY)
+    f.fake.statuses.set(PLUGIN_IDENTITY, 'Enabled')
+
+    const result = strict(f)
+
+    // The plugin KyberDash installed is KyberDash's own: the receipt names the
+    // marketplace it came from and the identity it carries.
+    expect(result.reason).not.toBe('conflict')
+    expect(result.exitCode).toBe(0)
+    expect(result.err.join('\n')).not.toContain('droid plugin uninstall')
+    const commands = fakeCommandLines(f.fake).filter(
+      (line) => !line.startsWith('plugin marketplace list') && !line.startsWith('plugin list'),
+    )
+    // The marketplace is registered FIRST, because `plugin update` fails without a
+    // registration, and the plugin's cached copy is refreshed after it.
+    expect(commands).toEqual([
+      `plugin marketplace add ${f.pluginDir}`,
+      `plugin update ${PLUGIN_IDENTITY} --scope user`,
+    ])
+    expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
   })
 })
 
