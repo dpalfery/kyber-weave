@@ -251,6 +251,36 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.Empty(McpWiringFixes.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
     }
 
+    /// <summary>
+    /// A repository root the platform cannot spell as a path answers no path for a name, rather than
+    /// throwing out of the containment rule.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule's own remarks promise this outcome: a name this process cannot resolve is a refusal
+    /// like any other, because an operator needs a finding that names the path rather than an
+    /// exception out of a check that runs during <c>docs init</c>. The promise held only for the
+    /// relative name, though, because the root it is combined with was resolved outside the guarded
+    /// region — so a root holding a character the filesystem forbids threw before the name was ever
+    /// looked at.
+    /// </para>
+    /// <para>
+    /// The embedded NUL is the one such root a caller can build on every platform: it is not
+    /// whitespace, so the null-or-blank guard on the argument does not answer it, and both the
+    /// Unix and the Windows implementation of <see cref="Path.GetFullPath(string)"/> refuse to
+    /// resolve it. Asserting the refusal rather than "does not throw" is the point — null is what a
+    /// caller acts on, and it is the same answer the rule gives a name outside the tree.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARepositoryRootThePlatformCannotResolveAnswersNoPathRatherThanThrowing()
+    {
+        const string UnusableRoot = "\0";
+
+        Assert.Null(McpRepositoryPath.Contained(UnusableRoot, ".mcp.json"));
+        Assert.Null(McpWiringRepairer.ContainedPath(UnusableRoot, ".mcp.json"));
+    }
+
     // ---- The link guard must test for a parent-reference segment, not for the two characters.
 
     /// <summary>

@@ -56,6 +56,16 @@ internal static class McpRepositoryPath
     /// other: an operator needs a finding that names the path, not an exception out of a check that
     /// runs during <c>docs init</c>.
     /// </para>
+    /// <para>
+    /// The root is resolved inside the same guard as the name, and that placement is the rule rather
+    /// than an accident of ordering. Both are strings a caller supplied, so both can name something
+    /// the platform refuses to resolve, and a root is the likelier of the two to be the reason: it
+    /// arrives from an argv flag or a configuration value, and it is combined with every name in the
+    /// tree. Resolving it outside the guard meant the promise above held for the name and not for the
+    /// root — a root the filesystem rejects threw out of the repair, the removal and the fix list
+    /// before any one of them had a path to refuse, which is the exception this type exists to
+    /// answer with a finding instead.
+    /// </para>
     /// </remarks>
     public static string? Contained(string repositoryRoot, string relativePath)
     {
@@ -64,11 +74,13 @@ internal static class McpRepositoryPath
         if (!McpWiringReceipt.RepositoryRelative(relativePath))
             return null;
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root;
         string full;
 
         try
         {
+            root = Path.GetFullPath(repositoryRoot);
+
             full = Path.GetFullPath(
                 Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         }
