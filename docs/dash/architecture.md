@@ -671,6 +671,19 @@ capture never fails the host.
 unreadable, oversized, malformed or unknown-version file reads as off.
 `KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
 
+**Two readers, one writer.** The consent file's **read** side exists twice, on purpose. The
+canon seam's gate is `dash/src/canon/droid-content.ts`; the copy the plugin bundle inlines is
+`dash/src/capture/harnesses/factory-plugin/consent.ts`. Both are leaves — the plugin's may
+import node built-ins and the capture family only (the leaf rules in
+`dash/src/architecture/factory-leaves.test.ts` and
+`dash/src/capture/harnesses/factory-plugin/bundle.test.ts` forbid a value import from outside
+`src/capture/`), and the canon copy declares the same rule in its own header comment — so
+neither can import the other, and the duplication is kept rather than merged. What holds the two
+copies to one behaviour is a **parity test**: it runs both readers over one corpus (valid,
+malformed, oversized, missing, unknown-version) and asserts identical verdicts, and it round
+trips the shared writer (`dash/src/capture/consent-file.ts`) into both readers. The **write**
+side is one module both sides already share.
+
 The Settings switch that installs the capture **never turns content recording on**. Only the
 consent verb (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner
 editing the consent file turns it on. This is a deliberate difference from the OpenCode writer,
@@ -704,17 +717,40 @@ route's own content switch belongs to the harness, not to KyberDash.
   first time, because the harness's copy is then the stale one. When the registry does not report
   it installed, nothing is written and no harness command runs.
 
-**The install lifecycle's vocabulary.** The status surface reports the harness-side state as the
-harness itself reports it (`dash/src/capture/harnesses/factory-plugin/marketplace.ts`):
+**The status surface's fixed words.** `capture status` and the Settings row report the **tree's**
+state, in fixed words: `plugin: installed`, `plugin: not installed`, `plugin: unreadable` (not a
+regular directory, or a file in it is not a regular file), `plugin: modified since install or
+not written by KyberDash`, and — for a tree KyberDash wrote that holds the **previous** bundle —
+`plugin: installed (an older version than this build)`. That last word is the `upgrade`
+classification, and it is deliberately distinct from `plugin: modified since install or not
+written by KyberDash`: a tree KyberDash wrote and still owns, whose bytes are simply an older
+bundle, is neither an owner edit nor a foreign tree. The install is what resolves it — the
+install rewrites the tree with the current bundle and then refreshes the harness's cached copy,
+the same refresh the `--if-installed` clause above promises — so the row reads
+`plugin: installed` again once the install has run.
+
+**The install lifecycle's vocabulary.** The **install path** classifies the harness-side state as
+the harness itself reports it (`dash/src/capture/harnesses/factory-plugin/marketplace.ts`):
 `marketplace-tree-written` (the Kyber-owned tree landed; the harness does not have it yet),
 `marketplace-registered` (the harness registered the marketplace; the plugin is not installed),
 `plugin-installed` (the plugin is installed and enabled), `conflict` (the harness holds a
 marketplace name or a plugin identity KyberDash does not own), and `unknown` (the harness's own
-state could not be read — the CLI is missing, or its output is not understood). Every partial
-state is named, and every one of them is resumable by re-running the install. An interrupted
-harness-side step is never repaired by hand: the harness's cache copy and its own plugin record
-are the harness's files, and the repair is to re-run the harness's own command. A missing `droid`
-CLI reads as `unknown` with the named cause, never as an install that succeeded.
+state could not be read — the CLI is missing, or its output is not understood).
+
+This vocabulary is **not** part of the status surface. Reading it spawns the harness's own CLI,
+so a caller that must not spawn — a status read, for instance — does not read it:
+`factoryHarnessState` (`dash/src/capture/harnesses/factory-plugin/install.ts`) takes the harness
+CLI from its caller and says so in its own header comment, and `describeFactoryPluginStatus`
+prints the `factory harness: <state>` line only when a caller injects one. No production caller
+injects one, so the install path is the only place the vocabulary is reported today, and a
+status row reports the tree's state only. The consequence is honest but uncomfortable: an owner
+whose organisation refused the route, or whose marketplace registration was removed, sees a row
+that says the plugin is installed with no harness-side fact to contradict it.
+
+Every partial state is named, and every one of them is resumable by re-running the install. An
+interrupted harness-side step is never repaired by hand: the harness's cache copy and its own
+plugin record are the harness's files, and the repair is to re-run the harness's own command. A
+missing `droid` CLI reads as `unknown` with the named cause, never as an install that succeeded.
 
 **The refusal vocabulary.** A refusal names its cause: `conflict` (a name the harness holds that
 KyberDash does not own), `drift` (the tree the owner edited) and `unreadable` (the tree, or the

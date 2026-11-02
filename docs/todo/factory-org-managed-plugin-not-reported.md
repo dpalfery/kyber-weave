@@ -38,10 +38,12 @@ that state is known.
 - Whether the state is detectable at all from outside. If the harness exposes no such report,
   then the honest position is that KyberDash cannot tell, and the surfaces must say so rather than
   report "installed" as though it meant "capturing".
-- What the report is called. The existing vocabulary has words for the states KyberDash can
-  observe (`plugin: installed`, `plugin: not installed`, `factory harness: plugin-installed`); a
-  state meaning "installed, and the hooks will not load" needs its own, and it must not read as
-  a fault in the capture.
+- What the report is called. The status surface's own vocabulary has words for the states
+  KyberDash can observe (`plugin: installed`, `plugin: not installed`). The harness-side
+  vocabulary — `factory harness: plugin-installed` and its siblings — exists on the **install**
+  path and is **not** surfaced by the status surfaces, because a status read never spawns the
+  harness's CLI. A state meaning "installed, and the hooks will not load" needs its own, and it
+  must not read as a fault in the capture.
 
 Whichever is chosen, the honest-unobservability rule applies: a capture that will not run must
 never be reported as one that is running, and an absence of knowledge must be reported as an
