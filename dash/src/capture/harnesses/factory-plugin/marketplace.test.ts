@@ -33,6 +33,8 @@ import { installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
 import {
   FACTORY_MARKETPLACE_NAME,
   FACTORY_PLUGIN_IDENTITY,
+  parseMarketplaceList,
+  parsePluginList,
   readFactoryHarnessRegistry,
   readFactoryHarnessResidue,
   readFactoryHarnessState,
@@ -548,5 +550,92 @@ describe('the residue the harness\'s own teardown leaves', () => {
     const fake = fakeHarness()
 
     expect(readFactoryHarnessResidue(fake.harness, before)).toEqual([])
+  })
+})
+
+/**
+ * The harness prints its list output as a table whose columns are sized to the content, and
+ * a cell that does not fit is truncated with the overflow printed on the lines below. These
+ * are the REAL outputs, captured from Factory Droid CLI 1.1.0 on 2026-11-02.
+ */
+describe('the harness prints a wrapped table', () => {
+  // The REAL output, captured from Factory Droid CLI 1.1.0 on 2026-11-02: two
+  // marketplaces, one with a long name, the harness truncating both cells and printing the
+  // overflow on the lines below.
+  const WRAPPED_MARKETPLACE_LIST = [
+    'MARKETPLACE                            SOURCE                                  PLUGINS  DISPLAY NAME',
+    'a-very-long-marketplace-directory-nam  local:/var/folders/gg/jnm7dkgs7w1dhkb3        0  m',
+    'e-that-will-not-fit                    j8wm4gg00000gn/T/tmp.Q5N8ItWjCd/a-very',
+    '                                       -long-marketplace-directory-name-that-',
+    '                                       will-not-fit',
+    'kyberdash                              local:/var/folders/gg/jnm7dkgs7w1dhkb3        0  —',
+    '                                       j8wm4gg00000gn/T/tmp.Q5N8ItWjCd/kyberd',
+    '                                       ash',
+    '',
+  ].join('\n')
+
+  it('reads the whole SOURCE cell when the harness wraps it', () => {
+    const registry = parseMarketplaceList(WRAPPED_MARKETPLACE_LIST)
+    const kyberdash = registry?.find((entry) => entry.name === 'kyberdash')
+
+    expect(kyberdash?.source).toBe(
+      'local:/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T/tmp.Q5N8ItWjCd/kyberdash',
+    )
+  })
+
+  it('reads the whole marketplace name and source when both wrap', () => {
+    const registry = parseMarketplaceList(WRAPPED_MARKETPLACE_LIST)
+
+    expect(registry).toHaveLength(2)
+    expect(registry?.[0]?.name).toBe(
+      'a-very-long-marketplace-directory-name-that-will-not-fit',
+    )
+    expect(registry?.[0]?.source).toBe(
+      'local:/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T/tmp.Q5N8ItWjCd/a-very-long-marketplace-directory-name-that-will-not-fit',
+    )
+    expect(registry?.[1]?.name).toBe('kyberdash')
+  })
+
+  it('does not mistake a wrapped continuation line for a row of its own', () => {
+    // Six of the eight lines below the header are continuations of the two rows.
+    expect(parseMarketplaceList(WRAPPED_MARKETPLACE_LIST)).toHaveLength(2)
+  })
+
+  it('reads a plugin identity the harness wrapped', () => {
+    const registry = parsePluginList(
+      [
+        'PLUGIN                       STATUS   SOURCE  VERSION',
+        'a-very-long-plugin-identit  Enabled  user    mvz6nbvc',
+        'y@kyberdash',
+        '',
+      ].join('\n'),
+    )
+
+    expect(registry).toHaveLength(1)
+    expect(registry?.[0]?.identity).toBe('a-very-long-plugin-identity@kyberdash')
+    expect(registry?.[0]?.status).toBe('Enabled')
+  })
+
+  it('decides the ownership by the whole source when the harness wrapped it', () => {
+    const fake = fakeHarness()
+    fake.harness.run = (argv) =>
+      argv[1] === 'marketplace'
+        ? { exitCode: 0, stdout: WRAPPED_MARKETPLACE_LIST, stderr: '' }
+        : { exitCode: 0, stdout: 'PLUGIN  STATUS  SOURCE  VERSION\n', stderr: '' }
+
+    const ours = readFactoryHarnessState(fake.harness, {
+      treeWritten: true,
+      marketplaceRoot: '/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T/tmp.Q5N8ItWjCd/kyberdash',
+    })
+    const theirs = readFactoryHarnessState(fake.harness, {
+      treeWritten: true,
+      marketplaceRoot: '/kyberdash/marketplaces/kyberdash',
+    })
+
+    // A wrapped source that is OUR tree is not a collision; the same output against a
+    // different root is.
+    expect(ours.state).toBe('marketplace-registered')
+    expect(ours.conflict).toBeUndefined()
+    expect(theirs.state).toBe('conflict')
   })
 })

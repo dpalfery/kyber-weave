@@ -352,23 +352,75 @@ function emptyRegistry(): FactoryHarnessRegistry {
 /** The harness pads the columns of its list output with runs of spaces. */
 const COLUMN_SEPARATOR = /\s{2,}/
 
+/** One cell of a table row, with the offset its text begins at. */
+type TableCell = { text: string; start: number }
+
 /**
- * The rows of one of the harness's list commands, with the header row dropped.
+ * The cells of one line of the harness's table, with the offset each cell's text begins at.
+ *
+ * The offset matters because the harness prints a cell that does not fit its column in
+ * pieces: the overflow of a cell is printed at that cell's own offset on the lines below,
+ * so the offset is what says which column a piece belongs to.
+ */
+function tableCells(line: string): TableCell[] {
+  const cells: TableCell[] = []
+  const separator = new RegExp(COLUMN_SEPARATOR, 'g')
+  let start = 0
+  let match: RegExpExecArray | null
+  while ((match = separator.exec(line)) !== null) {
+    const raw = line.slice(start, match.index)
+    const text = raw.trim()
+    if (text !== '') cells.push({ text, start: start + (raw.length - raw.trimStart().length) })
+    start = match.index + match[0].length
+  }
+  const raw = line.slice(start)
+  const text = raw.trim()
+  if (text !== '') cells.push({ text, start: start + (raw.length - raw.trimStart().length) })
+  return cells
+}
+
+/**
+ * The rows of one of the harness's list commands, read as the table the harness prints.
  *
  * `undefined` means the output was not understood at all, which is `unknown` and never
  * "holds nothing"; an empty array means the harness answered that it holds nothing of
  * that kind.
+ *
+ * The harness sizes its columns to the content and TRUNCATES a cell that does not fit,
+ * printing the overflow at the same offset on the lines below. So a row occupies as many
+ * lines as its longest cell needs, and a line with fewer cells than the row above it
+ * continues that row: each of its pieces belongs to the column whose offset it starts in,
+ * and the pieces concatenate back into the cell's whole text.
  */
 function listRows(stdout: string, header: string, empty: RegExp): string[][] | undefined {
   const text = stdout.trim()
   if (text === '') return undefined
   if (empty.test(text)) return []
-  const rows = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-    .map((line) => line.split(COLUMN_SEPARATOR).map((cell) => cell.trim()))
-  if (rows[0]?.[0]?.toUpperCase() === header) rows.shift()
+
+  const rows: string[][] = []
+  let offsets: number[] = []
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue
+    const cells = tableCells(line)
+    if (cells.length === 0) continue
+    if (cells[0]?.text.toUpperCase() === header) continue
+    if (rows.length === 0 || cells.length >= offsets.length) {
+      // A row of its own: its cells are the columns, and their offsets are where the
+      // overflow of each column is printed.
+      offsets = cells.map((cell) => cell.start)
+      rows.push(cells.map((cell) => cell.text))
+      continue
+    }
+    // A continuation of the row above: each piece joins the column it starts in.
+    const row = rows[rows.length - 1]
+    for (const cell of cells) {
+      let column = 0
+      for (let index = 0; index < offsets.length; index++) {
+        if (offsets[index] <= cell.start) column = index
+      }
+      row[column] = `${row[column] ?? ''}${cell.text}`
+    }
+  }
   return rows
 }
 
