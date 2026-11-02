@@ -22,14 +22,20 @@ public enum CapturePluginStepOutcome
 
 /// <summary>
 ///     Runs <c>kyberdash kyber capture plugin install --harness &lt;harness&gt; --preserve</c> after a Squad global
-///     deployment, so the capture plugin of the deployed harness is installed or upgraded in the same root Squad just
-///     wrote to.
+///     deployment, so the capture plugin of the deployed harness is installed or upgraded in the root that harness
+///     loads it from.
 /// </summary>
 /// <remarks>
 ///     KyberDash owns the plugin file and its receipt (ADR 0031). Squad calls the verb and never writes the file.
 ///     <c>--preserve</c> keeps a user-edited or foreign plugin file, so this step never overwrites one. The step
 ///     never throws and never changes Squad's exit code: the Squad deployment has already succeeded, and rolling
 ///     it back for a capture helper would trade a working install for an optional one.
+///     <para>
+///         The OpenCode step is handed the root Squad resolved, as <c>--config-dir</c>. The Factory step is handed
+///         no root at all: that flag selects the OpenCode config root, and the Factory verb refuses it — the
+///         Factory harness resolves its own root (<c>$FACTORY_DIR</c>, else <c>~/.factory</c>), the same tree the
+///         Factory file source reads, so the plugin and the file source always pair from one root.
+///     </para>
 /// </remarks>
 internal sealed class KyberDashCapturePluginStep
 {
@@ -75,11 +81,14 @@ internal sealed class KyberDashCapturePluginStep
         return Run(SquadTarget.OpenCode, openCodeRoot, dryRun);
     }
 
-    /// <summary>Runs the verb for one harness against the global root Squad resolved for that harness.</summary>
+    /// <summary>Runs the verb for one harness, against the root that harness resolves.</summary>
     /// <param name="harness">The harness whose capture plugin is installed; it names the verb's <c>--harness</c>.</param>
-    /// <param name="globalRoot">The harness's global root Squad resolved, passed as <c>--config-dir</c>.</param>
+    /// <param name="globalRoot">
+    ///     The root passed as <c>--config-dir</c>, or null when the verb is given no root at all. The Factory verb
+    ///     refuses that flag and resolves its own root, so its call names none.
+    /// </param>
     /// <param name="dryRun">Whether the Squad run is a dry run; passed through as <c>--dry-run</c>.</param>
-    internal CapturePluginStepOutcome Run(SquadTarget harness, string globalRoot, bool dryRun)
+    internal CapturePluginStepOutcome Run(SquadTarget harness, string? globalRoot, bool dryRun)
     {
         string name = DisplayName(harness);
         string? kyberdash = _locateKyberDash();
@@ -150,10 +159,10 @@ internal sealed class KyberDashCapturePluginStep
     ///     target, <c>--no-capture-plugin</c>, or no step injected) does nothing.
     /// </summary>
     /// <remarks>
-    ///     The plugin is global capture, so a project-scope deployment never reaches here. Every root comes from the
-    ///     same resolver the lifecycle planned with, so the verb and Squad agree on the directory, and every harness
-    ///     is handed its own root: the OpenCode plugin lives under the OpenCode root, the Factory plugin under the
-    ///     Factory one.
+    ///     The plugin is global capture, so a project-scope deployment never reaches here. The OpenCode root comes
+    ///     from the same resolver the lifecycle planned with, so the verb and Squad agree on the directory. The
+    ///     Factory step is handed no root: that verb resolves the Factory harness's own root itself, so the two
+    ///     steps can never share one root.
     /// </remarks>
     internal static void RunForGlobal(
         KyberDashCapturePluginStep? step,
@@ -170,6 +179,12 @@ internal sealed class KyberDashCapturePluginStep
             if (!deployedTargets.Contains(harness))
                 continue;
 
+            if (harness == SquadTarget.Factory)
+            {
+                step.Run(harness, null, dryRun);
+                continue;
+            }
+
             IReadOnlyList<(SquadTarget Target, string GlobalRoot)> roots =
                 SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots);
             if (roots.Count == 0)
@@ -184,13 +199,19 @@ internal sealed class KyberDashCapturePluginStep
         }
     }
 
-    private static List<string> Arguments(SquadTarget harness, string globalRoot, bool dryRun)
+    private static List<string> Arguments(SquadTarget harness, string? globalRoot, bool dryRun)
     {
         List<string> arguments =
         [
-            "kyber", "capture", "plugin", "install", "--harness", SquadTargetCatalog.GetToken(harness), "--preserve",
-            "--config-dir", globalRoot
+            "kyber", "capture", "plugin", "install", "--harness", SquadTargetCatalog.GetToken(harness), "--preserve"
         ];
+        // No root means no --config-dir: the Factory verb resolves its own root and refuses the flag.
+        if (globalRoot is not null)
+        {
+            arguments.Add("--config-dir");
+            arguments.Add(globalRoot);
+        }
+
         if (dryRun)
             arguments.Add("--dry-run");
         return arguments;

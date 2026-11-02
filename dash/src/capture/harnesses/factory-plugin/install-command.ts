@@ -11,7 +11,7 @@
 //   exit    0 success, including every preserve-mode keep and --if-installed skip;
 //           1 strict refusal (a foreign tree, an owner edit, an unreadable path) or a failed
 //           write;
-//           2 usage (missing or unsupported --harness).
+//           2 usage (missing or unsupported --harness, or --config-dir).
 //
 // Contract for the consent:
 //   stdout  `factory consent: content <on|off> <consentFile>`.
@@ -22,6 +22,11 @@
 // The install never turns the content consent on: it creates the consent file with content
 // off, and only the consent verb (or the owner editing that file) records the owner's
 // decision to capture the prompt text.
+//
+// The verb refuses `--config-dir`. That flag selects the OpenCode config root; the Factory
+// harness resolves its own root ($FACTORY_DIR, else ~/.factory) — the same tree the Factory FILE
+// source reads. A request that carries the flag is a usage error, and a refused request writes
+// nothing at all: no plugin tree, no receipt, no consent file.
 
 import { readConsentState, writeContentConsent } from '../../consent-file.js'
 import type { PathEnv } from '../../paths.js'
@@ -39,6 +44,11 @@ export type FactoryPluginInstallCommandOptions = {
   harness?: string
   preserve?: boolean
   ifInstalled?: boolean
+  /**
+   * `--config-dir`: the OpenCode config root. The Factory harness resolves its own root, so the
+   * verb refuses the flag rather than ignoring it.
+   */
+  configDir?: string
   dryRun?: boolean
   homeDir: string
   env?: PathEnv
@@ -73,6 +83,16 @@ export const FACTORY_CONSENT_REMINDER =
 export function runFactoryPluginInstall(
   options: FactoryPluginInstallCommandOptions,
 ): FactoryPluginCommandResult {
+  // Checked before the harness, so the refusal holds whatever else the request carries: the flag
+  // names the OpenCode config root, and the Factory harness resolves its own root.
+  if (options.configDir !== undefined) {
+    return {
+      exitCode: FACTORY_PLUGIN_USAGE_EXIT,
+      stdout: '',
+      stderr:
+        'kyberdash capture plugin install: --config-dir selects the OpenCode config root; the Factory harness resolves its own root ($FACTORY_DIR, else ~/.factory). Pass --harness opencode to use it.\n',
+    }
+  }
   if (options.harness !== 'factory') {
     return {
       exitCode: FACTORY_PLUGIN_USAGE_EXIT,

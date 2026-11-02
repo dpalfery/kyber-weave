@@ -467,7 +467,10 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--harness <id>', 'Harness whose plugin to install (only: opencode, factory)')
     .option('--preserve', 'Keep an edited or foreign plugin and an existing consent file; warn and exit 0')
     .option('--if-installed', 'Act only when the plugin file is already present')
-    .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)')
+    .option(
+      '--config-dir <dir>',
+      'OpenCode config root, for --harness opencode only (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)',
+    )
     .option('--dry-run', 'Print what would change and write nothing')
     .exitOverride(captureUsageExit)
     .action(
@@ -489,6 +492,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
                 homeDir,
                 ...(opts.preserve !== undefined ? { preserve: opts.preserve } : {}),
                 ...(opts.ifInstalled !== undefined ? { ifInstalled: opts.ifInstalled } : {}),
+                // The Factory verb refuses the flag rather than ignoring it, so it is forwarded
+                // and the refusal reaches the caller who typed it.
+                ...(opts.configDir !== undefined ? { configDir: opts.configDir } : {}),
                 ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
               })
             : (await import('../capture/harnesses/opencode-plugin/install-command.js')).runPluginInstall({ ...opts, homeDir })
