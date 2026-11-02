@@ -516,6 +516,9 @@ describe('the owner\'s own Factory files are never written', () => {
 
     installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     expect(listFiles(f.root)).toEqual(['hooks.json', 'settings.json'])
+    // The ONE thing KyberDash removes from the Factory root is the tree the PREVIOUS route
+    // wrote there, and only when the receipt that route wrote proves it is ours; the cases
+    // above pin that, and they are the only deletion under the root.
   })
 })
 
