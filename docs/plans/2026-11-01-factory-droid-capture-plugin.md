@@ -17,7 +17,8 @@ impact-components: [KyberDash, KyberSquad]
 **Status: Ready — approved for execution 2026-11-01 (D22).** Execution authority is the task
 list in §5: T1–T21, plus the rework tasks T22–T33 added by the D28–D37 amendments below, each
 with its RED/GREEN split, acceptance criteria and test command, plus the tasks T34–T46 added by
-the D43–D56 amendment and T47–T48 added by the D57–D64 amendment. The
+the D43–D56 amendment, T47–T48 added by the D57–D64 amendment, and T49–T50 added by the D65
+amendment. The
 conductor dispatches them; no task runs before it does. The reconciliation of the external
 evidence digest and the local-environment digest (D12, D23–D26, A1–A10) is folded into this
 version; the two documentation checks must be re-run by the conductor after these edits, because
@@ -197,6 +198,34 @@ the lifecycle: the plan stays **Ready**, and the new tasks T47–T48 are dispatc
 conductor accepts this amendment. Provenance: **autonomous: decided in the D57–D64 amendment
 session; no hard block, no escalation**.
 
+**Amendment 8 (D65, T49–T50).** The shipped Factory installer can install the capture plugin and
+can leave it alone, but it **cannot upgrade it**. The tree classifier's `same` means "the tree
+matches the receipt", and a tree KyberDash wrote with an **older bundle** still matches its
+receipt — so the install reports `unchanged`, the Kyber-owned tree is never rewritten, and the
+harness's cached copy keeps running the superseded bundle. Nothing on the branch ever replaces a
+bundle that a newer KyberDash has superseded. **D65** decides the upgrade path. A tree the
+**receipt proves** KyberDash wrote, whose bytes still match that receipt, and whose content is
+not the current bundle, is an **upgrade** — not an owner edit and not `unchanged`; a tree no
+receipt proves stays **foreign**, because matching an older bundle's bytes never establishes
+ownership, and the existing strict/preserve behaviour applies to it unchanged. The upgrade
+rewrites the Kyber-owned tree and its receipt with the current bundle and then refreshes the
+**harness's cached copy** through the harness's own `droid plugin update kyberdash-factory@kyberdash
+--scope user`; the refresh command is chosen from the **harness's own registry**, an installed
+plugin is never refreshed with `plugin install` (Factory 1.1.0 refuses it), and an installed
+plugin whose marketplace registration is missing gets the registration restored first.
+`--if-installed` decides from the harness's registry, as D11 requires, and the refresh happens
+even when KyberDash's own tree is absent and must be written for the first time. The reporting
+gains the `upgraded` and `would-upgrade` tokens, the strict/preserve refusal behaviour is
+unchanged, and **a harness refusal is never reported as a success**. `unchanged` now means
+**both** facts — the tree is the current bundle **and** the harness holds the plugin — so a
+routine install mutates nothing and runs no harness command. The **receipt keeps its shape**
+(`{version, marketplace, plugin, root, files[]}`): its per-file digests already prove the
+installed tree's identity and ownership, so no bundle-identity field is added and the receipt
+forms the plan already requires the installer to read stay readable. The plan's lifecycle state
+is unchanged (**Ready**); **T49/T50** are dispatched only once the conductor accepts this
+amendment. Provenance: **autonomous: decided in the D65 amendment session; no hard block, no
+escalation**.
+
 **Development mode:** `test-first` (supplied in the packet). **Autonomy:** `autonomous` (supplied
 in the packet; matches the repository root `AGENTS.md` Config Reg `<autonomy>`).
 
@@ -290,7 +319,7 @@ and its index registration, over a CodeGraph-indexed checkout:
 
 So the plan and its index row are schema-conformant and drift-free. The two checks must be re-run
 after every further change to this plan or to the index, because the architect session cannot
-run them itself. **The D28–D30, D31–D32, D33–D34, D35–D37, D38–D42, D43–D56 and D57–D64
+run them itself. **The D28–D30, D31–D32, D33–D34, D35–D37, D38–D42, D43–D56, D57–D64 and D65
 amendments are such changes**: the two checks
 must be re-run by the conductor against this amended plan, for the same reason and with the same
 `--merge-ready` gate (the plan still sits in the active plans folder, so `mergeReady` stays false).
@@ -346,6 +375,22 @@ documentation gates and `git` remained unavailable to it as well. **The pass the
 run `docs validate` or `docs drift`, and could not commit** — the gates are the conductor's, and
 they must be run against this amended plan and this amended index row, with `mergeReady` false,
 before anything is committed (§13, item 11).
+
+### 2.1c The D65 amendment session — no semantic index, no documentation tools, and no shell
+
+The amendment session that produced D65 had **neither tool family and no process-execution
+tool**, exactly as the D43–D56 and D57–D64 sessions did (§2.1a, §2.1b). The CodeGraph MCP tool
+(`codegraph_explore`) and the Kyber-Weave MCP documentation tools (`docs_explore`,
+`docs_for_symbol`, `docs_glossary`, `docs_validate`, `docs_drift`) were **not loadable**: the
+`ToolSearch` query for them returned "Every tool this session can load is named in the Deferred
+tools reminder; if none provides this, the capability is unavailable in this session and no
+ToolSearch query will change that." The session's deferred tools were `WebSearch` and `FetchUrl`
+only, and **no shell was exposed**, so the `codegraph explore` CLI fallback, the two
+documentation gates and `git` were unavailable as well. The amendment was therefore authored from
+**direct reads, targeted greps and Factory's own published documentation** (fetched over HTTP
+with `FetchUrl`), and **the two documentation checks could not be re-run in this session** — the
+conductor must run them against this amended plan and this amended index row, with `mergeReady`
+false, for the same reason and with the same gate (§13, item 12).
 
 ### 2.2 What the repository already provides (the reusable seams)
 
@@ -498,6 +543,7 @@ decisions that answer them. Each row names its evidence: **measured** on this ma
 | D62 | **What follow-ups does this amendment file?** | **Four, none of them work in this branch. Three have a dedicated todo under the todo index; the fourth rides on an existing one.** (1) **The quarantine table's growth.** The quarantine packet keeps the whole decoded span, capped at 256 KiB each, and **no retention or re-quarantine policy for the rows themselves was identified**; with the native span claim withdrawn (D50), every native Factory span the harness sends lands there. The concern is unbounded row count, not unbounded packet size. **No dedicated todo exists for this** — the nearest is `kyberdash-quarantine-harness-index.md`, whose "neighbouring question" names payload retention ("If it is going to be large, a retention policy — or moving the payload out of the row — is worth more than an index") but whose title and scope are the harness index. **Filing a dedicated quarantine-retention todo is T20's work**, not this amendment's. (2) **Consent is not a purge or a retention control.** Turning the consent off does not remove what is already stored, and `records.raw` is never purged — a backfill re-derives content from it, so a row that holds content stays a content store and an ingest-time strip is **not retroactive**. **Todo: `canon-records-raw-never-purged.md`** (2026-11-02). (3) **The harness's teardown drops a pre-existing owner entry**, and no restoring command is known to exist (D59). **Todo: `factory-uninstall-drops-disabled-plugin-entry.md`** (2026-11-02), which carries the three candidate remedies and says the receipt does not record the harness-side state the install found. (4) **An organisation's `allowManagedHooksOnly` makes the capture silently inert**, and the harness's own CLI does not report which hooks a scope loads (D60). **Todos: `factory-org-managed-plugin-not-reported.md`** (the status surface does not report that state) **and `factory-command-outcome-vocabulary.md`** (the command's output does not distinguish "an install whose hooks the organisation's settings will not load" from the other outcomes a user must tell apart). | Each is a finding whose remedy is a decision about **other** files — the quarantine's retention, the store's raw retention, the harness's teardown semantics, and the status surface's vocabulary — and each is recorded with the evidence and the candidate remedies, so the next decision starts from a list rather than from a rediscovery. The plan's own out-of-scope section already names the mechanism (D21, T20 files the todos); this decision makes the list explicit and ties each item to the decision that raised it. **Naming the artifacts exactly matters:** a follow-up list that says "filed as a todo" for an item with no todo of its own sends the next session hunting for a document that does not exist. | ANSWERED — autonomous: decided in the D57–D64 amendment session |
 | D63 | **Which of the amendment's tasks have shipped, and what does the branch carry now?** | **The branch has moved on since the D43–D56 amendment was written, and the plan's own task accounting is re-based on the code as it stands.** **Shipped:** T34/T35 (the marketplace route — `marketplace.ts`, `marketplace.test.ts`, and the installer's rewrite around it), T38's **SubagentStop** half (the mapper and the contract declare no child-session span), T40/T41 (the native span claim's withdrawal), T44/T45 (the native export's effective shape on the status surface — the format, the granularity and the content switch). **Partly shipped:** T36/T37 (**the settings-file non-interference shipped**, `marketplace.test.ts:223-249`; **the name-conflict refusal and the residue report did not**), T38 (**the `SubagentStop` half shipped; the hooks-file half did not** — the shipped hooks file still carries the `hooks:` wrapper and still registers the `SubagentStop` event), T44/T45's **D58 criteria did not ship** (the organisation's `enabled` master switch is unresolved and the granularity's unreadable value still resolves to `user`, `native-export.ts:334`), T46 (**some of the harness's answers are recorded** — ADR 0031's 2026-11-02 amendment and the filed todos carry the marketplace registration, the settings-entry shapes and the uninstall behaviour — **but no evidence directory was produced and the probe is not closed**). **Not shipped:** T42/T43 (the consent gate over the native and quarantine routes). **New work in this amendment: T47 and T48** — the status surface's corrected consent wording and the native reader's `enabled` switch and granularity fallback (D57, D58). | The task list is the plan's execution authority, and a task list that says a shipped task is pending sends the conductor to re-do work and a closeout that claims shipped work as new. Every entry was checked against the working tree rather than against the amendment that wrote it: the marketplace module and its test exist and pin the command order, the state vocabulary and the settings-file non-interference; the mapper's `SubagentStop` case returns no span and the contract declares no child-session kind; the adapter's `detect` claims the plugin envelope and nothing else; the native reader resolves the format, the granularity and the content switch and the row reports them. **What has NOT landed is named as precisely as what has**, because the pending half of T38 (the hooks file's shape) and the pending T42/T43 gate are real gaps the branch still carries. **A task that is partly shipped is marked partly shipped, not wholly pending and not wholly done** — the two errors are the same error in opposite directions, and both mislead the conductor. | ANSWERED — autonomous: decided in the D57–D64 amendment session, from the working tree |
 | D64 | What is the plan's lifecycle after this amendment? | **The plan stays Ready. The shipped tasks stand as shipped. T36/T37's pending half (the name-conflict refusal and the residue report), T38's hooks-file half, T42/T43 and T46 remain pending and are dispatched as ordinary tasks. T47/T48 are new and are dispatched only once the conductor accepts this amendment.** The amendment corrects the **consent's scope** (D57), the **status surface's fixed words and the export's shape** (D58), the **receipt and the restore guarantee** (D59), the **enterprise-control position** (D60), the **plan's factual statements about the code** (D61) and the **follow-up list** (D62), and re-bases the **task accounting** on the shipped code (D63). None of it changes the branch's shape: the capture is still one hooks-plugin pipeline, the owned unit is still the Kyber-owned marketplace tree, the native span claim is still withdrawn, and the native metrics path is still the whole of what remains of the native path. | The plan's approval (D22) covered the tasks then listed; every amendment since has been a decision set presented for acceptance rather than a re-scoping. **This amendment touches work that has already shipped** — the status surface's wording is live, and the false sentence in it is live — which is why the closeout must not claim the corrected wording before T48 lands, and why the branch carries a status line that overstates its own privacy behaviour until then. The two documentation checks must be re-run against this amended plan (mergeReady false, the planning gate) — the amendment session could not run them, because it had no process-execution tool and no documentation MCP server (§2.1b). | ANSWERED — autonomous: decided in the D57–D64 amendment session; the conductor's acceptance of the amendment is the gate for T47/T48 |
+| D65 | **How does a superseded KyberDash bundle get upgraded?** | **A receipt-proven tree whose bytes are exactly what KyberDash wrote, and whose content is not the current bundle, is an UPGRADE — not an owner edit and not `unchanged`.** The tree classifier gains a **sixth** kind, `upgrade`, beside `absent` / `unreadable` / `foreign` / `edited` / `same` (D61's five). Three facts make it one: (1) the receipt names this tree's root and records a digest for **every** owned file; (2) every file on disk still matches its recorded digest, so the owner has not edited it; and (3) the tree's content differs from the current `FACTORY_MARKETPLACE_CONTENT`, so the bundle KyberDash wrote has been superseded. **A tree that fails (2) stays `edited`** — the owner's edit is the owner's, and the strict/preserve behaviour is unchanged. **A tree that fails (1) is `foreign`** — no receipt, an unreadable receipt, or a receipt naming another root — and **matching an older bundle's bytes never establishes ownership**, so it is refused in strict mode and kept in preserve mode, exactly as today. **The upgrade flow.** The Kyber-owned tree and its receipt are rewritten with the current bundle, and then the harness's **cached copy** is refreshed through the harness's own command. The command is chosen from the **harness's own registry** (the state D11 already reads), never from a guess: the plugin **installed** → `droid plugin update kyberdash-factory@kyberdash --scope user`; the plugin **not installed** and the marketplace **registered** → `droid plugin install kyberdash-factory@kyberdash --scope user`; the plugin **installed** and the marketplace **not registered** → `droid plugin marketplace add <the marketplace root>` and then the update; neither → the marketplace add and then the install. **`plugin install` is never used against an installed plugin**: Factory 1.1.0 refuses it, so the fallback would turn a working upgrade into a failure. **A refusal is the harness's answer and KyberDash reports it** with the harness's stderr quoted — strict refuses (exit 1), preserve keeps with a warning (exit 0) — and **no refusal is ever reported as a success**: an install the harness refused does not print `installed`, and an upgrade the harness refused does not print `upgraded`. **`--if-installed` decides from the harness's registry, as D11 requires.** When the harness's own registry reports the plugin installed, the install refreshes the harness's copy — **even when KyberDash's own tree is absent and must be written for the first time**, because the harness's cached copy is then the stale one. When the registry does not report it installed, nothing is written and nothing is run. **`unchanged` means two facts, not one:** the outcome is `unchanged` only when the tree is the **current** bundle **and** the harness holds the plugin. The harness is refreshed **only when the tree changed**, so a routine install — a Squad step, or the updater's `--if-installed` call — that finds the current tree and an installed plugin runs **no harness command at all** and mutates nothing. **The reporting.** `upgraded` for an actual upgrade and `would-upgrade` in a dry run, mirroring the OpenCode installer's existing vocabulary (`dash/src/capture/harnesses/opencode-plugin/install.ts:56-60`, `:317-333`); `installed`, `would-install` and `unchanged` keep their meanings, and a dry run writes nothing. **The receipt keeps its shape:** `{ version: 1, marketplace, plugin, root, files[] }`, unchanged. The per-file digests already prove the installed tree's identity and ownership, and they are exactly what the upgrade classification reads, so **no bundle-identity field is added**, and the receipt forms this plan already requires the installer to read — including the previous route's receipt, which names no marketplace and no plugin — stay readable. | **The defect is measurable in the shipped code.** `classify` returns `same` for a tree whose files match the receipt's digests (`dash/src/capture/harnesses/factory-plugin/install.ts:365-408`), and the install then returns `unchanged`/`noop` when the harness holds the plugin (`install.ts:645-651`) — so a tree written by an earlier KyberDash is never rewritten, and the harness's cached copy keeps running the old bundle. The tree is written **only when the tree is `absent`** (`install.ts:653-661`), so an upgrade needs a second write trigger. **The precedent is the OpenCode installer, which already has this shape:** it classifies `older` (with a `proven` flag) and `newer` beside `same`, upgrades a proven older file, keeps an unproven one with a warning, and reports `upgraded` / `would-upgrade` (`dash/src/capture/harnesses/opencode-plugin/install.ts:189-211`, `:292-333`). The Factory route differs in one respect, and the difference is deliberate: an OpenCode plugin file carries a content-version marker (`// kyberdash-opencode-plugin v1`) that an unproven file can be recognised by, while the Factory **tree** has no such marker, so an unproven tree cannot be told from an owner tree at all — hence "no receipt, no upgrade". **Factory's own documented command set** names `droid plugin update [plugin@marketplace] --scope <scope>` beside `droid plugin install` and `droid plugin marketplace update`, and states that Droid copies a plugin into its cache unchanged — which is why the harness's cached copy needs its own refresh command once the marketplace tree changes. **One honest limit:** the Factory tree carries no content-version marker a newer KyberDash would bump (its plugin manifest's `version` is the static `1.0.0`), so a tree from a **newer** KyberDash cannot be told apart from an older one; both are "not the current bundle", and the running build replaces the tree with its own bundle, which keeps the tree and the engine that owns it consistent. **One named consequence:** a refresh the harness refuses leaves the Kyber-owned tree current and the harness's cached copy stale, and because `unchanged` requires only a current tree and an installed plugin, **a later install does not retry the refresh** — so the refusal is reported with the exact command that completes it (`droid plugin update kyberdash-factory@kyberdash --scope user`), which is the residue rule D59 established: report, never patch. | ANSWERED — autonomous: decided in the D65 amendment session, from the shipped classifier, the OpenCode installer's precedent and Factory's own documented command set; the conductor's acceptance of the amendment is the gate for T49/T50 |
 
 ## Design harvest
 
@@ -521,7 +567,7 @@ decisions that answer them. Each row names its evidence: **measured** on this ma
 | H14 | KyberDash | reference | `docs/dash/telemetry-inventory.md`: the child-session token source (D29) — a child session's tokens come from the child's **own** companion file through the exact-id pairing, and the parent's `childInclusiveTokenUsageBySessionId` map is the parent's aggregate view and never a token source; and the plugin rows' `not_measurable` reasons name the file-source pairing (D30). H12's child-pairing half is superseded by this row. |
 | H15 | KyberDash | architecture | `docs/dash/architecture.md` and `docs/dash/telemetry-inventory.md`: the native OTLP metrics destination (D31, as amended by **D38** and **D42**) — the decoded metric points are persisted in the canon store's **`metric_point`** table through the production sink's `upsertMetrics` and the `ingestMetricBatch` seam, one row per **distinct** decoded point (a point's identity is a content digest, so a re-delivered point lands on the row it already occupies); nothing projects them yet (a todo); the receiver activity records the batch as `otlp:metrics` with the points it carried; and the writer's rule is unchanged — a sink that cannot persist metrics is refused, never accepted-and-dropped. **The two documents' current "one row" shorthand is corrected by T20** (D42). |
 | H16 | KyberDash | architecture | `docs/dash/architecture.md`: the status rule at the normalization seam (D32) — an error status is never downgraded, so the `droid` adapter's `error.type` reaches the stored record and the policy-denied tool call counts as an error; the rule is inert for every other harness. |
-| H17 | KyberSquad | architecture | `docs/kyber-squad/architecture.md` and `docs/kyber-squad/onboarding.md`: the capture-plugin step's harness-aware shape (D33, extending H9) — one plugin call per capture-plugin harness, in a fixed order with the OpenCode call first and the Factory call following it, the OpenCode call handed its OWN resolved global root (`~/.config/opencode`) and the Factory call handed NONE (D35) — and the updater's Factory call (D34): the same verb in preserve mode with `--if-installed` and no root. |
+| H17 | KyberSquad | architecture | `docs/kyber-squad/architecture.md` and `docs/kyber-squad/onboarding.md`: the capture-plugin step's harness-aware shape (D33, extending H9) — one plugin call per capture-plugin harness, in a fixed order with the OpenCode call first and the Factory call following it, the OpenCode call handed its OWN resolved global root (`~/.config/opencode`) and the Factory call handed NONE (D35) — and the updater's Factory call (D34): the same verb in preserve mode with `--if-installed` and no root. **AMENDED (D65): the harvest must also correct the target document's own example**, which still shows the Factory call as `kyberdash kyber capture plugin install --harness factory --preserve --config-dir <Squad-resolved Factory root>` (`docs/kyber-squad/architecture.md:605`) — a command the Factory verb **refuses** with exit 2 (D35, D55), and which the shipped step does not run (`KyberDashCapturePluginStep.Arguments` adds `--config-dir` only for a non-null root, and the Factory call passes none: `src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs:202-217`). The document's own next paragraph already states the correct rule, so the example contradicts the prose beneath it |
 | H18 | KyberDash | reference | The `--config-dir` flag's scope (D35, **amended by D55**): it is the OpenCode config root; the Factory plugin-install verb refuses it (exit 2), and the Factory tree lands under **KyberDash's own marketplace root** (`~/.kyberdash/marketplaces/kyberdash/`), never under a Factory root — `$FACTORY_DIR` is honoured only by the file source, for the sessions tree. |
 | H19 | KyberDash | adr | ADR 0031 amended in place (D49): the Factory writer owns a **marketplace tree** under `~/.kyberdash/marketplaces/kyberdash/` (not a plugin directory under `~/.factory/plugins/`), the install is **delegated to the harness's own commands** (`droid plugin marketplace add`, `droid plugin install … --scope user`), the **delegated-install clause** — an install the harness's own CLI performs is not KyberDash owning the harness's settings, and the owner's settings file changes by the harness's hand — and the owner's settings and hooks files are still never created, read, merged, rewritten or restored **by KyberDash** (D48). |
 | H20 | KyberDash | adr | The new Factory ADR (H1) amended with the install route and the native path's fate (D43, D50): the capture plugin is installed through the harness's marketplace; the owned unit is the marketplace tree and the receipt; the native **span** claim is withdrawn with the group-vote arithmetic that made it inert, and the native **metrics** path (the `metric_point` destination) is what remains. |
@@ -531,6 +577,9 @@ decisions that answer them. Each row names its evidence: **measured** on this ma
 | H24 | KyberDash | reference | `docs/dash/telemetry-inventory.md`: the native export's **effective shape** — the format (`legacy` \| `genai`), the granularity (`user` \| `aggregate`), the message-content switch, the organisation's `enabled` master switch, and which of the organisation's settings pin each — and what KyberDash stores from it: the metrics in `metric_point`, **no native span**, and what the consent governs, stated as **what the consent governs and what it does not** (D51, D52, **amended by D57 and D58**: the earlier "no Factory content while the consent is off" is withdrawn, because the Factory **file source** stores the first user-message fragment whatever the consent file says). |
 | H25 | KyberDash | reference | `docs/cli-command-surface.md`: the Factory plugin-install verb's route and its exit codes — the marketplace route, the refusal of `--config-dir` (exit 2, D55), the named refusal states (`conflict`, `drift`, `unreadable`) and the residue report (D37, D46, D47). |
 | H26 | KyberDash | reference | `docs/dash/telemetry-inventory.md` and `docs/dash/runbook.md`: **the consent's scope, stated as what it governs and what it does not** (D57) — the plugin's prompt text is the only content the consent governs; the Factory **file source** stores the first user-message fragment (≤ 500 characters) whatever the consent file says, and the native route's content is the harness's own switch; and the **organisation-control position** (D60) — an organisation's `strictKnownMarketplaces`, `strictEnabledPlugins` or `allowManagedHooksOnly` can refuse the route or make it silently inert, KyberDash works around none of them, and an install the harness refused is reported with the harness's own stderr. |
+| H27 | KyberDash | architecture | `docs/dash/architecture.md`: the Factory install lifecycle's **upgrade path** (D65) — a tree the receipt proves KyberDash wrote, whose bytes still match that receipt and whose content is not the current bundle, is an **upgrade**, not an owner edit and not `unchanged`; a tree no receipt proves is foreign, because matching an older bundle's bytes never establishes ownership; the upgrade rewrites the Kyber-owned tree and its receipt and then refreshes the harness's cached copy with `droid plugin update kyberdash-factory@kyberdash --scope user`; the refresh command is chosen from the harness's own registry, never `plugin install` against an installed plugin; and `unchanged` means **both** a current tree and an installed harness copy. |
+| H28 | KyberDash | runbook | `docs/dash/runbook.md`: the routine Factory install against the upgrade — when KyberDash's tree is rewritten and the harness's cached copy refreshed (`upgraded`), when nothing happens (`unchanged`), and the exact command that refreshes the harness's copy when the harness refuses the refresh (D65). |
+| H29 | KyberDash | reference | `docs/cli-command-surface.md`: the Factory plugin-install verb's **stdout tokens** — `installed`, `would-install`, `unchanged`, **`upgraded`** and **`would-upgrade`** — and the refusal reporting, which keeps a harness refusal from ever reading as a success (D65). |
 
 ## 3. The design, in detail
 
@@ -641,6 +690,22 @@ this plan's earlier list named `older` and `newer`, which the code has never had
 second read through the harness's own CLI. The row reports the marketplace name and the plugin
 identity it installed, so a reader can see what the harness holds without looking at the owner's
 settings file.
+
+**AMENDED (D65) — the tree axis gains an UPGRADE state, and the harness's cached copy gains a
+refresh.** The classifier's five kinds become six: `absent` / `unreadable` / `foreign` / `edited` /
+`same` / **`upgrade`**. A tree is `upgrade` when the receipt proves KyberDash wrote it, every
+file on disk still matches that receipt's digest, and the tree's content is not the current
+bundle — an older bundle of ours, still ours, and safe to replace. A tree **no receipt proves**
+is `foreign`, however much it resembles an older bundle of ours, because matching an older
+bundle's bytes never establishes ownership; a tree whose bytes no longer match the receipt is
+`edited`, and the owner's edit stays the owner's. The install rewrites the tree and the receipt
+with the current bundle and then asks the harness to refresh its **cached copy**: `droid plugin
+update kyberdash-factory@kyberdash --scope user` when the plugin is installed, the install path
+when it is not, and the marketplace registration restored first when an installed plugin's
+registration is missing. `plugin install` is never used against an installed plugin. The install
+reports `upgraded` — and `would-upgrade` in a dry run — and **`unchanged` now means both a
+current tree and an installed harness copy**, so a routine install runs no harness command at all
+and mutates nothing (D65).
 
 The row also states, as fixed facts and never as an echo of owner text: that native
 OpenTelemetry export is configured by machine environment variables (`OTEL_TELEMETRY_ENDPOINT` and
@@ -917,6 +982,8 @@ behaviour before the implementation landed; GREEN uses the same test, unweakened
 | T46 | **No automated test — this is the manual, owner-run probe** that establishes the harness-side semantics. Evidence written to the gitignored `artifacts/evidence/factory-capture-live/<UTC-stamp>/` | `droid plugin marketplace list`, `droid plugin list --scope user`, `droid plugin install --scope user`, `droid plugin uninstall --scope user`, `droid plugin marketplace remove` | **STATUS (D63): PARTLY ANSWERED, NOT CLOSED.** Some of the harness's answers are recorded — ADR 0031's 2026-11-02 amendment and the filed todos carry the marketplace registration, the settings-entry shapes and the uninstall behaviour — but **no evidence directory was produced and the probe is not closed**, so the questions below remain open where they are not answered: the registered marketplace name for a local path, the shape of the `extraKnownMarketplaces` and `enabledPlugins` entries, what `droid plugin uninstall` and `droid plugin marketplace remove` clean up, whether a re-install upgrades an installed plugin, the scope flags those commands accept, and whether the settings path follows `HOME` (which is what would make the flow automatically testable) (D45, D46, A12, A13, A14) | n/a — manual verification | The probe's answers are recorded in the plan's assumption table and the evidence directory; a contradiction with the plan is reported as a failure, not worked around |
 | T47 | `dash/src/capture/harnesses/factory.test.ts` (the status row's consent wording), `dash/src/capture/harnesses/factory-plugin/native-export.test.ts` (amended — the `enabled` switch and the granularity fallback) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/capture/harnesses/factory.test.ts src/capture/harnesses/factory-plugin/native-export.test.ts` | **STATUS (D63): NEW, NOT SHIPPED.** The row's fixed words are **corrected** in **both** consent branches — *"while KyberDash's consent is off, KyberDash's own Factory capture stores no prompt text"* and *"while KyberDash's consent is on, KyberDash's own Factory capture stores the plugin's prompt text"* — and the shipped *"no Factory content is stored while KyberDash's consent is off"* and *"Factory content is stored while KyberDash's consent is on"* are **both gone** (D57, D58); the row names the **file source**'s route as one the consent does not govern, and the **native route**'s content as the harness's own switch; the reader resolves the organisation's **`enabled`** master switch and reports it beside the endpoint verdict; and a **granularity value that cannot be read resolves to `aggregate`**, not `user` (D58) | The cases exist and fail against the shipped wording and the shipped reader | Same tests pass, unweakened |
 | T48 | same as T47 | same as T47 | **STATUS (D63): NEW, NOT SHIPPED.** The status surface says what the consent governs, and the reported shape is the export's effective one | — | T47 green; no new read of the owner's settings file is introduced; the native reader's own tests stay green |
+| T49 | `dash/src/capture/harnesses/factory-plugin/install.test.ts` (amended), `dash/src/capture/harnesses/factory-plugin/marketplace.test.ts` (amended) | `scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/capture/harnesses/factory-plugin/install.test.ts src/capture/harnesses/factory-plugin/marketplace.test.ts` | **STATUS (D65): NEW, NOT SHIPPED.** A receipt-proven tree whose bytes match that receipt and whose content is not the current bundle is an **upgrade** — not `edited` and not `same`; the install rewrites the tree and the receipt with the current bundle and refreshes the harness's cached copy with `droid plugin update kyberdash-factory@kyberdash --scope user`, **never** `plugin install` against an installed plugin; a registered-but-uninstalled plugin takes the install path, and an installed plugin whose marketplace registration is missing gets the registration restored first; a tree no receipt proves stays `foreign` and a tree whose bytes drifted stays `edited`; `--if-installed` decides from the harness's registry and refreshes even when KyberDash's tree is absent and must be written for the first time; `unchanged` requires **both** a current tree and an installed harness copy and runs no harness command; the tokens are `upgraded` and `would-upgrade`; and a harness refusal is never reported as a success (D65) | The cases exist and fail against the shipped classifier, which returns `same` for a receipt-proven older bundle, never rewrites the tree, and runs no harness command | Same tests pass, unweakened; the shipped refusal and non-interference cases stay green |
+| T50 | same as T49 | same as T49 | **STATUS (D65): NEW, NOT SHIPPED.** The upgrade path exists: the `upgrade` classification, the tree-and-receipt rewrite, the harness refresh chosen from the harness's own registry, and the `upgraded` / `would-upgrade` tokens | — | T49 green; the receipt's shape is unchanged; the OpenCode installer's cases stay green |
 
 ## 5. Dispatchable tasks
 
@@ -1840,6 +1907,77 @@ status sees the same line.
 **Depends on.** T47.
 **Skills.** `typescript-dev`.
 
+### T49 — RED: the upgrade path (D65)
+
+**Objective.** Pin that a superseded bundle of ours is **upgraded** — not refused as an owner edit
+and not reported as `unchanged` — and that the harness's cached copy is refreshed through the
+harness's own command.
+**Files.** `dash/src/capture/harnesses/factory-plugin/install.test.ts` (amended),
+`dash/src/capture/harnesses/factory-plugin/marketplace.test.ts` (amended).
+**Acceptance criteria.**
+1. **The classification.** A tree the receipt proves — the receipt names this root and records a
+   digest for every owned file — whose every file still matches its recorded digest, and whose
+   content is not the current bundle, is an **upgrade**: not `edited`, and not `same`. The fixture
+   is a real older bundle: the tree's script differs from the current `FACTORY_MARKETPLACE_CONTENT`
+   and the receipt records that tree's own digests.
+2. **The rewrite.** The install rewrites the tree with the current bundle and rewrites the
+   receipt, and the receipt's recorded digests are the current bundle's.
+3. **The harness refresh.** With the plugin installed at the harness, the install runs `droid
+   plugin update kyberdash-factory@kyberdash --scope user` and **no** `droid plugin install` — the
+   argv the fake runner recorded is the assertion.
+4. **The install path.** With the marketplace registered and the plugin **not** installed, the
+   install runs `droid plugin install kyberdash-factory@kyberdash --scope user` and **no** `droid
+   plugin update`.
+5. **The restored registration.** With the plugin installed and the marketplace registration
+   missing, the install runs `droid plugin marketplace add <the marketplace root>` **before** `droid
+   plugin update kyberdash-factory@kyberdash --scope user`, in that order.
+6. **The ownership rule.** A tree with **no** receipt, an unreadable receipt, or a receipt naming
+   another root is `foreign` — refused in strict mode (exit 1, nothing written) and kept in
+   preserve mode (exit 0) — **even when its bytes match an older bundle of ours**; and a tree whose
+   bytes no longer match the receipt stays `edited`, with the same refusal and keep.
+7. **`--if-installed`.** With the harness's registry reporting the plugin installed and KyberDash's
+   own tree absent, the tree is written **and** the harness's copy is refreshed with `droid plugin
+   update …`; with the registry reporting it not installed, nothing is written and no harness
+   command runs.
+8. **`unchanged`.** With the current bundle on disk and the plugin installed, the outcome is
+   `unchanged` and **no harness command runs at all**; the same tree with the plugin **not**
+   installed takes the install path.
+9. **The tokens.** An upgrade prints `factory plugin: upgraded <the marketplace tree>`; a dry run
+   prints `factory plugin: would-upgrade <the marketplace tree>` and writes nothing; and **no
+   upgrade prints `installed`**.
+10. **The refusal.** A harness that refuses the update is refused in strict mode (exit 1) and kept
+    with a warning in preserve mode (exit 0), and **neither prints `upgraded`**.
+**Depends on.** none — the marketplace route (T34/T35) has shipped.
+**Skills.** `test-dev`.
+
+### T50 — GREEN: the upgrade path (D65)
+
+**Objective.** Make the shipped installer upgrade a superseded bundle and refresh the harness's
+cached copy.
+**Files.** `dash/src/capture/harnesses/factory-plugin/install.ts`,
+`dash/src/capture/harnesses/factory-plugin/marketplace.ts`,
+`dash/src/capture/harnesses/factory-plugin/install-command.ts` (the verb's documented stdout
+contract).
+**Acceptance criteria.** T49 green, unweakened. The classifier gains the `upgrade` kind beside
+the five it has, and the ownership rules are unchanged: `edited` for a tree whose bytes drifted,
+`foreign` for a tree no receipt proves. The install writes the tree **and** the receipt with the
+current bundle when the tree is `absent` **or** `upgrade`, and the receipt is written only after
+the tree landed. The harness-side command is chosen from the harness's own registry: the update
+path for an installed plugin, the install path for a plugin that is not installed, and the
+marketplace registration restored **before** the update when an installed plugin's registration is
+missing. `plugin install` is never run against an installed plugin. `--if-installed` decides from
+the harness's registry, and the refresh runs even when the tree had to be written for the first
+time. The `unchanged` outcome requires **both** a current tree and an installed harness copy, and
+no harness command runs in that case. The dispositions and the stdout tokens are `installed`,
+`would-install`, `unchanged`, `upgraded` and `would-upgrade`; a harness refusal never prints a
+success token, and the refusal quotes the harness's stderr and names the exact command that
+completes the refresh. The receipt's shape is unchanged — `{version, marketplace, plugin, root,
+files[]}` — and the receipt forms this plan already requires the installer to read stay readable.
+The verb's documented stdout contract in `install-command.ts` names the two new tokens and the
+refusal reporting.
+**Depends on.** T49.
+**Skills.** `typescript-dev`.
+
 ## 6. Dependency graph
 
 ```
@@ -1865,6 +2003,7 @@ T38 ─► T39 ─► T34 ─► T35 ─► T46 ──────────�
 T40 ─► T41 ─► T42 ─► T43 ─────────────────────┤
 T44 ─► T45 ───────────────────────────────────┤
 T47 ─► T48 ───────────────────────────────────┤
+T49 ─► T50 ───────────────────────────────────┤
                                               ▼
                                              T20 ─► T21
 ```
@@ -1902,6 +2041,14 @@ the status surface's consent wording and the native reader's `enabled` switch an
 fallback (D57, D58) — both hang off nothing, because both are corrections to shipped code and to
 the plan's own text, and T20's harvest carries the corrected consent scope and the
 organisation-control position (H26).
+
+**The D65 amendment's tasks (D65).** T49/T50 add the **upgrade path**: a receipt-proven tree
+whose content is not the current bundle is **upgraded** rather than refused as an owner edit or
+reported as `unchanged`; the tree and the receipt are rewritten with the current bundle; and the
+harness's cached copy is refreshed through `droid plugin update kyberdash-factory@kyberdash
+--scope user`, the command chosen from the harness's own registry. They hang off nothing, because
+the marketplace route they correct (T34/T35) has shipped, and T20's harvest carries the upgrade
+path into the architecture, the runbook and the command surface (H27–H29).
 
 ## 7. Risks
 
@@ -1943,6 +2090,8 @@ organisation-control position (H26).
 | The plugin's hooks file relies on undocumented tolerance | medium | D53 rewrites it in the documented shape (keyed directly by event name); the shipped wrapper was the `settings.json` shape and worked only by tolerance, which a Factory upgrade may remove. T38/T39 pin the shape and the fact that the other seven events are unchanged. **AMENDED (D63): T38's `SubagentStop` half has shipped; the hooks-file half has not** — the shipped file still carries the `hooks:` wrapper and still registers the `SubagentStop` event |
 | The plugin's `SubagentStop` span names the parent session as the child | medium — it was the shipped behaviour | D54 withdraws the span, because the documented payload carries no child identity; a child session's own rows are unaffected, because the child's own events fire in the child's session. T38/T39 pin the withdrawal, and the live check confirms the payload's fields (A3, A4) |
 | Two tool calls in one session collapse into one row when the payload carries no per-call id | medium | The documented tool payload names `tool_name`, `tool_input` and `tool_response` but no call id, and the mapper anchors a tool span on the call id when it has one and on the session id when it does not — so the two hooks of one call would still share a span id, but a second call in the same session could land on the first one's row. A3 records it as open, the live check settles it, and the contract's anchor is a named change if the payload carries no per-call identity |
+| The harness refuses the refresh command, or does not accept `--scope user` for it | medium | D65: the refresh command is chosen from the harness's **own registry**, never guessed, and a refusal is the harness's answer — reported with its stderr quoted, refused in strict mode (exit 1) and kept with a warning in preserve mode (exit 0). **No refusal is reported as a success.** The documented form of the command is `droid plugin update [plugin@marketplace] --scope <scope>` and the documented example uses `--scope project`, while the plugin is installed at **user** scope; which scope values the command accepts is open (A23) and is settled by T46's probe. The fallback to `plugin install` is **not** available, because Factory 1.1.0 refuses an install of an already-installed plugin |
+| A refused refresh leaves the harness's cached copy stale, and no later install retries it | medium | D65: the tree is rewritten before the harness is asked, so a refused refresh leaves KyberDash's own tree current and the harness's copy stale. Because `unchanged` requires only a current tree and an installed harness copy, a later install does **not** retry the refresh — so the refusal is reported with the exact command that completes it (`droid plugin update kyberdash-factory@kyberdash --scope user`), which is D59's residue rule: report, never patch. Whether the harness's own plugin list reports an installed version, which would let a later amendment detect a stale cached copy, is open (A23) |
 
 ## 8. Out of scope
 
@@ -1977,6 +2126,14 @@ content from it and an ingest-time strip is not retroactive (D62). **An organisa
 `allowManagedHooksOnly`** can make the capture silently inert, and the harness's own CLI does not
 report which hooks a scope loads, so the surfaces cannot detect it; the gap and its candidate
 remedies are a todo (D60, D62).
+
+**AMENDED (D65).** Two further boundaries are named, and neither is work in this branch. **The
+Factory tree carries no content-version marker** — its plugin manifest's `version` is the static
+`1.0.0` — so a tree written by a **newer** KyberDash cannot be told apart from an older one:
+both are "not the current bundle", and the running build replaces the tree with its own bundle.
+**A refused refresh is not retried automatically**: the tree is rewritten before the harness is
+asked, so a refusal leaves the harness's cached copy stale, and the remedy is the exact command
+the refusal names (D59's rule: report, never patch).
 
 ## 9. Verification gates
 
@@ -2047,6 +2204,17 @@ sentence that is wrong, rather than describing the row that has not shipped. **T
 must not claim the quarantine is bounded**: the 256 KiB cap bounds one packet, not the table, and
 no retention or re-quarantine policy for the rows themselves was identified (D61, D62).
 
+**AMENDED (D65).** The closeout mapping gains a row for **D65**, and the harvest carries **H27**
+(the architecture's upgrade path), **H28** (the runbook's routine install against the upgrade, and
+the exact command that refreshes the harness's copy) and **H29** (the command surface's stdout
+tokens — `installed`, `would-install`, `unchanged`, `upgraded`, `would-upgrade` — and the refusal
+reporting). **The closeout must not claim the upgrade path before T50 lands**: the shipped
+installer still reports a receipt-proven older bundle as `unchanged`, never rewrites the
+Kyber-owned tree, and never refreshes the harness's cached copy. The ADR harvest records the
+harness update route in **ADR 0053**'s install-route account (and in ADR 0031's delegated-install
+clause, if its text names the refresh), and the ADR index rows change only if their summaries
+change.
+
 ## 12. Assumptions and open questions
 
 Factory-side facts, each labelled by its evidence source: **documented** (Factory's own
@@ -2077,10 +2245,12 @@ local-environment digest), or **open** (still to be confirmed by the live check)
 | A20 | What is the quarantine table's retention? | **OPEN, and not identified (D61).** The **packet** is bounded: `MAX_QUARANTINE_RAW_PAYLOAD_CHARS` cuts one stored payload at 256 KiB (`dash/src/canon/ingest.ts:360-366`). The **rows** are not: no bounded retention, no re-quarantine policy and no pruning pass for the quarantine table itself was found — the rows are cleared only by a scoped or full wipe (`dash/src/canon/store.ts:154`, `:5008-5010`) | A todo under the todo index carries it (D62); the branch does not set a retention policy | With the native span claim withdrawn (D50), every native Factory span the harness sends lands in that table, so its row count is this branch's own consequence — and it is unbounded. The plan states the 256 KiB bound as a **per-packet** bound and never as a bound on the table |
 | A21 | Is consent a purge or a retention control? | **MEASURED (D62):** turning the consent off does not remove what is already stored; `records.raw` is never purged; and a backfill re-derives content from it, so a row that holds content stays a content store and an ingest-time strip is **not retroactive** | A todo under the todo index carries it; the documents state the distinction (H26) | A reader who takes the consent for a purge control will believe the store is clean when it is not. The documents must say what the consent governs and what it does not |
 | A22 | Can a Factory native **metric point** carry message content? | **NOT MEASURED, and deliberately out of scope (D61).** Factory's documented native metrics are `droid.*` under `legacy` and `gen_ai.*` under `genai`; the amendment session found **no evidence** that either carries a message, an argument or a result. The metric point's own attribute column is a generic string map, so a content-carrying attribute is structurally possible — but no Factory evidence populates it, and the plan does not claim a gate it has not measured | T42/T43 gate the **span** routes only (the record and the quarantine packet); the metric route is left alone, and the plan says so in those tasks' text rather than implying a coverage it does not have | A gate that claims a surface it has not measured looks comprehensive and is not — which is the failure mode D57 corrected in the status wording |
+| A23 | Does `droid plugin update` refresh a plugin installed from a **local** marketplace, and which `--scope` values does it accept? | **DOCUMENTED (Factory's *Plugins* page):** the CLI's command set names `droid plugin update [plugin@marketplace] --scope project` beside `droid plugin install <plugin@marketplace> --scope user` and `droid plugin marketplace update [name]`; the page states that Droid "copies them into its cache unchanged", and that an explicit `droid plugin marketplace update` requests an immediate update. **The documented example uses `--scope project`, while KyberDash installs at `--scope user`** — whether the update accepts the user scope is **OPEN**. **Not measured:** whether the update re-copies the plugin from a local marketplace path, and what it prints on success | T46's probe asks the real CLI: the update's accepted scope flags, its output, and whether the cached copy's bytes change after the marketplace tree is rewritten | The refresh runs against a scope the command refuses — a **visible** refusal, reported with the harness's stderr quoted and never as a success (D65). The Kyber-owned tree stays current either way, so the capture keeps running the previous bundle until a refresh succeeds |
+| A24 | Does `droid plugin install` refuse a plugin that is already installed? | **MEASURED on Factory 1.1.0 (the D65 amendment session, on the owner's machine): the install of an already-installed plugin is refused.** Not re-measured in the session that wrote this row | T46's probe confirms the refusal's exit code and message on a scratch install | The upgrade's fallback to the install path fails visibly. **D65 forbids that fallback**: an installed plugin is refreshed with `droid plugin update`, never with `plugin install` |
 
 ## 13. Investigation record
 
-Eleven evidence sources, each labelled by who produced it and what it can prove:
+Twelve evidence sources, each labelled by who produced it and what it can prove:
 
 1. **Repository evidence (architect session).** `codegraph_explore`, `docs_explore`,
    `docs_for_symbol` and `docs_glossary` are not loadable in the architect session (§2.1), so the
@@ -2320,3 +2490,52 @@ Eleven evidence sources, each labelled by who produced it and what it can prove:
     self-spawn" note). **No file outside the plan was written**, and **the two documentation checks
     could not be re-run in this session** — the conductor must run them against this amended plan,
     with `mergeReady` false, for the reason in §2.1b.
+12. **The D65 amendment session (2026-11-02).** The same tooling limits apply, and the same
+    missing process-execution tool (§2.1c): no semantic index, no documentation MCP server, no
+    shell, and therefore neither the `codegraph explore` CLI fallback nor `docs validate` /
+    `docs drift` nor `git`. **Discovery: codegraph 0, docs 0, direct reads 7 source files and 4 governed documents
+    (plus this plan), 19 targeted greps, and 2 external fetches** — the source
+    reads were
+    `dash/src/capture/harnesses/factory-plugin/install.ts` (the classifier's five kinds and the
+    `same` branch's digest comparison, the `unchanged`/noop path, the tree-write trigger, the
+    refusal vocabulary and the receipt's shape),
+    `.../install-command.ts` (the verb's documented stdout contract, and how `--preserve` and
+    `--if-installed` reach the installer),
+    `.../marketplace.ts` (the harness state vocabulary, the install and uninstall command sets,
+    and the plugin-list parsing, which reads the identity and the status and **no version**),
+    `.../generated/plugin-source.ts` (the bundle's ownership marker
+    `// kyberdash-factory-plugin v1`, and the plugin manifest's static `version: 1.0.0`),
+    `dash/src/capture/harnesses/opencode-plugin/install.ts` (the `older`/`newer` classification
+    with its `proven` flag, the `upgraded` / `would-upgrade` tokens, and the unproven-older keep)
+    and `.../opencode-plugin/generated/plugin-source.ts` (the OpenCode marker's version scheme);
+    `src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs` (the shipped
+    argument list, which hands the Factory call no `--config-dir`);
+    the governed documents were `docs/dash/architecture.md` (the Factory pipeline section and the
+    install and teardown route), `docs/cli-command-surface.md` (the Factory plugin-install row and
+    its flags), `docs/kyber-squad/architecture.md` (the global capture-plugin step's example, which
+    is stale) and `docs/plans/README.md` (the index row this amendment updates); the greps
+    covered the plan's own anchors (the decisions, the harvest rows, the section headings, the
+    task ledger, the risk table and the closeout), the harness module's exported surface, the
+    OpenCode installer's vocabulary, the shipped step's argument list, and the two documents'
+    Factory routes. **Every read was
+    necessary because the semantic index could not be loaded at all**, and each one answered a
+    specific question: **whether a superseded bundle can be upgraded today** (the classifier
+    returns `same` for a receipt-proven older bundle, the tree is written only when it is
+    `absent`, and the install then reports `unchanged` — so no upgrade exists) — the defect
+    D65 fixes; **what the precedent already does** (the OpenCode installer's `older`/`newer`
+    classification, its `upgraded`/`would-upgrade` tokens and its unproven-older keep); **which
+    harness command can refresh the harness's cached copy** (the harness state vocabulary and
+    Factory's own documented command set); and **what the tree can and cannot say about its own
+    age** (the ownership marker is a constant `v1` and the manifest's version is static, so no
+    content-version marker distinguishes an older bundle from a newer one); and **whether the
+    shipped Squad step hands the Factory call a root** (it does not — `--config-dir` is added only
+    for a non-null root — so `docs/kyber-squad/architecture.md:605`'s example is stale, and the
+    correction is named in H17). **External evidence
+    (Factory's own published documentation, fetched over HTTP):** the *Plugins* page — the CLI's
+    command set (`droid plugin marketplace add|list|update|remove`, `droid plugin install|list|
+    update|uninstall`), the identity rule, the cache copy ("Droid copies them into its cache
+    unchanged"), and the `droid plugin update [plugin@marketplace] --scope <scope>` form whose
+    documented example uses `--scope project`. **No file outside the plan and the plan's index row
+    was written**, and **the two documentation checks could not be re-run in this session** — the
+    conductor must run them against this amended plan and this amended index row, with
+    `mergeReady` false, for the reason in §2.1c.
