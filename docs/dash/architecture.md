@@ -671,6 +671,13 @@ capture never fails the host.
 unreadable, oversized, malformed or unknown-version file reads as off.
 `KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
 
+**One bound, one unit.** Every consent file is bounded at **4096 UTF-8 bytes**, and every reader
+counts the same unit — the Factory plugin's own reader, the canon seam's gate, the OpenCode
+plugin's reader and the engine-side state reader the Settings row and `capture status` use. A file
+that is under 4096 characters and over 4096 bytes therefore reads the same way everywhere: the
+content readers publish no prompt text, and the Factory row reports
+`content consent: unreadable or malformed (treated as off)`.
+
 **Two readers, one writer.** The consent file's **read** side exists twice, on purpose. The
 canon seam's gate is `dash/src/canon/droid-content.ts`; the copy the plugin bundle inlines is
 `dash/src/capture/harnesses/factory-plugin/consent.ts`. Both are leaves — the plugin's may
@@ -784,6 +791,15 @@ installed plugin. The tree's presence is what proves a marketplace ours when the
 source to compare against; the tree's presence **or** the receipt is what proves the plugin
 identity ours.
 
+**The same rule applies at the uninstall.** The uninstall reads the receipt it already has to
+remove and derives the same proven identity from it — the receipt names **this** tree, **this**
+marketplace and **this** identity, and is not the previous route's legacy receipt — so a plugin
+the receipt proves is ours is removed through the harness's own
+`droid plugin uninstall kyberdash-factory@kyberdash --scope user` instead of being classified as
+a conflict. A conflict answer there would run no harness command, delete the receipt and report
+success while the plugin stayed installed and kept capturing. A marketplace named `kyberdash` that
+somebody else registered is still a conflict, and it is still left alone.
+
 **The residue rule — report, never patch.** If the harness's own uninstall leaves an entry
 behind, KyberDash names it (which registry, which entry) and prints the exact `droid plugin …`
 command that removes it, and never writes the owner's settings file to clean it up. The teardown
@@ -856,6 +872,16 @@ and Droid pushes OTLP/HTTP directly, so no collector is needed and KyberDash is 
 customer's own collector. The path is authorized as a **second, complementary** path
 ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)), never as the primary
 one.
+
+**The organisation's pin is read from the harness's own directory.** An organisation's managed
+settings reach the machine two ways: the **cached view** the harness writes into its own
+directory — `<home>/.factory/org-managed-settings.cache.json`, whose `managedSettings.telemetry`
+carries the pinned values — and the **system-managed copy** (`settings.json` under the platform's
+system-managed directory), whose `telemetry` block carries them. Both are read, so a machine that
+holds only one of them still reports the organisation's pin. The cached view is **not** read from
+the directory `FACTORY_DIR` moves: that variable moves the harness's **sessions tree** and
+nothing else, so the harness keeps its own settings and its cached organisation settings in its
+own directory (`dash/src/capture/harnesses/factory-plugin/native-export.ts`).
 
 **The receiver.** `POST /v1/metrics` sits beside `POST /v1/traces` and `POST /v1/logs`
 (`dash/src/otel/receiver.ts`). OTLP/JSON metrics are decoded to their own shape and handed to a
