@@ -2203,10 +2203,12 @@ real Droid turn produced the session, turn and tool spans through the corrected 
 consent off and no prompt text on the live span. The **consent gate over the native and quarantine
 routes** (T42/T43) **has landed** and runs at the ingest seam before normalization and before the
 quarantine write, with the fail-closed arm D52 records. The **name-conflict refusal** (T36/T37)
-**has landed** in the harness-state reader and in the installer's refusal. The closeout **may**
-describe all of them as shipped, and it must name the gate's fail-closed arm and the harness's
-**wrapped** list table, because both are properties a reader of the closed plan cannot infer from
-the code.
+**has landed** in the harness-state reader, which parses the registry and decides the refusal;
+the installer's own wiring of that refusal and the residue report are **pending**. The closeout
+**may** describe the hooks file, the consent gate and the corrected wording as shipped, must not
+claim the installer-side refusal or the residue, and it must name the gate's fail-closed arm and
+the harness's **wrapped** list table, because both are properties a reader of the closed plan
+cannot infer from the code.
 
 **AMENDED (D64).** The closeout mapping gains a row per decision of this amendment, D57–D64, and
 the harvest carries **H26** — the consent's scope stated as what it governs and what it does not,
