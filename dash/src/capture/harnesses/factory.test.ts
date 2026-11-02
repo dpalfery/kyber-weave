@@ -145,9 +145,9 @@ const RECEIVER_ADDRESS = DEFAULT_CAPTURE_ENDPOINT.replace(/^https?:\/\//, '')
 
 /**
  * The machine environment Factory's native export reads: the endpoint variable and its
- * documented fallback, and the three that carry the export's shape. All of them are
- * stubbed, so the developer's own shell cannot decide the fixture and the fallback cannot
- * answer for the variable.
+ * documented fallback, the switch that carries the export's master switch, and the three
+ * that carry the rest of the export's shape. All of them are stubbed, so the developer's
+ * own shell cannot decide the fixture and the fallback cannot answer for the variable.
  */
 function setNativeEnv(endpoint: string | undefined): void {
   vi.stubEnv('OTEL_TELEMETRY_ENDPOINT', endpoint)
@@ -155,6 +155,7 @@ function setNativeEnv(endpoint: string | undefined): void {
   vi.stubEnv('OTEL_TELEMETRY_FORMAT', undefined)
   vi.stubEnv('OTEL_TELEMETRY_GRANULARITY', undefined)
   vi.stubEnv('OTEL_LOG_MESSAGE_CONTENT', undefined)
+  vi.stubEnv('OTEL_CUSTOMER_ENABLED', undefined)
 }
 
 /**
@@ -252,6 +253,22 @@ function consequenceText(lines: readonly string[]): string {
   const found = lines.filter((line) => /persisted/i.test(line))
   if (found.length === 0) {
     throw new Error(`the row does not say what KyberDash does with the export: ${JSON.stringify(lines)}`)
+  }
+  return found.join('\n')
+}
+
+/**
+ * The row's own line about the routes that carry Factory content, and which of them
+ * KyberDash's consent governs. A row that names only the consent's own reach is the
+ * defect these tests exist to catch, so the helper fails loudly instead of returning an
+ * empty string.
+ */
+function contentRoutesText(lines: readonly string[]): string {
+  const found = lines.filter((line) => /content routes/i.test(line))
+  if (found.length === 0) {
+    throw new Error(
+      `the row does not name the routes that carry Factory content: ${JSON.stringify(lines)}`,
+    )
   }
   return found.join('\n')
 }
@@ -557,7 +574,7 @@ describe('the Factory row and the native OpenTelemetry export', () => {
     expect(shape).toMatch(/message content\s+off/i)
   })
 
-  it('states that the native metrics are persisted, that no native span is claimed, and that no Factory content is stored while the consent is off', async () => {
+  it('states that the native metrics are persisted, that no native span is claimed, and that the consent governs the capture prompt text only', async () => {
     const f = fixture('factory-consequence-')
     setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
 
@@ -565,7 +582,21 @@ describe('the Factory row and the native OpenTelemetry export', () => {
 
     expect(consequence).toMatch(/native metrics are persisted/i)
     expect(consequence).toMatch(/native spans are not claimed/i)
-    expect(consequence).toMatch(/no Factory content is stored while KyberDash's consent is off/i)
+    expect(consequence).toMatch(
+      /while KyberDash's consent is off, KyberDash's own Factory capture stores no prompt text/i,
+    )
+    // The false word is gone: the consent governs the capture's own prompt text, and the
+    // claim it used to make about "Factory content" was never true.
+    expect(consequence).not.toMatch(/Factory content/i)
+  })
+
+  it('never claims that no Factory content is stored: the file source stores its fragment whatever the consent says', async () => {
+    const f = fixture('factory-no-false-claim-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+
+    const row = (await printedStatus(f.home)).join('\n')
+
+    expect(row).not.toMatch(/Factory content/i)
   })
 
   it('states the content consequence from the consent file, not from an inference', async () => {
@@ -575,8 +606,68 @@ describe('the Factory row and the native OpenTelemetry export', () => {
 
     const consequence = consequenceText(await printedStatus(f.home))
 
-    // The consent is on, so the row does not claim that no content is stored.
-    expect(consequence).toMatch(/Factory content is stored while KyberDash's consent is on/i)
-    expect(consequence).not.toMatch(/no Factory content is stored/i)
+    // The consent is on, so the row says the capture stores the plugin's prompt text —
+    // and it does not claim that "Factory content" is stored, which the file source's own
+    // fragment makes false in the other direction.
+    expect(consequence).toMatch(
+      /while KyberDash's consent is on, KyberDash's own Factory capture stores the plugin's prompt text/i,
+    )
+    expect(consequence).not.toMatch(/Factory content/i)
+  })
+
+  it('names the file source as a route the consent does not govern', async () => {
+    const f = fixture('factory-file-source-route-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+
+    const routes = contentRoutesText(await printedStatus(f.home))
+
+    expect(routes).toMatch(/consent governs[^.]*prompt text only/i)
+    expect(routes).toMatch(/file source/i)
+    expect(routes).toMatch(/whatever the consent says/i)
+  })
+
+  it("names the native route's content as the harness's own switch, not as the consent", async () => {
+    const f = fixture('factory-native-content-route-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+
+    const routes = contentRoutesText(await printedStatus(f.home))
+
+    expect(routes).toMatch(/native route's content follows Factory's own message-content switch/i)
+  })
+
+  it('reports the export as switched off when the organisation disables it, whatever the machine variable says', async () => {
+    const f = fixture('factory-enabled-off-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_CUSTOMER_ENABLED', 'true')
+    writeOrgTelemetry(f.home, f.root, { enabled: false })
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    // The export is off, not merely pointed elsewhere: the organisation's switch wins.
+    expect(shape).toMatch(/enabled off/i)
+    expect(shape).toMatch(/organisation/i)
+  })
+
+  it('reports the export as on when the organisation enables it, whatever the machine variable says', async () => {
+    const f = fixture('factory-enabled-on-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_CUSTOMER_ENABLED', 'false')
+    writeOrgTelemetry(f.home, f.root, { enabled: true })
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    expect(shape).toMatch(/enabled on/i)
+    expect(shape).toMatch(/organisation/i)
+  })
+
+  it('falls back to the machine variable when the organisation pins no enabled switch', async () => {
+    const f = fixture('factory-enabled-machine-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_CUSTOMER_ENABLED', 'false')
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    expect(shape).toMatch(/enabled off/i)
+    expect(shape).toMatch(/OTEL_CUSTOMER_ENABLED/)
   })
 })

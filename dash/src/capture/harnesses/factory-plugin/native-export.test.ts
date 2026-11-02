@@ -9,11 +9,20 @@
 //
 // The shape is configured in two places, and the two places do NOT follow one rule:
 //
+//   - the ENABLED switch follows precedence for the organisation's `telemetry.enabled`:
+//     where the organisation sets it at all the machine's `OTEL_CUSTOMER_ENABLED` does not
+//     decide, so an organisation can keep the pipeline on (or off) whatever the machine
+//     says. Where the organisation sets nothing, the machine's variable decides, and
+//     where the machine says nothing either the pipeline is on — Factory's own
+//     documentation makes the machine variable an opt-OUT.
 //   - the FORMAT follows precedence: the organisation's `telemetry.format` wins, and where
 //     the organisation sets it the machine's `OTEL_TELEMETRY_FORMAT` is not read at all.
 //     Anything unrecognised resolves to `legacy`.
 //   - the GRANULARITY follows most-restrictive-wins: `aggregate` beats `user`, whichever
-//     level each of them came from.
+//     level each of them came from. A value that CANNOT BE READ resolves to `aggregate`,
+//     because that is the restrictive one and Factory's own privacy page says so; a value
+//     that was never set is a different case and takes the documented default, which is
+//     `user`.
 //   - the MESSAGE-CONTENT switch follows precedence for the organisation's
 //     `telemetry.logMessageContent` — when it is set at all, the machine's
 //     `OTEL_LOG_MESSAGE_CONTENT` does not decide — and the granularity overrides both:
@@ -46,8 +55,16 @@ type Fixture = {
   root: string
 }
 
+/**
+ * The enabled switch of an export that nothing enables or disables: on, because Factory's
+ * own documentation makes the machine variable an opt-OUT — a machine that says nothing is
+ * a machine that has not opted out.
+ */
+const DEFAULT_ENABLED = { value: true, source: 'default' }
+
 /** The shape of an export nothing configures: the documented defaults. */
 const DEFAULT_SHAPE = {
+  enabled: DEFAULT_ENABLED,
   format: { value: 'legacy', source: 'default' },
   granularity: { value: 'user', source: 'default' },
   content: { value: false, source: 'default' },
@@ -113,6 +130,7 @@ describe("the native export's effective shape", () => {
     const f = fixture('factory-shape-format-machine-')
 
     expect(read(f, { OTEL_TELEMETRY_FORMAT: 'genai' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'genai', source: 'OTEL_TELEMETRY_FORMAT' },
       granularity: { value: 'user', source: 'default' },
       content: { value: false, source: 'default' },
@@ -130,6 +148,7 @@ describe("the native export's effective shape", () => {
     writeOrgTelemetry(f, { format: 'genai' })
 
     expect(read(f, { OTEL_TELEMETRY_FORMAT: 'legacy' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'genai', source: 'organisation' },
       granularity: { value: 'user', source: 'default' },
       content: { value: false, source: 'default' },
@@ -143,6 +162,7 @@ describe("the native export's effective shape", () => {
     // The organisation pinned the format, so the machine's variable is not read at all and
     // the unrecognised value resolves to legacy.
     expect(read(f, { OTEL_TELEMETRY_FORMAT: 'genai' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'organisation' },
       granularity: { value: 'user', source: 'default' },
       content: { value: false, source: 'default' },
@@ -153,6 +173,7 @@ describe("the native export's effective shape", () => {
     const f = fixture('factory-shape-granularity-machine-')
 
     expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'aggregate' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'default' },
       granularity: { value: 'aggregate', source: 'OTEL_TELEMETRY_GRANULARITY' },
       content: { value: false, source: 'default' },
@@ -164,6 +185,7 @@ describe("the native export's effective shape", () => {
     writeOrgTelemetry(f, { granularity: 'user' })
 
     expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'aggregate' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'default' },
       granularity: { value: 'aggregate', source: 'OTEL_TELEMETRY_GRANULARITY' },
       content: { value: false, source: 'default' },
@@ -175,6 +197,7 @@ describe("the native export's effective shape", () => {
     writeOrgTelemetry(f, { granularity: 'aggregate' })
 
     expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'user' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'default' },
       granularity: { value: 'aggregate', source: 'organisation' },
       content: { value: false, source: 'default' },
@@ -185,6 +208,7 @@ describe("the native export's effective shape", () => {
     const f = fixture('factory-shape-content-machine-')
 
     expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: 'true' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'default' },
       granularity: { value: 'user', source: 'default' },
       content: { value: true, source: 'OTEL_LOG_MESSAGE_CONTENT' },
@@ -222,6 +246,7 @@ describe("the native export's effective shape", () => {
     writeOrgTelemetry(f, { granularity: 'aggregate', logMessageContent: true })
 
     expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: 'true' }).shape).toEqual({
+      enabled: DEFAULT_ENABLED,
       format: { value: 'legacy', source: 'default' },
       granularity: { value: 'aggregate', source: 'organisation' },
       content: { value: false, source: 'granularity' },
@@ -244,6 +269,134 @@ describe("the native export's effective shape", () => {
     writeSystemTelemetry(f, { format: 'genai' })
 
     expect(read(f, {}).shape.format).toEqual({ value: 'genai', source: 'organisation' })
+  })
+})
+
+describe("the export's enabled master switch", () => {
+  it("keeps the export on when the organisation enables it, whatever the machine variable says", () => {
+    const f = fixture('factory-enabled-organisation-on-')
+    writeOrgTelemetry(f, { enabled: true })
+
+    expect(read(f, { OTEL_CUSTOMER_ENABLED: 'false' }).shape.enabled).toEqual({
+      value: true,
+      source: 'organisation',
+    })
+  })
+
+  it("keeps the export off when the organisation disables it, whatever the machine variable says", () => {
+    const f = fixture('factory-enabled-organisation-off-')
+    writeOrgTelemetry(f, { enabled: false })
+
+    expect(read(f, { OTEL_CUSTOMER_ENABLED: 'true' }).shape.enabled).toEqual({
+      value: false,
+      source: 'organisation',
+    })
+  })
+
+  it("reads the organisation's enabled switch when the machine variable is absent", () => {
+    const f = fixture('factory-enabled-organisation-alone-')
+    writeOrgTelemetry(f, { enabled: false })
+
+    expect(read(f, {}).shape.enabled).toEqual({ value: false, source: 'organisation' })
+  })
+
+  it('falls back to the machine variable when the organisation pins no enabled switch', () => {
+    const f = fixture('factory-enabled-machine-')
+
+    expect(read(f, { OTEL_CUSTOMER_ENABLED: 'false' }).shape.enabled).toEqual({
+      value: false,
+      source: 'OTEL_CUSTOMER_ENABLED',
+    })
+  })
+
+  it('keeps the export on when the organisation pins no enabled switch and the machine says nothing', () => {
+    const f = fixture('factory-enabled-default-')
+
+    // Factory's own documentation makes the machine variable an opt-out, so a machine that
+    // says nothing has not opted out.
+    expect(read(f, {}).shape.enabled).toEqual({ value: true, source: 'default' })
+  })
+
+  it('switches the export off when the organisation carries an enabled value that cannot be read', () => {
+    const f = fixture('factory-enabled-organisation-unreadable-')
+    writeOrgTelemetry(f, { enabled: 'yes' })
+
+    expect(read(f, {}).shape.enabled).toEqual({
+      value: false,
+      source: 'organisation',
+      unreadable: true,
+    })
+  })
+
+  it('switches the export off when the machine carries an enabled value that cannot be read', () => {
+    const f = fixture('factory-enabled-machine-unreadable-')
+
+    expect(read(f, { OTEL_CUSTOMER_ENABLED: 'yes' }).shape.enabled).toEqual({
+      value: false,
+      source: 'OTEL_CUSTOMER_ENABLED',
+      unreadable: true,
+    })
+  })
+})
+
+describe('the granularity a value that cannot be read resolves to', () => {
+  it('resolves an unrecognised organisation granularity to aggregate', () => {
+    const f = fixture('factory-granularity-organisation-unknown-')
+    writeOrgTelemetry(f, { granularity: 'otel' })
+
+    expect(read(f, {}).shape.granularity).toEqual({
+      value: 'aggregate',
+      source: 'organisation',
+      unreadable: true,
+    })
+  })
+
+  it('resolves a granularity of the wrong type to aggregate', () => {
+    const f = fixture('factory-granularity-organisation-wrong-type-')
+    writeOrgTelemetry(f, { granularity: true })
+
+    expect(read(f, {}).shape.granularity).toEqual({
+      value: 'aggregate',
+      source: 'organisation',
+      unreadable: true,
+    })
+  })
+
+  it('resolves an unrecognised machine granularity to aggregate', () => {
+    const f = fixture('factory-granularity-machine-unknown-')
+
+    expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'otel' }).shape.granularity).toEqual({
+      value: 'aggregate',
+      source: 'OTEL_TELEMETRY_GRANULARITY',
+      unreadable: true,
+    })
+  })
+
+  it('resolves to aggregate when the organisation settings file cannot be read at all', () => {
+    const f = fixture('factory-granularity-unreadable-file-')
+    writeFileSync(join(f.root, 'org-managed-settings.cache.json'), '{ not json\n')
+
+    expect(read(f, {}).shape.granularity).toEqual({
+      value: 'aggregate',
+      source: 'organisation',
+      unreadable: true,
+    })
+  })
+
+  it('keeps the documented default when nothing pins a granularity at all', () => {
+    const f = fixture('factory-granularity-default-')
+
+    // The published default is `user`. The aggregate fallback covers a value that cannot
+    // be READ, which is a different case from a value that was never set.
+    expect(read(f, {}).shape.granularity).toEqual({ value: 'user', source: 'default' })
+  })
+
+  it("never reads the owner's own settings file, so a malformed one cannot change the shape", () => {
+    const f = fixture('factory-granularity-owner-file-')
+    writeFileSync(join(f.root, 'settings.json'), '{ not json\n')
+
+    // A file the reader never opens cannot make a granularity unreadable.
+    expect(read(f, {}).shape.granularity).toEqual({ value: 'user', source: 'default' })
   })
 })
 
