@@ -1,0 +1,347 @@
+// The Factory (Droid) marketplace route: the install contract Factory actually loads.
+//
+// Factory does not discover a plugin from a directory under its own root. It loads one from
+// a MARKETPLACE: a directory holding `.factory-plugin/marketplace.json`, whose `plugins[]`
+// entries name a plugin and the RELATIVE path of its payload. The plugin's identity is
+// `<plugin>@<marketplace>`, and the marketplace's registered name is the basename of the
+// directory that was added — so the tree's directory name is load-bearing.
+//
+// These cases pin that route end to end, through an INJECTED harness CLI: the test asserts
+// the argv the installer would run, not the effect on a real Factory, so no test needs a
+// real `droid` on the machine.
+//
+//   droid plugin marketplace add <marketplace root>
+//   droid plugin install kyberdash-factory@kyberdash --scope user
+//
+// and the uninstall, which removes the harness-side state FIRST:
+//
+//   droid plugin uninstall kyberdash-factory@kyberdash --scope user
+//   droid plugin marketplace remove kyberdash
+//
+// The harness's CLI is the only interface to the harness's state: the owner's
+// `~/.factory/settings.json` is never opened, and the harness's own plugin cache is the
+// harness's file.
+
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { sha256Hex } from '../../receipt.js'
+import { installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
+import {
+  FACTORY_MARKETPLACE_NAME,
+  FACTORY_PLUGIN_IDENTITY,
+  readFactoryHarnessState,
+} from './marketplace.js'
+import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
+
+/** The marketplace tree root, relative to the injected home. */
+const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', FACTORY_MARKETPLACE_NAME)
+
+/** Every file Kyber owns in the marketplace tree, relative to the tree root. */
+const OWNED_FILES = [
+  '.factory-plugin/marketplace.json',
+  'kyberdash-factory/.factory-plugin/plugin.json',
+  'kyberdash-factory/hooks/hooks.json',
+  'kyberdash-factory/hooks/kyberdash-factory.mjs',
+]
+
+/** The harness commands the installer may run, and nothing else. */
+const READ_COMMANDS = ['plugin marketplace list', 'plugin list --scope user']
+
+const dirs: string[] = []
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+function temp(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  dirs.push(dir)
+  return dir
+}
+
+type Fixture = {
+  /** The injected home: KyberDash's own state lives in `<home>/.kyberdash`. */
+  home: string
+  /** The Factory root. KyberDash writes nothing under it. */
+  root: string
+  /** The marketplace tree root. */
+  marketplaceRoot: string
+  /** The plugin's own receipt, beside the consent file. */
+  receiptFile: string
+}
+
+/** A temp home and a temp Factory root. The expected paths are computed, not read back. */
+function fixture(prefix: string): Fixture {
+  const home = temp(`${prefix}home-`)
+  const root = temp(`${prefix}root-`)
+  return {
+    home,
+    root,
+    marketplaceRoot: join(home, MARKETPLACE_RELATIVE),
+    receiptFile: join(home, '.kyberdash', 'factory-plugin-receipt.json'),
+  }
+}
+
+/** Every file under `root`, as sorted relative posix-style paths. */
+function listFiles(root: string): string[] {
+  if (!existsSync(root)) return []
+  const found: string[] = []
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) walk(join(dir, entry.name), relative)
+      else found.push(relative)
+    }
+  }
+  walk(root, '')
+  return found.sort()
+}
+
+/** The install, with the harness CLI injected. */
+function install(f: Fixture, fake: FakeHarness, extra: Record<string, unknown> = {}) {
+  return installFactoryPlugin(f.home, undefined, {
+    mode: 'strict',
+    processEnv: { FACTORY_DIR: f.root },
+    harnessCli: fake.harness,
+    ...extra,
+  })
+}
+
+/** The uninstall, with the harness CLI injected. */
+function uninstall(f: Fixture, fake: FakeHarness, extra: Record<string, unknown> = {}) {
+  return uninstallFactoryPlugin(f.home, undefined, {
+    processEnv: { FACTORY_DIR: f.root },
+    harnessCli: fake.harness,
+    ...extra,
+  })
+}
+
+describe('the marketplace install route', () => {
+  it('runs "plugin marketplace add <root>" and then "plugin install <identity> --scope user", in that order', () => {
+    const f = fixture('factory-marketplace-add-')
+    const fake = fakeHarness()
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(0)
+    const mutating = fakeCommandLines(fake).filter((line) => !READ_COMMANDS.includes(line))
+    expect(mutating).toEqual([
+      `plugin marketplace add ${f.marketplaceRoot}`,
+      `plugin install ${FACTORY_PLUGIN_IDENTITY} --scope user`,
+    ])
+  })
+
+  it('reads the harness state only through "plugin marketplace list" and "plugin list --scope user"', () => {
+    const f = fixture('factory-marketplace-read-')
+    const fake = fakeHarness()
+
+    install(f, fake)
+
+    expect(fakeCommandLines(fake)).toEqual([
+      ...READ_COMMANDS,
+      `plugin marketplace add ${f.marketplaceRoot}`,
+      `plugin install ${FACTORY_PLUGIN_IDENTITY} --scope user`,
+    ])
+  })
+
+  it('writes the marketplace tree under KyberDash\'s own state directory, and nothing under the Factory root', () => {
+    const f = fixture('factory-marketplace-tree-')
+    const fake = fakeHarness()
+
+    install(f, fake)
+
+    expect(listFiles(f.marketplaceRoot)).toEqual([...OWNED_FILES].sort())
+    expect(listFiles(f.root)).toEqual([])
+  })
+
+  it('gives the marketplace manifest a relative source for the plugin payload', () => {
+    const f = fixture('factory-marketplace-manifest-')
+    const fake = fakeHarness()
+
+    install(f, fake)
+
+    const manifest = JSON.parse(
+      readFileSync(join(f.marketplaceRoot, '.factory-plugin', 'marketplace.json'), 'utf8'),
+    ) as { name?: unknown; plugins?: { name?: unknown; source?: unknown }[] }
+    expect(manifest.name).toBe(FACTORY_MARKETPLACE_NAME)
+    expect(manifest.plugins).toHaveLength(1)
+    expect(manifest.plugins?.[0]?.name).toBe('kyberdash-factory')
+    // The source is relative: Factory rejects an absolute source, and a source that escapes
+    // the marketplace directory.
+    expect(manifest.plugins?.[0]?.source).toBe('./kyberdash-factory')
+  })
+
+  it('names the marketplace, the plugin identity, the tree root and a digest per owned file in the receipt', () => {
+    const f = fixture('factory-marketplace-receipt-')
+    const fake = fakeHarness()
+
+    install(f, fake)
+
+    const receipt = JSON.parse(readFileSync(f.receiptFile, 'utf8')) as {
+      version: number
+      marketplace: string
+      plugin: string
+      root: string
+      files: { path: string; sha256: string }[]
+    }
+    expect(receipt.version).toBe(1)
+    expect(receipt.marketplace).toBe(FACTORY_MARKETPLACE_NAME)
+    expect(receipt.plugin).toBe(FACTORY_PLUGIN_IDENTITY)
+    expect(receipt.root).toBe(f.marketplaceRoot)
+    expect(receipt.files).toHaveLength(OWNED_FILES.length)
+    // Every owned file is digested, the marketplace manifest included.
+    for (const relative of OWNED_FILES) {
+      const absolute = join(f.marketplaceRoot, ...relative.split('/'))
+      const entry = receipt.files.find((file) => file.path === absolute)
+      expect(entry, `the receipt names ${relative}`).toBeDefined()
+      expect(entry?.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(entry?.sha256).toBe(sha256Hex(readFileSync(absolute)))
+    }
+  })
+
+  it('runs "plugin uninstall <identity> --scope user" and then "plugin marketplace remove kyberdash", and only then removes the tree and the receipt', () => {
+    const f = fixture('factory-marketplace-uninstall-')
+    const fake = fakeHarness()
+    install(f, fake)
+    const before = fakeCommandLines(fake).length
+
+    const result = uninstall(f, fake)
+
+    expect(result.exitCode).toBe(0)
+    expect(fakeCommandLines(fake).slice(before)).toEqual([
+      ...READ_COMMANDS,
+      `plugin uninstall ${FACTORY_PLUGIN_IDENTITY} --scope user`,
+      `plugin marketplace remove ${FACTORY_MARKETPLACE_NAME}`,
+    ])
+    expect(existsSync(f.marketplaceRoot)).toBe(false)
+    expect(existsSync(f.receiptFile)).toBe(false)
+  })
+
+  it('never opens the owner\'s Factory settings file', () => {
+    const f = fixture('factory-marketplace-settings-')
+    const fake = fakeHarness()
+    const owner = '{\n  "theme": "dark"\n}\n'
+    mkdirSync(f.root, { recursive: true })
+    writeFileSync(join(f.root, 'settings.json'), owner)
+    // The file cannot be read at all: an install that needed to read it would fail.
+    chmodSync(join(f.root, 'settings.json'), 0o000)
+    try {
+      const result = install(f, fake)
+      expect(result.exitCode).toBe(0)
+    } finally {
+      chmodSync(join(f.root, 'settings.json'), 0o600)
+    }
+    expect(readFileSync(join(f.root, 'settings.json'), 'utf8')).toBe(owner)
+    expect(statSync(join(f.root, 'settings.json')).isFile()).toBe(true)
+  })
+
+  it('never writes the harness\'s own plugin cache or its installed-plugin record', () => {
+    const f = fixture('factory-marketplace-cache-')
+    const fake = fakeHarness()
+
+    install(f, fake)
+
+    // The harness's cache lives under the Factory root, and KyberDash writes nothing there.
+    expect(listFiles(f.root)).toEqual([])
+  })
+})
+
+describe('the harness-side state vocabulary', () => {
+  it('reports plugin-installed when the harness holds the plugin identity', () => {
+    const fake = fakeHarness()
+    fake.plugins.add(FACTORY_PLUGIN_IDENTITY)
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('plugin-installed')
+    expect(report.cause).toBeUndefined()
+  })
+
+  it('reports marketplace-registered when the harness holds the marketplace but not the plugin', () => {
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('marketplace-registered')
+    expect(report.cause).toBeUndefined()
+  })
+
+  it('reports marketplace-tree-written when the tree landed and the harness holds neither', () => {
+    const fake = fakeHarness()
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('marketplace-tree-written')
+    expect(report.cause).toBeUndefined()
+  })
+
+  it('reports unknown with the named cause when the droid CLI is missing, and never "installed"', () => {
+    const fake = fakeHarness({ unavailable: 'the droid CLI was not found on PATH' })
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('unknown')
+    expect(report.cause).toBe('the droid CLI was not found on PATH')
+    expect(report.state).not.toBe('plugin-installed')
+  })
+
+  it('reports unknown with the named cause when the harness answers with output KyberDash cannot understand', () => {
+    const fake = fakeHarness()
+    fake.harness.run = () => ({ exitCode: 0, stdout: '', stderr: '' })
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('unknown')
+    expect(report.cause).toMatch(/could not understand/)
+  })
+
+  it('reports unknown with the named cause when the harness command fails, quoting its stderr', () => {
+    const fake = fakeHarness()
+    fake.failNext('Error: Unable to resolve plugin settings')
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('unknown')
+    expect(report.cause).toMatch(/Unable to resolve plugin settings/)
+  })
+
+  it('does not mistake a plugin of the same name in another marketplace for the plugin identity', () => {
+    const fake = fakeHarness()
+    fake.harness.run = (argv) =>
+      argv[1] === 'list'
+        ? { exitCode: 0, stdout: 'kyberdash-factory@other  Enabled  1.0.0\n', stderr: '' }
+        : { exitCode: 0, stdout: 'other  /somewhere/other\n', stderr: '' }
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: true })
+
+    expect(report.state).toBe('marketplace-tree-written')
+  })
+})
+
+describe('the install reports the harness it used', () => {
+  it('names the executable the install drove the harness through', () => {
+    const f = fixture('factory-marketplace-executable-')
+    const fake = fakeHarness({ executable: '/opt/bin/droid' })
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.out.join('\n')).toContain('/opt/bin/droid')
+  })
+
+  it('reports a missing harness CLI as unknown, and writes nothing', () => {
+    const f = fixture('factory-marketplace-missing-')
+    const fake = fakeHarness({ unavailable: 'the droid CLI was not found on PATH' })
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.err.join('\n')).toMatch(/was not found on PATH/)
+    expect(existsSync(f.marketplaceRoot)).toBe(false)
+    expect(existsSync(f.receiptFile)).toBe(false)
+  })
+})

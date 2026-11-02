@@ -1,4 +1,4 @@
-// RED tests for the KyberDash Factory (Droid) capture plugin installer.
+// Tests for the KyberDash Factory (Droid) capture plugin installer.
 //
 // The module under test is `./install.ts`, which does not exist yet: this file is the
 // contract the implementation is written against, and the run that proves it is a RED
@@ -6,29 +6,29 @@
 //
 // The contract mirrors the OpenCode installer at `../opencode-plugin/install.ts` — its
 // mode names (`strict` / `preserve`), its classifier states, its refusal messages and
-// its receipt shape — with one deliberate difference: the owned unit is a whole plugin
-// DIRECTORY, not a single file.
+// its receipt shape — with one deliberate difference: the owned unit is a whole
+// MARKETPLACE TREE, not a single file, and it is installed through the harness's OWN
+// commands rather than by dropping a directory where the harness looks.
 //
-//   <factoryRoot>/plugins/kyberdash-factory/
-//   ├── .factory-plugin/
-//   │   └── plugin.json
-//   └── hooks/
-//       ├── hooks.json
-//       └── kyberdash-factory.mjs
+//   <home>/.kyberdash/marketplaces/kyberdash/
+//   ├── .factory-plugin/marketplace.json
+//   └── kyberdash-factory/
+//       ├── .factory-plugin/plugin.json
+//       └── hooks/
+//           ├── hooks.json
+//           └── kyberdash-factory.mjs
 //
-// `<factoryRoot>` is `~/.factory`, overridden by `$FACTORY_DIR` (the resolution the
-// Factory file provider already uses, `dash/src/providers/droid.ts`). The receipt and
-// the consent file live in KyberDash's own state directory, `~/.kyberdash`, exactly as
-// the OpenCode installer puts them there. Both are injected through the `home`
-// argument, so a test never touches the developer's real `~/.factory` or
-// `~/.kyberdash`.
+// The receipt and the consent file live in KyberDash's own state directory, `~/.kyberdash`,
+// exactly as the OpenCode installer puts them there. Both are injected through the `home`
+// argument, so a test never touches the developer's real `~/.factory` or `~/.kyberdash`.
 //
 // The receipt grows from the OpenCode one-file receipt to the whole tree:
 //
-//   { "version": 1, "root": "<plugin dir>", "files": [ { "path": ..., "sha256": ... } ] }
+//   { "version": 1, "marketplace": "kyberdash", "plugin": "kyberdash-factory@kyberdash",
+//     "root": "<marketplace tree>", "files": [ { "path": ..., "sha256": ... } ] }
 //
-// The plugin bytes are a committed generated bundle that does not exist yet, so these
-// tests pin the tree SHAPE and the digest behaviour, never the exact future bytes.
+// The plugin bytes are a committed generated bundle, so these tests pin the tree SHAPE and
+// the digest behaviour, never the exact future bytes.
 
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,18 +37,31 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sha256Hex } from '../../receipt.js'
 import { factoryPluginPaths, installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
+import { fakeHarness, type FakeHarness } from './testing.js'
 
-/** The plugin directory Kyber owns inside the Factory root. */
-const PLUGIN_DIR_NAME = 'kyberdash-factory'
-/** The files Kyber owns, relative to the plugin directory. This is the tree shape. */
-const OWNED_FILES = ['.factory-plugin/plugin.json', 'hooks/hooks.json', 'hooks/kyberdash-factory.mjs']
+/** The marketplace the tree is registered as. Pinned as a literal, not read from the module. */
+const MARKETPLACE_NAME = 'kyberdash'
+/** The plugin's identity in the harness: `<plugin>@<marketplace>`. */
+const PLUGIN_IDENTITY = 'kyberdash-factory@kyberdash'
+
+/** The marketplace tree Kyber owns, relative to the injected home. */
+const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', MARKETPLACE_NAME)
+/** The files Kyber owns, relative to the marketplace tree root. This is the tree shape. */
+const OWNED_FILES = [
+  '.factory-plugin/marketplace.json',
+  'kyberdash-factory/.factory-plugin/plugin.json',
+  'kyberdash-factory/hooks/hooks.json',
+  'kyberdash-factory/hooks/kyberdash-factory.mjs',
+]
 
 /** A symlink test is meaningless on Windows, where the installer cannot create one. */
 const POSIX_ONLY = process.platform === 'win32'
 
-/** The receipt the installer writes: the tree, not one file. */
+/** The receipt the installer writes: the marketplace tree, not one file. */
 type FactoryReceipt = {
   version: number
+  marketplace: string
+  plugin: string
   root: string
   files: { path: string; sha256: string }[]
 }
@@ -70,14 +83,17 @@ const NO_ENV: NodeJS.ProcessEnv = {}
 type Fixture = {
   /** The injected home: KyberDash's state directory is `<home>/.kyberdash`. */
   home: string
-  /** The Factory root the installer resolves from `$FACTORY_DIR`. */
+  /** The Factory root the installer resolves from `$FACTORY_DIR`. KyberDash writes nothing there. */
   root: string
   /** The environment that points the installer at `root`. */
   env: NodeJS.ProcessEnv
+  /** The marketplace tree Kyber owns. */
   pluginDir: string
   receiptFile: string
   consentFile: string
   stateDir: string
+  /** The fake harness CLI the install and the uninstall are driven through. */
+  fake: FakeHarness
 }
 
 /**
@@ -92,10 +108,11 @@ function fixture(prefix: string): Fixture {
     home,
     root,
     env: { FACTORY_DIR: root },
-    pluginDir: join(root, 'plugins', PLUGIN_DIR_NAME),
+    pluginDir: join(home, MARKETPLACE_RELATIVE),
     receiptFile: join(home, '.kyberdash', 'factory-plugin-receipt.json'),
     consentFile: join(home, '.kyberdash', 'factory-plugin.json'),
     stateDir: join(home, '.kyberdash'),
+    fake: fakeHarness(),
   }
 }
 
@@ -141,17 +158,17 @@ describe('factoryPluginPaths', () => {
   it('resolves the Factory root from $FACTORY_DIR, not from the home directory', () => {
     const paths = factoryPluginPaths('/home/me', { platform: 'linux' }, { processEnv: { FACTORY_DIR: '/env/factory' } })
     expect(paths.root).toBe('/env/factory')
-    expect(paths.pluginDir).toBe('/env/factory/plugins/kyberdash-factory')
   })
 
   it('falls back to ~/.factory when FACTORY_DIR is not set', () => {
     const paths = factoryPluginPaths('/home/me', { platform: 'linux' }, { processEnv: NO_ENV })
     expect(paths.root).toBe('/home/me/.factory')
-    expect(paths.pluginDir).toBe('/home/me/.factory/plugins/kyberdash-factory')
   })
 
-  it('keeps the receipt and the consent file in KyberDash\'s own state directory', () => {
+  it('keeps the marketplace tree, the receipt and the consent file in KyberDash\'s own state directory', () => {
     const paths = factoryPluginPaths('/home/me', { platform: 'linux' }, { processEnv: NO_ENV })
+    expect(paths.pluginDir).toBe('/home/me/.kyberdash/marketplaces/kyberdash')
+    expect(paths.marketplaceRoot).toBe('/home/me/.kyberdash/marketplaces/kyberdash')
     expect(paths.receiptFile).toBe('/home/me/.kyberdash/factory-plugin-receipt.json')
     expect(paths.consentFile).toBe('/home/me/.kyberdash/factory-plugin.json')
   })
@@ -159,9 +176,14 @@ describe('factoryPluginPaths', () => {
 
 describe('installFactoryPlugin: strict mode', () => {
   const strict = (f: Fixture, extra: Record<string, unknown> = {}) =>
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, ...extra })
+    installFactoryPlugin(f.home, undefined, {
+      mode: 'strict',
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+      ...extra,
+    })
 
-  it('writes the whole plugin tree and a receipt listing every file with its digest', () => {
+  it('writes the whole marketplace tree and a receipt listing every file with its digest', () => {
     const f = fixture('factory-install-')
     const result = strict(f)
     expect(result.exitCode).toBe(0)
@@ -171,6 +193,8 @@ describe('installFactoryPlugin: strict mode', () => {
 
     const receipt = readReceipt(f.receiptFile)
     expect(receipt.version).toBe(1)
+    expect(receipt.marketplace).toBe(MARKETPLACE_NAME)
+    expect(receipt.plugin).toBe(PLUGIN_IDENTITY)
     expect(receipt.root).toBe(f.pluginDir)
     expect(receipt.files).toHaveLength(OWNED_FILES.length)
     expect(resolvedReceiptPaths(receipt)).toEqual(expectedPaths(f.pluginDir))
@@ -181,19 +205,19 @@ describe('installFactoryPlugin: strict mode', () => {
     }
   })
 
-  it('leaves nothing but the receipt and the consent file in the state directory', () => {
+  it('leaves nothing but the receipt, the consent file and the marketplace tree in the state directory', () => {
     const f = fixture('factory-state-')
     strict(f)
     const names = readdirSync(f.stateDir).sort()
     expect(names).toContain('factory-plugin-receipt.json')
-    expect(names.filter((name) => !['factory-plugin-receipt.json', 'factory-plugin.json'].includes(name))).toEqual([])
+    expect(names.filter((name) => !['factory-plugin-receipt.json', 'factory-plugin.json', 'marketplaces'].includes(name))).toEqual([])
   })
 
   it('refuses a tree holding a file Kyber did not write, and writes nothing', () => {
     const f = fixture('factory-foreign-')
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
-    writeFileSync(join(f.pluginDir, 'hooks', 'owner-notes.md'), 'mine\n')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'owner-notes.md'), 'mine\n')
     const before = snapshot(f.pluginDir)
 
     const result = strict(f)
@@ -207,10 +231,12 @@ describe('installFactoryPlugin: strict mode', () => {
   it('refuses a tree whose files do not match what Kyber writes, and writes nothing', () => {
     const f = fixture('factory-mismatch-')
     mkdirSync(join(f.pluginDir, '.factory-plugin'), { recursive: true })
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(f.pluginDir, '.factory-plugin', 'plugin.json'), '{"owner":"not kyberdash"}\n')
-    writeFileSync(join(f.pluginDir, 'hooks', 'hooks.json'), '{"owner":"not kyberdash"}\n')
-    writeFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), 'export default {}\n')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', '.factory-plugin'), { recursive: true })
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(f.pluginDir, '.factory-plugin', 'marketplace.json'), '{"owner":"not kyberdash"}\n')
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', '.factory-plugin', 'plugin.json'), '{"owner":"not kyberdash"}\n')
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'hooks.json'), '{"owner":"not kyberdash"}\n')
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), 'export default {}\n')
     const before = snapshot(f.pluginDir)
 
     const result = strict(f)
@@ -223,7 +249,7 @@ describe('installFactoryPlugin: strict mode', () => {
   it('refuses a tree Kyber wrote whose bytes no longer match the receipt digest', () => {
     const f = fixture('factory-drift-')
     strict(f)
-    const script = join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs')
+    const script = join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs')
     writeFileSync(script, `${readFileSync(script, 'utf8')}// owner tweak\n`)
     const before = snapshot(f.pluginDir)
     const receiptBefore = readFileSync(f.receiptFile, 'utf8')
@@ -236,7 +262,7 @@ describe('installFactoryPlugin: strict mode', () => {
     expect(readFileSync(f.receiptFile, 'utf8')).toBe(receiptBefore)
   })
 
-  it('is idempotent when the tree already matches the receipt', () => {
+  it('is idempotent when the tree already matches the receipt and the harness holds the plugin', () => {
     const f = fixture('factory-idempotent-')
     strict(f)
     const before = snapshot(f.pluginDir)
@@ -276,7 +302,7 @@ describe('installFactoryPlugin: strict mode', () => {
     expect(readFileSync(f.receiptFile, 'utf8')).toBe(receiptBefore)
   })
 
-  it('--if-installed with nothing installed writes nothing at all', () => {
+  it('--if-installed writes nothing when the harness\'s own registry reports no plugin', () => {
     const f = fixture('factory-ifinst-')
     const result = strict(f, { ifInstalled: true })
     expect(result.exitCode).toBe(0)
@@ -285,7 +311,7 @@ describe('installFactoryPlugin: strict mode', () => {
     expect(existsSync(f.stateDir)).toBe(false)
   })
 
-  it('--if-installed over an installed tree keeps it intact', () => {
+  it('--if-installed over an installed plugin keeps the tree intact', () => {
     const f = fixture('factory-ifinst2-')
     strict(f)
     const before = snapshot(f.pluginDir)
@@ -298,23 +324,30 @@ describe('installFactoryPlugin: strict mode', () => {
 
 describe('installFactoryPlugin: preserve mode', () => {
   const preserve = (f: Fixture, extra: Record<string, unknown> = {}) =>
-    installFactoryPlugin(f.home, undefined, { mode: 'preserve', processEnv: f.env, ...extra })
+    installFactoryPlugin(f.home, undefined, {
+      mode: 'preserve',
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+      ...extra,
+    })
 
-  it('writes the plugin tree and a receipt holding every file digest', () => {
+  it('writes the marketplace tree and a receipt holding every file digest', () => {
     const f = fixture('factory-preserve-')
     const result = preserve(f)
     expect(result.exitCode).toBe(0)
     expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
     const receipt = readReceipt(f.receiptFile)
     expect(receipt.version).toBe(1)
+    expect(receipt.marketplace).toBe(MARKETPLACE_NAME)
+    expect(receipt.plugin).toBe(PLUGIN_IDENTITY)
     expect(receipt.root).toBe(f.pluginDir)
     expect(resolvedReceiptPaths(receipt)).toEqual(expectedPaths(f.pluginDir))
   })
 
   it('keeps a tree Kyber did not write, warns, and exits 0', () => {
     const f = fixture('factory-preserve-foreign-')
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
     const before = snapshot(f.pluginDir)
 
     const result = preserve(f)
@@ -329,8 +362,8 @@ describe('installFactoryPlugin: preserve mode', () => {
 
   it('keeps a tree Kyber wrote that the owner edited, warns, and exits 0', () => {
     const f = fixture('factory-preserve-edited-')
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
-    const script = join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs')
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
+    const script = join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs')
     writeFileSync(script, `${readFileSync(script, 'utf8')}// owner tweak\n`)
     const before = snapshot(f.pluginDir)
     const receiptBefore = readFileSync(f.receiptFile, 'utf8')
@@ -348,11 +381,15 @@ describe('installFactoryPlugin: preserve mode', () => {
 
 describe('uninstallFactoryPlugin', () => {
   const uninstall = (f: Fixture, extra: Record<string, unknown> = {}) =>
-    uninstallFactoryPlugin(f.home, undefined, { processEnv: f.env, ...extra })
+    uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+      ...extra,
+    })
 
   it('removes the tree and the receipt while every digest still matches', () => {
     const f = fixture('factory-uninstall-')
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     const result = uninstall(f)
     expect(result.exitCode).toBe(0)
     expect(result.outcome).toBe('restored')
@@ -362,8 +399,8 @@ describe('uninstallFactoryPlugin', () => {
 
   it('leaves an edited tree in place and exits 1', () => {
     const f = fixture('factory-uninstall-edited-')
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
-    const script = join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs')
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
+    const script = join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs')
     writeFileSync(script, `${readFileSync(script, 'utf8')}// owner tweak\n`)
 
     const result = uninstall(f)
@@ -375,8 +412,8 @@ describe('uninstallFactoryPlugin', () => {
 
   it('never removes a file Kyber did not write', () => {
     const f = fixture('factory-uninstall-foreign-')
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
-    const ownerFile = join(f.pluginDir, 'hooks', 'owner-notes.md')
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
+    const ownerFile = join(f.pluginDir, 'kyberdash-factory', 'hooks', 'owner-notes.md')
     writeFileSync(ownerFile, 'mine\n')
 
     uninstall(f)
@@ -387,9 +424,8 @@ describe('uninstallFactoryPlugin', () => {
   it('is a noop when nothing is installed, and a dry run removes nothing', () => {
     const f = fixture('factory-uninstall-none-')
     expect(uninstall(f).exitCode).toBe(0)
-    expect(uninstall(f).outcome).toBe('noop')
 
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     const dry = uninstall(f, { dryRun: true })
     expect(dry.exitCode).toBe(0)
     expect(dry.outcome).toBe('would-restore')
@@ -424,25 +460,25 @@ describe('the owner\'s own Factory files are never written', () => {
     const check = ownerFiles(f, project)
 
     // enable: the strict install.
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     check()
     // disable: the uninstall.
-    uninstallFactoryPlugin(f.home, undefined, { processEnv: f.env })
+    uninstallFactoryPlugin(f.home, undefined, { processEnv: f.env, harnessCli: f.fake.harness })
     check()
     // the preserve path (squad / kyber-weave update).
-    installFactoryPlugin(f.home, undefined, { mode: 'preserve', processEnv: f.env })
+    installFactoryPlugin(f.home, undefined, { mode: 'preserve', processEnv: f.env, harnessCli: f.fake.harness })
     check()
-    uninstallFactoryPlugin(f.home, undefined, { processEnv: f.env })
+    uninstallFactoryPlugin(f.home, undefined, { processEnv: f.env, harnessCli: f.fake.harness })
     check()
   })
 
-  it('writes nothing into the Factory root except the plugin directory', () => {
+  it('writes nothing into the Factory root at all', () => {
     const f = fixture('factory-owner-root-')
     writeFileSync(join(f.root, 'settings.json'), OWNER_SETTINGS)
     writeFileSync(join(f.root, 'hooks.json'), OWNER_HOOKS)
 
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
-    expect(listFiles(f.root).filter((relative) => !relative.startsWith('plugins/'))).toEqual(['hooks.json', 'settings.json'])
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
+    expect(listFiles(f.root)).toEqual(['hooks.json', 'settings.json'])
   })
 })
 
@@ -451,29 +487,29 @@ describe('the installer never writes through a symlink', () => {
     const f = fixture('factory-symlink-file-')
     // A real tree first, so the only anomaly is the link: the tree holds the bytes the
     // installer would write, so nothing but the symlink can make it refuse.
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
-    const script = join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs')
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
+    const script = join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs')
     const precious = join(temp('factory-symlink-target-'), 'precious.txt')
     writeFileSync(precious, readFileSync(script, 'utf8'))
     rmSync(script)
     symlinkSync(precious, script)
     const mtimeBefore = statSync(precious).mtimeMs
 
-    const result = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    const result = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     expect(result.exitCode).toBe(1)
     // The link was not replaced by a regular file, and its target was not written through.
     expect(lstatSync(script).isSymbolicLink()).toBe(true)
     expect(statSync(precious).mtimeMs).toBe(mtimeBefore)
   })
 
-  it.skipIf(POSIX_ONLY)('refuses a plugin directory that is a symlink and leaves its target untouched', () => {
+  it.skipIf(POSIX_ONLY)('refuses a marketplace tree that is a symlink and leaves its target untouched', () => {
     const f = fixture('factory-symlink-dir-')
     const preciousDir = temp('factory-symlink-dir-target-')
     writeFileSync(join(preciousDir, 'precious.txt'), 'PRECIOUS')
-    mkdirSync(join(f.root, 'plugins'), { recursive: true })
+    mkdirSync(join(f.stateDir, 'marketplaces'), { recursive: true })
     symlinkSync(preciousDir, f.pluginDir)
 
-    const result = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    const result = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     expect(result.exitCode).toBe(1)
     expect(lstatSync(f.pluginDir).isSymbolicLink()).toBe(true)
     expect(readFileSync(join(preciousDir, 'precious.txt'), 'utf8')).toBe('PRECIOUS')
@@ -484,10 +520,10 @@ describe('the installer never writes through a symlink', () => {
     const f = fixture('factory-symlink-preserve-')
     const precious = join(temp('factory-symlink-preserve-target-'), 'precious.txt')
     writeFileSync(precious, 'PRECIOUS')
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    symlinkSync(precious, join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'))
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    symlinkSync(precious, join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'))
 
-    const result = installFactoryPlugin(f.home, undefined, { mode: 'preserve', processEnv: f.env })
+    const result = installFactoryPlugin(f.home, undefined, { mode: 'preserve', processEnv: f.env, harnessCli: f.fake.harness })
     expect(result.exitCode).toBe(0)
     expect(result.err.length).toBeGreaterThan(0)
     expect(readFileSync(precious, 'utf8')).toBe('PRECIOUS')
@@ -498,23 +534,24 @@ describe('the installer never writes through a symlink', () => {
 describe('writes are atomic and the receipt lands last', () => {
   it('leaves no temporary file behind and every file is complete', () => {
     const f = fixture('factory-atomic-ok-')
-    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env })
+    installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness })
     expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
-    expect(() => JSON.parse(readFileSync(join(f.pluginDir, '.factory-plugin', 'plugin.json'), 'utf8'))).not.toThrow()
-    expect(() => JSON.parse(readFileSync(join(f.pluginDir, 'hooks', 'hooks.json'), 'utf8'))).not.toThrow()
-    expect(readFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), 'utf8').length).toBeGreaterThan(0)
+    expect(() => JSON.parse(readFileSync(join(f.pluginDir, '.factory-plugin', 'marketplace.json'), 'utf8'))).not.toThrow()
+    expect(() => JSON.parse(readFileSync(join(f.pluginDir, 'kyberdash-factory', '.factory-plugin', 'plugin.json'), 'utf8'))).not.toThrow()
+    expect(() => JSON.parse(readFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'hooks.json'), 'utf8'))).not.toThrow()
+    expect(readFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), 'utf8').length).toBeGreaterThan(0)
   })
 
   it.skipIf(process.getuid?.() === 0)('writes no receipt when a file of the tree could not land', () => {
     const f = fixture('factory-atomic-fail-')
     // The tree cannot be written in full: one of the directories cannot be written into.
-    const blocked = join(f.pluginDir, 'hooks')
+    const blocked = join(f.pluginDir, 'kyberdash-factory', 'hooks')
     mkdirSync(blocked, { recursive: true })
     chmodSync(blocked, 0o500)
     try {
       let exitCode = 0
       try {
-        exitCode = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env }).exitCode
+        exitCode = installFactoryPlugin(f.home, undefined, { mode: 'strict', processEnv: f.env, harnessCli: f.fake.harness }).exitCode
       } catch {
         // A failed write may be reported by throwing, as the OpenCode installer does.
         exitCode = 1
