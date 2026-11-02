@@ -1015,6 +1015,34 @@ describe('a name the harness holds that KyberDash does not own', () => {
     expect(commands).not.toContain(`plugin install ${PLUGIN_IDENTITY} --scope user`)
   })
 
+  it('does not silence a conflict under --if-installed', () => {
+    const f = fixture('factory-conflict-ifinstalled-')
+    // The harness holds the plugin identity KyberDash wants, and the marketplace that names
+    // it was registered from a directory KyberDash did not register: the name is a conflict,
+    // not an absence.
+    f.fake.marketplaces.add(MARKETPLACE_NAME)
+    f.fake.sources.set(MARKETPLACE_NAME, '/somewhere/else/kyberdash')
+    f.fake.plugins.add(PLUGIN_IDENTITY)
+
+    const result = strict(f, { ifInstalled: true })
+
+    const out = result.out.join('\n')
+    // The skip is not silent: the owner is told the name is a conflict ...
+    expect(out).not.toContain('skipped-not-installed')
+    expect(out).toMatch(/conflict|did not register|does not own/i)
+    // ... and the exact command that removes it reaches STDOUT, because the callers of this
+    // path relay stdout and nothing else.
+    expect(out).toContain('droid plugin uninstall kyberdash-factory@kyberdash --scope user')
+    // A conflict is never acted on: neither the tree nor the receipt is written, and the
+    // harness is not touched.
+    expect(existsSync(f.pluginDir)).toBe(false)
+    expect(existsSync(f.receiptFile)).toBe(false)
+    const commands = fakeCommandLines(f.fake).filter(
+      (line) => !line.startsWith('plugin marketplace list') && !line.startsWith('plugin list'),
+    )
+    expect(commands).toEqual([])
+  })
+
   it('the uninstall removes KyberDash\'s own tree and leaves the name it does not own', () => {
     const f = fixture('factory-conflict-uninstall-')
     // A tree KyberDash wrote, and then the marketplace of the same name taken over by
