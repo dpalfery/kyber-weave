@@ -1,5 +1,5 @@
-// Factory's native OpenTelemetry export: where its endpoint comes from, and whether it is
-// this KyberDash receiver.
+// Factory's native OpenTelemetry export: where its endpoint comes from, whether it is this
+// KyberDash receiver, and what its EFFECTIVE SHAPE is.
 //
 // Factory (Droid) can export native OTLP telemetry to a customer endpoint. The endpoint is
 // configured in one of two places, and the organisation's setting wins:
@@ -10,14 +10,32 @@
 //      `OTEL_EXPORTER_OTLP_ENDPOINT`.
 //
 // The organisation's block reaches the machine as the cached view under the Factory root
-// (`org-managed-settings.cache.json`, whose `managedSettings.telemetry.endpoint` carries the
-// pinned endpoint) and as the system-managed copy (`settings.json`, whose `telemetry.endpoint`
-// carries it). Both are read, so a machine that holds only one of them still reports the
-// organisation's pin.
+// (`org-managed-settings.cache.json`, whose `managedSettings.telemetry` carries the pinned
+// values) and as the system-managed copy (`settings.json`, whose `telemetry` carries them).
+// Both are read, so a machine that holds only one of them still reports the organisation's
+// pin.
 //
 // An organisation pin is an administrative override the developer does not control, so the
 // verdict under one is never "working": the row names the organisation as the cause and the
 // plugin path stays the capture path in that deployment (plan D26).
+//
+// The endpoint does not say what the export SENDS. That is the export's shape, and it is
+// configured in the same two places — but NOT by one rule:
+//
+//   - the FORMAT follows precedence. The organisation's `telemetry.format` wins, and where it
+//     is set the machine's `OTEL_TELEMETRY_FORMAT` is not read at all. Anything
+//     unrecognised resolves to `legacy`.
+//   - the GRANULARITY follows most-restrictive-wins, not precedence: `aggregate` beats
+//     `user`, whichever level each of them came from.
+//   - the MESSAGE-CONTENT switch follows precedence for the organisation's
+//     `telemetry.logMessageContent` — when it is set at all the machine's
+//     `OTEL_LOG_MESSAGE_CONTENT` does not decide — and the granularity overrides both:
+//     `aggregate` overrides every content opt-in.
+//
+// The shape decides what arrives: the format picks the metric catalog (`droid.*` under
+// `legacy`, `gen_ai.*` under `genai` — the two replace each other and do not stack), the
+// granularity decides whether the legacy format produces spans at all, and the content
+// switch decides whether content-bearing spans are produced.
 //
 // This module is a LEAF of the engine: `node:` built-ins only, no project import and no
 // third-party package. It therefore takes the paths it reads and the environment it consults
@@ -40,6 +58,12 @@ const MAX_ENDPOINT_CHARS = 200
 const TELEMETRY_ENDPOINT_VARIABLE = 'OTEL_TELEMETRY_ENDPOINT'
 /** The documented fallback beside it. */
 const FALLBACK_TELEMETRY_ENDPOINT_VARIABLE = 'OTEL_EXPORTER_OTLP_ENDPOINT'
+/** The machine variable that carries the export's format. */
+const TELEMETRY_FORMAT_VARIABLE = 'OTEL_TELEMETRY_FORMAT'
+/** The machine variable that carries the export's granularity. */
+const TELEMETRY_GRANULARITY_VARIABLE = 'OTEL_TELEMETRY_GRANULARITY'
+/** The machine variable that carries the message-content switch. */
+const LOG_MESSAGE_CONTENT_VARIABLE = 'OTEL_LOG_MESSAGE_CONTENT'
 
 /**
  * The port this KyberDash receiver listens on: the OTLP/HTTP standard port, the same one
@@ -55,10 +79,49 @@ const RECEIVER_PORT = 4318
  */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
-/** The machine variables Factory's native export reads, in the order it reads them. */
+/** The machine variables Factory's native export reads for its endpoint, in the order it reads them. */
 export type NativeExportVariable =
   | typeof TELEMETRY_ENDPOINT_VARIABLE
   | typeof FALLBACK_TELEMETRY_ENDPOINT_VARIABLE
+
+/** The format the native export sends: `legacy` or `genai`. */
+export type NativeExportFormat = 'legacy' | 'genai'
+
+/** The granularity the native export sends: per-individual (`user`) or aggregate. */
+export type NativeExportGranularity = 'user' | 'aggregate'
+
+/**
+ * Where a resolved switch came from: the organisation's managed `telemetry` block, one of
+ * the machine variables, the documented default, or the granularity — which overrides every
+ * content opt-in.
+ */
+export type NativeExportShapeSource =
+  | 'organisation'
+  | 'default'
+  | 'granularity'
+  | typeof TELEMETRY_FORMAT_VARIABLE
+  | typeof TELEMETRY_GRANULARITY_VARIABLE
+  | typeof LOG_MESSAGE_CONTENT_VARIABLE
+
+/** One resolved switch: its value, and the place it came from. */
+export type NativeExportSwitch<T> = {
+  value: T
+  source: NativeExportShapeSource
+}
+
+/**
+ * The native export's effective shape: the format, the granularity and the message-content
+ * switch, each with the source it came from.
+ *
+ * The shape is not the endpoint. The format decides which metric catalog arrives, the
+ * granularity decides whether the legacy format produces spans at all, and the content
+ * switch decides whether content-bearing spans are produced.
+ */
+export type NativeExportShape = {
+  format: NativeExportSwitch<NativeExportFormat>
+  granularity: NativeExportSwitch<NativeExportGranularity>
+  content: NativeExportSwitch<boolean>
+}
 
 /**
  * The native export's state. `available` means the effective endpoint IS this KyberDash
@@ -68,22 +131,28 @@ export type NativeExportVariable =
  * The union is exact: an organisation's pin is never `available`, and a machine variable is
  * never the `organisation-pinned` cause, so the surface cannot word a state the
  * configuration does not hold.
+ *
+ * Every state carries the export's SHAPE, because the endpoint does not say what the export
+ * sends: a verdict without the shape would let the row read as "the native path works" when
+ * the export is pinned to a shape that sends nothing KyberDash reads.
  */
 export type NativeExportVerdict =
-  | { state: 'available'; endpoint: string; source: NativeExportVariable }
+  | { state: 'available'; endpoint: string; source: NativeExportVariable; shape: NativeExportShape }
   | {
       state: 'unavailable'
       endpoint: string
       source: 'organisation'
       cause: 'organisation-pinned'
+      shape: NativeExportShape
     }
   | {
       state: 'unavailable'
       endpoint: string
       source: NativeExportVariable
       cause: 'endpoint-differs'
+      shape: NativeExportShape
     }
-  | { state: 'not-configured' }
+  | { state: 'not-configured'; shape: NativeExportShape }
 
 /** Where the organisation's and the machine's configuration are read from. */
 export type NativeExportSources = {
@@ -136,16 +205,33 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>
 }
 
-/** The `telemetry.endpoint` of a settings document, when it carries one. */
-function telemetryEndpoint(value: unknown): string | undefined {
-  const endpoint = asRecord(asRecord(value)?.['telemetry'])?.['endpoint']
-  if (typeof endpoint !== 'string') return undefined
-  return displayEndpoint(endpoint)
+/** The `telemetry` block of a settings document, when it carries one. */
+function telemetryBlock(value: unknown): Record<string, unknown> | undefined {
+  return asRecord(asRecord(value)?.['telemetry'])
 }
 
-/** The `managedSettings.telemetry.endpoint` of the cached organisation settings. */
-function cachedOrganisationEndpoint(value: unknown): string | undefined {
-  return telemetryEndpoint(asRecord(value)?.['managedSettings'])
+/** The `managedSettings.telemetry` block of the cached organisation settings. */
+function cachedOrganisationTelemetry(value: unknown): Record<string, unknown> | undefined {
+  return telemetryBlock(asRecord(value)?.['managedSettings'])
+}
+
+/** A string key of a telemetry block, when it carries one. */
+function blockString(block: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = block?.[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+/** A boolean key of a telemetry block, when it carries one. */
+function blockBoolean(block: Record<string, unknown> | undefined, key: string): boolean | undefined {
+  const value = block?.[key]
+  return typeof value === 'boolean' ? value : undefined
+}
+
+/** The `telemetry.endpoint` of a telemetry block, as it is echoed in a status line. */
+function blockEndpoint(block: Record<string, unknown> | undefined): string | undefined {
+  const value = block?.['endpoint']
+  if (typeof value !== 'string') return undefined
+  return displayEndpoint(value)
 }
 
 /**
@@ -163,16 +249,132 @@ function systemManagedDir(sources: NativeExportSources): string {
 }
 
 /**
- * The endpoint an organisation pins, when one pins it. The cached view under the Factory
- * root is read first — it is the view Factory itself reads — and the system-managed copy is
- * the fallback.
+ * The organisation's telemetry block, as the reader resolves it. A value the organisation
+ * does not pin is absent, not a default: the default belongs to the level that did not pin
+ * it.
  */
-function organisationEndpoint(sources: NativeExportSources): string | undefined {
-  const cached = cachedOrganisationEndpoint(
+type OrganisationTelemetry = {
+  /** The endpoint the organisation pins, when it pins one. */
+  endpoint: string | undefined
+  /** The format the organisation pins, when it pins one. */
+  format: string | undefined
+  /** The granularity the organisation pins, when it pins one. */
+  granularity: string | undefined
+  /** The message-content switch the organisation pins, when it pins one. */
+  logMessageContent: boolean | undefined
+}
+
+/**
+ * The organisation's telemetry block, resolved key by key. The cached view under the Factory
+ * root is read first — it is the view Factory itself reads — and the system-managed copy is
+ * the fallback for every key the cached view does not carry. The endpoint resolves that way
+ * too, so the verdict under an organisation's pin is unchanged by reading the shape beside
+ * it.
+ */
+function organisationTelemetry(sources: NativeExportSources): OrganisationTelemetry {
+  const cached = cachedOrganisationTelemetry(
     readSettingsFile(join(sources.factoryRoot, ORGANISATION_CACHE_FILE)),
   )
-  if (cached !== undefined) return cached
-  return telemetryEndpoint(readSettingsFile(join(systemManagedDir(sources), SYSTEM_SETTINGS_FILE)))
+  const system = telemetryBlock(readSettingsFile(join(systemManagedDir(sources), SYSTEM_SETTINGS_FILE)))
+  return {
+    endpoint: blockEndpoint(cached) ?? blockEndpoint(system),
+    format: blockString(cached, 'format') ?? blockString(system, 'format'),
+    granularity: blockString(cached, 'granularity') ?? blockString(system, 'granularity'),
+    logMessageContent:
+      blockBoolean(cached, 'logMessageContent') ?? blockBoolean(system, 'logMessageContent'),
+  }
+}
+
+/**
+ * The format the export sends. The organisation's block wins by precedence: where it pins
+ * the format the machine's variable is not read at all, and anything unrecognised resolves
+ * to `legacy`.
+ */
+function resolveFormat(
+  organisation: OrganisationTelemetry,
+  processEnv: NodeJS.ProcessEnv,
+): NativeExportSwitch<NativeExportFormat> {
+  if (organisation.format !== undefined) {
+    return { value: organisation.format === 'genai' ? 'genai' : 'legacy', source: 'organisation' }
+  }
+  const machine = processEnv[TELEMETRY_FORMAT_VARIABLE]
+  if (machine === 'legacy' || machine === 'genai') {
+    return { value: machine, source: TELEMETRY_FORMAT_VARIABLE }
+  }
+  return { value: 'legacy', source: 'default' }
+}
+
+/**
+ * The granularity the export sends. Most-restrictive-wins, not precedence: `aggregate`
+ * beats `user` whichever level each of them came from. A tie is the organisation's, because
+ * that is the level that pinned it.
+ */
+function resolveGranularity(
+  organisation: OrganisationTelemetry,
+  processEnv: NodeJS.ProcessEnv,
+): NativeExportSwitch<NativeExportGranularity> {
+  const organisationValue =
+    organisation.granularity === 'aggregate' || organisation.granularity === 'user'
+      ? organisation.granularity
+      : undefined
+  const raw = processEnv[TELEMETRY_GRANULARITY_VARIABLE]
+  const machineValue = raw === 'aggregate' || raw === 'user' ? raw : undefined
+  if (organisationValue === 'aggregate' || machineValue === 'aggregate') {
+    return {
+      value: 'aggregate',
+      source: organisationValue === 'aggregate' ? 'organisation' : TELEMETRY_GRANULARITY_VARIABLE,
+    }
+  }
+  if (organisationValue === 'user' || machineValue === 'user') {
+    return {
+      value: 'user',
+      source: organisationValue === 'user' ? 'organisation' : TELEMETRY_GRANULARITY_VARIABLE,
+    }
+  }
+  return { value: 'user', source: 'default' }
+}
+
+/**
+ * The message-content switch. The organisation's value wins when it is set at all, and the
+ * aggregate granularity overrides every content opt-in: `aggregate` carries no
+ * per-individual content, so an opt-in that would have turned content on is overridden.
+ *
+ * The source names where the VALUE came from, so the granularity is named only when it
+ * changed the outcome: with no opt-in at all, the switch is off because the default is off,
+ * and the aggregate granularity agrees with it rather than overriding it.
+ */
+function resolveContent(
+  organisation: OrganisationTelemetry,
+  processEnv: NodeJS.ProcessEnv,
+  granularity: NativeExportSwitch<NativeExportGranularity>,
+): NativeExportSwitch<boolean> {
+  const organisationValue = organisation.logMessageContent
+  if (organisationValue !== undefined) {
+    if (granularity.value === 'aggregate' && organisationValue) {
+      return { value: false, source: 'granularity' }
+    }
+    return { value: organisationValue, source: 'organisation' }
+  }
+  const machine = processEnv[LOG_MESSAGE_CONTENT_VARIABLE]
+  if (machine === 'true' || machine === '1') {
+    if (granularity.value === 'aggregate') return { value: false, source: 'granularity' }
+    return { value: true, source: LOG_MESSAGE_CONTENT_VARIABLE }
+  }
+  if (machine === 'false' || machine === '0') {
+    return { value: false, source: LOG_MESSAGE_CONTENT_VARIABLE }
+  }
+  return { value: false, source: 'default' }
+}
+
+/** The export's effective shape: the format, the granularity and the content switch. */
+function resolveShape(
+  organisation: OrganisationTelemetry,
+  processEnv: NodeJS.ProcessEnv,
+): NativeExportShape {
+  const format = resolveFormat(organisation, processEnv)
+  const granularity = resolveGranularity(organisation, processEnv)
+  const content = resolveContent(organisation, processEnv, granularity)
+  return { format, granularity, content }
 }
 
 /** The machine variable that names the endpoint, and the endpoint it names. */
@@ -210,35 +412,42 @@ function pointsAtReceiver(endpoint: string): boolean {
 }
 
 /**
- * The native export's effective endpoint and state.
+ * The native export's effective endpoint, state and shape.
  *
  * The organisation's pinned endpoint wins outright: when one is pinned, the machine variable
  * is not consulted at all, and the verdict is `unavailable` with the organisation named as
  * the cause — a developer whose machine variable points at this receiver must not be told
  * the native path works when the organisation's endpoint is what receives the traffic.
+ *
+ * The SHAPE travels with the verdict. It is resolved from the same configuration as the
+ * endpoint — the organisation's managed block and the machine's variables — but it follows
+ * Factory's own precedence rules, which are not one rule (see the header).
  */
 export function readNativeExport(
   sources: NativeExportSources,
   options: NativeExportOptions = {},
 ): NativeExportVerdict {
   const processEnv = options.processEnv ?? process.env
-  const organisation = organisationEndpoint(sources)
-  if (organisation !== undefined) {
+  const organisation = organisationTelemetry(sources)
+  const shape = resolveShape(organisation, processEnv)
+  if (organisation.endpoint !== undefined) {
     return {
       state: 'unavailable',
-      endpoint: organisation,
+      endpoint: organisation.endpoint,
       source: 'organisation',
       cause: 'organisation-pinned',
+      shape,
     }
   }
   const machine = machineEndpoint(processEnv)
-  if (machine === undefined) return { state: 'not-configured' }
+  if (machine === undefined) return { state: 'not-configured', shape }
   return pointsAtReceiver(machine.endpoint)
-    ? { state: 'available', endpoint: machine.endpoint, source: machine.source }
+    ? { state: 'available', endpoint: machine.endpoint, source: machine.source, shape }
     : {
         state: 'unavailable',
         endpoint: machine.endpoint,
         source: machine.source,
         cause: 'endpoint-differs',
+        shape,
       }
 }

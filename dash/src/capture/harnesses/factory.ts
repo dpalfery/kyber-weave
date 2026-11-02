@@ -16,7 +16,12 @@
 // The Factory root is `$FACTORY_DIR`, else `~/.factory`: the resolution the Factory file
 // provider already uses (`dash/src/providers/droid.ts`) and the one the installer uses.
 
-import { createConsentIfAbsent, readConsentState, writeContentConsent } from '../consent-file.js'
+import {
+  createConsentIfAbsent,
+  readConsentState,
+  writeContentConsent,
+  type ConsentState,
+} from '../consent-file.js'
 import { envJoin, type PathEnv } from '../paths.js'
 
 import {
@@ -27,7 +32,12 @@ import {
   uninstallFactoryPlugin,
   type FactoryPluginResult,
 } from './factory-plugin/install.js'
-import { readNativeExport } from './factory-plugin/native-export.js'
+import {
+  readNativeExport,
+  type NativeExportShape,
+  type NativeExportShapeSource,
+  type NativeExportVerdict,
+} from './factory-plugin/native-export.js'
 import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
@@ -59,6 +69,21 @@ function factorySettingsPath(home: string, env?: PathEnv): string {
 }
 
 /**
+ * The native OpenTelemetry export's verdict, read from the Factory root's cached
+ * organisation settings and the system-managed copy beside it. The owner's own settings file
+ * is never read for it.
+ */
+function nativeExportVerdict(home: string, env: PathEnv | undefined): NativeExportVerdict {
+  const paths = factoryPluginPaths(home, env)
+  return readNativeExport({
+    factoryRoot: paths.root,
+    home,
+    platform: env?.platform ?? process.platform,
+    ...(env?.appData !== undefined ? { appData: env.appData } : {}),
+  })
+}
+
+/**
  * The native OpenTelemetry export's line: whether Factory's own export is pointed at this
  * KyberDash receiver, and the cause when it is not.
  *
@@ -68,14 +93,7 @@ function factorySettingsPath(home: string, env?: PathEnv): string {
  * not that the native path works, when the organisation's endpoint is what receives the
  * traffic.
  */
-function nativeExportLine(home: string, env: PathEnv | undefined): string {
-  const paths = factoryPluginPaths(home, env)
-  const verdict = readNativeExport({
-    factoryRoot: paths.root,
-    home,
-    platform: env?.platform ?? process.platform,
-    ...(env?.appData !== undefined ? { appData: env.appData } : {}),
-  })
+function nativeExportLine(verdict: NativeExportVerdict): string {
   switch (verdict.state) {
     case 'available':
       return `native OpenTelemetry export: available (${verdict.source} points at ${verdict.endpoint}, this KyberDash receiver)`
@@ -88,26 +106,73 @@ function nativeExportLine(home: string, env: PathEnv | undefined): string {
   }
 }
 
+/** The place a resolved switch came from, in the words the row prints. */
+function shapeSource(source: NativeExportShapeSource): string {
+  switch (source) {
+    case 'organisation':
+      return "the organisation's telemetry block"
+    case 'granularity':
+      return 'the aggregate granularity overrides every content opt-in'
+    case 'default':
+      return 'the documented default'
+    default:
+      return source
+  }
+}
+
+/**
+ * The export's EFFECTIVE SHAPE: the format, the granularity and the message-content switch,
+ * each with the source it came from.
+ *
+ * The endpoint says where the export sends; the shape says what it sends. The format picks
+ * the metric catalog, the granularity decides whether the legacy format produces spans at
+ * all, and the content switch decides whether content-bearing spans are produced — so a row
+ * that named only the endpoint could read as "the native path works" while the export is
+ * pinned to a shape KyberDash does not read.
+ */
+function nativeExportShapeLine(shape: NativeExportShape): string {
+  return `native OpenTelemetry export shape: format ${shape.format.value} (${shapeSource(shape.format.source)}), granularity ${shape.granularity.value} (${shapeSource(shape.granularity.source)}), message content ${shape.content.value ? 'on' : 'off'} (${shapeSource(shape.content.source)})`
+}
+
+/**
+ * What KyberDash does with the export, in fixed words: the metrics are persisted, no native
+ * span is claimed, and the content consequence follows the consent file.
+ *
+ * The consent is KyberDash's own (`~/.kyberdash/factory-plugin.json`) and it is READ here,
+ * not inferred from the shape: the export's own content switch says what Factory sends, and
+ * the consent says what KyberDash is allowed to keep.
+ */
+function nativeExportConsequenceLine(consent: ConsentState): string {
+  const content =
+    consent === 'on'
+      ? "Factory content is stored while KyberDash's consent is on"
+      : "no Factory content is stored while KyberDash's consent is off"
+  return `native OpenTelemetry export: Factory's native metrics are persisted; Factory's native spans are not claimed; ${content}`
+}
+
 /**
  * The status lines for the Factory row: the plugin state, the directory the plugin
  * resolves to, the receipt and the content consent. The consent lines come from the
  * installer, which owns the consent file's shape; the directory and the receipt are added
  * here because the Factory plugin is a TREE and the row has to say where it lives. The
- * native export line is added here too: it is the Factory row's own fact about the second
- * capture path, and it is the same line the printed status, the structured row and the API
- * route carry.
+ * native export lines are added here too: they are the Factory row's own facts about the
+ * second capture path, and they are the same lines the printed status, the structured row
+ * and the API route carry.
  */
 function factoryStatusLines(home: string, env: PathEnv | undefined): string[] {
   const paths = factoryPluginPaths(home, env)
   const state = factoryPluginState(home, env)
   const described = describeFactoryPluginStatus(home, env)
   const plugin = described[0] ?? 'plugin: unknown'
+  const verdict = nativeExportVerdict(home, env)
   return [
     plugin,
     `plugin directory: ${paths.pluginDir}`,
     `plugin receipt: ${state.receipt ? 'recorded' : 'absent'}`,
     ...described.slice(1),
-    nativeExportLine(home, env),
+    nativeExportLine(verdict),
+    nativeExportShapeLine(verdict.shape),
+    nativeExportConsequenceLine(readConsentState(paths.consentFile)),
   ]
 }
 
