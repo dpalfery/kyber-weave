@@ -177,6 +177,25 @@ directory name is load-bearing and the local-source object written into
 `extraKnownMarketplaces` is exactly the documented shape; and `droid plugin marketplace remove`
 deletes the marketplace registration and leaves `enabledPlugins` alone.
 
+**A name the harness holds that KyberDash does not own is refused, and the harness's own output
+decides it.** The harness resolves a plugin identity through the **registered marketplace name**,
+not through the tree KyberDash published: measured, a marketplace named `kyberdash` registered
+from a *different* directory makes `droid plugin install kyberdash-factory@kyberdash --scope
+user` **succeed** and install **the other tree's payload**. Nothing in the harness's answers says
+which payload is running. So the harness's registry is read as the harness reports it — the
+marketplace list with its registered **SOURCE**, the plugin list with its **STATUS** — and a
+marketplace or plugin identity KyberDash does not own is a **conflict**: strict mode refuses with
+nothing written, preserve mode keeps it with a warning, and the report names the colliding
+entry, the registry it lives in and the exact `droid plugin …` command that removes it. The
+teardown never removes an entry that is not KyberDash's.
+
+**The harness's list output is a wrapped table, and it is read as one.** The harness sizes its
+columns to the content and **truncates** a cell that does not fit, printing the overflow at the
+same offset on the lines below, so a registered path longer than its column arrives in pieces.
+The reader joins a row's pieces back into the column they start in; a reader that took one line
+per row would compare a **truncated** source against the tree KyberDash published and report a
+conflict that does not exist — on every install, on every machine whose path is long enough.
+
 ## Context
 
 KyberDash can only analyse the context it receives. Most of that context reaches it through each
