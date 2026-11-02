@@ -283,16 +283,32 @@ describe('the Factory (Droid) capture writer', () => {
     expect(writer.ensureIfAbsentKeys?.('http://127.0.0.1:4318') ?? {}).toEqual({})
   })
 
-  it('resolves the Factory settings file under the home', () => {
+  it('names the Kyber-owned marketplace, never the owner\'s settings file', () => {
     const f = fixture('factory-writer-home-')
-    expect(factoryWriter().resolvePath(f.home, pathEnv())).toBe(f.settingsFile)
+    const path = factoryWriter().resolvePath(f.home, pathEnv())
+    // The capture lives in the marketplace KyberDash owns; the owner's settings file is
+    // neither a write target, nor a read target, nor install evidence.
+    expect(path.startsWith(f.pluginDir)).toBe(true)
+    expect(path).not.toBe(f.settingsFile)
+    expect(path.startsWith(f.root)).toBe(false)
   })
 
-  it('resolves the Factory settings file under $FACTORY_DIR, not under the home', () => {
+  it('does not move with $FACTORY_DIR: the capture lives in KyberDash\'s own state directory', () => {
     const f = fixture('factory-writer-env-')
     const elsewhere = tempDir('factory-root-')
     vi.stubEnv('FACTORY_DIR', elsewhere)
-    expect(factoryWriter().resolvePath(f.home, pathEnv())).toBe(join(elsewhere, 'settings.json'))
+    const path = factoryWriter().resolvePath(f.home, pathEnv())
+    expect(path.startsWith(f.pluginDir)).toBe(true)
+    expect(path.startsWith(elsewhere)).toBe(false)
+  })
+
+  it('never names or opens the owner\'s settings file', async () => {
+    const f = fixture('factory-writer-status-')
+    writeFileSync(f.settingsFile, '{\n  "theme": "dark"\n}\n')
+
+    const lines = await printedStatus(f.home)
+
+    expect(lines.join('\n')).not.toContain(f.settingsFile)
   })
 
   it('owns the marketplace tree under KyberDash\'s own state directory', () => {

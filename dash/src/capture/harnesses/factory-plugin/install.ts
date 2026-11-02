@@ -37,7 +37,9 @@
 //   preserve  Squad and `kyber-weave update`: keeps such a tree, warns, and exits 0.
 //
 // The Factory root (`$FACTORY_DIR`, else `~/.factory`) is named for READING only: nothing
-// is written under it any more.
+// is written under it any more. The ONE thing that is removed from it is the plugin tree
+// the PREVIOUS route wrote there — KyberDash's own artifact from its own earlier route —
+// and only when the receipt that route wrote proves the tree is still KyberDash's.
 
 import {
   closeSync,
@@ -49,7 +51,7 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, basename, dirname, join, sep } from 'node:path'
 
 import { createConsentIfAbsent, readConsentState, writeFileAtomic } from '../../consent-file.js'
 import { envJoin, type PathEnv } from '../../paths.js'
@@ -136,15 +138,31 @@ export type FactoryPluginResult = {
 
 type Receipt = {
   version: 1
-  /** The marketplace the tree is registered as. */
-  marketplace: string
-  /** The plugin's identity in the harness: `<plugin>@<marketplace>`. */
-  plugin: string
-  /** The marketplace tree root. */
+  /**
+   * The marketplace the tree is registered as, and the plugin's identity in the harness.
+   * A receipt the PREVIOUS route wrote carries neither: that route wrote a plugin tree
+   * into the Factory root, and the harness never registered it.
+   */
+  marketplace?: string
+  plugin?: string
+  /** The tree root. */
   root: string
   /** Every file Kyber owns, and its digest. */
   files: { path: string; sha256: string }[]
 }
+
+/**
+ * The plugin directory the PREVIOUS route wrote into the Factory root. That route wrote
+ * the tree straight into the harness's own directory, where the harness never loaded it.
+ */
+const LEGACY_PLUGIN_DIR_NAME = 'kyberdash-factory'
+
+/** The files the previous route owned, relative to its plugin directory. */
+const LEGACY_OWNED_FILES = [
+  '.factory-plugin/plugin.json',
+  'hooks/hooks.json',
+  'hooks/kyberdash-factory.mjs',
+]
 
 /** The cap on one file the installer reads. Kyber's own files are far smaller. */
 const MAX_FILE_BYTES = 1024 * 1024
@@ -177,15 +195,14 @@ export function factoryPluginPaths(
 function readReceipt(path: string): Receipt | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Receipt>
-    if (
-      parsed.version !== 1 ||
-      typeof parsed.root !== 'string' ||
-      typeof parsed.marketplace !== 'string' ||
-      typeof parsed.plugin !== 'string' ||
-      !Array.isArray(parsed.files)
-    ) {
+    if (parsed.version !== 1 || typeof parsed.root !== 'string' || !Array.isArray(parsed.files)) {
       return undefined
     }
+    // The previous route's receipt named a tree and its digests, and no marketplace and no
+    // plugin identity: the tree it wrote was never registered with the harness. Both are
+    // optional here so that receipt is READ rather than refused.
+    if (parsed.marketplace !== undefined && typeof parsed.marketplace !== 'string') return undefined
+    if (parsed.plugin !== undefined && typeof parsed.plugin !== 'string') return undefined
     const files: { path: string; sha256: string }[] = []
     for (const entry of parsed.files) {
       if (typeof entry?.path !== 'string' || typeof entry?.sha256 !== 'string') return undefined
@@ -193,8 +210,8 @@ function readReceipt(path: string): Receipt | undefined {
     }
     return {
       version: 1,
-      marketplace: parsed.marketplace,
-      plugin: parsed.plugin,
+      ...(parsed.marketplace !== undefined ? { marketplace: parsed.marketplace } : {}),
+      ...(parsed.plugin !== undefined ? { plugin: parsed.plugin } : {}),
       root: parsed.root,
       files,
     }
@@ -202,6 +219,19 @@ function readReceipt(path: string): Receipt | undefined {
     // A missing or unreadable receipt means nothing was recorded.
     return undefined
   }
+}
+
+/** A receipt the PREVIOUS route wrote: it names a tree and its digests, and no marketplace. */
+type LegacyReceipt = {
+  version: 1
+  marketplace?: undefined
+  plugin?: undefined
+  root: string
+  files: { path: string; sha256: string }[]
+}
+
+function isLegacyReceipt(receipt: Receipt | undefined): receipt is LegacyReceipt {
+  return receipt !== undefined && receipt.marketplace === undefined && receipt.plugin === undefined
 }
 
 /** The absolute path of one owned file, the way the receipt records it. */
@@ -377,6 +407,116 @@ function classify(paths: FactoryPluginPaths): Classified {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The tree the previous route wrote
+
+/** Where the previous route wrote its plugin tree: `<Factory root>/plugins/kyberdash-factory`. */
+function legacyPluginDir(paths: FactoryPluginPaths): string {
+  return join(paths.root, 'plugins', LEGACY_PLUGIN_DIR_NAME)
+}
+
+/**
+ * Whether a path is a plugin directory of the shape the previous route wrote:
+ * `<something>/plugins/kyberdash-factory`. The receipt names the tree to remove, and the
+ * shape check keeps a receipt that was edited by hand from naming an arbitrary directory.
+ */
+function isLegacyPluginPath(path: string): boolean {
+  return basename(dirname(path)) === 'plugins' && basename(path) === LEGACY_PLUGIN_DIR_NAME
+}
+
+/** The path of a file relative to a root, or undefined when the file is not under that root. */
+function relativeTo(root: string, absolute: string): string | undefined {
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`
+  if (!absolute.startsWith(prefix)) return undefined
+  return absolute.slice(prefix.length).split(sep).join('/')
+}
+
+type LegacyTree =
+  | { kind: 'absent' }
+  | { kind: 'proven'; path: string }
+  | { kind: 'unproven'; path: string; detail: string }
+
+/**
+ * Decide what the tree the previous route wrote is.
+ *
+ * The proof is the receipt that route wrote: it recorded a digest for every file it
+ * wrote, so a tree whose files all match those digests is KyberDash's own artifact and
+ * nothing else. A tree the receipt does not describe, and a tree whose bytes no longer
+ * match, are the owner's to remove.
+ */
+function classifyLegacyTree(paths: FactoryPluginPaths, receipt: Receipt | undefined): LegacyTree {
+  const recorded = isLegacyReceipt(receipt) && isLegacyPluginPath(receipt.root) ? receipt.root : undefined
+  const path = recorded ?? legacyPluginDir(paths)
+  const tree = readTree(path)
+  if (tree.kind === 'absent') return { kind: 'absent' }
+  if (tree.kind === 'unreadable') return { kind: 'unproven', path, detail: tree.detail }
+  if (receipt === undefined || !isLegacyReceipt(receipt)) {
+    return { kind: 'unproven', path, detail: 'no receipt describes this tree' }
+  }
+  const digests = new Map<string, string>()
+  for (const entry of receipt.files) {
+    const absolute = isAbsolute(entry.path) ? entry.path : join(receipt.root, entry.path)
+    const relative = relativeTo(receipt.root, absolute)
+    if (relative === undefined) {
+      return { kind: 'unproven', path, detail: 'the receipt names a file outside the tree' }
+    }
+    digests.set(relative, entry.sha256)
+  }
+  for (const relative of LEGACY_OWNED_FILES) {
+    if (!digests.has(relative)) {
+      return { kind: 'unproven', path, detail: `the receipt does not record ${relative}` }
+    }
+  }
+  const found = new Map(tree.files.map((file) => [file.relative, file.text]))
+  if (found.size !== digests.size) {
+    return { kind: 'unproven', path, detail: 'the tree holds a file the receipt does not record' }
+  }
+  for (const [relative, text] of found) {
+    const digest = digests.get(relative)
+    if (digest === undefined || sha256Hex(text) !== digest) {
+      return { kind: 'unproven', path, detail: `${relative} changed since it was installed` }
+    }
+  }
+  return { kind: 'proven', path }
+}
+
+/** What the previous route's tree costs the caller: what to print, and what to remove. */
+type LegacyOutcome = { out: string[]; err: string[] }
+
+/**
+ * Remove the tree the previous route wrote, when the receipt proves it is KyberDash's.
+ *
+ * A tree the receipt does not prove is the owner's: it is reported with the exact command
+ * that removes it and left where it is.
+ */
+function clearLegacyTree(
+  paths: FactoryPluginPaths,
+  receipt: Receipt | undefined,
+  platform: NodeJS.Platform | undefined,
+  dryRun: boolean,
+): LegacyOutcome {
+  const tree = classifyLegacyTree(paths, receipt)
+  if (tree.kind === 'absent') return { out: [], err: [] }
+  if (tree.kind === 'unproven') {
+    const command = platform === 'win32' ? `rmdir /s /q "${tree.path}"` : `rm -rf "${tree.path}"`
+    return {
+      out: [],
+      err: [
+        `kyberdash capture: warning: ${tree.path} was left in place (${tree.detail}); remove it yourself with: ${command}`,
+      ],
+    }
+  }
+  if (!dryRun) rmSync(tree.path, { recursive: true, force: true })
+  return {
+    out: [
+      dryRun
+        ? `factory plugin: would remove the previous install's plugin tree ${tree.path}`
+        : `factory plugin: removed the previous install's plugin tree ${tree.path}`,
+    ],
+    err: [],
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Writing the tree
 
 /**
@@ -423,6 +563,10 @@ export function installFactoryPlugin(
   const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
   const found = classify(paths)
   const preserve = mode === 'preserve'
+  /** The receipt on disk, read before this install can overwrite it. */
+  const receipt = readReceipt(paths.receiptFile)
+  /** What the previous route's tree costs this install: nothing until it is cleared. */
+  let legacyLines: LegacyOutcome = { out: [], err: [] }
 
   const strictRefusal = (
     reason: 'conflict' | 'drift' | 'unreadable',
@@ -481,9 +625,11 @@ export function installFactoryPlugin(
   }
 
   if (dryRun) {
+    const legacy = clearLegacyTree(paths, receipt, env?.platform, true)
     return result('installed', 'would-write', {
       consent: ensureConsent(paths, true),
-      out: [`factory plugin: would-install ${paths.pluginDir}`],
+      out: [`factory plugin: would-install ${paths.pluginDir}`, ...legacy.out],
+      err: legacy.err,
     })
   }
 
@@ -505,10 +651,15 @@ export function installFactoryPlugin(
   }
 
   if (found.kind === 'absent') {
+    // The tree the PREVIOUS route wrote into the Factory root goes first: the receipt that
+    // route wrote is the proof that the tree is KyberDash's, and the receipt written below
+    // would lose that proof.
+    const legacy = clearLegacyTree(paths, receipt, env?.platform, false)
     // The tree lands before the receipt, and the receipt before the harness is asked to
     // take the tree: a receipt never describes a tree that is not there.
     writeTree(paths)
     writeReceipt(paths)
+    legacyLines = legacy
   }
 
   const commands = marketplaceInstallCommands(harnessState.state, paths.pluginDir)
@@ -518,8 +669,8 @@ export function installFactoryPlugin(
       const message = `the Factory harness refused "${argv.join(' ')}" (exit ${answer.exitCode})${answer.stderr.trim() === '' ? '' : `: ${answer.stderr.trim().split('\n')[0]}`}`
       if (!preserve) return strictRefusal('unreadable', message)
       return result('kept-unreadable', 'kept', {
-        out: [`factory plugin: kept-unreadable ${paths.pluginDir}`],
-        err: [`kyberdash capture: warning: ${message}`],
+        out: [`factory plugin: kept-unreadable ${paths.pluginDir}`, ...legacyLines.out],
+        err: [`kyberdash capture: warning: ${message}`, ...legacyLines.err],
       })
     }
   }
@@ -532,7 +683,9 @@ export function installFactoryPlugin(
       `factory marketplace: ${FACTORY_MARKETPLACE_NAME}`,
       `factory plugin identity: ${FACTORY_PLUGIN_IDENTITY}`,
       `factory harness: ${executable}`,
+      ...legacyLines.out,
     ],
+    err: legacyLines.err,
   })
 }
 
@@ -544,6 +697,8 @@ export function uninstallFactoryPlugin(
   const paths = factoryPluginPaths(home, env, options)
   const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
   const found = classify(paths)
+  /** The receipt on disk, read before this uninstall can remove it. */
+  const receipt = readReceipt(paths.receiptFile)
 
   if (found.kind === 'unreadable') {
     return result('refused', 'refused', {
@@ -571,8 +726,10 @@ export function uninstallFactoryPlugin(
     })
   }
   if (options.dryRun === true) {
+    const legacy = clearLegacyTree(paths, receipt, env?.platform, true)
     return result('skipped', 'would-restore', {
-      out: [`factory plugin: would remove capture plugin ${paths.pluginDir}`],
+      out: [`factory plugin: would remove capture plugin ${paths.pluginDir}`, ...legacy.out],
+      err: legacy.err,
     })
   }
 
@@ -601,9 +758,14 @@ export function uninstallFactoryPlugin(
   }
 
   rmSync(paths.pluginDir, { recursive: true, force: true })
+  // The tree the previous route wrote into the Factory root is KyberDash's own artifact
+  // from its own earlier route: it is removed when the receipt proves it is ours, and
+  // reported with the exact command when it does not.
+  const legacy = clearLegacyTree(paths, receipt, env?.platform, false)
   rmSync(paths.receiptFile, { force: true })
   return result('skipped', 'restored', {
-    out: [`factory plugin: removed capture plugin ${paths.pluginDir}`],
+    out: [`factory plugin: removed capture plugin ${paths.pluginDir}`, ...legacy.out],
+    err: legacy.err,
   })
 }
 
@@ -626,17 +788,20 @@ export function factoryPluginState(
 ): FactoryPluginState {
   const paths = factoryPluginPaths(home, env, options)
   const receipt = readReceipt(paths.receiptFile)
+  // The receipt the PREVIOUS route wrote describes that route's tree in the Factory root,
+  // not the marketplace tree: it is not this route's receipt.
+  const recorded = receipt !== undefined && !isLegacyReceipt(receipt)
   const found = classify(paths)
   if (found.kind === 'unreadable') {
-    return { state: 'unknown', exists: true, receipt: receipt !== undefined, unreadable: true }
+    return { state: 'unknown', exists: true, receipt: recorded, unreadable: true }
   }
   if (found.kind === 'absent') {
-    return { state: 'off', exists: false, receipt: receipt !== undefined, unreadable: false }
+    return { state: 'off', exists: false, receipt: recorded, unreadable: false }
   }
   return {
     state: found.kind === 'same' ? 'on' : 'unknown',
     exists: true,
-    receipt: receipt !== undefined,
+    receipt: recorded,
     unreadable: false,
   }
 }

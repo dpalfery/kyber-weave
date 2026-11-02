@@ -142,16 +142,22 @@ function groupsFor(writer: CaptureHarnessWriter, home: string, env: PathEnv): Pr
         },
       ]
     case 'factory':
-      // The Factory root is `$FACTORY_DIR`, else `~/.factory`. The capture plugin tree is
-      // the only trace that says a Factory root is a real Factory installation, so an empty
-      // or unrelated `.factory` directory is not evidence: the owner's own settings file
-      // proves nothing, and the plugin's own state is reported separately, by the writer.
+      // The harness's OWN directory is the evidence: Factory populates `~/.factory` itself,
+      // and it does so even for a Droid that never wrote a settings file. The harness's own
+      // plugin registry is the second trace — the directory the harness writes when a
+      // plugin is installed. `$FACTORY_DIR` redirects the sessions tree, never the harness's
+      // own directory, so it moves neither probe.
+      //
+      // KyberDash's marketplace tree is NOT evidence: it is KyberDash's own artifact under
+      // KyberDash's own state directory, and it says nothing about whether the harness is
+      // installed. The plugin's own state is reported separately, by the writer.
       return [
         {
           probes: [
+            { label: 'Factory directory', path: pjoin(platform, home, '.factory') },
             {
-              label: 'Factory capture plugin directory',
-              path: pluginPathFor(writer, home, env),
+              label: 'Factory plugin registry',
+              path: pjoin(platform, home, '.factory', 'plugins', 'installed_plugins'),
             },
           ],
         },
@@ -170,16 +176,6 @@ function copilotSettingsPath(
 ): string {
   const file = writer.kind === 'managed' ? writer.configFiles?.find((f) => f.fileId === fileId) : undefined
   return (file?.resolvePath ?? writer.resolvePath)(home, env)
-}
-
-/**
- * The file a plugin-only harness owns: the tree Kyber installs. A harness whose settings
- * file belongs to its owner is asked about the plugin instead, because that is the trace
- * that says the harness is really there.
- */
-function pluginPathFor(writer: CaptureHarnessWriter, home: string, env: PathEnv): string {
-  if (writer.kind === 'managed' && writer.filePlugin !== undefined) return writer.filePlugin.path(home, env)
-  return writer.resolvePath(home, env)
 }
 
 /**
