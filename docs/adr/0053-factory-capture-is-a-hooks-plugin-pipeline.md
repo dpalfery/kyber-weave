@@ -24,6 +24,13 @@ Amended 2026-11-02: the plugin's `SubagentStop` event produces no span, because 
 documented payload for that event carries no child session id; and the native **span** claim is
 withdrawn, so the native **metrics** path is what remains of the native path.
 
+Amended 2026-11-02: the plugin's `SubagentStop` event is **not registered** at all. A
+registration that produces no span buys nothing and costs a process per subagent stop. The
+plugin's `hooks/hooks.json` is keyed **directly by event name**, the shape Factory's own
+documentation shows for a plugin's hooks file; the earlier top-level `hooks` wrapper was the
+shape Factory documents for the `hooks` key inside `settings.json`, and it worked only through
+undocumented tolerance.
+
 Amended 2026-11-02: the owned unit is a Kyber-owned **marketplace tree** that KyberDash
 publishes and then installs through the harness's own plugin commands, not a plugin directory
 KyberDash writes into the Factory root. The plugin that runs is the harness's **cached copy** of
@@ -54,7 +61,8 @@ data "are not exported as customer OTEL metrics" — and its `genai` format carr
 lineage: a subagent's trace is a separate trace root, so it cannot be joined to its parent's. The
 Factory transcript's own `parentId` does carry that linkage; the plugin's `SubagentStop` event
 does not — its documented payload names `task_name`, `task_result`, `task_error` and
-`stop_hook_active`, and no child session id — so that event produces no span.
+`stop_hook_active`, and no child session id — so that event produces no span and is not
+registered.
 
 ## Decision
 
@@ -89,7 +97,12 @@ projection, then `/api/kyber/*`.
   payload for it names `task_name`, `task_result`, `task_error` and `stop_hook_active`, and no
   child session id, while the common `session_id` is the session the hook fires in — the
   **parent's**, for a subagent's stop. A span there would name the parent as the child, so none
-  is written, and a child session's own turns arrive as the child's own plugin spans.
+  is written, and a child session's own turns arrive as the child's own plugin spans. The event
+  is **not registered** either: a registration that produces no span buys nothing and costs a
+  process per subagent stop. The plugin's `hooks/hooks.json` is keyed **directly by event
+  name**, the shape Factory's own documentation shows for a plugin's hooks file; the earlier
+  top-level `hooks` wrapper was the shape Factory documents for the `hooks` key inside
+  `settings.json`, and it worked only through undocumented tolerance.
 - **One canonical harness id: `droid`.** It is the id the Factory file source already stores, so
   the dashboard shows Factory once and the plugin's turns sit beside the file source's counters.
   One adapter, named `droid`, claims the plugin envelope (`factory.contract_version = 1`) and

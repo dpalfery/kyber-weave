@@ -578,7 +578,7 @@ published and then installed by the harness's own commands:
     ├── .factory-plugin/
     │   └── plugin.json      # Factory plugin manifest
     └── hooks/
-        ├── hooks.json       # registers the script on the seven hook events
+        ├── hooks.json       # registers the script on the six hook events
         └── kyberdash-factory.mjs # the bundled capture script
 ```
 
@@ -589,7 +589,10 @@ The install is `droid plugin marketplace add <the marketplace tree>` followed by
 directory's basename rather than the manifest's own `name` field, so the directory name is
 load-bearing and the plugin identity is `kyberdash-factory@kyberdash`. The plugin that runs is
 the **harness's cached copy** of the tree, and `${DROID_PLUGIN_ROOT}` expands to that cached
-path.
+path. The tree's `hooks/hooks.json` is keyed **directly by event name**, the shape Factory's own
+documentation shows for a plugin's hooks file; the top-level `hooks` wrapper KyberDash first
+shipped was the shape Factory documents for the `hooks` key inside `settings.json`, and it worked
+only through undocumented tolerance.
 
 The receipt is `~/.kyberdash/factory-plugin-receipt.json` — one digest per owned file, because
 the owned unit is a tree and not a single file, and the tree KyberDash owns is not the harness's
@@ -605,15 +608,15 @@ span names (`factory.session`, `factory.turn`, `factory.tool`) and deterministic
 (`dash/src/capture/harnesses/factory-plugin/contract.ts`). The
 OpenCode contract-3 keys are deliberately not reused: the OpenCode adapter claims every span
 carrying them, so an `opencode.*` key here would attribute every Factory row to OpenCode. The
-seven registered hook events are `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
-`Stop`, `SubagentStop` and `SessionEnd`; `PreCompact` produces no span in this contract, so no
-process is spent on it. `SubagentStop` is registered but produces no span either: Factory's
-documented payload for that event carries `task_name`, `task_result`, `task_error` and
-`stop_hook_active`, and **no child session id** — the common `session_id` is the session the hook
-fires in, which for a subagent's stop is the **parent's** session, so a span there would name the
-parent as the child. The mapper (`mapper.ts`) is pure: an attribute the payload does not carry
-is absent, never zero and never an empty string, and the prompt text is capped at 64 KiB and
-marked when it is cut.
+six registered hook events are `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`Stop` and `SessionEnd`; `PreCompact` produces no span in this contract, so no
+process is spent on it. `SubagentStop` is not registered: Factory's documented payload for that
+event carries `task_name`, `task_result`, `task_error` and `stop_hook_active`, and **no child
+session id** — the common `session_id` is the session the hook fires in, which for a subagent's
+stop is the **parent's** session, so a span there would name the parent as the child, and a
+registration would cost a process per subagent stop for no span. The mapper (`mapper.ts`) is
+pure: an attribute the payload does not carry is absent, never zero and never an empty string,
+and the prompt text is capped at 64 KiB and marked when it is cut.
 
 **The file-backed spool.** A Factory hook is a one-shot process — one short-lived process per
 event — so an in-memory outbox would lose the span when the process exits. The runner
