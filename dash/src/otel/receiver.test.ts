@@ -564,7 +564,9 @@ describe('OtlpReceiver (R2.1)', () => {
 
   it('serves POST /v1/traces and nothing else at that path', async () => {
     const { url } = await startReceiver()
-    const wrongPath = await fetch(`${url}/v1/metrics`, { method: 'POST' })
+    // A path the receiver does not serve at all. `/v1/metrics` is served, so
+    // it cannot stand in for "an unknown path" any more.
+    const wrongPath = await fetch(`${url}/v1/not-a-signal`, { method: 'POST' })
     expect(wrongPath.status).toBe(404)
 
     const wrongMethod = await fetch(`${url}${OTLP_TRACES_PATH}`, { method: 'GET' })
@@ -881,7 +883,9 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     const { url } = await startReceiver()
 
     expect((await fetch(`${url}/`)).status).toBe(404)
-    expect((await fetch(`${url}/v1/metrics`)).status).toBe(404)
+    // `/v1/metrics` is served now, so it is not an "every other GET path"
+    // any more; the metrics path's own method rule is pinned with it.
+    expect((await fetch(`${url}/v1/not-a-signal`)).status).toBe(404)
 
     const traces = await fetch(`${url}${OTLP_TRACES_PATH}`)
     expect(traces.status).toBe(405)
@@ -1019,3 +1023,244 @@ describe('OtlpReceiver pause for database clean (issue #312)', () => {
 function minimalTraceBody(): string {
   return jsonFixture('hand-rolled')
 }
+
+// ---------------------------------------------------------------------------
+// The native OTLP metrics path
+// ---------------------------------------------------------------------------
+
+/**
+ * The OTLP metrics export path. Spelled out rather than imported because the
+ * receiver does not serve it yet, and importing a name that does not exist
+ * fails the whole file before a single case runs — which would say nothing
+ * about the behaviour each case below requires.
+ */
+const OTLP_METRICS_PATH = '/v1/metrics'
+
+/** A metric name from Factory's native `legacy` namespace. */
+const LEGACY_METRIC_NAME = 'droid.code.files_modified'
+/** A metric name from Factory's native `genai` namespace. */
+const GENAI_METRIC_NAME = 'gen_ai.client.operation.duration'
+/** The value the legacy metric's single data point carries. */
+const LEGACY_METRIC_VALUE = 4200
+/** The value the genai metric's single data point carries. */
+const GENAI_METRIC_VALUE = 7300
+
+/**
+ * An OTLP/JSON metrics request carrying the names Factory's native export
+ * emits — one from its `legacy` namespace and one from its `genai` namespace.
+ * The receiver must accept the vocabulary without requiring any particular
+ * name, so the fixture names real ones and the assertions watch them survive.
+ */
+function jsonMetricsFixture(): string {
+  const metric = (name: string, value: number): unknown => ({
+    name,
+    description: `Factory native metric ${name}`,
+    unit: '1',
+    sum: {
+      aggregationTemporality: 2,
+      isMonotonic: true,
+      dataPoints: [
+        {
+          asInt: String(value),
+          timeUnixNano: '1756478400123456789',
+          attributes: [
+            { key: 'session.id', value: { stringValue: 'droid-session-native-only' } },
+          ],
+        },
+      ],
+    },
+  })
+  return JSON.stringify({
+    resourceMetrics: [
+      {
+        resource: {
+          attributes: [{ key: 'service.name', value: { stringValue: 'droid' } }],
+        },
+        scopeMetrics: [
+          {
+            scope: { name: 'droid.telemetry', version: '1.0.0' },
+            metrics: [
+              metric(LEGACY_METRIC_NAME, LEGACY_METRIC_VALUE),
+              metric(GENAI_METRIC_NAME, GENAI_METRIC_VALUE),
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
+
+/**
+ * A receiver store that records what it is handed.
+ *
+ * The metrics port is offered on both wirings the receiver may use — flat on
+ * the store, and nested beside `spans` and `logs` — so the assertions are
+ * about what the receiver hands over, not about which wiring it looked for
+ * the port by.
+ */
+class RecordingStore {
+  readonly recordedSpans: OtlpSpan[] = []
+  readonly recordedLogs: OtlpLog[] = []
+  readonly recordedMetrics: unknown[] = []
+
+  write(spans: readonly OtlpSpan[]): void {
+    this.recordedSpans.push(...spans)
+  }
+
+  writeLogs(logs: readonly OtlpLog[]): void {
+    this.recordedLogs.push(...logs)
+  }
+
+  writeMetrics(metrics: readonly unknown[]): void {
+    this.recordedMetrics.push(...metrics)
+  }
+
+  readonly spans = {
+    write: (spans: readonly OtlpSpan[]): void => {
+      this.recordedSpans.push(...spans)
+    },
+  }
+
+  readonly logs = {
+    writeLogs: (logs: readonly OtlpLog[]): void => {
+      this.recordedLogs.push(...logs)
+    },
+  }
+
+  readonly metrics = {
+    writeMetrics: (metrics: readonly unknown[]): void => {
+      this.recordedMetrics.push(...metrics)
+    },
+  }
+}
+
+/** Every string that appears anywhere in a handed payload, keys included. */
+function stringsIn(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap((entry) => stringsIn(entry))
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) => [
+      key,
+      ...stringsIn(entry),
+    ])
+  }
+  return []
+}
+
+async function startReceiverWithStore(store: RecordingStore): Promise<{
+  receiver: OtlpReceiver
+  url: string
+}> {
+  const receiver = new OtlpReceiver({ port: 0, store })
+  await receiver.start()
+  started.push(receiver)
+  return { receiver, url: `http://127.0.0.1:${receiver.port}` }
+}
+
+function postMetrics(url: string, contentType: string, body: string | Uint8Array): Promise<Response> {
+  return fetch(`${url}${OTLP_METRICS_PATH}`, {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body: body as BodyInit,
+  })
+}
+
+describe('OtlpReceiver metrics signal (the native OTLP path)', () => {
+  it('serves POST /v1/metrics and hands the decoded metrics to the metrics sink', async () => {
+    const store = new RecordingStore()
+    const { receiver, url } = await startReceiverWithStore(store)
+
+    const response = await postMetrics(url, 'application/json', jsonMetricsFixture())
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    // The metric names the exporter sent reach the sink: the receiver decodes
+    // the payload, it does not filter it by name.
+    const handed = stringsIn(store.recordedMetrics)
+    expect(handed, 'the decoded metrics must reach the metrics sink').toContain(LEGACY_METRIC_NAME)
+    expect(handed).toContain(GENAI_METRIC_NAME)
+    // The values are decoded too, not dropped on the way through.
+    const recorded = JSON.stringify(store.recordedMetrics)
+    expect(recorded).toContain(String(LEGACY_METRIC_VALUE))
+    expect(recorded).toContain(String(GENAI_METRIC_VALUE))
+    // A request that was accepted is not receiver-health evidence of failure.
+    expect(receiver.getHealth().failures5m).toBe(0)
+  })
+
+  it('rejects a malformed metrics body with a diagnostic and hands nothing to the sink', async () => {
+    const store = new RecordingStore()
+    const { receiver, url } = await startReceiverWithStore(store)
+
+    const response = await postMetrics(url, 'application/json', '{"resourceMetrics": [')
+
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('OTLP_MALFORMED_PAYLOAD')
+    expect(store.recordedMetrics).toEqual([])
+    // A refused metrics payload is receiver-health evidence, exactly as a
+    // refused trace or log payload is.
+    expect(receiver.getHealth().failures5m).toBe(1)
+  })
+
+  it('sheds a metrics request with 503 while the receiver is paused', async () => {
+    const store = new RecordingStore()
+    const { receiver, url } = await startReceiverWithStore(store)
+    const paused = await fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(paused.status).toBe(200)
+
+    const shed = await postMetrics(url, 'application/json', jsonMetricsFixture())
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+    expect(store.recordedMetrics).toEqual([])
+    // A shed while paused is an operator-chosen state, not a failure.
+    expect(receiver.getHealth().failures5m).toBe(0)
+
+    const resumed = await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(resumed.status).toBe(200)
+    const accepted = await postMetrics(url, 'application/json', jsonMetricsFixture())
+    expect(accepted.status).toBe(200)
+    expect(store.recordedMetrics.length).toBeGreaterThan(0)
+  })
+
+  it('leaves an unknown path a 404 and serves no OTLP/gRPC endpoint', async () => {
+    const { url } = await startReceiverWithStore(new RecordingStore())
+
+    const unknown = await fetch(`${url}/v1/not-a-signal`, { method: 'POST' })
+    expect(unknown.status).toBe(404)
+    expect(((await unknown.json()) as { error: { code: string } }).error.code).toBe('OTLP_NOT_FOUND')
+
+    // OTLP over gRPC is not served: the receiver speaks HTTP only, so the
+    // gRPC service path is an unknown path like any other.
+    const grpc = await fetch(
+      `${url}/opentelemetry.proto.collector.metrics.v1.MetricsService/Export`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+    expect(grpc.status).toBe(404)
+  })
+
+  it('serves the export paths over POST only', async () => {
+    const { url } = await startReceiverWithStore(new RecordingStore())
+
+    for (const path of [OTLP_TRACES_PATH, OTLP_LOGS_PATH, OTLP_METRICS_PATH]) {
+      const response = await fetch(`${url}${path}`)
+      expect(response.status, `${path} must answer 405 for a GET`).toBe(405)
+      expect(response.headers.get('allow')).toBe('POST')
+    }
+  })
+
+  it('leaves the log path untouched by the metrics path', async () => {
+    const store = new RecordingStore()
+    const { url } = await startReceiverWithStore(store)
+
+    const response = await postLogs(url, 'application/json', jsonLogFixture())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ acceptedLogs: 1 })
+    expect(store.recordedLogs).toHaveLength(1)
+    // The metrics sink saw nothing: a log request is not a metrics request.
+    expect(store.recordedMetrics).toEqual([])
+  })
+})

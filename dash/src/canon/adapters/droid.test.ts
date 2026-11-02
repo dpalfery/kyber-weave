@@ -241,6 +241,17 @@ async function summaryOf(store: CanonStore, sessionId: string): Promise<Record<s
   return payload.summary ?? {}
 }
 
+/**
+ * The harness's own attributes, as the record keeps them. A vocabulary key
+ * that is not bridged onto a canonical field is still readable here, so this
+ * is where the export's own words are checked.
+ */
+function rawAttributesOf(record: CanonicalRecord): Record<string, unknown> {
+  const raw = record.raw
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  return raw as Record<string, unknown>
+}
+
 describe('the droid adapter — one harness, one bucket', () => {
   it('stamps the canonical harness id on every record it claims', async () => {
     const { droidAdapter } = await loadDroid()
@@ -466,5 +477,86 @@ describe('precedence — the plugin envelope is checked first', () => {
     } finally {
       store.close()
     }
+  })
+})
+
+describe('the native Factory vocabulary — every word the export carries', () => {
+  it('keeps the whole native vocabulary on the claimed record', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'native-tool',
+      nativeAttributes({
+        'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.tool.name': TOOL_NAME,
+        'gen_ai.tool.call.id': 'call_native_1',
+        'gen_ai.tool.type': 'function',
+        'gen_ai.provider.name': 'anthropic',
+        'server.address': 'api.anthropic.com',
+        'server.port': 443,
+      }),
+    )
+    const attributes = rawAttributesOf(record)
+    expect(attributes['gen_ai.agent.name']).toBe('droid')
+    expect(attributes['gen_ai.operation.name']).toBe('execute_tool')
+    expect(attributes['gen_ai.conversation.id']).toBe(DROID_SESSION)
+    expect(attributes['session.id']).toBe(DROID_SESSION)
+    expect(attributes['gen_ai.request.model']).toBe(NATIVE_MODEL)
+    expect(attributes['gen_ai.provider.name']).toBe('anthropic')
+    expect(attributes['gen_ai.tool.name']).toBe(TOOL_NAME)
+    expect(attributes['gen_ai.tool.call.id']).toBe('call_native_1')
+    expect(attributes['gen_ai.tool.type']).toBe('function')
+    expect(attributes['server.address']).toBe('api.anthropic.com')
+    expect(attributes['server.port']).toBe(443)
+  })
+
+  it('keeps the finish reasons as the array the export sends', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'native-chat-finish',
+      nativeAttributes({ 'gen_ai.response.finish_reasons': ['stop', 'length'] }),
+    )
+    // An array, not a joined string and not the first element alone.
+    expect(rawAttributesOf(record)['gen_ai.response.finish_reasons']).toEqual(['stop', 'length'])
+  })
+
+  it('surfaces a policy-denied tool call as an error instead of dropping the error type', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'native-tool-rejected',
+      nativeAttributes({
+        'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.tool.name': TOOL_NAME,
+        'gen_ai.tool.call.id': 'call_native_2',
+        'gen_ai.tool.type': 'function',
+        'error.type': 'rejected',
+      }),
+    )
+    expect(record.op).toBe('tool.invoke')
+    // A denied tool call is an error, not an ordinary tool call: the record
+    // says so, and the type the export named is kept as the evidence of why.
+    expect(record.status, 'a policy-denied tool call must not read as a plain tool call').toBe(
+      'error',
+    )
+    expect(rawAttributesOf(record)['error.type']).toBe('rejected')
+  })
+
+  it('does not call an ordinary tool call an error', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'native-tool-allowed',
+      nativeAttributes({
+        'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.tool.name': TOOL_NAME,
+        'gen_ai.tool.call.id': 'call_native_3',
+        'gen_ai.tool.type': 'function',
+      }),
+    )
+    expect(record.status, 'a tool call that was not denied must not read as an error').not.toBe(
+      'error',
+    )
   })
 })
