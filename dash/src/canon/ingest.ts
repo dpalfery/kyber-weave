@@ -34,13 +34,7 @@ import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter, UNKNOWN_TIMESTAMP } from './adapters/copilot.js'
 import {
   DROID_HARNESS,
-  DROID_NATIVE_SUPERSEDED_REASON,
   droidAdapter,
-  droidRawAttributesOf,
-  droidSessionIdOf,
-  isDroidNativeRecord,
-  isDroidNativeSpan,
-  isDroidPluginRecord,
   isDroidPluginSpan,
 } from './adapters/droid.js'
 import {
@@ -64,7 +58,6 @@ import {
   recordValidationProblems,
 } from './adapters/quarantine.js'
 import { DEFAULT_PENDING_PAGE_BYTES, type CanonStore } from './store.js'
-import { isFileSource } from './measurability.js'
 import {
   contentFromParts,
   isNotMeasurable,
@@ -98,10 +91,9 @@ export const ADAPTERS: readonly HarnessAdapter[] = [
   // every existing vote resolves above it. The Phase 2 OpenCode task fills in
   // adapters/opencode.ts without moving this tie-break.
   opencodeAdapter,
-  // Factory (droid) claims on two fingerprints — its plugin envelope and its
-  // own agent identity — and both are specific enough that no other adapter
-  // scores the same span, so its place in this order only breaks a tie it
-  // cannot reach.
+  // Factory (droid) claims on one fingerprint — its plugin envelope — and it
+  // is specific enough that no other adapter scores the same span, so its
+  // place in this order only breaks a tie it cannot reach.
   droidAdapter,
 ]
 
@@ -142,13 +134,11 @@ export function toRawSpan(span: OtlpSpan): RawSpan {
  * decoded span carries the harness's own clock.
  *
  * The exporter's status code is not the last word on the outcome. An
- * adapter that already determined the record failed — Factory's native
- * export names an `error.type` on a policy-denied tool call and the adapter
- * stamps `error` — keeps that status: an error is never downgraded here,
- * because the exporter does not mark the span's transport status as an
- * error. Every other record takes the span's own status code, so a harness
- * whose adapter did not judge the outcome still stores what the exporter
- * reported.
+ * adapter that already determined the record failed keeps that status: an
+ * error is never downgraded here, because the exporter does not mark the
+ * span's transport status as an error. Every other record takes the span's
+ * own status code, so a harness whose adapter did not judge the outcome
+ * still stores what the exporter reported.
  */
 export function growWithReceiverTiming(record: CanonicalRecord, span: OtlpSpan): void {
   record.timestamp = span.timestamp
@@ -376,96 +366,6 @@ export function boundRawPayload(json: string): string {
 }
 
 /**
- * The sessions the Factory plugin envelope names and the ones Factory's own
- * native export names, within one batch.
- */
-function droidSessionsByPath(rawSpans: readonly RawSpan[]): {
-  /** The sessions the plugin envelope names. */
-  plugin: Set<string>
-  /** The sessions the native export names. */
-  native: Set<string>
-} {
-  const plugin = new Set<string>()
-  const native = new Set<string>()
-  for (const raw of rawSpans) {
-    const sessionId = droidSessionIdOf(raw)
-    if (sessionId === undefined) continue
-    if (isDroidPluginSpan(raw)) plugin.add(sessionId)
-    else if (isDroidNativeSpan(raw)) native.add(sessionId)
-  }
-  return { plugin, native }
-}
-
-/**
- * The sessions the plugin envelope covers: the ones this batch's plugin spans
- * name, and the ones an earlier batch's plugin rows already cover.
- *
- * The earlier rows are read back from the store, because the plugin and
- * Factory's own native export reach the receiver through separate exporters
- * and so rarely land in one batch — the rule has to hold across batches to
- * hold at all. The lookup is one indexed query per session the batch observes
- * natively, and a batch is one OTLP request, so the candidate set stays small.
- */
-function droidCoveredSessions(
-  store: CanonStore,
-  sessions: { plugin: Set<string>; native: Set<string> },
-): Set<string> {
-  const covered = new Set(sessions.plugin)
-  for (const sessionId of sessions.native) {
-    if (covered.has(sessionId)) continue
-    const stored = store.recordsForHarnessSession(DROID_HARNESS, sessionId)
-    if (stored.some((record) => isDroidPluginRecord(record))) covered.add(sessionId)
-  }
-  return covered
-}
-
-/**
- * The native Factory rows of a session the plugin envelope has just covered.
- *
- * The precedence rule holds whichever order the two exporters arrive in: a
- * native span that reached the corpus before the plugin's row for its session
- * would otherwise be counted beside that row. Such a row leaves the corpus for
- * quarantine — the same exclusion the forward path applies — and its evidence
- * stays in the quarantine row.
- *
- * Only OTLP-sourced rows are candidates: a file-sourced row of the same
- * session is not the native export's, and how the file path and the plugin
- * relate is another rule's business.
- */
-function supersedeStoredNativeRows(store: CanonStore, sessionId: string): number {
-  const stored = store.recordsForHarnessSession(DROID_HARNESS, sessionId)
-  let superseded = 0
-  for (const record of stored) {
-    if (isDroidPluginRecord(record)) continue
-    if (isFileSource(record.source)) continue
-    if (!isDroidNativeRecord(record)) continue
-    const raw = droidRawAttributesOf(record)
-    store.quarantineAndDelete(
-      record.spanId,
-      observedNamespaces(raw),
-      DROID_NATIVE_SUPERSEDED_REASON,
-      {
-        source: record.source,
-        name: record.name,
-        timestamp: timestampOf(record),
-        rawPayload: JSON.stringify(raw),
-        harness: DROID_HARNESS,
-      },
-    )
-    superseded += 1
-  }
-  return superseded
-}
-
-/** A record's timestamp as the text a quarantine row stores. */
-function timestampOf(record: CanonicalRecord): string | undefined {
-  const timestamp = record.timestamp
-  if (typeof timestamp === 'string') return timestamp
-  if (timestamp instanceof Date) return timestamp.toISOString()
-  return undefined
-}
-
-/**
  * Normalize and store one batch of decoded spans.
  *
  * A batch is one unit of attribution — the same unit one live OTLP request
@@ -545,19 +445,6 @@ export function ingestBatchWithAdapters(
     rawSpans.filter((_, index) => !versionQuarantined.has(index) && !droidVersionQuarantined.has(index)),
   )
 
-  // The plugin envelope is checked first (adapters/droid.ts): one session can
-  // be seen by both the plugin and Factory's own native export, and counting
-  // both would count that session's turn twice.
-  const droidSessions = droidSessionsByPath(rawSpans)
-  const droidCovered = droidCoveredSessions(store, droidSessions)
-  // The other order: a native row that reached the corpus before the plugin's
-  // row for its session leaves it now, so the session counts the plugin's
-  // rows only.
-  let superseded = 0
-  for (const sessionId of droidSessions.plugin) {
-    superseded += supersedeStoredNativeRows(store, sessionId)
-  }
-
   const unclaimed: string[] = []
   for (const [index, raw] of rawSpans.entries()) {
     if (
@@ -583,8 +470,7 @@ export function ingestBatchWithAdapters(
       },
     )
   }
-  let quarantined =
-    unclaimed.length + versionQuarantined.size + droidVersionQuarantined.size + superseded
+  let quarantined = unclaimed.length + versionQuarantined.size + droidVersionQuarantined.size
   let rejected = 0
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
@@ -601,30 +487,27 @@ export function ingestBatchWithAdapters(
       throw new Error(`attribution named unregistered harness "${harness}"`)
     }
 
-    // The plugin envelope is checked first: a native Factory span for a
-    // session the plugin already covers is kept as evidence and kept OUT of
-    // that session's turn, tool and duration totals, so a session observed
-    // through both paths is counted once (adapters/droid.ts).
-    if (harness === DROID_HARNESS && isDroidNativeSpan(raw)) {
-      const sessionId = droidSessionIdOf(raw)
-      if (sessionId !== undefined && droidCovered.has(sessionId)) {
-        store.quarantineAndDelete(
-          raw.spanId,
-          observedNamespaces(raw.attributes),
-          DROID_NATIVE_SUPERSEDED_REASON,
-          {
-            source: raw.source,
-            name: raw.name,
-            timestamp: spans[index]?.timestamp ?? raw.timestamp,
-            // The decoded span is the evidence this row keeps: the record is
-            // never stored, so this packet is the only surviving copy.
-            rawPayload: rawPayloadOf(index),
-            harness,
-          },
-        )
-        quarantined += 1
-        continue
-      }
+    // The droid adapter claims the plugin envelope and NOTHING else. The
+    // registry votes per GROUP, and its source-inheritance pass can hand a
+    // group to a harness that detected none of its spans — so a span
+    // attributed to droid that is not the envelope is not the adapter's
+    // claim. It is quarantined as unclaimed, exactly as a span no adapter
+    // claimed is: never swallowed, and never stored as a droid record. The
+    // decoded packet stays as the audit evidence (B7).
+    if (harness === DROID_HARNESS && !isDroidPluginSpan(raw)) {
+      store.quarantineAndDelete(
+        raw.spanId,
+        observedNamespaces(raw.attributes),
+        isStructuralSpan(raw) ? 'non-model span' : 'unclaimed',
+        {
+          source: raw.source,
+          name: raw.name,
+          timestamp: spans[index]?.timestamp ?? raw.timestamp,
+          rawPayload: rawPayloadOf(index),
+        },
+      )
+      quarantined += 1
+      continue
     }
 
     let record: CanonicalRecord
