@@ -71,6 +71,13 @@ const NATIVE_AGENT_VALUE = 'droid'
 /** The attribute the native export names its operation under. */
 const NATIVE_OPERATION_KEY = 'gen_ai.operation.name'
 
+/**
+ * The attribute the native export names a failure under. `error.type` is the
+ * OpenTelemetry convention for the type of the error a span records; Factory's
+ * native export sets it to `rejected` on a policy-denied tool call.
+ */
+const NATIVE_ERROR_TYPE_KEY = 'error.type'
+
 /** The native export's operations and the canonical operation each one is. */
 const NATIVE_SPAN_OPS: Readonly<Record<string, string>> = {
   chat: 'llm.invoke',
@@ -296,6 +303,14 @@ function applyNativeExport(record: CanonicalRecord, raw: RawSpan): void {
   const operation = nonEmptyString(attributes, NATIVE_OPERATION_KEY)
   const op = operation !== undefined ? NATIVE_SPAN_OPS[operation] : undefined
   if (op !== undefined) record.op = op
+
+  // A span that names an error type failed: the canonical status has to say
+  // so, or a policy-denied tool call reads as an ordinary one. The type
+  // itself stays in the record's raw attributes — it is the evidence of why
+  // the call was denied, and the status only says that it was.
+  if (nonEmptyString(attributes, NATIVE_ERROR_TYPE_KEY) !== undefined) {
+    record.status = 'error'
+  }
 }
 
 export const droidAdapter: HarnessAdapter = {
