@@ -2,15 +2,21 @@
 //
 // Factory reaches KyberDash through a capture plugin DIRECTORY in its own root
 // (`<factory root>/plugins/kyberdash-factory`), not through a configuration key. The row
-// therefore declares no key at all: `enable` installs the plugin tree and turns the capture
-// consent on, `disable` turns the consent off and removes the tree. The owner's own
-// `~/.factory/settings.json` is never written, merged or receipted — `resolvePath` only
-// names where Factory keeps its settings, which is where the harness is found.
+// therefore declares no key at all: `enable` installs the plugin tree and `disable` removes
+// it. The owner's own `~/.factory/settings.json` is never written, merged or receipted —
+// `resolvePath` only names where Factory keeps its settings, which is where the harness is
+// found.
+//
+// The CONTENT consent is the owner's own decision, and it is deliberately NOT the Settings
+// switch: `enable` installs the capture and leaves that decision exactly as it was, and only
+// the consent verb (`kyberdash kyber capture plugin consent --harness factory --on`) or the
+// owner editing the consent file turns the prompt text on. `disable` turns it off. This
+// differs from the OpenCode writer, whose Settings switch does set the consent.
 //
 // The Factory root is `$FACTORY_DIR`, else `~/.factory`: the resolution the Factory file
 // provider already uses (`dash/src/providers/droid.ts`) and the one the installer uses.
 
-import { writeContentConsent } from '../consent-file.js'
+import { createConsentIfAbsent, readConsentState, writeContentConsent } from '../consent-file.js'
 import { envJoin, type PathEnv } from '../paths.js'
 
 import {
@@ -24,6 +30,9 @@ import {
 import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
+
+/** What the enable path says when the content consent is off: the switch never records the prompt text. */
+const OFF_CONSENT = 'harness factory: content consent off (the capture switch does not record the prompt text)'
 
 /**
  * The engine knows one vocabulary for a plugin outcome; the installer's preserve-only
@@ -76,14 +85,32 @@ const factoryFilePlugin: ManagedFilePlugin = {
   state: (home, env) => factoryPluginState(home, env),
   describeStatus: (home, env) => factoryStatusLines(home, env),
   consent: {
-    // The Settings switch is the consent: on for `enable`, off for `disable`. The installer
-    // creates the file with content off; this is the only writer that turns it on.
+    // The Settings switch starts the capture; it never opts the prompt text in. The content
+    // consent is the owner's own decision, so `enable` leaves the file exactly as it is and
+    // creates it with content off only when it is absent; `disable` turns content off.
     set: (home, env, content, options) => {
       const { consentFile } = factoryPluginPaths(home, env)
-      const word = content ? 'on' : 'off'
-      if (options.dryRun === true) return { out: [`harness factory: would set content consent ${word}`] }
-      writeContentConsent(consentFile, content)
-      return { out: [`harness factory: content consent ${word}`] }
+      if (!content) {
+        if (options.dryRun === true) return { out: ['harness factory: would set content consent off'] }
+        writeContentConsent(consentFile, false)
+        return { out: ['harness factory: content consent off'] }
+      }
+      const state = readConsentState(consentFile)
+      if (state === 'absent') {
+        if (options.dryRun === true) {
+          return { out: ['harness factory: would create the content consent with content off'] }
+        }
+        createConsentIfAbsent(consentFile)
+        return { out: [OFF_CONSENT] }
+      }
+      if (state === 'on') {
+        return { out: ['harness factory: content consent on (left as the owner set it)'] }
+      }
+      if (state === 'off') {
+        return { out: [OFF_CONSENT] }
+      }
+      // A malformed or unreadable file is the owner's to fix: it reads off either way.
+      return { out: ['harness factory: content consent left as it is'] }
     },
   },
 }

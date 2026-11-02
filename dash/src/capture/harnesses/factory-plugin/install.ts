@@ -616,10 +616,14 @@ export function describeFactoryPluginStatus(
       lines.push('content consent: on (the prompt text is captured)')
       break
     case 'off':
-      lines.push('content consent: off (turn Factory capture on in KyberDash Settings to capture the prompt text)')
+      lines.push(
+        'content consent: off (the Factory capture switch does not record the prompt text; turn it on with kyberdash kyber capture plugin consent --harness factory --on)',
+      )
       break
     case 'absent':
-      lines.push('content consent: not set (no prompt text is captured until Factory capture is turned on)')
+      lines.push(
+        'content consent: not set (no prompt text is captured; the Factory capture switch does not record it)',
+      )
       break
     case 'invalid':
     case 'unreadable':
