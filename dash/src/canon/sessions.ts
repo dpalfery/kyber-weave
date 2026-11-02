@@ -285,6 +285,20 @@ function attributeOf(record: CanonicalRecord, keys: readonly string[]): string |
   return undefined
 }
 
+/**
+ * The models a set of records names, each one once, in the order they named
+ * it. A record that names none contributes nothing: an absent model is
+ * absent, never a placeholder.
+ */
+function modelsOf(records: readonly CanonicalRecord[]): string[] {
+  const models = new Set<string>()
+  for (const record of records) {
+    const model = attributeOf(record, MODEL_KEYS)
+    if (model !== undefined) models.add(model)
+  }
+  return [...models]
+}
+
 /** Epoch ms, or NaN when the timestamp is absent or unparseable. Absent is never the epoch. */
 function parseTimestamp(ts: string | Date | unknown): number {
   if (ts instanceof Date) return ts.getTime()
@@ -1741,7 +1755,15 @@ export function buildSessionRow(
     { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
   )
 
-  const models = [...new Set(turnRecords.map((r) => attributeOf(r, MODEL_KEYS)).filter(Boolean))]
+  // The session's models come from the records that are its turns. Factory's
+  // own turn payload carries no model field, so a plugin-sourced turn
+  // generally names none, and the model the file source measured for that
+  // same call stands in: the session publishes the one model a source
+  // actually named. A turn's own model always wins, so a paired session never
+  // publishes two models for one conversation, and a session whose sources
+  // name none publishes none. Nothing is inferred here.
+  const turnModels = modelsOf(turnRecords)
+  const models = turnModels.length > 0 ? turnModels : modelsOf(counterRecords)
   const { started, ended } = timestampBounds(records)
 
   let toolCalls: number | undefined = undefined
