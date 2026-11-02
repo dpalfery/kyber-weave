@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Scale | Goal |
+|---|---|---|---|---|
+| [2026-11-01-factory-droid-capture-plugin.md](2026-11-01-factory-droid-capture-plugin.md) | Ready — approved for execution 2026-11-01 (D22); awaiting the conductor's dispatch of T1–T21 | 2026-11-01 | `extends-component` — KyberDash, KyberSquad | Give Factory (Droid) a hooks-based capture plugin (`kyberdash-factory`, a Kyber-owned plugin directory under `~/.factory/plugins/`, a receipt and a consent file) and a Settings row that installs and removes it, so a live Droid turn produces a dashboard-visible session with model and tool attribution, tokens either paired from the existing file source or honestly `not_measurable`, and no write to the owner's Factory settings or hooks files. The native-OpenTelemetry path is authorized and additive (D12 branch A: `OTEL_TELEMETRY_ENDPOINT` may point at the receiver), with a plugin-first precedence rule (D23), the corrected model-resolution chain (D24) and child-session token pairing (D25). |
 
 ## Archived Plans
 
