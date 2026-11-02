@@ -883,7 +883,11 @@ it, and their removal path is `git revert`. It can be deleted once the write has
 committed and reviewed — deleting it retires the undo along with it. A hand-edited record is
 not refused for being hand-edited: removal acts on what the record proves against the file,
 and a record whose digests no longer describe the bytes on disk is refused as drift like any
-other. A receipt whose shape does not match schema version 1 is treated as empty instead.
+other. A receipt whose shape does not match schema version 1 is treated as empty instead —
+and the shape check holds every field to the rule that produced it: a path inside the tree,
+at least one non-blank server name, a non-blank post-write digest, a write timestamp, and,
+where the record carries them, a non-blank pre-write digest and payload. A record that cannot
+say what it wrote proves nothing a removal may act on, so it loads as nothing.
 
 ### What the repair writes, and what it will not
 

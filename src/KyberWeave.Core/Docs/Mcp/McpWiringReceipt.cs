@@ -162,6 +162,7 @@ public sealed class McpWiringReceipt
     /// </summary>
     /// <param name="files">The document's file list, exactly as it was deserialized.</param>
     /// <remarks>
+    /// <para>
     /// Nothing downstream re-checks what it reads: the removal path combines a record's path into a
     /// filesystem path, enumerates its server list into the report, and compares its digest. A
     /// document holding <c>"files": null</c>, or a record whose path or server list is null, would
@@ -170,6 +171,18 @@ public sealed class McpWiringReceipt
     /// rejected rather than the offending record dropped: a receipt whose shape this code cannot
     /// trust is not a receipt it can prove anything from, and an empty receipt refuses every
     /// removal, which is the safe direction.
+    /// </para>
+    /// <para>
+    /// Every value is held to the rule that produced it, which is what makes the check a schema
+    /// rather than a null guard. The loader refuses a declared server whose name is blank, and a
+    /// record whose server list is empty cannot describe a write this code performs, because it
+    /// records a file only after at least one server was written to it. A digest and a payload are
+    /// compared by value, so one that says nothing matches nothing and would surface later as a drift
+    /// refusal about a file nobody edited. A timestamp is present on every record this code writes,
+    /// and a document without one did not come from a write it can describe. <c>IsNullOrEmpty</c>
+    /// answered only the null half of each: a whitespace-only name or digest loaded as proven and was
+    /// then enumerated into the removal report and the restore.
+    /// </para>
     /// </remarks>
     private static IReadOnlyList<McpWiringReceiptRecord>? WellFormed(
         IReadOnlyList<McpWiringReceiptRecord>? files)
@@ -184,8 +197,12 @@ public sealed class McpWiringReceipt
             if (record is null
                 || !RepositoryRelative(record.Path)
                 || record.Servers is null
-                || record.Servers.Any(string.IsNullOrEmpty)
-                || string.IsNullOrEmpty(record.PostSha256))
+                || record.Servers.Count == 0
+                || record.Servers.Any(string.IsNullOrWhiteSpace)
+                || string.IsNullOrWhiteSpace(record.PostSha256)
+                || record.PreSha256 is not null && string.IsNullOrWhiteSpace(record.PreSha256)
+                || record.PreContent is not null && string.IsNullOrWhiteSpace(record.PreContent)
+                || record.WrittenAtUtc == default)
             {
                 return null;
             }

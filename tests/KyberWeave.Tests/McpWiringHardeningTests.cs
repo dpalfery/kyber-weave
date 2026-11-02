@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -473,6 +474,125 @@ public sealed class McpWiringHardeningTests : IDisposable
         WriteReceiptText(text);
 
         Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+    }
+
+    /// <summary>
+    /// A value that is only whitespace names nothing, so a record carrying one is not a record this
+    /// code wrote and must not load as proof of one.
+    /// </summary>
+    /// <remarks>
+    /// The loader refuses a declared server whose name is blank, and the receipt is read by the same
+    /// removal path that trusts what the loader accepted. <c>String.IsNullOrEmpty</c> let
+    /// <c>"servers": [" "]</c> through, so a hand-edited receipt loaded as proven and then enumerated
+    /// its blank name into the removal report and the restore.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "created", "servers": [" "], "postSha256": "AA", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "created", "servers": [""], "postSha256": "AA", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "created", "servers": ["kyber-weave", "\t"], "postSha256": "AA", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    public void AReceiptRecordNamingABlankServerRejectsTheReceipt(string text)
+    {
+        WriteReceiptText(text);
+
+        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+    }
+
+    /// <summary>
+    /// A record naming no servers at all is refused, because the writer never produces one: it records
+    /// a file only when at least one server was written to it.
+    /// </summary>
+    /// <remarks>
+    /// The empty list is the same false claim as a blank name, one level up. A record that says a file
+    /// was written but names nothing the write added cannot be reported or restored honestly, and
+    /// reading it as proven would put a nameless change in front of the operator.
+    /// </remarks>
+    [Fact]
+    public void AReceiptRecordNamingNoServersRejectsTheReceipt()
+    {
+        WriteReceipt(
+            new JsonObject
+            {
+                ["path"] = ".mcp.json",
+                ["mode"] = "created",
+                ["servers"] = new JsonArray(),
+                ["postSha256"] = "AA",
+                ["writtenAtUtc"] = "2026-10-31T00:00:00+00:00"
+            });
+
+        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+    }
+
+    /// <summary>
+    /// A blank digest is not a digest, and a record whose digests do not say anything cannot prove the
+    /// file it names is the file it wrote.
+    /// </summary>
+    /// <remarks>
+    /// Both are compared by value on the removal path, so a whitespace-only one matches no file and no
+    /// payload. Loading it as proven defers that to a drift refusal, which reports a change to a file
+    /// nobody changed; the shape check is where it can be refused while nothing has been touched.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "created", "servers": ["kyber-weave"], "postSha256": " ", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "inserted", "servers": ["kyber-weave"], "preSha256": " ", "postSha256": "AA", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    [InlineData("""{"version": 1, "files": [{"path": ".mcp.json", "mode": "inserted", "servers": ["kyber-weave"], "preSha256": "AA", "postSha256": "AA", "preContent": " ", "writtenAtUtc": "2026-10-31T00:00:00+00:00"}]}""")]
+    public void AReceiptRecordWithABlankDigestOrPayloadRejectsTheReceipt(string text)
+    {
+        WriteReceiptText(text);
+
+        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+    }
+
+    /// <summary>
+    /// A record with no timestamp is refused: this code writes one on every record it makes, so a
+    /// document without one did not come from a write it can describe.
+    /// </summary>
+    /// <remarks>
+    /// The field is the audit half of "every write is removable and auditable" (5.8). A record missing
+    /// it cannot say when the file it names was changed, and a receipt that cannot say that is not the
+    /// artifact the removal is meant to be reading.
+    /// </remarks>
+    [Fact]
+    public void AReceiptRecordWithNoWriteTimestampRejectsTheReceipt()
+    {
+        WriteReceipt(
+            new JsonObject
+            {
+                ["path"] = ".mcp.json",
+                ["mode"] = "created",
+                ["servers"] = new JsonArray(ServerName),
+                ["postSha256"] = "AA"
+            });
+
+        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+    }
+
+    /// <summary>
+    /// The shape check still accepts the record this code writes, with every field read back as
+    /// written. Without this case the rule above could tighten into "no record ever loads" and every
+    /// removal would refuse for the wrong reason.
+    /// </summary>
+    [Fact]
+    public void AReceiptRecordThisCodeWritesLoadsWithEveryFieldIntact()
+    {
+        byte[] pre = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
+        WriteReceipt(Record(
+            ".mcp.json",
+            McpWiringWriteMode.Inserted,
+            Digest(pre),
+            Convert.ToBase64String(pre),
+            Digest(Encoding.UTF8.GetBytes("""{"mcpServers": {"kyber-weave": {}}}"""))));
+
+        McpWiringReceiptRecord record = McpWiringReceipt.Load(Repo).Find(".mcp.json")
+            ?? throw new InvalidOperationException("the record this code writes must load");
+
+        Assert.Equal(".mcp.json", record.Path);
+        Assert.Equal(McpWiringWriteMode.Inserted, record.Mode);
+        Assert.Equal(ServerName, Assert.Single(record.Servers));
+        Assert.Equal(Digest(pre), record.PreSha256);
+        Assert.Equal(Convert.ToBase64String(pre), record.PreContent);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-10-31T00:00:00+00:00", CultureInfo.InvariantCulture),
+            record.WrittenAtUtc);
     }
 
     // ---- The undo record has to exist before the file it undoes.
