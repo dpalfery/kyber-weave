@@ -12,6 +12,13 @@ import {
   USER_CANON,
   ZERO_RECORD_HARNESS,
 } from './harness-collection-world.js'
+import {
+  FACTORY_CONTENT_OFF_SESSION_ID,
+  FACTORY_CONTENT_ON_SESSION_ID,
+  FACTORY_REPLAY_MODEL,
+  FACTORY_REPLAY_PROMPT,
+  FACTORY_REPLAY_TOOL,
+} from './factory-replay-world.js'
 
 /**
  * Harness-collection completeness predicate.
@@ -19,12 +26,12 @@ import {
  * Isolated browser acceptance. Starts its own dashboard against a temp DB from
  * the world. Does not use the live 4747 spine host.
  *
- * Capture proof comes from one scenario only: the OpenCode 2.2.1 replay. The
- * world runs it through the production plugin, receiver decode, canonical
- * ingest and projection before the dashboard starts, so the session the
- * round-trip case reads was derived, not seeded. The honest-empty `opencode`
- * row and the measured `claude-code` row are rendering-only seeds and prove
- * no capture.
+ * Capture proof comes from two replays: the OpenCode 2.2.1 replay and the
+ * Factory (Droid) replay below. Each world runs its recorded payload through
+ * the production plugin, receiver decode, canonical ingest and projection
+ * before the dashboard starts, so the session the round-trip case reads was
+ * derived, not seeded. The honest-empty `opencode` row and the measured
+ * `claude-code` row are rendering-only seeds and prove no capture.
  */
 const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
@@ -89,16 +96,20 @@ const killBootGroupOnExit = (): void => {
  * replied instead of only "element not found". The payload is also the isolation
  * proof — it must carry the fixture run, never whatever the operator's own
  * `~/.kyberdash/canon.db` happens to hold.
+ *
+ * `baseUrl` is the dashboard the harness is opened on. The harness matrix and the
+ * Factory replay run on dashboards of their own, each against its own temp store.
  */
 async function openHarness(
   page: Page,
   harnessId: string,
+  baseUrl: string = app,
 ): Promise<{ status: number; body: string; runs: unknown[] }> {
   const responsePromise = page.waitForResponse(
     (response) => response.url().includes('/api/kyber/runs'),
     { timeout: 30_000 },
   )
-  await page.goto(app)
+  await page.goto(baseUrl)
   await expect(page.getByTestId('page-context-doctor')).toBeVisible()
   await page.evaluate((id) => {
     const stack = [{ level: 'context-doctor' }, { level: 'harness', harnessId: id }]
@@ -309,3 +320,233 @@ test('OpenCode 2.2.1 replay through the production pipeline renders the consent-
   await expect.soft(page.getByTestId('page-sessions')).toContainText('40.1K')
   await expect.soft(page.getByTestId('page-sessions')).toContainText(/1\.5K|1,?529/)
 })
+
+/**
+ * The Factory (Droid) capture replay.
+ *
+ * REPLAY EVIDENCE, NOT LIVE CAPTURE. The payloads under `dash/e2e/fixtures/factory/` are recorded
+ * Factory hook events, replayed through the production hook runner, the production loopback
+ * receiver, the droid canon adapter, the canonical projection and this dashboard. No Droid agent
+ * runs, so nothing in this block is proof that a live Factory turn is captured; the live check is a
+ * separate, owner-run procedure.
+ *
+ * It runs on a dashboard of its own, against a temp store of its own: the `droid` harness is the
+ * zero-record harness of the scenarios above, and this replay gives that harness rows.
+ */
+test.describe('the Factory (Droid) replay', () => {
+  let factoryChild: ChildProcess | undefined
+  let factoryBootPid: number | undefined
+  let factoryApp = ''
+  let factoryDbPath = ''
+
+  /** Process 'exit' fallback for the Factory boot, as the harness-matrix boot has. */
+  const killFactoryBootGroupOnExit = (): void => {
+    if (factoryBootPid === undefined || !bootGroupAlive(factoryBootPid)) return
+    try {
+      signalBootGroup(factoryBootPid, 'SIGKILL')
+    } catch {
+      // The process is exiting; there is nothing left that could act on the error.
+    }
+  }
+
+  test.beforeAll(async () => {
+    test.setTimeout(180_000)
+    factoryChild = spawn('npx', ['tsx', 'e2e/factory-replay-boot.ts'], {
+      cwd: dashRoot,
+      env: {
+        ...process.env,
+        NODE_OPTIONS: '--no-deprecation',
+      },
+      // Leads its own process group so teardown can reach every process the boot forks.
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    factoryBootPid = factoryChild.pid
+    process.once('exit', killFactoryBootGroupOnExit)
+
+    factoryApp = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('the Factory replay dashboard did not become ready')), 150_000)
+      let stdout = ''
+      const onData = (chunk: Buffer) => {
+        stdout += chunk.toString()
+        const ready = stdout.match(/FR_READY (http:\/\/127\.0\.0\.1:\d+)/)
+        const db = stdout.match(/FR_DB (.+)/)
+        if (db) factoryDbPath = db[1]!.trim()
+        if (ready) {
+          clearTimeout(timer)
+          factoryChild?.stdout?.off('data', onData)
+          resolve(ready[1]!)
+        }
+      }
+      factoryChild!.stdout!.on('data', onData)
+      factoryChild!.stderr!.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString()
+      })
+      factoryChild!.on('exit', (code) => {
+        if (!factoryApp) reject(new Error(`the Factory replay boot exited ${code}: ${stdout}`))
+      })
+      // Without this, a spawn failure (no `npx` on PATH, EACCES) arrives as an
+      // unhandled 'error' event on the child and crashes the worker instead of
+      // failing this hook with the reason.
+      factoryChild!.on('error', (error) => {
+        clearTimeout(timer)
+        reject(new Error(`the Factory replay boot could not start: ${String(error)}`))
+      })
+    })
+
+    expect(factoryDbPath).not.toBe(USER_CANON)
+    expect(factoryApp).not.toContain(':4747')
+  })
+
+  test.afterAll(async () => {
+    // SIGTERM is a request, not a completion: stop the whole boot process group and
+    // wait for it to empty before deleting the store it was serving from.
+    if (factoryBootPid !== undefined) {
+      await stopBootGroup(factoryBootPid)
+      process.off('exit', killFactoryBootGroupOnExit)
+    }
+    if (factoryDbPath !== '') {
+      const root = dirname(factoryDbPath)
+      if (root.startsWith(tmpdir()) && !root.includes('.kyberdash')) {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test('Factory replay: the recorded session renders its model, its tool and an honest token state', async ({ page }) => {
+    test.setTimeout(120_000)
+    // REPLAY, not live capture: the payloads are recorded hook events, and no Droid agent runs.
+    const runs = await openHarness(page, 'droid', factoryApp)
+    expect(runs.status, runs.body).toBe(200)
+
+    // The harness page states what it cannot measure rather than printing a zero:
+    // every dimension of the Factory harness is unmeasurable, and every one of them
+    // carries a reason.
+    const unmeasurable = page.getByTestId('dimension-unmeasurable')
+    expect(await unmeasurable.count(), 'the Factory harness measures nothing yet').toBeGreaterThan(0)
+    const reason = page.getByTestId(/^dimension-reason-/).first()
+    await expect(reason).toBeVisible()
+    await expect(reason).not.toBeEmpty()
+
+    // Sessions tab: the replayed session, found by its real session id.
+    await page.getByTestId('nav-tab-sessions').click()
+    await expect(page.getByTestId('page-sessions')).toBeVisible()
+    const row = page.getByTestId(`agent-session-row-${FACTORY_CONTENT_OFF_SESSION_ID}`)
+    await expect(row).toBeVisible()
+    await row.click()
+
+    // The tool the recorded tool payload named: one invocation of it.
+    await expect(page.getByTestId('metric-tool-calls')).toContainText('1')
+    await expect(page.getByTestId('schema-cost-ranking')).toContainText(FACTORY_REPLAY_TOOL)
+
+    // The token state is honest: the input figure is the em dash, never a zero and
+    // never a number borrowed from another session.
+    //
+    // This is the PLUGIN-ONLY case. The replay writes no companion settings file beside the
+    // session, so nothing pairs with it and the session keeps the plugin's own declaration:
+    // the token usage is not measurable, with a reason that names the harness. (The paired
+    // case — a companion file naming the same session id — carries that file's counters
+    // instead, and is pinned by the canon pairing rules, not here.)
+    const totalInput = page
+      .getByTestId('overview-strip-section')
+      .getByText('Total Input')
+      .locator('xpath=following-sibling::div[1]')
+    await expect(totalInput).toHaveText('—')
+
+    // The reason the figure is the em dash is stated, not implied: the dashboard's own
+    // session row declares the token usage not measurable and names the harness.
+    const declared = await sessionTokenState(page, factoryApp, FACTORY_CONTENT_OFF_SESSION_ID)
+    expect(declared.availability, 'a plugin row carries no token counter').toBe('not_measurable')
+    expect(declared.reason, 'the reason must name the harness').toMatch(/droid/i)
+    expect(declared.reason, 'the reason must name the metric').toMatch(/token/i)
+
+    // Content OFF: the prompt text is nowhere in the rendered session, and the captured
+    // span's own attributes carry none either.
+    await expect(page.getByTestId('page-sessions')).not.toContainText(FACTORY_REPLAY_PROMPT)
+
+    // The model the recorded prompt payload named reaches the dashboard: the session
+    // declares it, and the span inspector renders it.
+    const declaredModels = await sessionModels(page, factoryApp, FACTORY_CONTENT_OFF_SESSION_ID)
+    expect(declaredModels, 'the session must declare the model its prompt payload named').toContain(
+      FACTORY_REPLAY_MODEL,
+    )
+    await openPromptTurnInspector(page)
+    await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_MODEL)
+    await expect(page.getByTestId('span-inspector')).not.toContainText(FACTORY_REPLAY_PROMPT)
+  })
+
+  test('Factory replay: the consent-on session carries the prompt text the consent allowed', async ({ page }) => {
+    test.setTimeout(120_000)
+    // REPLAY, not live capture: the payloads are recorded hook events, and no Droid agent runs.
+    await openHarness(page, 'droid', factoryApp)
+
+    await page.getByTestId('nav-tab-sessions').click()
+    await expect(page.getByTestId('page-sessions')).toBeVisible()
+    const row = page.getByTestId(`agent-session-row-${FACTORY_CONTENT_ON_SESSION_ID}`)
+    await expect(row).toBeVisible()
+    await row.click()
+
+    // The same span inspector as the consent-off session, on the session the consent file
+    // allowed the prompt text for: the prompt the user submitted is among the attributes
+    // the plugin emitted, because the consent said it may travel.
+    await openPromptTurnInspector(page)
+    await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_MODEL)
+    await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_PROMPT)
+  })
+})
+
+/**
+ * Open the dashboard's span inspector for the session's prompt turn.
+ *
+ * The timeline lists one node per captured span, and the prompt turn is the first
+ * `factory.turn` node: the recorded prompt was submitted before the turn finished. The
+ * inspector is where the dashboard renders what the plugin actually emitted, so it is
+ * where the model and the captured prompt text are read.
+ */
+async function openPromptTurnInspector(page: Page): Promise<void> {
+  const node = page.getByTestId('timeline-node').filter({ hasText: 'factory.turn' }).first()
+  await expect(node, 'the replayed session must list its prompt turn in the timeline').toBeVisible()
+  await node.click()
+  await expect(page.getByTestId('span-inspector')).toBeVisible()
+}
+
+/**
+ * The token state the dashboard declares for one session, as its own sessions answer
+ * reports it. The answer is read rather than the page: a not-measurable declaration is
+ * a payload fact, and the page renders it as the em dash.
+ */
+async function sessionTokenState(
+  page: Page,
+  baseUrl: string,
+  sessionId: string,
+): Promise<{ availability: string; reason: string }> {
+  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
+  expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
+  const body = (await response.json()) as {
+    sessions?: Array<{ session_id?: string; total_input?: unknown }>
+  }
+  const session = body.sessions?.find((row) => row.session_id === sessionId)
+  expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
+  const total = session?.total_input as { availability?: string; reason?: string } | undefined
+  expect(total, `${sessionId} must declare a token state`).toBeDefined()
+  return {
+    availability: total?.availability ?? 'measured',
+    reason: total?.reason ?? '',
+  }
+}
+
+/**
+ * The models the dashboard declares for one session, as its own sessions answer reports
+ * them. The model the plugin captured travels as the session's own attribute.
+ */
+async function sessionModels(page: Page, baseUrl: string, sessionId: string): Promise<string[]> {
+  const response = await page.request.get(`${baseUrl}/api/kyber/sessions`)
+  expect(response.status(), 'the sessions answer must be the dashboard own').toBe(200)
+  const body = (await response.json()) as {
+    sessions?: Array<{ session_id?: string; models?: unknown }>
+  }
+  const session = body.sessions?.find((row) => row.session_id === sessionId)
+  expect(session, `the sessions answer must carry ${sessionId}`).toBeDefined()
+  const models = session?.models
+  return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+}
