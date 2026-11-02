@@ -62,7 +62,6 @@ export const DROID_HARNESS = 'droid'
  */
 const PLUGIN_SPAN_OPS: Readonly<Record<string, string>> = {
   'factory.session': 'agent.invoke',
-  'factory.child_session': 'agent.invoke',
   'factory.turn': 'llm.invoke',
   'factory.tool': 'tool.invoke',
 }

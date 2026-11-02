@@ -678,6 +678,42 @@ describe('the plugin envelope path', () => {
     const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes(), PLUGIN_SOURCE)
     expectCounterReason(record, 'cache_creation', /cache[\s-]?creation/i)
   })
+
+  it('quarantines a plugin span of an undeclared name as non-model rather than guessing its kind', async () => {
+    const { droidAdapter } = await loadDroid()
+    // The wire contract declares the span names the map carries, and no
+    // other. A span whose name it does not declare keeps `unspecified`: the
+    // adapter claims the envelope, but it never guesses which kind of span
+    // an undeclared name is.
+    const record = normalize(
+      droidAdapter,
+      'plugin-undeclared',
+      pluginAttributes(),
+      PLUGIN_SOURCE,
+      'factory.undeclared_span',
+    )
+    expect(record.op).toBe('unspecified')
+
+    // And the ingest seam quarantines it as a non-model span: no record is
+    // stored, and the decoded packet stays as the evidence.
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [
+          otlpSpan('plugin-undeclared', pluginAttributes(), {
+            name: 'factory.undeclared_span',
+            resource: { 'service.name': PLUGIN_SOURCE },
+          }),
+        ],
+        store,
+        [droidAdapter],
+      )
+      expect(store.get('plugin-undeclared'), 'an undeclared plugin span must leave no record').toBeUndefined()
+      expect(quarantineReason(store, 'plugin-undeclared')).toBe('non-model span')
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('the plugin envelope is the only claim path', () => {

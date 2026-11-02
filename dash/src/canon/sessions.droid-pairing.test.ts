@@ -20,8 +20,10 @@
 //   * an unpaired plugin row reads `not_measurable` with a reason — never a
 //     zero, never a value borrowed from another session;
 //   * no token value is ever invented;
-//   * a Factory child session is a session of its own on disk — its own
-//     transcript file and its own companion settings file — so the file
+//   * a Factory child session is named by the plugin through its OWN turn
+//     span — the hooks fire inside the child's own session, so the turn's
+//     session id IS the child's — and it is a session of its own on disk: its
+//     own transcript file and its own companion settings file, so the file
 //     source discovers it as its own session and pairs it on its own session
 //     id; the parent's `childInclusiveTokenUsageBySessionId` map is the
 //     parent's aggregate view of its children, never a token source;
@@ -99,6 +101,20 @@ const CHILD_SESSION_OUTPUT = CHILD_OUTPUT + CHILD_THINKING
  */
 const AGGREGATE_SESSION_INPUT = FILE_SESSION_INPUT + CHILD_SESSION_INPUT
 const AGGREGATE_SESSION_OUTPUT = FILE_SESSION_OUTPUT + CHILD_SESSION_OUTPUT
+
+/**
+ * The counters the parent's child-usage map holds for the child.
+ *
+ * These are the map's OWN figures, before the session totals they would
+ * produce: a child that read its counters out of the map would report them,
+ * and one that treated them as a session's own counters would report the
+ * aggregate totals above. Neither is the child's own usage.
+ */
+const MAP_CHILD_INPUT = FILE_INPUT + CHILD_INPUT
+const MAP_CHILD_OUTPUT = FILE_OUTPUT + CHILD_OUTPUT
+const MAP_CHILD_CACHE_CREATION = FILE_CACHE_CREATION + CHILD_CACHE_CREATION
+const MAP_CHILD_CACHE_READ = FILE_CACHE_READ + CHILD_CACHE_READ
+const MAP_CHILD_THINKING = FILE_THINKING + CHILD_THINKING
 
 /** The telemetry source the Kyber-owned Factory plugin's export arrives under. */
 const PLUGIN_SOURCE = 'kyberdash-droid-plugin'
@@ -196,11 +212,11 @@ function childTokenUsage(): Record<string, number> {
  */
 function parentAggregateChildTokenUsage(): Record<string, number> {
   return {
-    inputTokens: FILE_INPUT + CHILD_INPUT,
-    outputTokens: FILE_OUTPUT + CHILD_OUTPUT,
-    cacheCreationTokens: FILE_CACHE_CREATION + CHILD_CACHE_CREATION,
-    cacheReadTokens: FILE_CACHE_READ + CHILD_CACHE_READ,
-    thinkingTokens: FILE_THINKING + CHILD_THINKING,
+    inputTokens: MAP_CHILD_INPUT,
+    outputTokens: MAP_CHILD_OUTPUT,
+    cacheCreationTokens: MAP_CHILD_CACHE_CREATION,
+    cacheReadTokens: MAP_CHILD_CACHE_READ,
+    thinkingTokens: MAP_CHILD_THINKING,
   }
 }
 
@@ -257,16 +273,6 @@ function otlpSpan(
 /** The plugin's turn span for one session: the session's own model call. */
 function pluginTurnSpan(sessionId: string, timestamp = '2026-04-20T10:00:02.000Z'): OtlpSpan {
   return otlpSpan(`plugin-turn-${sessionId}`, 'factory.turn', pluginAttributes(sessionId), timestamp)
-}
-
-/** The plugin's child-session span: the child's id and its parent's id. */
-function pluginChildSpan(childSessionId: string, parentSessionId: string): OtlpSpan {
-  return otlpSpan(
-    `plugin-child-${childSessionId}`,
-    'factory.child_session',
-    pluginAttributes(childSessionId, { 'factory.parent.session.id': parentSessionId }),
-    '2026-04-20T10:00:03.000Z',
-  )
 }
 
 /**
@@ -528,11 +534,23 @@ describe('the Factory child session pairing rule', () => {
     // carrying the child's own counters.
     await writeFactorySession(CHILD_SESSION_ID, { model: MODEL, tokenUsage: childTokenUsage() })
 
+    // The file source DISCOVERS the child as a session of its own — the
+    // child's own transcript file, on disk under the child's own session id.
+    const discovered = await createDroidProvider().discoverSessions()
+    expect(
+      discovered.some((candidate) => candidate.path.endsWith(`/${CHILD_SESSION_ID}.jsonl`)),
+      'the file source discovered the child session on disk',
+    ).toBe(true)
+
     const store = new CanonStore(':memory:')
     try {
+      // The plugin names the child session the only way it can: through its
+      // OWN turn span. The hooks fire inside the child's own session, so the
+      // turn's `factory.session.id` IS the child's session id. The plugin
+      // names no parent for it — it cannot, and the child needs no parent
+      // to be a session of its own.
       ingestBatchWithAdapters(
         [
-          pluginChildSpan(CHILD_SESSION_ID, SESSION_ID),
           pluginTurnSpan(CHILD_SESSION_ID, '2026-04-20T10:00:04.000Z'),
           pluginTurnSpan(SESSION_ID, '2026-04-20T10:00:03.000Z'),
         ],
@@ -547,6 +565,20 @@ describe('the Factory child session pairing rule', () => {
       // file source discovered it as one.
       expect(store.sessionCount()).toBe(2)
 
+      // The child session is carried by the plugin's ordinary turn span for
+      // the child — a turn like any other, naming the child's own session
+      // id, and by nothing that names a parent for it.
+      const childTurn = store.get(`plugin-turn-${CHILD_SESSION_ID}`)
+      expect(childTurn, "the plugin's own turn span must carry the child session").toBeDefined()
+      expect(childTurn?.sessionId).toBe(CHILD_SESSION_ID)
+      expect(childTurn?.op).toBe('llm.invoke')
+      const childSession = store.getSession(CHILD_SESSION_ID)
+      expect(childSession?.harness).toBe('droid')
+      // Nothing links the child to the parent session: the child is a
+      // session of its own, not a child of the parent's session.
+      expect(childSession?.parentSession).toBeNull()
+      expect(childSession?.isSubagent).toBe(false)
+
       // The child session is paired with the child's OWN usage, read from
       // the child's own companion file.
       expect(store.sessionTokenTotals(CHILD_SESSION_ID)).toEqual({
@@ -558,11 +590,14 @@ describe('the Factory child session pairing rule', () => {
       expect(child.total_output).toBe(CHILD_SESSION_OUTPUT)
 
       // And the child never shows the parent's counters, nor the aggregate
-      // the parent's child-usage map carries.
+      // the parent's child-usage map carries — neither the map's own
+      // counters nor the session totals they would produce.
       expect(child.total_input).not.toBe(FILE_SESSION_INPUT)
       expect(child.total_output).not.toBe(FILE_SESSION_OUTPUT)
       expect(child.total_input).not.toBe(AGGREGATE_SESSION_INPUT)
       expect(child.total_output).not.toBe(AGGREGATE_SESSION_OUTPUT)
+      expect(child.total_input).not.toBe(MAP_CHILD_INPUT)
+      expect(child.total_output).not.toBe(MAP_CHILD_OUTPUT)
 
       // The parent's own counters are unaffected by the child's presence:
       // the parent's session still carries the parent's own usage, not the
@@ -610,17 +645,29 @@ describe('the Factory child session pairing rule', () => {
 
     const store = new CanonStore(':memory:')
     try {
+      // The plugin names the child session through its OWN turn span — the
+      // hooks fire inside the child's own session, so the turn's
+      // `factory.session.id` IS the child's session id. The plugin names no
+      // parent for it, so nothing links the child to the parent.
       ingestBatchWithAdapters(
-        [
-          pluginChildSpan(UNMAPPED_CHILD_SESSION_ID, SESSION_ID),
-          pluginTurnSpan(UNMAPPED_CHILD_SESSION_ID, '2026-04-20T10:00:05.000Z'),
-        ],
+        [pluginTurnSpan(UNMAPPED_CHILD_SESSION_ID, '2026-04-20T10:00:05.000Z')],
         store,
         [droidAdapter],
       )
       store.upsertMany([await fileRow(SESSION_ID)])
 
       await buildSessions(store)
+
+      // The child session exists because of the plugin's own turn span for
+      // the child, and it is a session of its own: nothing links it to the
+      // parent session, so it borrows nothing from the parent either.
+      const childTurn = store.get(`plugin-turn-${UNMAPPED_CHILD_SESSION_ID}`)
+      expect(childTurn, "the plugin's own turn span must carry the child session").toBeDefined()
+      expect(childTurn?.sessionId).toBe(UNMAPPED_CHILD_SESSION_ID)
+      const childSession = store.getSession(UNMAPPED_CHILD_SESSION_ID)
+      expect(childSession?.harness).toBe('droid')
+      expect(childSession?.parentSession).toBeNull()
+      expect(childSession?.isSubagent).toBe(false)
 
       // Nothing measured the child, so it reads not measurable with a
       // reason, exactly as any other session that measured nothing: no
@@ -634,8 +681,9 @@ describe('the Factory child session pairing rule', () => {
       expect(reason).toMatch(/token/i)
 
       // It borrows nothing: not the parent's counters, not the child's own
-      // counters, and not the aggregate the parent's map carries. The
-      // parent's own totals are untouched by the child that measured
+      // counters, and not the aggregate the parent's map carries — neither
+      // the map's own counters nor the session totals they would produce.
+      // The parent's own totals are untouched by the child that measured
       // nothing.
       expect(summary.total_input).not.toBe(FILE_SESSION_INPUT)
       expect(summary.total_output).not.toBe(FILE_SESSION_OUTPUT)
@@ -643,6 +691,8 @@ describe('the Factory child session pairing rule', () => {
       expect(summary.total_output).not.toBe(CHILD_SESSION_OUTPUT)
       expect(summary.total_input).not.toBe(AGGREGATE_SESSION_INPUT)
       expect(summary.total_output).not.toBe(AGGREGATE_SESSION_OUTPUT)
+      expect(summary.total_input).not.toBe(MAP_CHILD_INPUT)
+      expect(summary.total_output).not.toBe(MAP_CHILD_OUTPUT)
       expect(store.sessionTokenTotals(SESSION_ID)).toEqual({
         input: FILE_SESSION_INPUT,
         output: FILE_SESSION_OUTPUT,
