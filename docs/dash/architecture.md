@@ -82,6 +82,9 @@ code-refs:
   - factorySpoolDir
   - runFactoryPluginConsent
   - decodeOtlpMetricsJson
+  - splitDroidSessionRecords
+  - growWithReceiverTiming
+  - ingestMetricBatch
   - ClaudeContentReader
   - ingestProviders
   - CompareRuns
@@ -632,6 +635,42 @@ unsupported or missing contract version scores zero and quarantines under the fi
 `unknown droid contract version`, the same guard the OpenCode envelope carries
 (`dash/src/canon/adapters/droid-envelope.ts`).
 
+### The Factory source-precedence rule
+
+Factory is one harness reached through two capture sources, and a session both sources observed
+has to say which source owns which half of it. The rule is decided in one place —
+`splitDroidSessionRecords` (`dash/src/canon/droid-pairing.ts`), a leaf module the session
+derivation calls — and it **splits by what each source can measure**; it never merges the two.
+
+| The session's figure | Read from | Why |
+|---|---|---|
+| turn count, timeline turns, request roots, per-turn model, tool invocations, duration, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism and alone observes the turn boundary, the tools and the timing |
+| token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters, and its counters are a session-level total split evenly across assistant calls — a session fact, never a turn fact |
+| cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
+
+The file row in a paired session is a **counter carrier**: it contributes its counters and its
+cost and **nothing else**. It is not a turn, not a timeline entry, not a request root, not a tool
+invocation, and its duration is not added to the session's duration.
+
+Two more figures follow the same split. The **cost** is one figure over the union of the turn
+records and the counter records — disjoint sets, so nothing is priced twice — and the cost-basis
+verdict is computed over that same union. The **context analysis** reads the turn records, and
+where no turn record carries a measured input — a paired Factory session's plugin turns report
+no counter at all — it falls back to the counter records, so the session keeps the context
+figure the file source gave it before the plugin arrived.
+
+The session's **model** follows the same split: the turn records' model where a turn record
+names one, the counter record's model where none does. See
+[the model a Factory session publishes](telemetry-inventory.md#the-model-a-factory-session-publishes).
+
+The rule is **inert for every other harness**: a record of another harness belongs to neither
+list, so every other session keeps the derivation it has. A **plugin-only** Factory session
+keeps the plugin's own declarations, so its totals read `not_measurable` with the reason the
+plugin adapter gives; a **file-only** session keeps the file source's. The pairing is
+**exact-match only** — no fuzzy join, no time window, no counter-equality join — and it never
+fabricates: a paired session's totals are the file row's counters, and a plugin-only session's
+totals are absent, never zero.
+
 ### Factory's native OpenTelemetry path (authorized, complementary)
 
 Factory's own native export can be pointed at the KyberDash receiver:
@@ -646,10 +685,33 @@ one.
 metrics sink port with the same admission, shedding and health-window discipline as the span
 path. Only OTLP/HTTP is documented for Factory — port 4318, no gRPC, no 4317 — so no other
 protocol is added. Logs are never exported by Droid, so `/v1/logs` receives nothing from Factory.
-A decoded metric point is **stored** in the canon store's own metric-point table
-(`dash/src/canon/store.ts`) and **nothing projects it yet**: the canon projection and the
-dashboard have no metric concept, so a metric point is a stored fact and not a figure the
-dashboard shows.
+
+**Where the metric points go.** A decoded point becomes **one row** in the canon store's own
+`metric_point` table (`dash/src/canon/store.ts`), written through the production sink's
+`upsertMetrics` port and the `ingestMetricBatch` seam
+(`dash/src/canon/metric-ingest.ts`). The row carries the metric's name, kind and unit, its
+aggregation temporality, the point's timestamp and its value or its count and sum, the point's
+attributes, the resource attributes, the scope, and the exporter's `service.name` as the row's
+**source**. A point that carried no value of its own keeps the value absent, never zero.
+
+The table is created by the store's own schema with `CREATE ... IF NOT EXISTS`, the
+`model_context_window_catalog` precedent, so **the schema version does not move and there is no
+migration step**: a store that predates the table opens unchanged and grows it on the next open.
+
+A metric point has **no span**, so its row carries **no harness attribution** — there is no span
+to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
+why a **scoped per-harness wipe cannot clear these rows**: it cannot claim a row it cannot
+attribute. The full corpus wipe clears them with everything else.
+
+**Nothing projects them yet.** The canon projection and the dashboard have no metric concept, so
+a metric point is a stored fact and not a figure the dashboard shows, and no reader is told a
+metric was measured and shown as one. The projection that would read them is later work.
+
+The writer's rule is **unchanged**: a sink that cannot persist metrics does not offer the port,
+and the writer **refuses** the batch rather than accepting one it would drop. The arrival is
+recorded as receiver activity under the single `otlp:metrics` key, carrying the number of points
+the batch carried, and that audit write is fenced exactly like the span and log audit writes: a
+failed audit row never fails the ingest it audits and never requeues the batch.
 
 **The native claim.** The `droid` adapter recognises the native `genai` fingerprint by
 attribute, never by source name. The vocabulary is:
@@ -947,6 +1009,11 @@ contract that separates the buckets from the missing counter; until then such a 
 content in the composition chart. OpenCode steps carry usage whenever OpenCode reports it, so
 OpenCode sessions are not in this case.
 
+The one harness-scoped exception to that derivation is Factory's: a session both capture sources
+observed is **split** between them — the plugin rows are its turns, the file rows are its
+counters — and the rule that splits it is in
+[the Factory source-precedence rule](#the-factory-source-precedence-rule).
+
 ## Normalization layer
 
 ```mermaid
@@ -977,6 +1044,30 @@ per-instance suffixes, does not track content, and is not stable across reconfig
 
 - **Antigravity OTLP attribution (issue #195):** `antigravityAdapter` (`dash/src/canon/adapters/antigravity.ts`) claims OTLP spans asserting `gen_ai.agent.name === 'antigravity'`, mapping them to canonical harness `antigravity`. When that fingerprint is present, `geminiAdapter` yields to Antigravity so valid Antigravity telemetry is never quarantined under Gemini's dev-harness exclusion. The file-side `kyberdash kyber antigravity-statusline` recorder appends to `antigravity-statusline.jsonl` and attributes to harness `antigravity-cli`; it is distinct from OTLP `antigravity`. Spans are not attributed to Antigravity merely because the source is named `agy`. Legacy records from the `agy` source are re-attributed through source-scoped repair (`node dash/dist/cli.js kyber renormalize --source agy`): records with Antigravity evidence become `antigravity`, while agent-name-less spans remain quarantined as `excluded_harness`.
 - **Copilot Chat attribution (issue #192):** `copilot_chat/gen_ai` spans are correctly claimed and attributed to harness `copilot` rather than falling through to `excluded_harness` quarantine.
+
+### The status rule at the normalization seam
+
+A record's outcome, once the adapter has determined one, is **never downgraded** by the later
+timing step. `growWithReceiverTiming` (`dash/src/canon/ingest.ts`) gives the record the
+receiver's timing, and the outcome **only when the adapter did not determine one**:
+
+```typescript
+record.timestamp = span.timestamp
+record.durationMs = span.durationMs
+if (record.status !== 'error') record.status = span.status.code
+```
+
+A span carrying `error.type` therefore keeps the `error` status the `droid` adapter assigned
+from it, and the **stored** record reads `error` — so a policy-denied tool call counts as an
+error in the session's tool error counts and in the run's outcome derivation, which is the whole
+point of the adapter's rule. The error **type** stays in the record's raw attributes: it is the
+evidence of **why** the call was denied, and the status only says that it was.
+
+The rule is **inert for every other harness**. `baseRecord` stamps `status: 'unspecified'`
+(`dash/src/canon/adapters/copilot.ts`), and the `droid` adapter is the only adapter under
+`dash/src/canon/adapters/` that assigns a `record.status`; every other adapter's record still
+carries `'unspecified'` when the timing step runs, so its stored status remains the exporter's
+status code, byte for byte.
 
 ### Provider call extraction contracts
 
