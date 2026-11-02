@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -604,6 +604,11 @@ capture-plugin harness, in a fixed order, each call handed what its own harness'
   The owned unit is a whole tree, so the receipt records a digest per file and the removal
   requires every digest to match. The consent file `~/.kyberdash/factory-plugin.json` is created
   with content off only when absent.
+- **The updater.** `kyber-weave update` reconciles the Factory plugin with the same verb, in the
+  same preserve mode, and with `--if-installed` — `kyberdash kyber capture plugin install
+  --harness factory --preserve --if-installed` — and it hands the call **no root**, because the
+  plugin is installed where the harness already holds it. A plugin the harness does not hold is
+  not added.
 
 Preserve mode never turns content capture on. For OpenCode the Settings switch does that. For
 **Factory the Settings switch deliberately does not** — it installs the capture and leaves the

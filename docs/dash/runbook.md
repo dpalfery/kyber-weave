@@ -330,6 +330,25 @@ plugin state, the receipt state and the content consent. The Settings switch
 - While consent is off, the session, turn, tool, model and byte-size facts still flow. The
   prompt text reads `not_measurable`, with a reason.
 
+**What the consent governs, and what it does not.** The consent governs the capture plugin's
+prompt text on the wire, and the content of Factory's **native** OpenTelemetry route: on that
+route the gate runs at the ingest seam, before the normalization and before the quarantine
+write, so the text is never written anywhere — not to a record, not to a quarantine packet. It
+does **not** govern the Factory **file source**, which stores the owner's first user-message
+fragment (up to 500 characters) whatever the consent file says, so that fragment is in the store
+with the consent off. Where the harness's own message-content switch is on, the native export
+carries the prompt, the reply, the tool arguments and the tool result, and KyberDash's consent
+decides whether that text may be stored.
+
+**An organisation can refuse the route, and KyberDash does not work around it.** Factory's
+enterprise controls apply to the install: `strictKnownMarketplaces` makes the organisation's list
+the ceiling for marketplace sources, `strictEnabledPlugins` makes the `enabledPlugins` map the
+exhaustive plugin allowlist — so a user-scope install is rejected — and `allowManagedHooksOnly`
+drops user- and project-level hooks, so the plugin can install, register as enabled and **never
+fire a hook**. The first two are visible: the harness's command fails, and the refusal is
+reported with the harness's own stderr quoted, never as a success. The third is silent, so an
+installed plugin is not proof that the capture is running.
+
 **The install modes.** Strict (`capture enable`, and `capture plugin install` without flags)
 refuses a foreign or owner-edited owned tree with exit 1 and writes nothing at all. Preserve
 (`--preserve`, used by Squad and `kyber-weave update`) keeps such a tree with a warning and exits
@@ -358,7 +377,9 @@ update` or Squad deploy that finds everything current reports `factory plugin: u
 runs no harness command and changes nothing.
 
 If the harness refuses a command, the verb reports the refusal with the harness's own stderr and
-never claims the capture is working.
+never claims the capture is working. A refused refresh leaves KyberDash's tree current and the
+harness's cached copy stale, and the command that completes it is
+`droid plugin update kyberdash-factory@kyberdash --scope user`.
 
 **If new Factory sessions do not show, restart Factory.** KyberDash cannot restart your Factory
 process for you.

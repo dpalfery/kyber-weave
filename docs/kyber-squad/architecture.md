@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -616,6 +616,11 @@ kyberdash kyber capture plugin install --harness factory --preserve
   warning. It creates the consent file with content off only when that file is absent, and never
   touches an existing one. The step never writes `opencode.jsonc`, and it never writes
   `~/.factory/settings.json` or `~/.factory/hooks.json`.
+- **The updater's own call.** `kyber-weave update` reconciles the Factory plugin with the same
+  verb, in the same preserve mode, and with `--if-installed` — `kyberdash kyber capture plugin
+  install --harness factory --preserve --if-installed` — and it hands the Factory call **no
+  root**, because the plugin is installed where the harness already holds it. `--if-installed`
+  decides from the harness's own registry, so a plugin the harness does not hold is not added.
 - **Locating the verb.** `kyberdash` is found beside `kyber-weave` in the install directory, then on
   `PATH`. When it is absent, Squad logs one skip line that names `kyber-weave update`.
 - **Failure isolation.** A non-zero exit from the verb prints a warning line that names the retry

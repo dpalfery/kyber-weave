@@ -332,10 +332,29 @@ names each value and **which level pinned it**, so a reader sees an export that 
 rather than one that is merely pointed somewhere else.
 
 **What the consent governs, and what it does not.** KyberDash's consent file governs **the
-capture plugin's prompt text, and nothing else**. The Factory **file source** stores the
-owner's first message fragment whatever the consent file says, and that route is outside the
-consent's reach. The native route's content follows **Factory's own message-content switch**,
-which is the harness's decision and not KyberDash's.
+capture plugin's prompt text on the wire, and the content of Factory's native OpenTelemetry
+route**. It does **not** govern the Factory **file source**, which stores the owner's first
+message fragment (up to 500 characters) whatever the consent file says — that route is outside
+the consent's reach. The two routes it does govern are governed differently: the plugin's own
+hook runner reads the consent on every event and publishes the prompt text only when the consent
+is on, while on the native route the **harness's own message-content switch** decides whether
+the export carries content at all and KyberDash's consent decides whether that content may be
+stored. The native gate runs at the ingest seam, before the normalization and before the
+quarantine write, so the text reaches neither a record nor a quarantine packet; it has a
+**fail-closed arm** — a span that belongs to **no** harness has an unknown origin, so its
+content is stripped too, which covers a Factory child that arrives before its root across a
+batch boundary — and a **claimed** span's content is never touched, so another harness's own
+content is untouched.
+
+**An organisation's hard controls can refuse the route or make it inert.** `strictKnownMarketplaces`
+makes the higher-level list the ceiling for marketplace sources, `strictEnabledPlugins` makes the
+`enabledPlugins` map the exhaustive plugin allowlist — so a user-scope install is rejected — and
+`allowManagedHooksOnly` drops user- and project-level hooks, so the plugin can install, register
+as enabled and **never fire a hook**. KyberDash works around **none** of them: the only way to
+add a marketplace or an enablement without the harness's commands is to write the owner's
+settings file, which KyberDash never does. The first two are **visible** — the harness's command
+fails, and the refusal is reported with the harness's own stderr quoted. The third is **silent**,
+so the surfaces must not read "installed" as "capturing".
 
 **Native metric points are stored, not projected.** A decoded metric point becomes **one row per
 distinct decoded point** in the canon store's own `metric_point` table — a point's identity is a

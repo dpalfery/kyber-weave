@@ -601,8 +601,11 @@ cache copy. Removal requires every recorded digest to match, so an edited file i
 **The upgrade path.** A tree the receipt proves KyberDash wrote, whose bytes still match that
 receipt, and whose content is **not** the current bundle is an **upgrade** — the sixth kind
 beside `absent`, `unreadable`, `foreign`, `edited` and `same`. A tree whose bytes drifted stays
-`edited` (the owner's edit is the owner's), and a tree no receipt proves stays `foreign`,
-because matching an older bundle's bytes never establishes ownership. On an upgrade the
+`edited` (the owner's edit is the owner's). A tree no receipt proves whose content is an
+**older** bundle stays `foreign`, because matching an older bundle's bytes never establishes
+ownership; a tree no receipt proves whose content is **exactly the current bundle** is not
+foreign — the install writes the receipt that proves KyberDash wrote it, so the next upgrade is
+provable. On an upgrade the
 Kyber-owned tree and its receipt are rewritten with the current bundle, and the harness's
 **cached copy** is then refreshed through the harness's own command, chosen from the harness's
 own registry rather than guessed: the plugin **installed** → `droid plugin update
@@ -636,6 +639,22 @@ registration would cost a process per subagent stop for no span. The mapper (`ma
 pure: an attribute the payload does not carry is absent, never zero and never an empty string,
 and the prompt text is capped at 64 KiB and marked when it is cut.
 
+**Bundle and delivery.** `dash/scripts/bundle-factory-plugin.mjs` bundles the plugin's entry with
+esbuild into one self-contained ESM file that imports only `node:` built-ins and uses the global
+`fetch`. The text is committed as `factory-plugin/generated/plugin-source.ts`
+(`FACTORY_PLUGIN_SOURCE`, `FACTORY_PLUGIN_MARKER`), so the npm and SEA builds carry the same
+bytes, and a drift test fails when the committed text differs from a fresh bundle. The first line
+is `// kyberdash-factory-plugin v1`, the ownership marker the installer reads.
+
+The generic parts are shared leaves — `dash/src/capture/harnesses/transport/` (the outbox and the
+OTLP sender) and `dash/src/capture/consent-file.ts` — and the OpenCode plugin's own transport and
+consent modules are thin re-exports of them, so there is one implementation of each and the
+OpenCode entry's imports and its wire are unchanged. What the extraction did **not** keep is the
+committed OpenCode bundle byte-stable: the module paths inside it changed and the shared OTLP body
+builder gained an identity argument, so the committed artefact was regenerated. The drift guard
+still holds in its real sense — it asserts the committed source **equals** a fresh bundle, so it
+proves the committed bytes are current, not that they never changed.
+
 **The file-backed spool.** A Factory hook is a one-shot process — one short-lived process per
 event — so an in-memory outbox would lose the span when the process exits. The runner
 (`dash/src/capture/harnesses/factory-plugin/entry.ts`) therefore posts the span to
@@ -659,13 +678,65 @@ whose Settings switch also sets consent: for Factory the switch is "install the 
 "start recording my prompts", and the difference is a privacy control. `disable` turns the
 consent off.
 
+**What the consent governs, and what it does not.** The consent file governs **the capture
+plugin's prompt text on the wire, and the content of Factory's native OpenTelemetry route**. It
+does **not** govern the Factory **file source**, which reads the owner's first user-message
+fragment out of the owner's own transcript and carries it on every file-sourced Factory record's
+raw attributes whatever the consent file says. On the native route the gate runs at the **ingest
+seam** — before the normalization and before the quarantine write — so the text is never written
+anywhere, not to a record and not to a quarantine packet (`dash/src/canon/ingest.ts`,
+`dash/src/canon/droid-content.ts`). The gate has a **fail-closed arm**: a span that belongs to
+**no** harness has an unknown origin, so its content is stripped too, which is what covers a
+Factory child that arrives before its root across a batch boundary; a **claimed** span's content
+is never touched, so another harness's own `gen_ai.input.messages` is untouched. The native
+route's own content switch belongs to the harness, not to KyberDash.
+
 **Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
 
 - **Strict** (`capture enable`): refuses a foreign tree (one holding a file KyberDash did not
   write) or an owner-edited tree (one whose bytes no longer match the receipt) with exit 1, and
   writes nothing at all. An unreadable tree is refused in both modes.
 - **Preserve** (`--preserve`, used by Squad and `kyber-weave update`): keeps such a tree with a
-  warning and exits 0. An absent tree with `--if-installed` writes nothing.
+  warning and exits 0.
+- **`--if-installed`** decides from the **harness's own registry**, not from the tree on disk.
+  When the registry reports the plugin installed, the install runs — and it refreshes the
+  harness's cached copy even when KyberDash's own tree is absent and has to be written for the
+  first time, because the harness's copy is then the stale one. When the registry does not report
+  it installed, nothing is written and no harness command runs.
+
+**The install lifecycle's vocabulary.** The status surface reports the harness-side state as the
+harness itself reports it (`dash/src/capture/harnesses/factory-plugin/marketplace.ts`):
+`marketplace-tree-written` (the Kyber-owned tree landed; the harness does not have it yet),
+`marketplace-registered` (the harness registered the marketplace; the plugin is not installed),
+`plugin-installed` (the plugin is installed and enabled), `conflict` (the harness holds a
+marketplace name or a plugin identity KyberDash does not own), and `unknown` (the harness's own
+state could not be read — the CLI is missing, or its output is not understood). Every partial
+state is named, and every one of them is resumable by re-running the install. An interrupted
+harness-side step is never repaired by hand: the harness's cache copy and its own plugin record
+are the harness's files, and the repair is to re-run the harness's own command. A missing `droid`
+CLI reads as `unknown` with the named cause, never as an install that succeeded.
+
+**The refusal vocabulary.** A refusal names its cause: `conflict` (a name the harness holds that
+KyberDash does not own), `drift` (the tree the owner edited) and `unreadable` (the tree, or the
+harness's own state, could not be read). Strict mode refuses with exit 1 and writes nothing;
+preserve mode keeps the state with a warning and exits 0.
+
+**The residue rule — report, never patch.** If the harness's own uninstall leaves an entry
+behind, KyberDash names it (which registry, which entry) and prints the exact `droid plugin …`
+command that removes it, and never writes the owner's settings file to clean it up. The teardown
+removes KyberDash's own tree on a conflict and leaves the foreign entry alone: the tree is
+KyberDash's and the receipt proves it, while the entry that holds KyberDash's **name** is
+somebody else's.
+
+**An organisation's hard controls can refuse the route.** `strictKnownMarketplaces` makes the
+higher-level list the ceiling for marketplace sources, `strictEnabledPlugins` makes the
+`enabledPlugins` map the exhaustive plugin allowlist — so a user-scope install is rejected — and
+`allowManagedHooksOnly` drops user- and project-level hooks, so the plugin can install, register
+as enabled and never fire a hook. KyberDash works around **none** of them: the only way to add a
+marketplace or an enablement without the harness's commands is to write the owner's settings
+file, which this section forbids. The first two are **visible** — the harness's command fails and
+the refusal is reported with the harness's own stderr quoted; the third is **silent**, and the
+surfaces must not read "installed" as "capturing".
 
 **The shared `droid` harness id.** Factory is one harness under one canonical id, `droid` — the
 id the Factory file source already stores (`dash/src/providers/droid.ts`), so the dashboard shows
