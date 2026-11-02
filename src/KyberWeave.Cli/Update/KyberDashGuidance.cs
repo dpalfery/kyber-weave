@@ -33,8 +33,9 @@ internal static class KyberDashGuidance
     /// <summary>
     ///     The guidance a capture-plugin verb printed after its verdict, in printed order. The OpenCode verb marks
     ///     every guidance line with its harness prefix and prints other chatter beside them, so only the marked lines
-    ///     are relayed. The Factory verb's stdout is a contract — the plugin line, the consent file and the consent
-    ///     reminder — and every line in it names the plugin, so every line after the verdict is relayed.
+    ///     are relayed. The Factory verb's stdout is a contract — every line of it that begins with <c>factory</c>
+    ///     is relayed, except the verdict line itself, and the verb's other chatter is not. One of the relayed
+    ///     lines names the harness CLI rather than the plugin.
     /// </summary>
     /// <param name="harness">
     ///     The harness the verb installed the plugin for, named as the verb names it: <c>opencode</c> or
