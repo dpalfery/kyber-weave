@@ -136,14 +136,24 @@ export function toRawSpan(span: OtlpSpan): RawSpan {
 }
 
 /**
- * Give a normalized record the timing and outcome the adapter seam cannot
- * carry: `RawSpan` is deliberately timing-free and adapters stamp a neutral
- * epoch, while the decoded span carries the harness's own clock and status.
+ * Give a normalized record the timing the adapter seam cannot carry, and
+ * the outcome only when the adapter did not determine one: `RawSpan` is
+ * deliberately timing-free and adapters stamp a neutral epoch, while the
+ * decoded span carries the harness's own clock.
+ *
+ * The exporter's status code is not the last word on the outcome. An
+ * adapter that already determined the record failed — Factory's native
+ * export names an `error.type` on a policy-denied tool call and the adapter
+ * stamps `error` — keeps that status: an error is never downgraded here,
+ * because the exporter does not mark the span's transport status as an
+ * error. Every other record takes the span's own status code, so a harness
+ * whose adapter did not judge the outcome still stores what the exporter
+ * reported.
  */
 export function growWithReceiverTiming(record: CanonicalRecord, span: OtlpSpan): void {
   record.timestamp = span.timestamp
   record.durationMs = span.durationMs
-  record.status = span.status.code
+  if (record.status !== 'error') record.status = span.status.code
 }
 
 /** Distinguish ambient telemetry from a span merely lacking an adapter. */
