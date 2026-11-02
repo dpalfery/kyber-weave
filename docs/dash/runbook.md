@@ -333,9 +333,10 @@ plugin state, the receipt state and the content consent. The Settings switch
 **The install modes.** Strict (`capture enable`, and `capture plugin install` without flags)
 refuses a foreign or owner-edited owned tree with exit 1 and writes nothing at all. Preserve
 (`--preserve`, used by Squad and `kyber-weave update`) keeps such a tree with a warning and exits
-0. `--if-installed` acts only when the tree is already present, and otherwise prints
-`skipped-not-installed` and writes nothing. The one-shot verb, for callers outside the Settings
-drawer:
+0. `--if-installed` acts only when the plugin is already present — for OpenCode, the plugin file;
+   for Factory, the **harness's own registry** reporting the plugin installed — and otherwise prints
+   `skipped-not-installed` and writes nothing. The one-shot verb, for callers outside the Settings
+   drawer:
 
 ```bash
 kyberdash kyber capture plugin install --harness factory --preserve

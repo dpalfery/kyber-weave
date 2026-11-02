@@ -466,7 +466,10 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .description('Install or upgrade the OpenCode or Factory capture plugin (the harness settings are never touched)')
     .option('--harness <id>', 'Harness whose plugin to install (only: opencode, factory)')
     .option('--preserve', 'Keep an edited or foreign plugin and an existing consent file; warn and exit 0')
-    .option('--if-installed', 'Act only when the plugin file is already present')
+    .option(
+      '--if-installed',
+      'Act only when the plugin is already present (the plugin file for OpenCode, the harness registry for Factory)',
+    )
     .option(
       '--config-dir <dir>',
       'OpenCode config root, for --harness opencode only (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)',
