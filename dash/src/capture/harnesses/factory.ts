@@ -79,14 +79,12 @@ function factoryMarketplaceManifest(home: string, env?: PathEnv): string {
 }
 
 /**
- * The native OpenTelemetry export's verdict, read from the Factory root's cached
- * organisation settings and the system-managed copy beside it. The owner's own settings file
- * is never read for it.
+ * The native OpenTelemetry export's verdict, read from the harness's own cached organisation
+ * settings and the system-managed copy beside it. The owner's own settings file is never
+ * read for it.
  */
 function nativeExportVerdict(home: string, env: PathEnv | undefined): NativeExportVerdict {
-  const paths = factoryPluginPaths(home, env)
   return readNativeExport({
-    factoryRoot: paths.root,
     home,
     platform: env?.platform ?? process.platform,
     ...(env?.appData !== undefined ? { appData: env.appData } : {}),

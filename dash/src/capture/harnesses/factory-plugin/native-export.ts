@@ -9,11 +9,15 @@
 //   2. the machine variable `OTEL_TELEMETRY_ENDPOINT`, with the documented fallback
 //      `OTEL_EXPORTER_OTLP_ENDPOINT`.
 //
-// The organisation's block reaches the machine as the cached view under the Factory root
-// (`org-managed-settings.cache.json`, whose `managedSettings.telemetry` carries the pinned
-// values) and as the system-managed copy (`settings.json`, whose `telemetry` carries them).
-// Both are read, so a machine that holds only one of them still reports the organisation's
-// pin.
+// The organisation's block reaches the machine as the cached view in the harness's OWN
+// directory (`<home>/.factory/org-managed-settings.cache.json`, whose
+// `managedSettings.telemetry` carries the pinned values) and as the system-managed copy
+// (`settings.json`, whose `telemetry` carries them). Both are read, so a machine that holds
+// only one of them still reports the organisation's pin.
+//
+// The cached view is read from the harness's own directory and NOT from `$FACTORY_DIR`:
+// that variable moves the harness's SESSIONS tree and nothing else (D55), so the harness
+// still writes its cached organisation settings in its own directory.
 //
 // An organisation pin is an administrative override the developer does not control, so the
 // verdict under one is never "working": the row names the organisation as the cause and the
@@ -54,8 +58,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** The cached organisation settings under the Factory root. */
+/** The cached organisation settings in the harness's own directory. */
 const ORGANISATION_CACHE_FILE = 'org-managed-settings.cache.json'
+/** The harness's own directory under the home. */
+const HARNESS_DIRECTORY_NAME = '.factory'
 /** The system-managed settings file. */
 const SYSTEM_SETTINGS_FILE = 'settings.json'
 /** The cap on one settings file: the real ones are a few kilobytes. */
@@ -181,9 +187,18 @@ export type NativeExportVerdict =
 
 /** Where the organisation's and the machine's configuration are read from. */
 export type NativeExportSources = {
-  /** The Factory root: the organisation-settings cache lives under it. */
-  factoryRoot: string
-  /** The home the system-managed copy lives under. */
+  /**
+   * The Factory root (`$FACTORY_DIR`, else `~/.factory`).
+   *
+   * It is NOT where the organisation's cached settings are read from: `FACTORY_DIR` moves
+   * the harness's SESSIONS tree and nothing else (D55), so the harness keeps its own
+   * settings and its cached organisation settings in its OWN directory, `<home>/.factory`.
+   * The field stays because a caller that knows the redirected root describes it, and the
+   * reader ignores it — reading the organisation's pin from it would report a pin the
+   * harness never wrote.
+   */
+  factoryRoot?: string
+  /** The home the harness's own directory and the system-managed copy live under. */
   home: string
   /** The platform the system-managed directory is resolved for. */
   platform: NodeJS.Platform
@@ -284,6 +299,17 @@ function systemManagedDir(sources: NativeExportSources): string {
 }
 
 /**
+ * The harness's own directory: `<home>/.factory`.
+ *
+ * `FACTORY_DIR` moves the harness's SESSIONS tree and nothing else (D55): with it pointed
+ * elsewhere the harness still keeps its settings and its cached organisation settings in
+ * its own directory, so that is where the organisation's cached view is read from.
+ */
+function harnessDir(sources: NativeExportSources): string {
+  return join(sources.home, HARNESS_DIRECTORY_NAME)
+}
+
+/**
  * The organisation's telemetry block, as the reader resolves it. A value the organisation
  * does not pin is absent, not a default: the default belongs to the level that did not pin
  * it.
@@ -318,9 +344,9 @@ type OrganisationView = {
 
 /**
  * One of the organisation's two views of its managed settings, read from its file. The
- * cached view under the Factory root is read first — it is the view Factory itself reads —
- * and the system-managed copy is the fallback for every key the cached view does not
- * carry.
+ * cached view in the harness's own directory is read first — it is the view Factory itself
+ * reads — and the system-managed copy is the fallback for every key the cached view does
+ * not carry.
  */
 function organisationView(
   path: string,
@@ -372,7 +398,7 @@ function organisationGranularity(
  */
 function organisationTelemetry(sources: NativeExportSources): OrganisationTelemetry {
   const cached = organisationView(
-    join(sources.factoryRoot, ORGANISATION_CACHE_FILE),
+    join(harnessDir(sources), ORGANISATION_CACHE_FILE),
     cachedOrganisationTelemetry,
   )
   const system = organisationView(
