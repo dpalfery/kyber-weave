@@ -21,7 +21,11 @@
 //     zero, never a value borrowed from another session;
 //   * no token value is ever invented;
 //   * a child session is paired only when the companion file's
-//     `childInclusiveTokenUsageBySessionId` names it.
+//     `childInclusiveTokenUsageBySessionId` names it;
+//   * the two sources own different halves of a paired session: the plugin
+//     row supplies the turns and the session's structure, the file row
+//     supplies the counters and their availability, and the cost of both is
+//     one figure.
 //
 // The projection under test is the shared engine's session projection
 // (`buildSessions` over the canonical store) — the table the
@@ -504,6 +508,164 @@ describe('the Factory child session pairing rule', () => {
       const reason = reasonOf(summary.total_input)
       expect(reason).toMatch(/droid/i)
       expect(reason).toMatch(/token/i)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+/** The session's context analysis, as the dashboard projects it. */
+function contextOf(store: CanonStore, sessionId: string): Record<string, unknown> {
+  const payload = store.getSessionPayload(sessionId) as
+    | { context?: Record<string, unknown> }
+    | undefined
+  if (payload === undefined) throw new Error(`no session payload was projected for ${sessionId}`)
+  return payload.context ?? {}
+}
+
+/** The session's cost block, as the dashboard projects it. */
+function costOf(store: CanonStore, sessionId: string): Record<string, unknown> {
+  const cost = summaryOf(store, sessionId)['cost']
+  if (typeof cost !== 'object' || cost === null) {
+    throw new Error(`the session ${sessionId} carries no cost block`)
+  }
+  return cost as Record<string, unknown>
+}
+
+/** The context bucket's reported input, as the dashboard projects it. */
+function reportedInputOf(bucket: unknown): unknown {
+  if (typeof bucket !== 'object' || bucket === null) {
+    throw new Error('the session carries no context bucket')
+  }
+  return (bucket as { reported_input?: unknown }).reported_input
+}
+
+describe('the Factory source precedence rule', () => {
+  it('takes the turns and the session structure from the plugin records and the counters from the file records', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      const summary = summaryOf(store, SESSION_ID)
+
+      // The plugin source knows the turns: the plugin's one turn is the
+      // session's one turn. The file row is the counter source of that same
+      // call, not a second turn of it.
+      expect(summary.turn_count).toBe(1)
+
+      // And the plugin source owns the session's structure: its span carries
+      // the session's duration.
+      expect(summary.duration_ms).toBe(1000)
+
+      // The file source knows the counters: the paired session reports the
+      // file row's own totals and their own availability, never the plugin
+      // row's absent ones.
+      expect(summary.total_input).toBe(FILE_SESSION_INPUT)
+      expect(summary.total_output).toBe(FILE_SESSION_OUTPUT)
+      expect(summary.total_cache_read).toBe(FILE_CACHE_READ)
+      expect(summary.total_cache_creation).toBe(FILE_CACHE_CREATION)
+      expect(store.sessionTokenTotals(SESSION_ID)).toEqual({
+        input: FILE_SESSION_INPUT,
+        output: FILE_SESSION_OUTPUT,
+      })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('sums the cost of both sources into one figure', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const file = await fileRow(SESSION_ID)
+    if (typeof file.cost.value !== 'number') {
+      throw new Error('the file source did not price the Factory session')
+    }
+    const priced = file.cost.value
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      store.upsertMany([file])
+
+      await buildSessions(store)
+
+      // The two sources are summed, never blended and never refused: the
+      // file source priced the session and the plugin source had no rate to
+      // add, so the figure the dashboard shows is the priced one — not a
+      // blank, and not a zero.
+      const cost = costOf(store, SESSION_ID)
+      expect(cost['basis']).toBe('harness')
+      expect(['priced', 'partial']).toContain(cost['status'])
+      expect(cost['currency']).toBe('USD')
+      expect(cost['value']).toBeCloseTo(priced, 12)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('falls back to the file counters for the context input the plugin turns do not report', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      // The plugin's turn reports no input at all, so the context analysis
+      // has no input of its own to chart. It falls back to the file
+      // counters: the session's context input is the file row's, not a zero
+      // and not the plugin's absent counter.
+      const context = contextOf(store, SESSION_ID)
+      expect(reportedInputOf(context['first'])).toBe(FILE_SESSION_INPUT)
+      expect(reportedInputOf(context['last'])).toBe(FILE_SESSION_INPUT)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('leaves a session only the file source observed with its own turn, counters and priced cost', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const file = await fileRow(SESSION_ID)
+    if (typeof file.cost.value !== 'number') {
+      throw new Error('the file source did not price the Factory session')
+    }
+    const priced = file.cost.value
+
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([file])
+
+      await buildSessions(store)
+
+      // No plugin record joins this session, so the file row stays the
+      // session's own turn and the session's own counters: the precedence
+      // rule must not empty a session the plugin never observed.
+      const summary = summaryOf(store, SESSION_ID)
+      expect(summary.turn_count).toBe(1)
+      expect(summary.total_input).toBe(FILE_SESSION_INPUT)
+      expect(summary.total_output).toBe(FILE_SESSION_OUTPUT)
+      expect(store.sessionTokenTotals(SESSION_ID)).toEqual({
+        input: FILE_SESSION_INPUT,
+        output: FILE_SESSION_OUTPUT,
+      })
+
+      // And the cost the file source priced is still the session's cost.
+      const cost = costOf(store, SESSION_ID)
+      expect(cost['basis']).toBe('harness')
+      expect(cost['status']).toBe('priced')
+      expect(cost['value']).toBeCloseTo(priced, 12)
+
+      // The context input comes from the same counters.
+      const context = contextOf(store, SESSION_ID)
+      expect(reportedInputOf(context['first'])).toBe(FILE_SESSION_INPUT)
     } finally {
       store.close()
     }
