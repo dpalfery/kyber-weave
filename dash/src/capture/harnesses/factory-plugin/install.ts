@@ -793,6 +793,8 @@ export function uninstallFactoryPlugin(
   const found = classify(paths)
   /** The receipt on disk, read before this uninstall can remove it. */
   const receipt = readReceipt(paths.receiptFile)
+  /** The plugin identity the receipt proves is KyberDash's own, when it proves one. */
+  const provenIdentity = provenPluginIdentity(receipt, paths)
 
   if (found.kind === 'unreadable') {
     return result('refused', 'refused', {
@@ -829,9 +831,15 @@ export function uninstallFactoryPlugin(
 
   // The harness-side state goes first: the harness's own uninstall, then the harness's own
   // marketplace removal. The Kyber-owned tree and the receipt follow.
+  //
+  // The receipt's proven identity travels with the read, because the receipt is the proof
+  // that survives the harness's own teardown: the harness removes a marketplace
+  // registration WITHOUT removing the plugin, so a plugin the receipt proves is ours is
+  // ours here too, and the uninstall removes it instead of leaving it capturing.
   const harnessState = readFactoryHarnessState(harness, {
     treeWritten: found.kind !== 'absent',
     marketplaceRoot: paths.pluginDir,
+    ...(provenIdentity === undefined ? {} : { ownedPluginIdentity: provenIdentity }),
   })
   if (!harnessState.readable) {
     // A conflict is not an unreadable state: the entry that holds KyberDash's name belongs

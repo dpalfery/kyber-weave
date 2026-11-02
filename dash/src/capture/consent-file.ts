@@ -18,6 +18,15 @@ import { randomBytes } from 'node:crypto'
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+/**
+ * The cap on one consent file, in UTF-8 BYTES.
+ *
+ * The unit is bytes, not characters, because the two readers that decide whether the
+ * prompt text is captured — the plugin's own consent reader and the canon gate's — bound
+ * the file by bytes. A state reader that counted characters would call a multi-byte file
+ * under the bound `on` while both of those readers called it off, and the status row would
+ * then claim a capture that is not happening.
+ */
 const MAX_CONSENT_BYTES = 4096
 
 /** absent: no file. on/off: a valid file. invalid: not our shape. unreadable: exists but cannot be read as a file. */
@@ -32,7 +41,7 @@ export function readConsentState(path: string): ConsentState {
     // One read attempt, no existence pre-check: a missing entry is the only 'absent'.
     return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' ? 'absent' : 'unreadable'
   }
-  if (text.length > MAX_CONSENT_BYTES) return 'invalid'
+  if (Buffer.byteLength(text, 'utf8') > MAX_CONSENT_BYTES) return 'invalid'
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 'invalid'

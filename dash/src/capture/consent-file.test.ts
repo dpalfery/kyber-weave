@@ -22,7 +22,7 @@
 //   readConsentState(path): 'absent' | 'on' | 'off' | 'invalid' | 'unreadable'
 //   writeFileAtomic(path, data): void
 
-import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -138,5 +138,48 @@ describe('the OpenCode consent writer is a thin re-export of the shared one', ()
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: false })
     shim.writeContentConsent(path, true)
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: true })
+  })
+})
+
+describe('the consent file is bounded by bytes, and every reader bounds it the same way', () => {
+  /**
+   * The valid on-shape, with multi-byte padding in a key the shape does not forbid: the
+   * file is still the on-shape the readers accept, and it is over the 4096-BYTE bound
+   * while it is under the 4096-character bound.
+   */
+  function paddedOnShape(): string {
+    return `{"version":1,"content":true,"note":"${'中'.repeat(3000)}"}`
+  }
+
+  it('reads an oversized multi-byte consent file as off, the way the two content readers read it', async () => {
+    const { readConsentState } = await import('./consent-file.js')
+    const { readContentConsent: readPluginConsent } = await import(
+      './harnesses/factory-plugin/consent.js'
+    )
+    const { readContentConsent: readCanonConsent } = await import('../canon/droid-content.js')
+    const dir = tempDir()
+    mkdirSync(join(dir, '.kyberdash'), { recursive: true })
+    const path = consentPathIn(dir)
+    const text = paddedOnShape()
+    // The fixture is the one the disagreement needs: UNDER the character bound, OVER the
+    // byte bound, and still the valid on-shape.
+    expect(text.length, 'under the 4096-character bound').toBeLessThan(4096)
+    expect(Buffer.byteLength(text, 'utf8'), 'over the 4096-byte bound').toBeGreaterThan(4096)
+    writeFileSync(path, text)
+
+    // The two content readers bound the file by UTF-8 bytes, so they read it as OFF and
+    // publish no prompt text.
+    expect(readPluginConsent(path), 'the plugin reader reads the oversized file as off').toBe(false)
+    expect(readCanonConsent(path), 'the canon gate reads the oversized file as off').toBe(false)
+
+    // The state reader must agree with them. It must not report 'on' for a file the two
+    // readers will not act on — the Settings row and `capture status` would then claim a
+    // capture that is not happening — and the state it already uses for a file it will
+    // not accept is 'invalid'.
+    expect(
+      readConsentState(path),
+      'the state reader must agree with the two content readers',
+    ).toBe('invalid')
+    expect(readConsentState(path)).not.toBe('on')
   })
 })
