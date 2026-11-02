@@ -1336,6 +1336,9 @@ function consentHome(body?: string): string {
 }
 
 afterEach(() => {
+  // The consent override is not one of the vars the environment isolation clears,
+  // so a case that sets it would decide every case after it.
+  delete process.env['KYBERDASH_FACTORY_CONTEXT']
   for (const home of consentHomes.splice(0)) rmSync(home, { recursive: true, force: true })
 })
 
@@ -1594,7 +1597,7 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
 
     const record = store.get('native-claimed-child')
     expect(record, 'the claimed span is stored as before').toBeDefined()
-    const raw = record?.raw ?? {}
+    const raw = (record?.raw ?? {}) as Record<string, unknown>
     expect(
       raw['gen_ai.input.messages'],
       'the claimed Factory span must carry no prompt',
@@ -1624,7 +1627,8 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
 
     const stored = store.get('file-source-record')
     expect(stored, 'the file source\'s record must survive the gate').toBeDefined()
-    expect(stored?.raw['userMessage']).toBe('the owner\'s own first message fragment')
+    const storedRaw = (stored?.raw ?? {}) as Record<string, unknown>
+    expect(storedRaw['userMessage']).toBe('the owner\'s own first message fragment')
     expect(store.getQuarantine('file-source-record'), 'and it must not be quarantined').toBeUndefined()
     store.close()
   })
@@ -1657,7 +1661,8 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
 
     const record = store.get('plugin-content')
     expect(record?.harness).toBe('droid')
-    expect(record?.raw['factory.turn.prompt.text']).toBe(FACTORY_PROMPT_TEXT)
+    const pluginRaw = (record?.raw ?? {}) as Record<string, unknown>
+    expect(pluginRaw['factory.turn.prompt.text']).toBe(FACTORY_PROMPT_TEXT)
     store.close()
   })
 })
