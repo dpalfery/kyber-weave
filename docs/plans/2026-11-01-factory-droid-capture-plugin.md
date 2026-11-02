@@ -2159,7 +2159,9 @@ commands may change the harness's own settings file across a marketplace install
 must contain no merge into it (D48, D49); that the install drives the harness's own `droid plugin`
 commands and nothing else (D43); that the native path's status line says plainly that no native
 span is claimed (D51); that the consent gate covers the quarantine path as well as the record path
-(D52) **and that it touches nothing outside the native and quarantine routes** (D57); that the
+(D52) **and that it touches nothing outside the native and quarantine routes** (D57) — **except the one
+deliberate exception D52 and D66 record: a span that belongs to NO harness has an unknown
+origin, so its content is stripped too, and a claimed span's content is never touched**; that the
 consent path never
 turns content on by itself; that **the status surface claims nothing the consent does not
 deliver** — the row must not say "no Factory content is stored" while the file source stores the
