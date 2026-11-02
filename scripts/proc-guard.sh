@@ -682,6 +682,8 @@ run_guarded() {
     cmd_line="$*"
     cmd_line="${cmd_line//[$'\n\r']/ }"
     task_label="${task_label//[$'\n\r']/ }"
+    # Every queued caller prints the holder's task, so the label is cut like the command is.
+    task_label="${task_label:0:100}"
     trap release_slot EXIT
     acquire_slot "${base}" "${slot}" "${slot_count}" "${slot_wait}" \
       "${task_label:-${root##*/}: ${cmd_line:0:100}}" "${cmd_line:0:300}"

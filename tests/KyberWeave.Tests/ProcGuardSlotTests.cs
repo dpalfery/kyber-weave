@@ -256,22 +256,33 @@ public sealed class ProcGuardSlotTests : IDisposable
     }
 
     /// <summary>
-    /// With <c>--slot-count 2</c> a caller takes the free slot while one is held, and queues only when both are held.
+    /// With <c>--slot-count 2</c> a caller takes the free slot and leaves the live holder's lock alone, and queues only
+    /// when both are held.
     /// </summary>
+    /// <remarks>
+    /// The first run is checked before the second holder is seeded and without re-seeding the first, because a guard that
+    /// deleted the live lock to take it would otherwise still exit 0 and pass.
+    /// </remarks>
     [Fact]
-    public void RunWithTwoSlots_TakesTheFreeOneAndQueuesOnlyWhenBothAreHeld()
+    public void RunWithTwoSlots_TakesTheFreeOneLeavesTheLiveOneAndQueuesOnlyWhenBothAreHeld()
     {
         SkipIfBashUnavailable();
         SeedLock(SlotName, 1, Environment.ProcessId, "first-holder");
 
         GuardRun whileOneFree = RunGuard(
-            ["run", "--slot", SlotName, "--slot-count", "2", "--slot-wait", "0", "--", "sh", "-c", "exit 0"]);
-        SeedLock(SlotName, 1, Environment.ProcessId, "first-holder");
+            ["run", "--slot", SlotName, "--slot-count", "2", "--slot-wait", "0", "--", "sh", "-c", "ls \"$0\"", slotRoot.Path]);
+
+        Assert.Equal(0, whileOneFree.ExitCode);
+        Assert.Contains($"{SlotName}.2.lock", whileOneFree.StandardOutput, StringComparison.Ordinal);
+        string firstHolder = Path.Combine(LockPath(SlotName, 1), "holder");
+        Assert.True(File.Exists(firstHolder), "The run deleted the live holder's lock.");
+        Assert.Contains("first-holder", File.ReadAllText(firstHolder), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(LockPath(SlotName, 2)), "The run did not release the second slot.");
+
         SeedLock(SlotName, 2, Environment.ProcessId, "second-holder");
         GuardRun whileBothHeld = RunGuard(
             ["run", "--slot", SlotName, "--slot-count", "2", "--slot-wait", "0", "--", "sh", "-c", "exit 0"]);
 
-        Assert.Equal(0, whileOneFree.ExitCode);
         Assert.Equal(SlotWaitExitCode, whileBothHeld.ExitCode);
     }
 
@@ -449,6 +460,26 @@ public sealed class ProcGuardSlotTests : IDisposable
         GuardRun result = RunGuard([.. arguments], options: new GuardOptions(UseDefaultSlotDir: true));
 
         Assert.Equal(UsageExitCode, result.ExitCode);
+    }
+
+    /// <summary>
+    /// A <c>--task</c> label longer than 100 characters is cut before it is written to the holder file.
+    /// </summary>
+    /// <remarks>
+    /// Every queued caller prints the holder's task on its first report, again every 30 seconds, and when its wait expires.
+    /// An unbounded label would be copied into all of them.
+    /// </remarks>
+    [Fact]
+    public void RunWithLongTaskLabel_CutsItBeforeWritingTheHolderFile()
+    {
+        SkipIfBashUnavailable();
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--task", new string('x', 5000), "--", "sh", "-c", "cat \"$0\"/*.lock/holder", slotRoot.Path]);
+
+        Assert.Equal(0, result.ExitCode);
+        string taskLine = Assert.Single(result.StandardOutput.Split('\n'), line => line.StartsWith("task=", StringComparison.Ordinal));
+        Assert.Equal("task=".Length + 100, taskLine.Length);
     }
 
     /// <summary>
