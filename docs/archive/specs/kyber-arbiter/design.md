@@ -6,6 +6,8 @@ status: archived
 owner: dpalfery
 last-reviewed: 2026-10-10
 component: KyberSquad
+documentation-impact: extends-component
+impact-components: [KyberSquad]
 ---
 
 # Kyber Arbiter design
@@ -1246,3 +1248,70 @@ Vendor pages were read on the dates shown. Under D7 they are the support claim, 
 | WA-7834 | [Warp #7834](https://github.com/warpdotdev/Warp/issues/7834) | 2026-10-01 | No hooks: a feature request |
 | ZC-hooks | [ZCode hooks](https://zcode.z.ai/en/docs/hooks) | 2026-10-01 | Project-level hooks are not executed in the current version |
 | ZC-32 | [zai-org/feedback#32](https://github.com/zai-org/feedback/issues/32) | 2026-10-01 | The same |
+
+## Decisions
+
+D1–D34 are recorded in the [archived plan](../../plans/2026-10-01-kyber-arbiter.md#approved-decisions)
+and [requirements](requirements.md#decisions). The design-phase decisions below are the
+durable choices this document makes.
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| DD1 | Where does the engine live? | `src/KyberWeave.Core/Arbiter/`; the CLI and the `kyber-weave-arbiter` binary are thin hosts | Design, approved 2026-10-03 |
+| DD2 | What is the evaluation flow? | Classify, append the ledger event, build facts, step 0, one batched step 1, combine, record, then answer | Design, approved 2026-10-03 |
+| DD3 | How are facts labelled? | Derived facts come from the repository and embedded catalog; asserted facts come from the dispatch input or lens output | Design, approved 2026-10-03 |
+| DD4 | What is the rule model? | A closed step-0 predicate set, an optional step-1 `ask`, and per-family effects; host overrides are limited by id | Design, approved 2026-10-03 |
+| DD5 | Which provider? | One `systemone` client for TypeSafe JEV and local Ollama; `none` by default; a state budget per model | Design, approved 2026-10-03 |
+| DD6 | How is the key resolved? | `TYPESAFE_API_KEY` for the TypeSafe origin, then the origin-bound OS credential store; never in configuration, argv, or logs | Design, approved 2026-10-03 |
+| DD7 | Who writes the ledger? | Only `hook` and `serve`; the CLI never appends; `audit` reports gaps | Design, approved 2026-10-03 |
+| DD8 | How does a hook behave? | One `hook` command with per-harness adapters, a plugin envelope for plugin harnesses, and a fail-closed top-level catch | Design, approved 2026-10-03 |
+| DD9 | What does the CLI expose? | `validate`, `rules`, `plan`, `eval`, `audit`, `setup`, `status`, `doctor`; `eval` is a dry run | Design, approved 2026-10-03 |
+| DD10 | What is the MCP fallback? | `serve` with `arbiter_evaluate`, `arbiter_rules`, `arbiter_status`; asserted routing facts; Phase 3 | Design, approved 2026-10-03 |
+| DD11 | How are non-allow outcomes delivered? | A fixed-order escalation envelope with `REPEAT` and `NEXT`; review notes `ARBITER_SKIP`, `ARBITER_VERIFIED`, `ARBITER_ANNOTATION` | Design, approved 2026-10-03 |
+| DD12 | How is the binary distributed? | Five release archives, `--no-arbiter`, Homebrew and npm resources, self-updater support, and a version probe | Design, approved 2026-10-03 |
+
+## Design harvest
+
+Scale: `documentation-impact: extends-component`, `impact-components: [KyberSquad]`.
+
+| ID | Design item | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Three-step evaluation model, trigger families, and the fixed `undecidable` mapping (D1, D6, D10, D11) | KyberSquad | architecture |
+| H2 | Rule model, the 18 permanent `KW-ARB-*` rules, host overrides, and the closed predicate set (D14, D30, D33) | KyberSquad | architecture |
+| H3 | Surfaces: the Core engine, the `kyber-weave-arbiter` binary (`hook`, `serve`), and the `arbiter` CLI (D2, D16, D22) | KyberSquad | architecture |
+| H4 | Facts, plan parser, header grammar, and trigger classification (D9, D21, D24, D25, D27) | KyberSquad | architecture |
+| H5 | Provider, credentials, configuration, and diagnostics (D17, D18, D19, D23) | KyberSquad | architecture |
+| H6 | Ledger, decision log, audit, escalation envelope, and review notes (D5, D15, D31) | KyberSquad | architecture |
+| H7 | Harness hooks, owned blocks, rendering, fail-closed behaviour, and the MCP fallback (D3, D4, D6, D7, D8, D12, D13) | KyberSquad | architecture |
+| H8 | Delivery phases, distribution, and size per phase (D20, D26, D28, D29, D32, D34) | KyberSquad | architecture |
+
+## Closeout mapping
+
+The durable design is harvested into the canonical
+[Kyber Arbiter architecture](../../../kyber-squad/arbiter.md) at `extends-component` scale,
+component KyberSquad. No ADR — ADR waiver: this design refines the existing Kyber-Squad
+architecture with no new external boundary, dependency, or schema; ADRs 0028 and 0029 are
+authored during delivery as the design requires.
+
+| ID | Destination |
+|---|---|
+| DD1 | [Surfaces](../../../kyber-squad/arbiter.md#surfaces) |
+| DD2 | [Three-step evaluation](../../../kyber-squad/arbiter.md#three-step-evaluation) |
+| DD3 | [Decision points and rules](../../../kyber-squad/arbiter.md#decision-points-and-rules) |
+| DD4 | [Decision points and rules](../../../kyber-squad/arbiter.md#decision-points-and-rules) |
+| DD5 | [Configuration](../../../kyber-squad/arbiter.md#configuration) |
+| DD6 | [Configuration](../../../kyber-squad/arbiter.md#configuration) |
+| DD7 | [Ledger, audit, and escalation](../../../kyber-squad/arbiter.md#ledger-audit-and-escalation) |
+| DD8 | [Harness support](../../../kyber-squad/arbiter.md#harness-support) |
+| DD9 | [Surfaces](../../../kyber-squad/arbiter.md#surfaces) |
+| DD10 | [Surfaces](../../../kyber-squad/arbiter.md#surfaces) |
+| DD11 | [Ledger, audit, and escalation](../../../kyber-squad/arbiter.md#ledger-audit-and-escalation) |
+| DD12 | [Delivery](../../../kyber-squad/arbiter.md#delivery) |
+| H1 | [Three-step evaluation](../../../kyber-squad/arbiter.md#three-step-evaluation) |
+| H2 | [Decision points and rules](../../../kyber-squad/arbiter.md#decision-points-and-rules) |
+| H3 | [Surfaces](../../../kyber-squad/arbiter.md#surfaces) |
+| H4 | [Decision points and rules](../../../kyber-squad/arbiter.md#decision-points-and-rules) |
+| H5 | [Configuration](../../../kyber-squad/arbiter.md#configuration) |
+| H6 | [Ledger, audit, and escalation](../../../kyber-squad/arbiter.md#ledger-audit-and-escalation) |
+| H7 | [Harness support](../../../kyber-squad/arbiter.md#harness-support) |
+| H8 | [Delivery](../../../kyber-squad/arbiter.md#delivery) |
