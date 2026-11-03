@@ -514,9 +514,12 @@ public sealed class ArbiterMcpPackagingTests
         foreach (string package in new[] { "ModelContextProtocol", "Microsoft.Extensions.Hosting" })
         {
             string? mcpVersion = PackageVersion(mcp, package);
-            Assert.True(mcpVersion is not null, $"KyberWeave.Mcp must pin '{package}'.");
+            string? arbiterVersion = PackageVersion(arbiter, package);
 
-            Assert.Equal(mcpVersion, PackageVersion(arbiter, package));
+            Assert.True(mcpVersion is not null, $"KyberWeave.Mcp must pin '{package}'.");
+            Assert.True(
+                string.Equals(mcpVersion, arbiterVersion, StringComparison.Ordinal),
+                $"'{package}' drifts: KyberWeave.Mcp pins {mcpVersion}, KyberWeave.Arbiter pins {arbiterVersion ?? "nothing"}.");
         }
     }
 
