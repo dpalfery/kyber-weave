@@ -183,10 +183,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>role-</c>-prefixed duplicate the way a genuinely primitive-less fallback target would.
 /// </para>
 /// </remarks>
-public sealed class PiRenderer : ISquadRenderer
+public sealed class PiRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".pi/agents";
-    private const string SkillsDirectory = ".pi/skills";
     private const string ArbiterExtensionFileRelativePath = ".pi/extensions/kyber-arbiter.ts";
 
     /// <summary>The MCP extension every agent carrying a derived overlay loads.</summary>
@@ -214,226 +212,105 @@ public sealed class PiRenderer : ISquadRenderer
     /// <c>delegate</c> is handled separately because an allowed, non-empty
     /// roster emits <c>allowed_subagents</c>, not a tool.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["read"]),
-        ("filesystem.search", ["grep", "find", "ls"]),
-        ("filesystem.write", ["edit", "write"]),
-        ("process.execute", ["bash"])
-    ];
-
-    /// <summary>
+    /// <remarks>
     /// Fixed <c>tools</c> CSV emission order, so a rendered agent file is byte-stable
     /// regardless of how the profile's permissions enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder = ["read", "grep", "find", "ls", "edit", "write", "bash"];
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["read"]),
+            ("filesystem.search", ["grep", "find", "ls"]),
+            ("filesystem.write", ["edit", "write"]),
+            ("process.execute", ["bash"])
+        ],
+        ["read", "grep", "find", "ls", "edit", "write", "bash"]);
 
     private static readonly HashSet<string> AllowedThinkingLevels = new(StringComparer.Ordinal)
     {
         "off", "minimal", "low", "medium", "high", "max"
     };
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
+    private static readonly SquadYamlEmitter Yaml = new(new SerializerBuilder()
         .WithTypeConverter(new PiExtensionsFlowSequenceConverter())
-        .Build();
+        .Build());
 
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Pi,
+        "Pi",
+        ".pi",
+        "agents",
+        SquadModelPolicy.InheritOmitted,
+        SquadLineBreaks.LineFeedOnly);
 
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public PiRenderer()
+        : base(HarnessSpec)
     {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".pi/", StringComparison.Ordinal)
-            ? baseDirectory[".pi/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Pi];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.Pi))
-        {
-            throw new ArgumentException(
-                "PiRenderer was asked to render a target other than Pi.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Pi);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        // Read upfront so the primary-agent fail-closed check (R3) can see whether a
-        // canonical skill already occupies the lowered identity before any file is built,
-        // regardless of which loop encounters the collision first.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in a lowered primary agent's
-        // permission-not-expressible details without a renderer change.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
         // Derived once: the roster and the adapter's naming rule are target-wide, so a
         // per-agent re-derivation could only produce the same list at greater cost.
-        IReadOnlyList<string> kyberWeaveOverlayTools =
-            ResolveKyberWeaveOverlayTools(source.Toolchain.RequiredMcpTools);
+        IReadOnlyList<string> kyberWeaveOverlayTools = context.GetOrCreateState(static c =>
+            ResolveKyberWeaveOverlayTools(c.Source.Toolchain.RequiredMcpTools));
 
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        foreach (SquadAgent agent in source.Agents)
+        if (agent.Invocation == SquadInvocation.Subagent)
         {
-            if (agent.Invocation == SquadInvocation.Subagent)
-            {
-                SquadDeploymentFile principal = RenderSubagentAgent(
-                    agent,
-                    source.ModelProfiles.Profiles,
-                    source.CapabilityProfiles.Profiles,
-                    kyberWeaveOverlayTools,
-                    request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                degradations.AddRange(BuildSubagentDegradations(agent, source.CapabilityProfiles.Profiles));
-                continue;
-            }
-
-            SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-            if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-            {
-                if (skillIdentities.Contains(agent.Name))
-                {
-                    if (sharedIdentities.Contains(agent.Name))
-                    {
-                        // The canonical skill is the entry point and is emitted by the skill
-                        // loop, so no lowered skill is emitted here; one identity, one
-                        // projection.
-                        degradations.AddRange(BuildPrimaryAgentDegradations(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            capabilityVocabulary,
-                            kyberWeaveOverlayTools,
-                            true));
-                        continue;
-                    }
-
-                    throw new SquadRenderValidationException(
-                        $"Cannot lower primary agent '{agent.Name}' to a Pi skill: a canonical " +
-                        $"skill named '{agent.Name}' already occupies that identity. Pi has " +
-                        "separate agent and skill namespaces with no role-prefixed fallback " +
-                        "mechanism, so this is a fail-closed condition rather than a naming " +
-                        "collision this renderer can resolve on its own.");
-                }
-
-                SquadDeploymentFile principal =
-                    RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                degradations.AddRange(BuildPrimaryAgentDegradations(
-                    agent,
-                    fallbackProfile,
-                    source.CapabilityProfiles.Profiles,
-                    capabilityVocabulary,
-                    kyberWeaveOverlayTools));
-            }
-            else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-            {
-                degradations.Add(new SquadDegradationRecord(
-                    "pi",
-                    agent.Name,
-                    agent.Name,
-                    "omitted",
-                    agent.BodyDigest,
-                    $"Fallback profile '{agent.Fallback}' declares " +
-                    "no-primary-agent: omit; Pi has no primary-agent primitive for this " +
-                    "agent to render onto, so no file is emitted."));
-            }
-            else
-            {
-                throw new SquadRenderValidationException(
-                    $"Fallback profile '{agent.Fallback}' declares unsupported " +
-                    $"no-primary-agent value '{fallbackProfile.NoPrimaryAgent}' for primary " +
-                    $"agent '{agent.Name}'.");
-            }
+            context.AddPrincipal(RenderSubagentAgent(context, agent, kyberWeaveOverlayTools), agent.Resources);
+            context.Degradations.AddRange(BuildSubagentDegradations(agent, context.CapabilityProfiles));
+            return;
         }
 
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection, per the same
-            // rule ClaudeRenderer follows. Resolved from source so a fallbacks.yml change is
-            // honored without a renderer change. A primary shared identity is the exception:
-            // its canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
+        // R3: a lowered identity a canonical skill already holds fails closed (ADR 0019).
+        context.AddLoweredPrimaryAgent(
+            agent,
+            () =>
+                $"Cannot lower primary agent '{agent.Name}' to a Pi skill: a canonical " +
+                $"skill named '{agent.Name}' already occupies that identity. Pi has " +
+                "separate agent and skill namespaces with no role-prefixed fallback " +
+                "mechanism, so this is a fail-closed condition rather than a naming " +
+                "collision this renderer can resolve on its own.",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml),
+            (fallbackProfile, reused) => BuildPrimaryAgentDegradations(
+                agent,
+                fallbackProfile,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                kyberWeaveOverlayTools,
+                reused));
+    }
 
-            SquadDeploymentFile principal =
-                RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
+    private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
+        context.EmitCanonicalSkills(skill =>
+            context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
 
-        // A null Arbiter must render byte for byte as before the field existed, so the
-        // guard lives here: only an enabled wiring at Project scope emits the owned
-        // extension shim. Under Global scope there is no project configuration to enforce
-        // from (Req 22.2).
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+    /// <summary>The owned extension shim, only for an enabled wiring at project scope (Req 22.2).</summary>
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is { } arbiter)
         {
-            files.Add(new SquadDeploymentFile(
+            context.Files.Add(context.CreateFile(
                 ArbiterExtensionFileRelativePath,
-                Encoding.UTF8.GetBytes(RenderArbiterExtension(request.Arbiter.HookTimeoutSeconds)),
-                "pi"));
+                RenderArbiterExtension(arbiter.HookTimeoutSeconds)));
         }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
     }
 
     private static SquadDeploymentFile RenderSubagentAgent(
+        SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> mcpOverlayTools,
-        SquadDeploymentScope scope)
+        IReadOnlyList<string> mcpOverlayTools)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = CollapseToSingleLine(agent.Description)
+            ["description"] = context.SingleLine(agent.Description)
         };
 
-        (string? model, string? thinkingLevel) = ResolvePiModelAndThinking(agent, modelProfiles);
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles = context.CapabilityProfiles;
+        string? resolvedModel = context.ResolveModel(agent);
+        (string? model, string? thinkingLevel) = resolvedModel is null
+            ? (null, null)
+            : ParseThinkingSuffix(resolvedModel);
         if (model is not null)
         {
             frontmatter["model"] = model;
@@ -453,10 +330,10 @@ public sealed class PiRenderer : ISquadRenderer
             CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles);
 
         // Always emit tools: omitting the key grants every built-in (widening). The
-        // capability-derived CSV comes first in the fixed ToolOrder; the declared pi-tools
+        // capability-derived CSV comes first in the fixed tool order; the declared pi-tools
         // overlay entries follow in declared canonical order, then the derived ones.
         IReadOnlyList<string> tools = MergeTools(
-            ResolveTools(agent, capabilityProfiles),
+            Tools.Resolve(agent.CapabilityProfile, capabilityProfiles),
             agent.PiTools,
             carriesMcpOverlay ? mcpOverlayTools : []);
         frontmatter["tools"] = tools.Count == 0 ? "none" : string.Join(", ", tools);
@@ -473,40 +350,9 @@ public sealed class PiRenderer : ISquadRenderer
             frontmatter["allowed_subagents"] = string.Join(", ", agent.DelegatesTo);
         }
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            "pi");
-    }
-
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody,
-        SquadDeploymentScope scope)
-    {
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = name,
-            ["description"] = CollapseToSingleLine(description),
-            ["license"] = "MIT"
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, instructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "pi");
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            Yaml.Compose(frontmatter, agent.InstructionBody));
     }
 
     /// <summary>
@@ -717,72 +563,6 @@ public sealed class PiRenderer : ISquadRenderer
         }
 
         return (bareModel, level);
-    }
-
-    /// <summary>
-    /// Resolves the harness-specific model and optional thinking level. Mirrors
-    /// <c>ClaudeRenderer.ResolveClaudeModel</c> (R12): the <c>pi</c> harness override when
-    /// the model profile declares one, otherwise the target-neutral <c>default</c>; either an
-    /// explicit or a defaulted <c>inherit</c> omits both keys.
-    /// </summary>
-    private static (string? Model, string? ThinkingLevel) ResolvePiModelAndThinking(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return (null, null);
-        }
-
-        string? resolvedModel;
-        if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
-        {
-            resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
-        }
-        else
-        {
-            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
-                ? null
-                : profile.Default;
-        }
-
-        if (resolvedModel is null)
-        {
-            return (null, null);
-        }
-
-        return ParseThinkingSuffix(resolvedModel);
-    }
-
-    /// <summary>
-    /// Lowers a capability profile onto Pi's closed <c>tools</c> vocabulary. Only
-    /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
-    /// withhold, which keeps the lowering non-broadening by construction. An unresolvable
-    /// profile grants nothing, mirroring <c>ClaudeRenderer.ResolveTools</c>'s safe-deny
-    /// fallback rather than turning a source error into silent widening.
-    /// </summary>
-    private static IReadOnlyList<string> ResolveTools(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        HashSet<string> granted = new(StringComparer.Ordinal);
-
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
-        {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    foreach (string tool in tools)
-                    {
-                        granted.Add(tool);
-                    }
-                }
-            }
-        }
-
-        return ToolOrder.Where(granted.Contains).ToArray();
     }
 
     /// <summary>
@@ -1050,14 +830,6 @@ public sealed class PiRenderer : ISquadRenderer
                   "this entry point reaches that server only if the session it runs in already " +
                   "has it configured."
                 : string.Empty));
-    }
-
-    private static string CollapseToSingleLine(string value)
-    {
-        return string.Join(
-            ' ',
-            value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     /// <summary>
