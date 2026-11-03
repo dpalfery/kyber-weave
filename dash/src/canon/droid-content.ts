@@ -1,11 +1,21 @@
 // The Factory (Droid) content gate.
 //
-// Factory reaches KyberDash through two routes. The Kyber-owned plugin gates its own
-// prompt at emission and publishes BYTE COUNTS for tool arguments and results, so it
-// carries no content to gate. Factory's NATIVE OpenTelemetry export carries the prompt,
-// the reply, the tool arguments and the tool result as span attributes whenever the
-// harness's own content switch is on — and that route lands in the canon store through
-// the ingest seam, so the gate belongs beside it.
+// Factory reaches KyberDash through two routes, and BOTH of them can carry the owner's
+// text:
+//
+//   * the Kyber-owned plugin publishes the owner's prompt text under
+//     `factory.turn.prompt.text`. It gates that text at EMISSION — the plugin reads
+//     the consent file when it maps the span — but the emission gate is not the last
+//     gate: a span the plugin PARKED because the delivery failed is re-delivered
+//     later WITHOUT the consent being read again. The gate therefore exists here,
+//     at the canon seam, precisely because the plugin's envelope carries content;
+//   * Factory's NATIVE OpenTelemetry export carries the prompt, the reply, the tool
+//     arguments and the tool result as span attributes whenever the harness's own
+//     content switch is on.
+//
+// The plugin's TOOL attributes stay off the content list on purpose: the plugin
+// publishes tool arguments and results as BYTE COUNTS, never as content, so there is
+// nothing there to strip.
 //
 // This module holds three things: the owner's consent decision, what a Factory span
 // looks like, and the bounded memory of the Factory traces that have been seen.
@@ -87,9 +97,14 @@ export const FACTORY_LEGACY_SPAN_PREFIX = 'droid.'
  *
  * These are the attributes that carry the owner's text: the prompt and the reply
  * (`gen_ai.input.messages`, `gen_ai.output.messages`), the tool arguments and the tool
- * result (`gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`), and the `legacy`
- * format's own message text (`message.content`). Everything else is a measurement —
- * the session, the conversation, the model, the counters — and survives the gate.
+ * result (`gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`), the `legacy`
+ * format's own message text (`message.content`), and the plugin envelope's own prompt
+ * text (`factory.turn.prompt.text`). Everything else is a measurement — the session,
+ * the conversation, the model, the counters — and survives the gate.
+ *
+ * The plugin's TOOL attributes are not on the list: the plugin publishes tool
+ * arguments and results as BYTE COUNTS, never as content, so there is nothing there
+ * to strip.
  */
 export const FACTORY_CONTENT_ATTRIBUTES = [
   'gen_ai.input.messages',
@@ -97,6 +112,7 @@ export const FACTORY_CONTENT_ATTRIBUTES = [
   'gen_ai.tool.call.arguments',
   'gen_ai.tool.call.result',
   'message.content',
+  'factory.turn.prompt.text',
 ] as const
 
 /** True for one of Factory's own `legacy`-format span names. */

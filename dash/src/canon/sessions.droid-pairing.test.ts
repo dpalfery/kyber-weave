@@ -117,7 +117,18 @@ const MAP_CHILD_CACHE_READ = FILE_CACHE_READ + CHILD_CACHE_READ
 const MAP_CHILD_THINKING = FILE_THINKING + CHILD_THINKING
 
 /** The telemetry source the Kyber-owned Factory plugin's export arrives under. */
-const PLUGIN_SOURCE = 'kyberdash-droid-plugin'
+const PLUGIN_SOURCE = 'kyberdash-factory-plugin'
+
+/** The plugin turn span's own duration: the millis its OTLP span reports. */
+const PLUGIN_TURN_DURATION_MS = 1000
+
+/**
+ * The duration the file row carries.
+ *
+ * The file source's own row reports no duration of its own, so a case gives it
+ * one: the session's duration then says which records the session added.
+ */
+const FILE_ROW_DURATION_MS = 5000
 
 /** The contract version the Kyber-owned plugin emits. */
 const CONTRACT_VERSION = '1'
@@ -261,7 +272,7 @@ function otlpSpan(
     startTimeUnixNano: '1793337355759000000',
     endTimeUnixNano: '1793337363002000000',
     timestamp,
-    durationMs: 1000,
+    durationMs: PLUGIN_TURN_DURATION_MS,
     status: { code: 'unset' },
     resource: { 'service.name': PLUGIN_SOURCE },
     scope: {},
@@ -510,6 +521,38 @@ describe('the Factory session pairing rule', () => {
       const rows = [...store.iterateSessions()]
       expect(rows).toHaveLength(1)
       expect(rows[0]!.harness).toBe('droid')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('pairs a plugin row reported under the plugin\'s own service name with the file row, so the file row is no turn and adds no duration', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      // The plugin row arrives under the `service.name` the plugin itself
+      // reports, which is what becomes the row's source.
+      ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+
+      // The file row carries a duration of its own, so the session's duration
+      // says which records the session added.
+      const file = await fileRow(SESSION_ID)
+      file.durationMs = FILE_ROW_DURATION_MS
+      store.upsertMany([file])
+
+      await buildSessions(store)
+
+      const summary = summaryOf(store, SESSION_ID)
+
+      // The file row is the COUNTER source of the turn the plugin source
+      // reported: it is not a turn of its own, so it is not a timeline entry.
+      expect(summary.turn_count).toBe(1)
+
+      // And its duration is not added to the session's: the session's duration
+      // is its turns' duration.
+      expect(summary.duration_ms).toBe(PLUGIN_TURN_DURATION_MS)
+      expect(summary.duration_ms).not.toBe(PLUGIN_TURN_DURATION_MS + FILE_ROW_DURATION_MS)
     } finally {
       store.close()
     }

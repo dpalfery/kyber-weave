@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ADAPTERS, ingestBatch, ingestBatchWithAdapters } from './ingest.js'
+import { FACTORY_CONTENT_ATTRIBUTES, stripFactoryContent } from './droid-content.js'
 import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { buildSessions } from './sessions.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
@@ -1298,8 +1299,14 @@ describe('ingestBatch — the withdrawn native Factory claim', () => {
 //      records.
 //   3. The file source's own records are untouched: its `userMessage` fragment is
 //      the owner's transcript, read by a different route (D57).
-//   4. The plugin route is untouched: its prompt attribute is gated at emission
-//      (D61), and the gate here does not touch `factory.*`.
+//   4. The plugin route is gated here too. Its prompt attribute is gated at
+//      emission (D61), but the emission gate reads the consent file at the moment
+//      the span is mapped, and a span the plugin PARKED because the delivery
+//      failed is re-delivered later WITHOUT the consent being read again. The
+//      store-side gate is therefore the last line that can keep the owner's
+//      prompt text out of the corpus: a plugin envelope carrying
+//      `factory.turn.prompt.text` must not reach the store while the consent
+//      says off — and the envelope's identity attributes survive the gate.
 //
 // The consent file lives in the owner's home. Every case below points HOME at a
 // throwaway directory, so no case ever reads the owner's real file.
@@ -1633,12 +1640,15 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
     store.close()
   })
 
-  it('leaves the plugin route unchanged', () => {
+  it('stores no plugin prompt text while the consent is off, and keeps the envelope\'s identity', () => {
     const store = new CanonStore(':memory:')
     process.env['HOME'] = consentHome('{"version":1,"content":false}')
 
     // The plugin's own prompt attribute is gated at emission, by the plugin's own
-    // consent read (D61). The gate here does not touch the plugin route.
+    // consent read (D61) — but the emission gate is not the last gate, and it is
+    // not the only one. A span the plugin parked while the consent was on is
+    // re-delivered later without the consent being read again, so the store-side
+    // gate is what keeps the owner's prompt text out of the corpus.
     ingestBatch(
       [
         span(
@@ -1646,6 +1656,7 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
             'factory.contract_version': '1',
             'factory.session.id': NATIVE_SESSION,
             'factory.model.id': 'gpt-5-codex',
+            'factory.tool.name': NATIVE_TOOL,
             'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
           },
           {
@@ -1662,7 +1673,124 @@ describe('ingestBatch — the Factory content consent gate (T42)', () => {
     const record = store.get('plugin-content')
     expect(record?.harness).toBe('droid')
     const pluginRaw = (record?.raw ?? {}) as Record<string, unknown>
-    expect(pluginRaw['factory.turn.prompt.text']).toBe(FACTORY_PROMPT_TEXT)
+
+    // The owner's prompt text does not reach the stored record.
+    expect(
+      pluginRaw['factory.turn.prompt.text'],
+      'the plugin envelope must carry no prompt text while the consent is off',
+    ).toBeUndefined()
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, 'the plugin envelope must carry no prompt text in its parts').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+
+    // The envelope's identity survives the gate: the span id, the session id,
+    // the model and the tool name describe the call, and they are not the
+    // owner's text.
+    expect(record?.spanId).toBe('plugin-content')
+    expect(record?.sessionId).toBe(NATIVE_SESSION)
+    expect(pluginRaw['factory.session.id']).toBe(NATIVE_SESSION)
+    expect(pluginRaw['factory.model.id']).toBe('gpt-5-codex')
+    expect(pluginRaw['factory.tool.name']).toBe(NATIVE_TOOL)
+    expect(pluginRaw['gen_ai.tool.name']).toBe(NATIVE_TOOL)
+    store.close()
+  })
+
+  it('stores no plugin prompt text for a span the plugin parked while the consent was on and re-delivered after it was turned off', () => {
+    const store = new CanonStore(':memory:')
+
+    // The consent is ON when the plugin maps the span, so the plugin's own
+    // emission gate lets the prompt text travel. The delivery failed, so the
+    // span is parked in the plugin's file-backed spool.
+    process.env['HOME'] = consentHome('{"version":1,"content":true}')
+    const parked = span(
+      {
+        'factory.contract_version': '1',
+        'factory.session.id': NATIVE_SESSION,
+        'factory.model.id': 'gpt-5-codex',
+        'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+      },
+      {
+        spanId: 'plugin-parked',
+        name: 'factory.turn',
+        traceId: 'trace-plugin-parked',
+        resource: { 'service.name': PLUGIN_SOURCE },
+      },
+    )
+    ingestBatch([parked], store)
+    const parkedRaw = (store.get('plugin-parked')?.raw ?? {}) as Record<string, unknown>
+    expect(
+      parkedRaw['factory.turn.prompt.text'],
+      'the parked span carried the prompt text while the consent was on',
+    ).toBe(FACTORY_PROMPT_TEXT)
+
+    // The owner turns the consent off. The spool re-delivers the parked span
+    // as it was mapped — the drain does not read the consent file again — so
+    // the span arrives carrying the owner's prompt text while the consent
+    // says off.
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+    ingestBatch([parked], store)
+
+    const record = store.get('plugin-parked')
+    const raw = (record?.raw ?? {}) as Record<string, unknown>
+    expect(
+      raw['factory.turn.prompt.text'],
+      'the re-delivered parked span must carry no prompt text while the consent is off',
+    ).toBeUndefined()
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, 'the re-delivered parked span must carry no prompt text in its parts').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('lists the plugin envelope\'s own prompt attribute among the attributes the gate strips', () => {
+    // The gate can only strip an attribute that is ON ITS LIST. The plugin's own
+    // prompt attribute was not on it, so nothing the gate did could take the
+    // owner's prompt text off a span that carried it.
+    const contentAttributes: readonly string[] = FACTORY_CONTENT_ATTRIBUTES
+    expect(
+      contentAttributes,
+      'the plugin envelope\'s prompt attribute must be on the gate\'s content list',
+    ).toContain('factory.turn.prompt.text')
+
+    // And the list is what the strip acts on: the text goes, the identity stays.
+    const stripped = stripFactoryContent({
+      'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+      'factory.session.id': NATIVE_SESSION,
+    })
+    expect(stripped['factory.turn.prompt.text']).toBeUndefined()
+    expect(stripped['factory.session.id']).toBe(NATIVE_SESSION)
+  })
+
+  it('stores no plugin prompt text carried by a native Factory span either', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // A span Factory's OWN export sent, carrying the plugin's prompt attribute.
+    // The gate owns the span (the agent identity names it Factory's), so the
+    // gate is what takes the text off it — and it can only take off what its
+    // list names. The attribute sits in the `factory.` namespace, so the
+    // envelope marker claims the span and the contract-version guard holds it
+    // back: the quarantine packet is where a span nothing stored keeps its
+    // text, and the text must not be there.
+    ingestBatch(
+      [
+        nativeRootSpan('native-with-plugin-prompt', {
+          traceId: 'trace-native-with-plugin-prompt',
+          attributes: {
+            ...nativeAttributes(),
+            'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+          },
+        }),
+      ],
+      store,
+    )
+
+    const packet = store.getQuarantine('native-with-plugin-prompt')?.rawPayload ?? ''
+    expect(packet, 'the native span must not carry the plugin prompt text').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
     store.close()
   })
 })

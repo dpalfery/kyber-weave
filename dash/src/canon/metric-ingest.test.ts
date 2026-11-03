@@ -20,9 +20,12 @@
 //   * THE SOURCE, NOT A HARNESS — the exporter's `service.name` is the row's
 //     source. A metric point has no span, so it carries no adapter
 //     fingerprint and no harness id.
-//   * THE SCHEMA VERSION DOES NOT MOVE — the table is created by the store's
-//     schema, which the store applies on every open, so no migration step is
-//     needed (the `model_context_window_catalog` precedent).
+//   * THE TABLE NEEDS NO MIGRATION STEP OF ITS OWN — it is created by the
+//     store's schema, which the store applies on every open, so it costs no
+//     migration (the `model_context_window_catalog` precedent). The schema
+//     version DID move once, for the point's interval column: a column
+//     cannot be added by the schema's IF NOT EXISTS, so it costs a migration
+//     step of its own (v22 -> v23).
 //   * THE WIPE — the full corpus wipe clears the rows; a scoped per-harness
 //     wipe does not, because their attribution is unknown.
 //
@@ -68,6 +71,10 @@ type MetricPointRow = {
   aggregationTemporality?: number | null
   timestamp?: string | null
   timeUnixNano?: string | null
+  /** The interval the point's measurement starts at, in Unix nanoseconds. */
+  startTimeUnixNano?: string | null
+  /** The same interval under the name a store may keep it in. */
+  intervalStartUnixNano?: string | null
   value?: number | null
   count?: number | null
   sum?: number | null
@@ -136,6 +143,19 @@ function pointTimestamp(row: MetricPointRow): string | null {
   return row.timestamp ?? row.timeUnixNano ?? null
 }
 
+/**
+ * The interval the point's measurement starts at, under either name the store
+ * may keep it in.
+ *
+ * The decoded point's own field is `startTimeUnixNano` — the nanoseconds,
+ * verbatim, the point arrived with — and the row's own spelling of the
+ * OBSERVATION time is `timeUnixNano`, so `startTimeUnixNano` is the name the
+ * row is expected to carry the interval under.
+ */
+function intervalStartOf(row: MetricPointRow): string | null | undefined {
+  return row.startTimeUnixNano ?? row.intervalStartUnixNano
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures — decoded from the OTLP/JSON the receiver actually accepts
 // ---------------------------------------------------------------------------
@@ -146,6 +166,10 @@ const SERVICE_NAME = 'droid'
 const SCOPE: OtlpScope = { name: 'droid.telemetry', version: '1.0.0' }
 /** The point's timestamp as it arrived: Unix nanoseconds. */
 const POINT_TIME_NANOS = '1756478400123456789'
+/** The interval a point's measurement starts at, as the exporter sent it. */
+const FIRST_INTERVAL_START_NANOS = '1756478300000000000'
+/** A second interval: the same measurement, over a different window. */
+const SECOND_INTERVAL_START_NANOS = '1756478350000000000'
 /** A metric name from Factory's native `legacy` namespace. */
 const GAUGE_NAME = 'droid.code.files_modified'
 /** A metric name from Factory's native `genai` namespace. */
@@ -157,6 +181,8 @@ type PointJson = {
   sum?: number
   attributes?: Record<string, string>
   timeUnixNano?: string
+  /** The interval the point's measurement starts at, as Unix nanoseconds. */
+  startTimeUnixNano?: string
 }
 
 /** One OTLP/JSON data point. A field left out is a field the point lacks. */
@@ -166,6 +192,7 @@ function otlpPoint(point: PointJson): unknown {
     ...(point.count === undefined ? {} : { count: String(point.count) }),
     ...(point.sum === undefined ? {} : { sum: point.sum }),
     timeUnixNano: point.timeUnixNano ?? POINT_TIME_NANOS,
+    ...(point.startTimeUnixNano === undefined ? {} : { startTimeUnixNano: point.startTimeUnixNano }),
     attributes: Object.entries(point.attributes ?? {}).map(([key, value]) => ({
       key,
       value: { stringValue: value },
@@ -376,15 +403,18 @@ describe('the canon store as the native OTLP metrics destination', () => {
     }
   })
 
-  it('adds the metrics table without moving the schema version', () => {
+  it('adds the metrics table without a migration step of its own', () => {
     const store = new CanonStore(':memory:')
     try {
       // The table is created by the store's schema, which the store applies on
       // every open with IF NOT EXISTS — the `model_context_window_catalog`
-      // precedent. A table that needs no migration step costs no version bump.
+      // precedent. A table that needs no migration step costs no version bump
+      // of its own. The version moved once, for the point's interval column:
+      // a column cannot be added by the schema's IF NOT EXISTS, so it costs a
+      // migration step of its own (v22 -> v23).
       expect(SCHEMA_SQL).toMatch(/CREATE TABLE IF NOT EXISTS\s+\w*metric/i)
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(22)
+      expect(SCHEMA_VERSION).toBe(23)
     } finally {
       store.close()
     }
@@ -421,6 +451,68 @@ describe('the canon store as the native OTLP metrics destination', () => {
       }
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps two points that differ only in their interval start as two rows', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const capable = metricsStore(store)
+      capable.upsertMetrics(
+        decode([
+          gauge([
+            {
+              value: 4200,
+              attributes: { 'session.id': 'session-a' },
+              startTimeUnixNano: FIRST_INTERVAL_START_NANOS,
+            },
+            {
+              value: 4200,
+              attributes: { 'session.id': 'session-a' },
+              startTimeUnixNano: SECOND_INTERVAL_START_NANOS,
+            },
+          ]),
+        ]),
+      )
+
+      // The two points differ ONLY in the interval their measurement covers:
+      // the same name, kind, unit, temporality, observation time, value,
+      // attributes, resource, scope and source. The interval is part of the
+      // point, so it is part of the point's identity: the second point is its
+      // OWN row, not an update of the first one.
+      const rows = capable.getMetricPoints()
+      expect(rows).toHaveLength(2)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('stores the point\'s interval start, so it can be recovered', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const capable = metricsStore(store)
+      capable.upsertMetrics(
+        decode([
+          gauge([
+            {
+              value: 4200,
+              attributes: { 'session.id': 'session-a' },
+              startTimeUnixNano: FIRST_INTERVAL_START_NANOS,
+            },
+          ]),
+        ]),
+      )
+
+      const rows = capable.getMetricPoints()
+      expect(rows).toHaveLength(1)
+      // The interval is STORED, not merely digested: a reader can recover the
+      // window the measurement covers.
+      expect(
+        intervalStartOf(rows[0]!),
+        'the stored row must carry the interval the point declared',
+      ).toBe(FIRST_INTERVAL_START_NANOS)
+    } finally {
+      store.close()
     }
   })
 

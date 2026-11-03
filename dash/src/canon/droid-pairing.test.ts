@@ -26,7 +26,14 @@
 //   * a session ONLY THE FILE SOURCE observed claims no turn: the file
 //     record is the counter source, and the session's own turn is the one
 //     the default path finds, with no plugin turn to take it from;
-//   * a session of ANOTHER HARNESS is not split at all.
+//   * a session of ANOTHER HARNESS is not split at all;
+//   * the plugin source is the name the plugin ITSELF reports — the
+//     `service.name` its OTLP resource carries — so the pairing fires for
+//     the source that really arrives, and the name is read from the
+//     plugin's own source rather than repeated here;
+//   * the split is TOTAL: every droid record lands in exactly one bucket,
+//     and a record of neither source is a turn record rather than a record
+//     that vanishes.
 //
 // The helper belongs in `./droid-pairing.ts`. It is loaded through a runtime
 // specifier on purpose: a literal import would fail the typecheck while the
@@ -35,6 +42,9 @@
 // this contract describes.
 
 import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { CanonicalRecord } from './types.js'
 
@@ -119,7 +129,7 @@ function canonicalRecord(over: {
 const PLUGIN_RECORD = canonicalRecord({
   spanId: 'plugin-turn-factory-session-1',
   name: 'factory.turn',
-  source: 'kyberdash-droid-plugin',
+  source: 'kyberdash-factory-plugin',
 })
 
 /** The file source's record — the source that knows the counters. */
@@ -136,6 +146,52 @@ const OTHER_HARNESS_RECORD = canonicalRecord({
   source: 'codeburn/claude',
   harness: 'claude',
 })
+
+/** A droid record of NEITHER source: the plugin's is not it, and it is not file-sourced. */
+const OTHER_SOURCE_RECORD = canonicalRecord({
+  spanId: 'native-turn-factory-session-1',
+  name: 'gen_ai.chat',
+  source: 'droid-native-export',
+})
+
+// ---------------------------------------------------------------------------
+// The plugin's own service name
+// ---------------------------------------------------------------------------
+
+/** The plugin bundle's own source directory, where its service name lives. */
+const PLUGIN_SOURCE_DIR = fileURLToPath(
+  new URL('../capture/harnesses/factory-plugin/', import.meta.url),
+)
+
+/**
+ * The `service.name` the Factory plugin's own export reports.
+ *
+ * The name is the plugin's own constant, and it becomes the canon record's
+ * source — so the pairing has to recognise THIS name and no other. It is read
+ * from the plugin's own source rather than repeated here, so this file cannot
+ * drift away from the plugin: rename the plugin's service and this file
+ * follows it, and the pairing has to follow it too.
+ *
+ * The name must be ONE constant: two spellings of it in the plugin bundle is
+ * itself the drift this guard exists to catch.
+ */
+function pluginServiceName(): string {
+  const found = new Set<string>()
+  for (const entry of readdirSync(PLUGIN_SOURCE_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
+    if (entry.name.endsWith('.test.ts')) continue
+    const text = readFileSync(join(PLUGIN_SOURCE_DIR, entry.name), 'utf8')
+    for (const match of text.matchAll(/SERVICE_NAME\s*=\s*'([^']+)'/g)) found.add(match[1]!)
+  }
+  if (found.size !== 1) {
+    throw new Error(
+      `the Factory plugin's service name must be ONE constant; found ${
+        [...found].join(', ') || 'none'
+      } in ${PLUGIN_SOURCE_DIR}`,
+    )
+  }
+  return [...found][0]!
+}
 
 describe('the Droid pairing split', () => {
   it('splits a session both sources observed into the plugin turns and the file counters', async () => {
@@ -175,6 +231,52 @@ describe('the Droid pairing split', () => {
     const result = split([OTHER_HARNESS_RECORD])
 
     expect(result.turnRecords).toEqual([])
+    expect(result.counterRecords).toEqual([])
+  })
+
+  it('treats the plugin\'s own service name as the plugin source, so the pairing fires for the name the plugin really reports', async () => {
+    const split = await loadSplitHelper()
+    const serviceName = pluginServiceName()
+
+    // The record the plugin's own export produces: its source IS the name the
+    // plugin reports, and the pairing has to recognise that name.
+    const result = split([
+      canonicalRecord({
+        spanId: 'plugin-turn-real-source',
+        name: 'factory.turn',
+        source: serviceName,
+      }),
+    ])
+
+    expect(result.turnRecords.map((record) => record.spanId)).toEqual(['plugin-turn-real-source'])
+    expect(result.counterRecords).toEqual([])
+  })
+
+  it('splits a session the plugin\'s own service name and the file source both observed into the plugin turns and the file counters', async () => {
+    const split = await loadSplitHelper()
+    const serviceName = pluginServiceName()
+
+    const pluginRecord = canonicalRecord({
+      spanId: 'plugin-turn-real-source',
+      name: 'factory.turn',
+      source: serviceName,
+    })
+
+    const result = split([FILE_RECORD, pluginRecord])
+
+    expect(result.turnRecords.map((record) => record.spanId)).toEqual([pluginRecord.spanId])
+    expect(result.counterRecords.map((record) => record.spanId)).toEqual([FILE_RECORD.spanId])
+  })
+
+  it('keeps a droid record of neither source as a turn record, so no record vanishes', async () => {
+    const split = await loadSplitHelper()
+
+    // The record is Factory's, but it came from neither the plugin nor the
+    // file source. It belongs to a bucket: the split is total, so a record
+    // never falls through both branches and disappears.
+    const result = split([OTHER_SOURCE_RECORD])
+
+    expect(result.turnRecords.map((record) => record.spanId)).toEqual([OTHER_SOURCE_RECORD.spanId])
     expect(result.counterRecords).toEqual([])
   })
 })

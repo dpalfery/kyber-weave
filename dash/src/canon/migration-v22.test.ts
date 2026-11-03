@@ -355,7 +355,7 @@ function sessionPayloadOf(store: CanonStore, sessionId: string): string {
  */
 describe('schema migration v21 -> v22 (session turns child table)', () => {
   it('pins SCHEMA_VERSION to 22 and defines migration 21 as its own step', () => {
-    expect(SCHEMA_VERSION).toBe(22)
+    expect(SCHEMA_VERSION).toBe(23)
     expect(MIGRATIONS[21]).toBeTypeOf('function')
   })
 
@@ -365,7 +365,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
     const path = join(dir, 'canon.db')
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
 
       // The child table exists and carries at least the three contracted
       // roles: the owning session, the turn index, and the turn JSON.
@@ -400,7 +400,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
 
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
 
       // Every turn of every session landed in the child table: 3 + 1.
       const rows = allSessionTurnRows(store.getDatabase())
@@ -423,7 +423,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
     const path = v21StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
       const rows = allSessionTurnRows(store.getDatabase())
 
       // The three-turn session: every row names its session, every turn
@@ -468,7 +468,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
     const path = v21StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
 
       const rows = allSessionTurnRows(store.getDatabase())
       expect(rowsForSession(rows, 'sess-no-turns')).toHaveLength(0)
@@ -484,7 +484,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('22')
+      expect(reopened.getMetadata('schema_version')).toBe('23')
     } finally {
       reopened.close()
     }
@@ -539,7 +539,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
     const path = v21StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
 
       const rows = store
         .getDatabase()
@@ -564,7 +564,7 @@ describe('schema migration v21 -> v22 (session turns child table)', () => {
     const store = new CanonStore(path)
     try {
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(22)
+      expect(SCHEMA_VERSION).toBe(23)
     } finally {
       store.close()
     }

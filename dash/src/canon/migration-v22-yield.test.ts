@@ -349,6 +349,6 @@ describe('schema migration v21 -> v22 yields between sessions', () => {
     expect(turnRows(yielding)).toEqual(turnRows(synchronous))
     expect(sessionRows(yielding)).toEqual(sessionRows(synchronous))
     expect(turnRows(yielding)).toHaveLength(9)
-    expect(schemaVersionOf(yielding)).toBe('22')
+    expect(schemaVersionOf(yielding)).toBe('23')
   })
 })
