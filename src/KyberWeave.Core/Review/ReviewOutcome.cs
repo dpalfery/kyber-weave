@@ -18,10 +18,12 @@ public sealed record ReviewOutcome(
     /// <summary>The exit code a command should return for this verdict.</summary>
     /// <remarks>
     /// Returns 0 for <see cref="ReviewVerdict.Approve"/> and 1 for <see cref="ReviewVerdict.RequestChanges"/>.
+    /// An undefined enum value returns 2 so it cannot be mistaken for a real verdict.
     /// </remarks>
     public int ExitCode => Verdict switch
     {
         ReviewVerdict.Approve => 0,
-        _ => 1
+        ReviewVerdict.RequestChanges => 1,
+        _ => 2
     };
 }

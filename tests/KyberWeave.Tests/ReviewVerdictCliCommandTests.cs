@@ -33,7 +33,9 @@ public sealed class ReviewVerdictCliCommandTests
             : program[verdictIndex..];
 
         Assert.DoesNotContain("needs-human", verdictRegistration, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Compute approve / request-changes from findings and gates.", verdictRegistration, StringComparison.Ordinal);
+        Assert.Contains("ReviewVerdictCommand.Description", verdictRegistration, StringComparison.Ordinal);
+        Assert.DoesNotContain("needs-human", ReviewVerdictCommand.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approve / request-changes", ReviewVerdictCommand.Description, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -187,7 +189,7 @@ public sealed class ReviewVerdictCliCommandTests
             {
                 review.SetDescription("Run the declared review gates and compute the review verdict.");
                 review.AddCommand<ReviewVerdictCommand>("verdict")
-                    .WithDescription("Compute approve / request-changes from findings and gates.")
+                    .WithDescription(ReviewVerdictCommand.Description)
                     .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
             });
         });

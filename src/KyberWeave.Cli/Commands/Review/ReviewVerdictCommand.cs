@@ -10,6 +10,9 @@ namespace KyberWeave.Cli.Commands.Review;
 /// </summary>
 public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
 {
+    /// <summary>The command description shared by the real registration and the help tests.</summary>
+    public const string Description = "Compute approve / request-changes from findings and gates.";
+
     private const string UnreadableInput = "KW-REVIEW-023";
     private const string Verdict = "KW-REVIEW-024";
 
@@ -74,7 +77,10 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     {
         ReviewVerdict.Approve => "APPROVE",
         ReviewVerdict.RequestChanges => "REQUEST CHANGES",
-        _ => verdict.ToString()
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(verdict),
+            verdict,
+            "The review verdict is not a defined value.")
     };
 
     private static bool TryRead<T>(

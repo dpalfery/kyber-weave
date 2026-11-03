@@ -371,6 +371,18 @@ public class ReviewVerdictTests
         Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-011");
     }
 
+    /// <summary>
+    /// An undefined verdict must surface with its own exit code rather than silently masquerade as
+    /// <see cref="ReviewVerdict.RequestChanges" />.
+    /// </summary>
+    [Fact]
+    public void ExitCode_WhenVerdictIsUndefined_ReturnsTheDefensiveCode()
+    {
+        ReviewOutcome outcome = new((ReviewVerdict)99, RiskGrade.Low, [], [], []);
+
+        Assert.Equal(2, outcome.ExitCode);
+    }
+
     [Fact]
     public void AcceptedFindingsAreOrderedMostSevereFirst()
     {
