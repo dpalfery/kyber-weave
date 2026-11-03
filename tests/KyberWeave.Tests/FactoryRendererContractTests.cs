@@ -778,37 +778,6 @@ public sealed class FactoryRendererContractTests : IDisposable
                 + $"entitlement rule require [{string.Join(", ", expected)}].");
         }
     }
-
-    [Fact]
-    public async Task RenderAsync_Factory_GlobalScope_StripsFactoryPrefix()
-    {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Global);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.NotEmpty(result.Files);
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("factory", f.Target);
-            Assert.False(
-                f.RelativePath.StartsWith('.'),
-                $"Global-scope path '{f.RelativePath}' still carries a project-scope dot-prefix.");
-            Assert.DoesNotContain(".factory", f.RelativePath, StringComparison.Ordinal);
-            Assert.True(
-                f.RelativePath.StartsWith("droids/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith("skills/", StringComparison.Ordinal),
-                $"Global-scope path '{f.RelativePath}' is neither droids/ nor skills/.");
-        });
-
-        Assert.DoesNotContain(result.Files, f =>
-            f.RelativePath.Contains("agents/", StringComparison.Ordinal));
-    }
-
     /// <summary>
     ///     The Factory app dispatches custom droids as subagents and exposes no session-parent
     ///     selector, so the primary agent renders as both a droid (kept for Task dispatch) and an

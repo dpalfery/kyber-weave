@@ -320,6 +320,23 @@ public sealed class SquadRendererSharedContractTests
     }
 
     /// <summary>
+    /// Under global scope the physical root already is the harness's global directory, so every
+    /// harness ships the same tree as at project scope with only the project root dropped.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachRendererShipsItsProjectTreeAtGlobalScopeWithoutTheProjectRoot(SquadTarget target)
+    {
+        string root = SpecFor(target).ProjectRoot + "/";
+        SquadRenderResult project = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Project);
+        SquadRenderResult global = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Global);
+
+        Assert.Equal(
+            project.Files.Select(file => file.RelativePath[root.Length..]).Order(StringComparer.Ordinal),
+            global.Files.Select(file => file.RelativePath).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
     /// A request naming a target with no renderer fails as a whole, before the renderers that do
     /// exist run, and points at the <c>docs/todo</c> entry for adding the missing one.
     /// </summary>

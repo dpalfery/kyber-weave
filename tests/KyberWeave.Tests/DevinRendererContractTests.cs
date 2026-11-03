@@ -445,23 +445,6 @@ public sealed class DevinRendererContractTests : IDisposable
             Assert.Contains("apply_patch", record.Details, StringComparison.Ordinal);
         }
     }
-
-    [Fact]
-    public async Task RenderAsync_Devin_GlobalScopeDropsTheDevinPrefix()
-    {
-        SquadRendererRegistry registry = new([new DevinRenderer()]);
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Devin],
-            SquadDeploymentScope.Global));
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.All(result.Files, f => Assert.True(
-            f.RelativePath.StartsWith("agents/", StringComparison.Ordinal) ||
-            f.RelativePath.StartsWith("skills/", StringComparison.Ordinal),
-            $"Global-scope path '{f.RelativePath}' is outside agents/ and skills/."));
-    }
-
     /// <summary>
     /// A <c>devin:</c> harness override on one model profile is emitted as <c>model</c>, and
     /// an explicit <c>devin: inherit</c> on another still omits it.
