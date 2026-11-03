@@ -1,5 +1,5 @@
-// The capture harness registry (T8): the six D6 harnesses plus Kilo Code (P3),
-// in one place.
+// The capture harness registry (T8): the six D6 harnesses plus Kilo Code (P3)
+// and Factory (Droid), in one place.
 //
 // Every writer module is a "pending discovery" stub until its Phase 2 task
 // maps the harness's real OTLP exporter surface and turns it into a managed
@@ -22,6 +22,7 @@ import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
 import { codexHarness } from './codex.js'
 import { copilotHarness } from './copilot.js'
+import { factoryHarness } from './factory.js'
 import { kiloHarness } from './kilo.js'
 import { opencodeHarness } from './opencode.js'
 import { piHarness } from './pi.js'
@@ -59,6 +60,23 @@ export type PendingHarnessWriter = {
     path: (home: string, env: PathEnv | undefined) => string
     state: (home: string, env: PathEnv | undefined) => KiloPluginState
   }
+}
+
+/**
+ * A harness's own CLI, for a harness whose plugin lifecycle the harness owns.
+ *
+ * KyberDash does not write into such a harness's files; it asks the harness to install and
+ * to remove the plugin, and reads the harness's own registry through the same CLI. The
+ * driver is a dependency like any other, so a test injects a fake and no test needs the
+ * real CLI on the machine.
+ */
+export type HarnessCli = {
+  /** The executable the driver runs, as resolved from PATH; undefined when PATH holds none. */
+  readonly executable: string | undefined
+  /** Why the CLI cannot be reached; undefined when it can. */
+  readonly unavailable: string | undefined
+  /** Run one command. The argv holds the arguments AFTER the executable. */
+  run(argv: readonly string[]): { exitCode: number; stdout: string; stderr: string }
 }
 
 /**
@@ -188,8 +206,16 @@ export type ManagedHarnessWriter = {
 
 /** The whole-file plugin a managed harness owns. Results reuse the Kilo plugin shape. */
 export type ManagedFilePlugin = {
-  install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
-  uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
+  install: (
+    home: string,
+    env: PathEnv | undefined,
+    options: { dryRun: boolean; configDir?: string; harnessCli?: HarnessCli },
+  ) => KiloPluginResult
+  uninstall: (
+    home: string,
+    env: PathEnv | undefined,
+    options: { dryRun: boolean; configDir?: string; harnessCli?: HarnessCli },
+  ) => KiloPluginResult
   path: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => string
   state: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => KiloPluginState
   /** Fixed-format status lines for the plugin and its consent. Never echoes owner text. */
@@ -202,7 +228,7 @@ export type ManagedFilePlugin = {
 
 export type CaptureHarnessWriter = PendingHarnessWriter | ManagedHarnessWriter
 
-/** The seven harnesses, the default `--harness` set. Kilo is appended last. */
+/** The eight harnesses, the default `--harness` set. Kilo and Factory are appended last. */
 export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   copilotHarness,
   claudeCodeHarness,
@@ -211,6 +237,7 @@ export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   piHarness,
   antigravityHarness,
   kiloHarness,
+  factoryHarness,
 ]
 
 export const SUPPORTED_CAPTURE_HARNESS_IDS: readonly string[] = CAPTURE_HARNESS_REGISTRY.map(

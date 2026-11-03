@@ -1,0 +1,68 @@
+[
+  {
+    "hook_event_name": "SessionStart",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "source": "startup"
+  },
+  {
+    "hook_event_name": "UserPromptSubmit",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "message_id": "msg-user-1",
+    "prompt": "the recorded factory prompt that must not travel without consent",
+    "has_images": false,
+    "model": "gpt-5-codex"
+  },
+  {
+    "hook_event_name": "PreToolUse",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "tool_name": "Read",
+    "tool_input": {
+      "file_path": "/tmp/kyberdash-factory-replay/README.md"
+    }
+  },
+  {
+    "hook_event_name": "PostToolUse",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "tool_name": "Read",
+    "tool_input": {
+      "file_path": "/tmp/kyberdash-factory-replay/README.md"
+    },
+    "tool_response": {
+      "ok": true
+    }
+  },
+  {
+    "hook_event_name": "Stop",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "message_id": "msg-assistant-1",
+    "stop_hook_active": false,
+    "tool_execution_count": 1,
+    "elapsed_time": 4200
+  },
+  {
+    "hook_event_name": "SessionEnd",
+    "session_id": "factory-replay-content-off",
+    "transcript_path": "/tmp/kyberdash-factory-replay/content-off/session.jsonl",
+    "cwd": "/tmp/kyberdash-factory-replay",
+    "permission_mode": "auto-medium",
+    "message_id": "msg-assistant-1",
+    "reason": "other",
+    "session_duration_ms": 4200,
+    "message_count": 2
+  }
+]

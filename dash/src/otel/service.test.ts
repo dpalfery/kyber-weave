@@ -12,7 +12,7 @@ import { ingestBatch } from '../canon/ingest.js'
 import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { CanonStore } from '../canon/store.js'
 import { startOtlpCollectorService } from './service.js'
-import type { OtlpSpan } from './receiver.js'
+import { OTLP_METRICS_PATH, type OtlpSpan } from './receiver.js'
 
 function identifiedLog(): OtlpLog {
   return {
@@ -595,6 +595,197 @@ describe('startOtlpCollectorService quarantined Claude body relink (D5)', () => 
     } finally {
       CanonStore.prototype.quarantinedLogsAfter = original
       spy.mockRestore()
+    }
+  })
+})
+
+// Factory's native OpenTelemetry export posts metrics to `POST /v1/metrics`,
+// and metrics-only is its DEFAULT export shape — so this is the path a real
+// deployment hits first. The receiver decodes the body and the writer has a
+// metrics port, but the collector's production sink has nowhere to put a
+// metric point: the writer refuses the batch rather than accepting one it
+// would drop, and the receiver answers 500.
+//
+// These cases drive the RUNNING service — the real `toCanon` sink, not a
+// double — because that is what a Factory deployment configured with the
+// native endpoint actually hits.
+describe('startOtlpCollectorService native OTLP metrics', () => {
+  /** The store's tables that hold metric points, discovered not named. */
+  function metricTableNames(store: CanonStore): string[] {
+    const rows = store
+      .getDatabase()
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND (name LIKE '%metric%' OR name LIKE '%point%')",
+      )
+      .all() as { name: unknown }[]
+    return rows
+      .map((row) => String(row.name))
+      .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+  }
+
+  /** How many metric points the store holds. */
+  function metricRowCount(store: CanonStore): number {
+    const names = metricTableNames(store)
+    expect(
+      names.length,
+      'the canon store must hold a table for the decoded metric points',
+    ).toBeGreaterThan(0)
+    let total = 0
+    for (const name of names) {
+      const row = store.getDatabase().prepare(`SELECT COUNT(*) AS n FROM ${name}`).get() as {
+        n: unknown
+      }
+      total += Number(row.n)
+    }
+    return total
+  }
+
+  /** A metrics request carrying the names Factory's native export emits. */
+  function metricsBody(): string {
+    return JSON.stringify({
+      resourceMetrics: [
+        {
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'droid' } }] },
+          scopeMetrics: [
+            {
+              scope: { name: 'droid.telemetry', version: '1.0.0' },
+              metrics: [
+                {
+                  name: 'droid.code.files_modified',
+                  unit: '1',
+                  sum: {
+                    aggregationTemporality: 2,
+                    isMonotonic: true,
+                    dataPoints: [
+                      {
+                        asInt: '4200',
+                        timeUnixNano: '1756478400123456789',
+                        attributes: [
+                          { key: 'session.id', value: { stringValue: 'droid-session-native-only' } },
+                        ],
+                      },
+                    ],
+                  },
+                },
+                {
+                  name: 'gen_ai.client.operation.duration',
+                  unit: 'ms',
+                  gauge: {
+                    dataPoints: [{ asDouble: 7300, timeUnixNano: '1756478400123456789' }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  }
+
+  async function postMetrics(service: CollectorService, body: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${service.receiver.port}${OTLP_METRICS_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    })
+  }
+
+  it('accepts a metrics batch over the running service and persists the points', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      const response = await postMetrics(service, metricsBody())
+
+      // The refusal is the regression this pins: a sink that cannot persist
+      // metrics must refuse the batch, so the receiver answers 500 until the
+      // store has somewhere to put the points.
+      expect(response.status).toBe(200)
+      await service.writer.flush()
+
+      // Both points of the batch are in the store afterwards.
+      expect(metricRowCount(service.canon)).toBe(2)
+      expect(service.writer.pendingMetrics).toBe(0)
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('moves the receiver last-persisted fact for a metrics-only commit', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      expect(service.receiver.getHealth().lastAcceptedAt).toBeNull()
+
+      const response = await postMetrics(service, metricsBody())
+      expect(response.status).toBe(200)
+      await service.writer.flush()
+
+      // Receipt is the receiver's 200; persistence is this fact, and the
+      // writer's persisted hook counts spans and logs but not metrics — so a
+      // metrics-only commit, which is Factory's default export shape, never
+      // moved it.
+      expect(typeof service.receiver.getHealth().lastAcceptedAt).toBe('string')
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('writes one ingest_log row for a metrics batch, carrying the points received', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      const response = await postMetrics(service, metricsBody())
+      expect(response.status).toBe(200)
+      await service.writer.flush()
+
+      const rows = service.canon.getIngestLog().filter((row) => row.source === 'otlp:metrics')
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.count).toBe(2)
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('keeps the accepted metrics when the audit write throws (audit never fails ingest)', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      const auditWrite = service.canon.logIngest
+      service.canon.logIngest = () => {
+        throw new Error('audit table locked')
+      }
+      try {
+        const response = await postMetrics(service, metricsBody())
+        expect(response.status).toBe(200)
+        await service.writer.flush()
+      } finally {
+        service.canon.logIngest = auditWrite
+      }
+      // The metrics landed, and the refused audit did not fail the ingest it
+      // audits nor requeue the batch behind it.
+      expect(metricRowCount(service.canon)).toBe(2)
+      expect(service.writer.pendingMetrics).toBe(0)
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('requests no projection for a metrics-only commit', async () => {
+    const request = vi
+      .spyOn(CanonicalProjectionScheduler.prototype, 'request')
+      .mockResolvedValue(undefined)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      request.mockClear()
+
+      const response = await postMetrics(service, metricsBody())
+      expect(response.status).toBe(200)
+      await service.writer.flush()
+
+      // Metrics are stored, not projected: they change no projected record,
+      // so a metrics batch must not ask for a projection or a rebuild.
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+      request.mockRestore()
+      await service.close()
     }
   })
 })

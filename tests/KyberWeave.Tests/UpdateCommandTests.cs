@@ -5,9 +5,12 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -985,6 +988,13 @@ public sealed class UpdateCommandTests : IDisposable
         "kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"
     ];
 
+    // The Factory plugin is installed with the same verb as the OpenCode one, and the same two flags: the plugin
+    // file is preserved, and it is installed only when the harness already has it.
+    private static readonly string[] FactoryPluginArgs =
+    [
+        "kyber", "capture", "plugin", "install", "--harness", "factory", "--preserve", "--if-installed"
+    ];
+
     // The plugin verb's guidance lines are every stdout line that starts with this prefix (D22). The copy after the
     // prefix belongs to kyberDash, so these tests use neutral text and never pin its wording.
     private const string HarnessPrefix = "harness opencode: ";
@@ -999,7 +1009,7 @@ public sealed class UpdateCommandTests : IDisposable
         return new ProcessResult(0, stdout, string.Empty);
     }
 
-    /// <summary>After the binaries commit, the engine runs first, then the tray, then the plugin.</summary>
+    /// <summary>After the binaries commit, the engine runs first, then the tray, then one capture plugin per harness.</summary>
     [Fact]
     public void RunReconcilesAfterCommitInEngineTrayPluginOrder()
     {
@@ -1013,11 +1023,14 @@ public sealed class UpdateCommandTests : IDisposable
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
         Assert.All(steps.Where(step => step.Name != "tray"), step => Assert.Equal(kyberdash, step.File));
         Assert.Equal(EngineArgs, steps[0].Args);
         Assert.Equal(["menubar", "--update", "--version", "0.10.0"], steps[1].Args);
         Assert.Equal(PluginArgs, steps[2].Args);
+        // The two plugin steps are one per harness, and the order is fixed: OpenCode first, then Factory.
+        Assert.Equal("opencode", HarnessOf(steps[2].Args));
+        Assert.Equal("factory", HarnessOf(steps[3].Args));
     }
 
     /// <summary>The "already on" path still runs the engine, tray and plugin reconciliation, and still does not download.</summary>
@@ -1037,7 +1050,10 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.10.0", outcome.Message);
-        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["engine", "tray", "plugin", "plugin"], steps.Select(step => step.Name));
+        // The "already on" path reconciles every harness's plugin, not only the first.
+        Assert.Equal("opencode", HarnessOf(steps[2].Args));
+        Assert.Equal("factory", HarnessOf(steps[3].Args));
         Assert.DoesNotContain(handler.Uris, uri => uri.Contains("SHA256SUMS.txt", StringComparison.Ordinal));
     }
 
@@ -1083,7 +1099,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains(log, line => line.Contains("already on 0.10.0", StringComparison.Ordinal));
     }
 
-    /// <summary>--no-restart skips the engine and the tray, but the plugin still upgrades when it is installed.</summary>
+    /// <summary>--no-restart skips the engine and the tray, but the plugins still upgrade when they are installed.</summary>
     [Fact]
     public void RunWithNoRestartSkipsEngineAndTrayButStillUpdatesThePlugin()
     {
@@ -1101,7 +1117,10 @@ public sealed class UpdateCommandTests : IDisposable
             steps);
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal<string>(["plugin"], steps.Select(step => step.Name));
+        Assert.Equal<string>(["plugin", "plugin"], steps.Select(step => step.Name));
+        // Skipping the restart skips the engine and the tray, never a harness's plugin.
+        Assert.Equal("opencode", HarnessOf(steps[0].Args));
+        Assert.Equal("factory", HarnessOf(steps[1].Args));
     }
 
     /// <summary>--no-kyberdash skips the engine, the tray and the plugin together.</summary>
@@ -1289,6 +1308,91 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.DoesNotContain(log, line => line.Contains("mid-line mention", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    ///     The update and the Squad deploy step relay the capture plugin's guidance, and they must relay the same
+    ///     lines from the same verb output. The rule lived in a private copy in each of them, and the two copies
+    ///     differed by one token, so nothing clustered them: a change to one copy left the other relaying something
+    ///     else, and only a reader would notice. This test runs both paths over one verb output and holds them
+    ///     together.
+    /// </summary>
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("factory")]
+    public void TheUpdateAndTheSquadStepRelayTheSameCapturePluginGuidance(string harness)
+    {
+        string stdout = CapturePluginVerbStdout(harness);
+
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            (_, args) => HarnessOf(args) == harness ? new ProcessResult(0, stdout, string.Empty) : QuietSuccess);
+
+        Assert.Equal(0, outcome.ExitCode);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", stdout);
+        KyberDashCapturePluginStep step = new(executor, () => "/fake/bin/kyberdash");
+        CapturedConsoleExecution<CapturePluginStepOutcome> captured = ProcessConsoleCapture.Run(() =>
+            step.Run(TargetOf(harness), harness == "opencode" ? "/fake/opencode" : null, false));
+
+        Assert.Equal(CapturePluginStepOutcome.Completed, captured.Result);
+
+        string[] expected = ExpectedGuidance(harness);
+        Assert.Equal(expected, RelayedGuidance(log));
+        Assert.Equal(expected, RelayedGuidance(captured.Output.Split('\n')));
+        // Neither path relays the verb's chatter, and neither relays the verdict as guidance.
+        Assert.DoesNotContain(log, line => line.Contains("verb chatter", StringComparison.Ordinal));
+        Assert.DoesNotContain(captured.Output, "verb chatter", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The capture-plugin verb's stdout for one harness: a verdict line, two guidance lines, and chatter that is
+    ///     not guidance. The wording after the harness prefix is KyberDash's, so these tests use neutral text.
+    /// </summary>
+    private static string CapturePluginVerbStdout(string harness)
+    {
+        return harness == "opencode"
+            ? "opencode plugin: upgraded /fake/plugins/kyberdash-opencode.js\n" +
+              $"{HarnessPrefix}relayed guidance alpha\n" +
+              $"{HarnessPrefix}relayed guidance beta\n" +
+              "verb chatter that is not guidance\n"
+            : "factory plugin: upgraded /fake/plugins/kyberdash-factory.js\n" +
+              "factory plugin: relayed guidance alpha\n" +
+              "factory plugin: relayed guidance beta\n" +
+              "verb chatter that is not guidance\n";
+    }
+
+    /// <summary>The guidance lines both paths must relay for one harness, in printed order.</summary>
+    private static string[] ExpectedGuidance(string harness)
+    {
+        return harness == "opencode"
+            ? ["relayed guidance alpha", "relayed guidance beta"]
+            : ["factory plugin: relayed guidance alpha", "factory plugin: relayed guidance beta"];
+    }
+
+    /// <summary>The relayed guidance lines in a printed output, in printed order.</summary>
+    private static string[] RelayedGuidance(IEnumerable<string> lines)
+    {
+        return lines
+            .Select(line => line.Trim())
+            .Where(line => line.Contains("relayed guidance", StringComparison.Ordinal))
+            .ToArray();
+    }
+
+    /// <summary>The Squad harness a verb token names.</summary>
+    private static SquadTarget TargetOf(string harness)
+    {
+        return harness == "opencode" ? SquadTarget.OpenCode : SquadTarget.Factory;
+    }
+
     /// <summary>A KyberDash that predates the engine verb is a named skip, not a failed update.</summary>
     [Fact]
     public void RunNamesAPreVerbKyberDashAsASkipForTheEngineAndThePlugin()
@@ -1402,6 +1506,142 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(log, line => line.Contains("could not run KyberDash", StringComparison.Ordinal));
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    // ---- the Factory (Droid) capture plugin ----
+
+    /// <summary>
+    ///     Runs an update and records every process the updater started, so a test can assert which
+    ///     capture-plugin verbs ran and with which arguments. The capture seam dispatches on the harness
+    ///     the verb names, so a test can fail the Factory verb and leave the OpenCode one alone.
+    /// </summary>
+    private SelfUpdateOutcome RunRecording(
+        HttpMessageHandler handler,
+        SelfUpdateHost host,
+        SelfUpdateOptions options,
+        List<string> log,
+        List<ReconcileStep> steps,
+        Func<string, IReadOnlyList<string>, ProcessResult>? capture = null)
+    {
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            HomeWithTrayVersion("0.9.23"),
+            (file, args) =>
+            {
+                steps.Add(new ReconcileStep("tray", file, args));
+                return 0;
+            },
+            captureProcess: (file, args) =>
+            {
+                steps.Add(new ReconcileStep("capture", file, args));
+                return capture is null ? QuietSuccess : capture(file, args);
+            });
+        return updater.Run(options);
+    }
+
+    /// <summary>The harness a verb names, or an empty string when it names none.</summary>
+    private static string HarnessOf(IReadOnlyList<string> args)
+    {
+        for (int index = 0; index + 1 < args.Count; index++)
+            if (args[index] == "--harness")
+                return args[index + 1];
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    ///     The self-updater installs the Kyber-owned Factory capture plugin with the same verb, but with
+    ///     the "only if already installed" flag, so an update never adds a surface the owner did not
+    ///     choose. It names no root: the plugin is installed where the harness already has it.
+    /// </summary>
+    [Fact]
+    public void RunInstallsTheFactoryCapturePluginWithTheIfInstalledFlag()
+    {
+        string kyberdash = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        ReconcileStep factory = Assert.Single(steps, step => HarnessOf(step.Args) == "factory");
+        Assert.Equal(kyberdash, factory.File);
+        // The whole verb is pinned, not a prefix of it: the install verb, the Factory harness, the preserve
+        // flag, the already-installed flag, and no root.
+        Assert.Equal(FactoryPluginArgs, factory.Args);
+    }
+
+    /// <summary>
+    ///     A refused Factory install is a warning: the capture plugin is an optional surface, so the
+    ///     update keeps its exit code and the owner can rerun the printed command.
+    /// </summary>
+    [Fact]
+    public void RunLeavesTheExitCodeUnchangedWhenTheFactoryCapturePluginStepFails()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            (file, args) => HarnessOf(args) == "factory"
+                ? new ProcessResult(3, string.Empty, "factory plugin write refused")
+                : QuietSuccess);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("capture plugin step failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     The OpenCode capture plugin step is unchanged: the same verb with the same flags. The Factory
+    ///     plugin is installed beside it, not in place of it.
+    /// </summary>
+    [Fact]
+    public void RunKeepsTheOpenCodeCapturePluginInstallUnchanged()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        ReconcileStep openCode = Assert.Single(steps, step => HarnessOf(step.Args) == "opencode");
+        Assert.Equal(PluginArgs, openCode.Args);
+    }
+
+    /// <summary>
+    ///     A missing kyberdash leaves the capture plugin alone, and the update's exit code with it: the
+    ///     plugin step is skipped, not failed.
+    /// </summary>
+    [Fact]
+    public void RunLeavesTheExitCodeUnchangedWhenKyberDashIsMissing()
+    {
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(steps, step => HarnessOf(step.Args) == "factory");
+        Assert.Contains(log, line => line.Contains("capture plugin", StringComparison.OrdinalIgnoreCase));
     }
 
     private SelfUpdateOutcome Run(

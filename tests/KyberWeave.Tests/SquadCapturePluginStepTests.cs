@@ -437,6 +437,254 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         Assert.Contains(GuidanceAlpha, execution.Output, StringComparison.Ordinal);
     }
 
+    // ---- the Factory (Droid) capture plugin ----
+
+    /// <summary>
+    ///     A global Factory deployment installs the Kyber-owned capture plugin for Factory through the
+    ///     KyberDash verb, in preserve mode. The call names no root: the verb resolves the Factory
+    ///     harness's own root itself.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryRunsThePluginVerbForFactoryInPreserveMode()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-factory"));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(FakeKyberDash, call.FileName);
+        Assert.Equal(
+            [
+                "kyber", "capture", "plugin", "install", "--harness", "factory", "--preserve"
+            ],
+            call.ArgumentList);
+    }
+
+    /// <summary>
+    ///     The Factory call names no root at all. The verb resolves the Factory harness's own root
+    ///     (<c>$FACTORY_DIR</c>, else <c>~/.factory</c>) — the same tree the Factory FILE source reads
+    ///     — so the plugin and the file source always pair from one root, and the deploy hands the
+    ///     verb no directory of its own.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryNamesNoRootSoTheVerbResolvesTheFactoryTreeItself()
+    {
+        string home = Path.Combine(_temp.Path, "factory-home");
+        Directory.CreateDirectory(home);
+        using Harness h = new(
+            Path.Combine(_temp.Path, "install-factory-root"),
+            new SquadGlobalRoots(_ => null, home));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        // The repository resolves the Factory tree to ~/.factory: the tree the verb resolves for itself.
+        Assert.Equal(Path.Combine(home, ".factory"), h.GlobalRoot(SquadTarget.Factory));
+        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(string.Empty, ConfigDirOf(call));
+        Assert.DoesNotContain("--config-dir", call.ArgumentList);
+        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.Factory), call.ArgumentList);
+    }
+
+    /// <summary>
+    ///     The two steps never share a root: the OpenCode plugin lives under the OpenCode global root
+    ///     and keeps its <c>--config-dir</c>, while the Factory step names no root at all, so it can
+    ///     never be handed the OpenCode one.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithOpenCodeAndFactoryGivesOnlyTheOpenCodeStepARoot()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-factory-roots"));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode", "factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        IReadOnlyList<ProcessStartInfo> calls = executor.Calls;
+        Assert.Equal(2, calls.Count);
+        // The OpenCode step keeps its own root: that flag still selects the OpenCode config root.
+        Assert.Equal(h.GlobalRoot(SquadTarget.OpenCode), ConfigDirOf(calls[0]));
+        // The Factory step names no root, so it cannot be handed the OpenCode one.
+        Assert.Equal(string.Empty, ConfigDirOf(calls[1]));
+        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.OpenCode), calls[1].ArgumentList);
+        Assert.NotEqual(h.GlobalRoot(SquadTarget.OpenCode), h.GlobalRoot(SquadTarget.Factory));
+        // The order is unchanged: OpenCode first, Factory second.
+        Assert.Equal("opencode", HarnessOf(calls[0]));
+        Assert.Equal("factory", HarnessOf(calls[1]));
+    }
+
+    /// <summary>
+    ///     The Factory plugin step runs after the OpenCode one: the step that already existed keeps its
+    ///     place in the deploy sequence and the new one follows it.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithOpenCodeAndFactoryRunsTheFactoryPluginStepAfterTheOpenCodeOne()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-factory-order"));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode", "factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        IReadOnlyList<ProcessStartInfo> calls = executor.Calls;
+        Assert.Equal(2, calls.Count);
+        Assert.Equal("opencode", HarnessOf(calls[0]));
+        Assert.Equal("factory", HarnessOf(calls[1]));
+    }
+
+    /// <summary>
+    ///     The plugin is global capture, so a project-scope deployment never touches the Factory global
+    ///     root and never runs the Factory plugin step.
+    /// </summary>
+    [Fact]
+    public void ProjectInstallWithFactoryDoesNotRunThePluginStep()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-project-factory"));
+        FakeProcessExecutor executor = new();
+        string project = h.MakeDirectory("project-factory");
+
+        CommandExecution execution = Capture(() => h.InstallCommand(executor).Execute(null!, new SquadInstallSettings
+        {
+            Path = project,
+            Global = false,
+            Targets = ["factory"],
+            Version = InstalledVersion,
+            Yes = true
+        }), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Empty(executor.Calls);
+    }
+
+    /// <summary>
+    ///     A global deployment that does not include Factory runs the OpenCode plugin step and nothing
+    ///     else: the Factory plugin is installed only for a Factory target.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithoutFactoryRunsOnlyTheOpenCodePluginStep()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-only"));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal("opencode", HarnessOf(call));
+    }
+
+    /// <summary>
+    ///     A missing KyberDash is a skip, not a failure: the deployment that already succeeded keeps its
+    ///     exit code and nothing is started.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryAndNoKyberDashSkipsThePluginStepAndKeepsTheExitCode()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-factory-no-dash"));
+        FakeProcessExecutor executor = new();
+
+        CommandExecution execution = Capture(
+            () => h.InstallCommand(executor, locateKyberDash: () => null)
+                .Execute(null!, GlobalInstall(h, ["factory"])),
+            out string output);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Empty(executor.Calls);
+        Assert.Contains("capture plugin", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skipped", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     A refused Factory install is a warning, not a failed deployment: the capture plugin is an
+    ///     optional surface and the owner can rerun the printed command.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryKeepsTheSquadExitCodeWhenThePluginStepFails()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-factory-plugin-fails"));
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Successfully installed", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("exit 3", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The step relays the verb's own verdict line. The wording is kyberDash's, so the line carries a
+    ///     neutral marker and this test never pins what KyberDash actually says.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryRelaysTheVerbsVerdictLine()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-factory-verdict"));
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            "FACTORY-VERDICT-LINE\n");
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("FACTORY-VERDICT-LINE", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     A KyberDash that predates the capture plugin command is a named skip, not a warning: the
+    ///     deployment must not report a failure it cannot fix.
+    /// </summary>
+    [Fact]
+    public void GlobalInstallWithFactoryNamesAPreVerbKyberDashAsASkipAndNotAWarning()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-factory-old-dash"));
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            "error: unknown command 'capture'\n",
+            1);
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("capture plugin", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("capture plugin step failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The harness the verb names, or an empty string when it names none.</summary>
+    private static string HarnessOf(ProcessStartInfo call)
+    {
+        return HarnessOf(call.ArgumentList);
+    }
+
+    private static string HarnessOf(IReadOnlyList<string> arguments)
+    {
+        for (int index = 0; index + 1 < arguments.Count; index++)
+            if (arguments[index] == "--harness")
+                return arguments[index + 1];
+
+        return string.Empty;
+    }
+
+    /// <summary>The root the verb was given, or an empty string when it was given none.</summary>
+    private static string ConfigDirOf(ProcessStartInfo call)
+    {
+        for (int index = 0; index + 1 < call.ArgumentList.Count; index++)
+            if (call.ArgumentList[index] == "--config-dir")
+                return call.ArgumentList[index + 1];
+
+        return string.Empty;
+    }
+
     // ---- fixtures ----
 
     private static CommandExecution Capture(Func<int> execute, out string output)
@@ -480,12 +728,12 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
     private sealed class Harness : IDisposable
     {
-        private readonly TempGlobalRoots _globalRoots;
+        private readonly ISquadGlobalRootResolver _globalRoots;
         private readonly SyntheticValidSquadReleaseSource _releaseSource = new();
         private readonly SquadStateStore _store;
         private readonly HomeUserPaths _userPaths;
 
-        public Harness(string root)
+        public Harness(string root, ISquadGlobalRootResolver? globalRoots = null)
         {
             Anchor = Path.Combine(root, "global-anchor");
             string applicationData = Path.Combine(root, "app-data");
@@ -497,7 +745,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Directory.CreateDirectory(globalRootsDirectory);
             _userPaths = new HomeUserPaths(applicationData, home);
             _store = new SquadStateStore(_userPaths);
-            _globalRoots = new TempGlobalRoots(globalRootsDirectory);
+            _globalRoots = globalRoots ?? new TempGlobalRoots(globalRootsDirectory);
         }
 
         public string Anchor { get; }
@@ -522,7 +770,8 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         public SquadInstallCommand InstallCommand(
             IProcessExecutor executor,
             bool isInteractive = false,
-            Func<string, bool>? readAnswer = null)
+            Func<string, bool>? readAnswer = null,
+            Func<string?>? locateKyberDash = null)
         {
             return new SquadInstallCommand(
                 _userPaths,
@@ -532,7 +781,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
                 isInteractive,
                 readAnswer ?? (_ => true),
                 _globalRoots,
-                PluginStep(executor));
+                PluginStep(executor, locateKyberDash));
         }
 
         public SquadUpdateCommand UpdateCommand(IProcessExecutor executor)
@@ -550,9 +799,11 @@ public sealed class SquadCapturePluginStepTests : IDisposable
                 PluginStep(executor));
         }
 
-        private static KyberDashCapturePluginStep PluginStep(IProcessExecutor executor)
+        private static KyberDashCapturePluginStep PluginStep(
+            IProcessExecutor executor,
+            Func<string?>? locateKyberDash = null)
         {
-            return new KyberDashCapturePluginStep(executor, () => FakeKyberDash);
+            return new KyberDashCapturePluginStep(executor, locateKyberDash ?? (() => FakeKyberDash));
         }
     }
 

@@ -6,11 +6,12 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-03
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
@@ -70,6 +71,20 @@ code-refs:
   - OPENCODE_CONTRACT_VERSION
   - createSetup
   - OPENCODE_KEYS
+  - droidAdapter
+  - isDroidEnvelopeSpan
+  - isSupportedDroidEnvelope
+  - installFactoryPlugin
+  - factoryPluginPaths
+  - describeFactoryPluginStatus
+  - mapHookEvent
+  - FACTORY_CONTRACT_VERSION
+  - factorySpoolDir
+  - runFactoryPluginConsent
+  - decodeOtlpMetricsJson
+  - splitDroidSessionRecords
+  - growWithReceiverTiming
+  - ingestMetricBatch
   - ClaudeContentReader
   - ingestProviders
   - CompareRuns
@@ -528,6 +543,463 @@ The decision and the alternatives it rejected are in
 [ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md). The per-source outcome is in the
 [telemetry inventory](telemetry-inventory.md).
 
+### Factory (Droid) capture plugin pipeline (`kyberdash-factory`)
+
+KyberDash captures Factory through one hooks-plugin pipeline
+([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
+
+```mermaid
+flowchart LR
+    Host["Factory (Droid)<br/>hook events"] --> Plugin["kyberdash-factory<br/>the harness's cached plugin"]
+    Plugin -->|"OTLP/HTTP JSON, contract 1"| Receiver["Loopback receiver<br/>127.0.0.1:4318"]
+    Receiver --> Adapter["droid adapter<br/>canon/adapters/droid.ts"]
+    Adapter --> Store["canon.db records"]
+    Store --> Projection["Shared projection<br/>canon/sessions.ts"]
+    Projection --> API["/api/kyber/*"]
+    API --> Dashboard["Web dashboard"]
+```
+
+Factory reaches KyberDash through a **marketplace** the harness installs from, not through a
+configuration key, so the writer declares no key at all
+(`dash/src/capture/harnesses/factory.ts`). `capture enable --harness factory` publishes the
+Kyber-owned marketplace tree and asks the harness to install the plugin from it, and
+`capture disable` asks the harness to uninstall it; neither reads, writes or receipts a config
+file. The Settings row appears because the registry reports it — the drawer is generic, so no web
+code changed.
+
+**The owned marketplace tree.** KyberDash owns one whole tree under its own state directory,
+published and then installed by the harness's own commands:
+
+```text
+<the marketplace tree>/
+├── .factory-plugin/
+│   └── marketplace.json     # the marketplace manifest: names the plugin, points at it by a relative path
+└── kyberdash-factory/      # the plugin payload
+    ├── .factory-plugin/
+    │   └── plugin.json      # Factory plugin manifest
+    └── hooks/
+        ├── hooks.json       # registers the script on the six hook events
+        └── kyberdash-factory.mjs # the bundled capture script
+```
+
+The install is `droid plugin marketplace add <the marketplace tree>` followed by
+`droid plugin install kyberdash-factory@kyberdash --scope user`, and the teardown is
+`droid plugin uninstall kyberdash-factory@kyberdash --scope user` followed by
+`droid plugin marketplace remove kyberdash`. The registered marketplace name is the tree
+directory's basename rather than the manifest's own `name` field, so the directory name is
+load-bearing and the plugin identity is `kyberdash-factory@kyberdash`. The plugin that runs is
+the **harness's cached copy** of the tree, and `${DROID_PLUGIN_ROOT}` expands to that cached
+path. The tree's `hooks/hooks.json` is keyed **directly by event name**, the shape Factory's own
+documentation shows for a plugin's hooks file; the top-level `hooks` wrapper KyberDash first
+shipped was the shape Factory documents for the `hooks` key inside `settings.json`, and it worked
+only through undocumented tolerance.
+
+The receipt is `~/.kyberdash/factory-plugin-receipt.json` — one digest per owned file, because
+the owned unit is a tree and not a single file, and the tree KyberDash owns is not the harness's
+cache copy. Removal requires every recorded digest to match, so an edited file is left in place.
+
+**The upgrade path.** A tree the receipt proves KyberDash wrote, whose bytes still match that
+receipt, and whose content is **not** the current bundle is an **upgrade** — the sixth kind
+beside `absent`, `unreadable`, `foreign`, `edited` and `same`. A tree whose bytes drifted stays
+`edited` (the owner's edit is the owner's). A tree no receipt proves whose content is an
+**older** bundle stays `foreign`, because matching an older bundle's bytes never establishes
+ownership; a tree no receipt proves whose content is **exactly the current bundle** is not
+foreign — the install writes the receipt that proves KyberDash wrote it, so the next upgrade is
+provable. On an upgrade the
+Kyber-owned tree and its receipt are rewritten with the current bundle, and the harness's
+**cached copy** is then refreshed through the harness's own command, chosen from the harness's
+own registry rather than guessed: the plugin **installed** → `droid plugin update
+kyberdash-factory@kyberdash --scope user`; the plugin **not installed** and the marketplace
+**registered** → `droid plugin install kyberdash-factory@kyberdash --scope user`; and the
+plugin **installed** while the marketplace is **not** registered → the registration is restored
+**first**, because `droid plugin update` fails without it ("Marketplace \"kyberdash\" not
+found"). `droid plugin install` is **never** run against an installed plugin, because the harness
+refuses it ("already installed at user scope"). `unchanged` therefore means **both** a current
+tree and an installed harness copy, so a routine `kyber-weave update` or Squad call that finds
+everything current runs no harness command and mutates nothing.
+
+KyberDash never creates, reads, merges, rewrites or restores the owner's
+`~/.factory/settings.json`, `~/.factory/hooks.json` or the project equivalents; the harness's
+own commands change the settings file during an install KyberDash requested, and the restore
+criterion is therefore semantic — no entry the install added remains, no entry the owner had is
+lost, and every other key is unchanged in content.
+
+**The wire contract.** Contract version `1`, in the `factory.*` attribute namespace, with its own
+span names (`factory.session`, `factory.turn`, `factory.tool`) and deterministic id derivations
+(`dash/src/capture/harnesses/factory-plugin/contract.ts`). The
+OpenCode contract-3 keys are deliberately not reused: the OpenCode adapter claims every span
+carrying them, so an `opencode.*` key here would attribute every Factory row to OpenCode. The
+six registered hook events are `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`Stop` and `SessionEnd`; `PreCompact` produces no span in this contract, so no
+process is spent on it. `SubagentStop` is not registered: Factory's documented payload for that
+event carries `task_name`, `task_result`, `task_error` and `stop_hook_active`, and **no child
+session id** — the common `session_id` is the session the hook fires in, which for a subagent's
+stop is the **parent's** session, so a span there would name the parent as the child, and a
+registration would cost a process per subagent stop for no span. The mapper (`mapper.ts`) is
+pure: an attribute the payload does not carry is absent, never zero and never an empty string,
+and the prompt text is capped at 64 KiB and marked when it is cut.
+
+**Bundle and delivery.** `dash/scripts/bundle-factory-plugin.mjs` bundles the plugin's entry with
+esbuild into one self-contained ESM file that imports only `node:` built-ins and uses the global
+`fetch`. The text is committed as `factory-plugin/generated/plugin-source.ts`
+(`FACTORY_PLUGIN_SOURCE`, `FACTORY_PLUGIN_MARKER`), so the npm and SEA builds carry the same
+bytes, and a drift test fails when the committed text differs from a fresh bundle. The first line
+is `// kyberdash-factory-plugin v1`, the ownership marker the installer reads.
+
+The generic parts are shared leaves — `dash/src/capture/harnesses/transport/` (the outbox and the
+OTLP sender) and `dash/src/capture/consent-file.ts` — and the OpenCode plugin's own transport and
+consent modules are thin re-exports of them, so there is one implementation of each and the
+OpenCode entry's imports and its wire are unchanged. What the extraction did **not** keep is the
+committed OpenCode bundle byte-stable: the module paths inside it changed and the shared OTLP body
+builder gained an identity argument, so the committed artefact was regenerated. The drift guard
+still holds in its real sense — it asserts the committed source **equals** a fresh bundle, so it
+proves the committed bytes are current, not that they never changed.
+
+**The file-backed spool.** A Factory hook is a one-shot process — one short-lived process per
+event — so an in-memory outbox would lose the span when the process exits. The runner
+(`dash/src/capture/harnesses/factory-plugin/entry.ts`) therefore posts the span to
+`http://127.0.0.1:4318/v1/traces` under a ≤ 2 s abort deadline and, when the delivery fails,
+appends it to `~/.kyberdash/capture/factory/spool.jsonl` — bounded at 500 events and 4 MB,
+drop-oldest. Every run drains the spool before it sends its own event. Diagnostics go to
+stderr and to a bounded 64 KB tail at `~/.kyberdash/capture/factory/diagnostics.log`; stdout
+carries the hook protocol and nothing else. Every error is swallowed and the hook exits 0: the
+capture never fails the host.
+
+**The consent contract.** The consent file is `~/.kyberdash/factory-plugin.json`
+(`{ "version": 1, "content": <boolean> }`), read on every event. An install creates it with
+`content: false` only when it is absent, and never rewrites an existing one. A missing,
+unreadable, oversized, malformed or unknown-version file reads as off.
+`KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
+
+**One bound, one unit.** Every consent file is bounded at **4096 UTF-8 bytes**, and every reader
+counts the same unit — the Factory plugin's own reader, the canon seam's gate, the OpenCode
+plugin's reader and the engine-side state reader the Settings row and `capture status` use. A file
+that is under 4096 characters and over 4096 bytes therefore reads the same way everywhere: the
+content readers publish no prompt text, and the Factory row reports
+`content consent: unreadable or malformed (treated as off)`.
+
+**Two readers, one writer.** The consent file's **read** side exists twice, on purpose. The
+canon seam's gate is `dash/src/canon/droid-content.ts`; the copy the plugin bundle inlines is
+`dash/src/capture/harnesses/factory-plugin/consent.ts`. Both are leaves — the plugin's may
+import node built-ins and the capture family only (the leaf rules in
+`dash/src/architecture/factory-leaves.test.ts` and
+`dash/src/capture/harnesses/factory-plugin/bundle.test.ts` forbid a value import from outside
+`src/capture/`), and the canon copy declares the same rule in its own header comment — so
+neither can import the other, and the duplication is kept rather than merged. What holds the two
+copies to one behaviour is a **parity test**: it runs both readers over one corpus (valid,
+malformed, oversized, missing, unknown-version) and asserts identical verdicts, and it round
+trips the shared writer (`dash/src/capture/consent-file.ts`) into both readers. The **write**
+side is one module both sides already share.
+
+The Settings switch that installs the capture **never turns content recording on**. Only the
+consent verb (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner
+editing the consent file turns it on. This is a deliberate difference from the OpenCode writer,
+whose Settings switch also sets consent: for Factory the switch is "install the capture", not
+"start recording my prompts", and the difference is a privacy control. `disable` turns the
+consent off.
+
+**What the consent governs, and what it does not.** The consent file governs **the capture
+plugin's prompt text on the wire and at the store, and the content of Factory's native
+OpenTelemetry route**. It does **not** govern the Factory **file source**, which reads the owner's
+first user-message fragment out of the owner's own transcript and carries it on every
+file-sourced Factory record's raw attributes whatever the consent file says. On the native route
+the gate runs at the **ingest seam** — before the normalization and before the quarantine write —
+so the text is never written anywhere, not to a record and not to a quarantine packet
+(`dash/src/canon/ingest.ts`, `dash/src/canon/droid-content.ts`). The gate has a **fail-closed
+arm**: a span that belongs to **no** harness has an unknown origin, so its content is stripped
+too, which is what covers a Factory child that arrives before its root across a batch boundary;
+a **claimed** span of another harness keeps its content, so another harness's own
+`gen_ai.input.messages` is untouched. The native route's own content switch belongs to the
+harness, not to KyberDash.
+
+**The gate covers the plugin envelope's own prompt attribute, and it reaches a claimed envelope.**
+The plugin gates its own prompt at **emission** — it reads the consent when it maps the span —
+but the emission gate is not the last gate. A span the plugin **parked** because the delivery
+failed is re-delivered from its spool **without the consent being read again**, so a prompt span
+parked while the consent was on reaches the store with the owner's text after the owner has
+turned the consent off. The store-side gate closes that hole, and it closes it in two steps: the
+gate's content list names the plugin envelope's own prompt attribute (`factory.turn.prompt.text`)
+among the attributes it strips, and the strip decision gives a **claimed** Factory envelope the
+same arm the native Factory span has. The envelope's **identity** attributes — the span id, the
+session id, the model, the tool name — are measurements, not content, and survive the gate; the
+plugin's **tool** attributes stay off the content list on purpose, because the plugin publishes
+tool arguments and results as **byte counts**, never as content (`dash/src/canon/droid-content.ts`,
+`dash/src/canon/ingest.ts`).
+
+**Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
+
+- **Strict** (`capture enable`): refuses a foreign tree (one holding a file KyberDash did not
+  write) or an owner-edited tree (one whose bytes no longer match the receipt) with exit 1, and
+  writes nothing at all. An unreadable tree is refused in both modes.
+- **Preserve** (`--preserve`, used by Squad and `kyber-weave update`): keeps such a tree with a
+  warning and exits 0.
+- **`--if-installed`** decides from the **harness's own registry**, not from the tree on disk.
+  When the registry reports the plugin installed, the install runs — and it refreshes the
+  harness's cached copy even when KyberDash's own tree is absent and has to be written for the
+  first time, because the harness's copy is then the stale one. When the registry does not report
+  it installed, nothing is written and no harness command runs.
+
+**The status surface's fixed words.** `capture status` and the Settings row report the **tree's**
+state, in fixed words: `plugin: installed`, `plugin: not installed`, `plugin: unreadable` (not a
+regular directory, or a file in it is not a regular file), `plugin: modified since install or
+not written by KyberDash`, and — for a tree KyberDash wrote that holds the **previous** bundle —
+`plugin: installed (an older version than this build)`. That last word is the `upgrade`
+classification, and it is deliberately distinct from `plugin: modified since install or not
+written by KyberDash`: a tree KyberDash wrote and still owns, whose bytes are simply an older
+bundle, is neither an owner edit nor a foreign tree. The install is what resolves it — the
+install rewrites the tree with the current bundle and then refreshes the harness's cached copy,
+the same refresh the `--if-installed` clause above promises — so the row reads
+`plugin: installed` again once the install has run.
+
+**The install's own verdict names the tree.** The disposition and the printed line say what
+happened to the **tree**, not to the harness's copy of it: a tree written fresh is `installed` and
+prints `factory plugin: installed <dir>`, and a superseded tree is `upgraded` and prints
+`factory plugin: upgraded <dir>`. The harness's **cached copy** is refreshed whenever the tree's
+content changed — and also when the tree was written fresh while the harness already held the
+plugin, because the copy the harness runs is then the stale one. The refresh rides along with
+either verdict, so a fresh tree the harness already had installed still ends with the harness
+running the current bundle.
+
+**The install lifecycle's vocabulary.** The **install path** classifies the harness-side state as
+the harness itself reports it (`dash/src/capture/harnesses/factory-plugin/marketplace.ts`):
+`marketplace-tree-written` (the Kyber-owned tree landed; the harness does not have it yet),
+`marketplace-registered` (the harness registered the marketplace; the plugin is not installed),
+`plugin-installed` (the plugin is installed and enabled), `conflict` (the harness holds a
+marketplace name or a plugin identity KyberDash does not own), and `unknown` (the harness's own
+state could not be read — the CLI is missing, or its output is not understood).
+
+This vocabulary is **not** part of the status surface. Reading it spawns the harness's own CLI,
+so a caller that must not spawn — a status read, for instance — does not read it:
+`factoryHarnessState` (`dash/src/capture/harnesses/factory-plugin/install.ts`) takes the harness
+CLI from its caller and says so in its own header comment, and `describeFactoryPluginStatus`
+prints the `factory harness: <state>` line only when a caller injects one. No production caller
+injects one, so the install path is the only place the vocabulary is reported today, and a
+status row reports the tree's state only. The consequence is honest but uncomfortable: an owner
+whose organisation refused the route, or whose marketplace registration was removed, sees a row
+that says the plugin is installed with no harness-side fact to contradict it.
+
+Every partial state is named, and every one of them is resumable by re-running the install. An
+interrupted harness-side step is never repaired by hand: the harness's cache copy and its own
+plugin record are the harness's files, and the repair is to re-run the harness's own command. A
+missing `droid` CLI reads as `unknown` with the named cause, never as an install that succeeded.
+
+**The refusal vocabulary.** A refusal names its cause: `conflict` (a name the harness holds that
+KyberDash does not own), `drift` (the tree the owner edited) and `unreadable` (the tree, or the
+harness's own state, could not be read). Strict mode refuses with exit 1 and writes nothing;
+preserve mode keeps the state with a warning and exits 0.
+
+**The tree or the receipt proves the plugin identity.** What makes a plugin identity KyberDash's
+own is **either** the tree KyberDash wrote **or** the receipt that proves it — an OR, not a
+fallback order. The tree's presence proves the identity ours when KyberDash wrote that tree; the
+receipt proves it when the tree is gone but the receipt survives, and a receipt proves an identity
+only when it names **this** tree, **this** marketplace and **this** identity
+(`kyberdash-factory@kyberdash`); every part of that has to hold, so a receipt naming another
+tree, another marketplace or no identity at all proves nothing, and an arbitrary plugin identity is
+never treated as ours. The receipt is the proof that survives the harness's own teardown — the
+harness removes a marketplace registration **without** removing the plugin, so a plugin can
+outlive the registration that named it. Ownership therefore does not rest on the tree's presence
+alone: a tree that is absent while the receipt still proves the plugin identity is **ours**, not a
+conflict, and the install then runs the sequence the harness's own registry dictates — the
+marketplace registration is restored **first** when it is missing, and `plugin update` refreshes
+the harness's cached copy against the installed plugin, because `plugin install` is refused for an
+installed plugin. The tree's presence is what proves a marketplace ours when the harness names no
+source to compare against; the tree's presence **or** the receipt is what proves the plugin
+identity ours.
+
+**The same rule applies at the uninstall.** The uninstall reads the receipt it already has to
+remove and derives the same proven identity from it — the receipt names **this** tree, **this**
+marketplace and **this** identity, and is not the previous route's legacy receipt — so a plugin
+the receipt proves is ours is removed through the harness's own
+`droid plugin uninstall kyberdash-factory@kyberdash --scope user` instead of being classified as
+a conflict. A conflict answer there would run no harness command, delete the receipt and report
+success while the plugin stayed installed and kept capturing. A marketplace named `kyberdash` that
+somebody else registered is still a conflict, and it is still left alone.
+
+**The residue rule — report, never patch.** If the harness's own uninstall leaves an entry
+behind, KyberDash names it (which registry, which entry) and prints the exact `droid plugin …`
+command that removes it, and never writes the owner's settings file to clean it up. The teardown
+removes KyberDash's own tree on a conflict and leaves the foreign entry alone: the tree is
+KyberDash's and the receipt proves it, while the entry that holds KyberDash's **name** is
+somebody else's.
+
+**An organisation's hard controls can refuse the route.** `strictKnownMarketplaces` makes the
+higher-level list the ceiling for marketplace sources, `strictEnabledPlugins` makes the
+`enabledPlugins` map the exhaustive plugin allowlist — so a user-scope install is rejected — and
+`allowManagedHooksOnly` drops user- and project-level hooks, so the plugin can install, register
+as enabled and never fire a hook. KyberDash works around **none** of them: the only way to add a
+marketplace or an enablement without the harness's commands is to write the owner's settings
+file, which this section forbids. The first two are **visible** — the harness's command fails and
+the refusal is reported with the harness's own stderr quoted; the third is **silent**, and the
+surfaces must not read "installed" as "capturing".
+
+**The shared `droid` harness id.** Factory is one harness under one canonical id, `droid` — the
+id the Factory file source already stores (`dash/src/providers/droid.ts`), so the dashboard shows
+Factory once and the plugin's rows sit beside the file source's rows. One adapter, named
+`droid`, claims the plugin envelope, and only the plugin envelope: it recognises a span by its
+attribute fingerprint alone, never by the span's source name (R6.2), and Factory's **native** span
+surface is not among the fingerprints it recognises (see
+[the native path](#factorys-native-opentelemetry-path-authorized-complementary)). An envelope span
+naming an unsupported or missing contract version scores zero and quarantines under the fixed
+reason `unknown droid contract version`, the same guard the OpenCode envelope carries
+(`dash/src/canon/adapters/droid-envelope.ts`).
+
+### The Factory source-precedence rule
+
+Factory is one harness reached through two capture sources, and a session both sources observed
+has to say which source owns which half of it. The rule is decided in one place —
+`splitDroidSessionRecords` (`dash/src/canon/droid-pairing.ts`), a leaf module the session
+derivation calls — and it **splits by what each source can measure**; it never merges the two.
+
+| The session's figure | Read from | Why |
+|---|---|---|
+| turn count, timeline turns, request roots, per-turn model, tool invocations, duration, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism and alone observes the turn boundary, the tools and the timing |
+| token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters, and its counters are a session-level total split evenly across assistant calls — a session fact, never a turn fact |
+| cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
+
+The file row in a paired session is a **counter carrier**: it contributes its counters and its
+cost and **nothing else**. It is not a turn, not a timeline entry, not a request root, not a tool
+invocation, and its duration is not added to the session's duration.
+
+Two more figures follow the same split. The **cost** is one figure over the union of the turn
+records and the counter records — disjoint sets, so nothing is priced twice — and the cost-basis
+verdict is computed over that same union. The **context analysis** reads the turn records, and
+where no turn record carries a measured input — a paired Factory session's plugin turns report
+no counter at all — it falls back to the counter records, so the session keeps the context
+figure the file source gave it before the plugin arrived.
+
+The session's **model** follows the same split: the turn records' model where a turn record
+names one, the counter record's model where none does. See
+[the model a Factory session publishes](telemetry-inventory.md#the-model-a-factory-session-publishes).
+
+The rule is **inert for every other harness**: a record of another harness belongs to neither
+list, so every other session keeps the derivation it has. A **plugin-only** Factory session
+keeps the plugin's own declarations, so its totals read `not_measurable` with the reason the
+plugin adapter gives; a **file-only** session keeps the file source's. The pairing is
+**exact-match only** — no fuzzy join, no time window, no counter-equality join — and it never
+fabricates: a paired session's totals are the file row's counters, and a plugin-only session's
+totals are absent, never zero.
+
+### Factory's native OpenTelemetry path (authorized, complementary)
+
+Factory's own native export can be pointed at the KyberDash receiver:
+`export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"` is Factory's own documented example,
+and Droid pushes OTLP/HTTP directly, so no collector is needed and KyberDash is simply the
+customer's own collector. The path is authorized as a **second, complementary** path
+([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)), never as the primary
+one.
+
+**The organisation's pin is read from the harness's own directory.** An organisation's managed
+settings reach the machine two ways: the **cached view** the harness writes into its own
+directory — `<home>/.factory/org-managed-settings.cache.json`, whose `managedSettings.telemetry`
+carries the pinned values — and the **system-managed copy** (`settings.json` under the platform's
+system-managed directory), whose `telemetry` block carries them. Both are read, so a machine that
+holds only one of them still reports the organisation's pin. The cached view is **not** read from
+the directory `FACTORY_DIR` moves: that variable moves the harness's **sessions tree** and
+nothing else, so the harness keeps its own settings and its cached organisation settings in its
+own directory (`dash/src/capture/harnesses/factory-plugin/native-export.ts`).
+
+**The receiver.** `POST /v1/metrics` sits beside `POST /v1/traces` and `POST /v1/logs`
+(`dash/src/otel/receiver.ts`). OTLP/JSON metrics are decoded to their own shape and handed to a
+metrics sink port with the same admission, shedding and health-window discipline as the span
+path. Only OTLP/HTTP is documented for Factory — port 4318, no gRPC, no 4317 — so no other
+protocol is added. Logs are never exported by Droid, so `/v1/logs` receives nothing from Factory.
+
+**Where the metric points go.** A decoded point becomes **one row per distinct decoded point** in
+the canon store's own `metric_point` table (`dash/src/canon/store.ts`), written through the
+production sink's `upsertMetrics` port and the `ingestMetricBatch` seam
+(`dash/src/canon/metric-ingest.ts`). A point's identity is a content digest of everything the row
+carries — **including the interval the point's measurement covers** — so a re-delivered point
+lands on the row it already occupies instead of beside it, and the same measurement over a
+different window is a different point rather than a second delivery of the first. The
+row carries the metric's name, kind and unit, its aggregation temporality, the point's timestamp,
+**the start of the interval the point's measurement covers**, and its value or its count and sum,
+the point's attributes, the resource attributes, the scope,
+and the exporter's `service.name` as the row's **source**. A point that carried no value of its
+own keeps the value absent, never zero, and a point that declared no interval carries none —
+absent, never a fabricated zero.
+
+**What the row stores is the exporter's own content.** `attributes_json` holds the point's own
+attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
+it redacts nothing. The receiver is what decides, at the decode seam and before anything is
+stored: it strips account identity from the metric **resource** and from the metric **point's own
+attributes**, exactly as it does for spans and logs. So `resource_json` carries the exporter's
+resource attributes (`service.name`, `service.version`, `os.type`, …), `attributes_json` carries
+the point's own attributes, and neither carries `user.id`, `user.email` or `organization.id` —
+Factory's native export puts those identity keys on every data point (the vocabulary table below
+is the exporter's own, not the stored row's), and the receiver is where they are dropped, so they
+never reach the stored row. The keys that survive are the correlation and usage evidence:
+`session.id`, `conversation.id`, the whole `gen_ai.*` namespace, and the point's own measurement
+attributes such as `model.id` or `skill.name`. Those are not identity, so they are kept.
+
+The table is created by the store's own schema with `CREATE ... IF NOT EXISTS`, the
+`model_context_window_catalog` precedent, so **the table's own creation needs no version bump and
+no migration step**: a store that predates the table opens unchanged and grows it on the next
+open. A **column** added to the table afterwards is a different matter — the same
+`IF NOT EXISTS` leaves an existing table without it — so the interval start landed with the
+**schema 23** migration, and it is presence-guarded like the other `ADD COLUMN` steps.
+
+A metric point has **no span**, so its row carries **no harness attribution** — there is no span
+to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
+why a **scoped per-harness wipe cannot clear these rows**: it cannot claim a row it cannot
+attribute. The full corpus wipe clears them with everything else.
+
+**Nothing projects them yet.** The canon projection and the dashboard have no metric concept, so
+a metric point is a stored fact and not a figure the dashboard shows, and no reader is told a
+metric was measured and shown as one. The projection that would read them is later work.
+
+The writer's rule is **unchanged**: a sink that cannot persist metrics does not offer the port,
+and the writer **refuses** the batch rather than accepting one it would drop. The arrival is
+recorded as receiver activity under the single `otlp:metrics` key, carrying the number of points
+the batch carried, and that audit write is fenced exactly like the span and log audit writes: a
+failed audit row never fails the ingest it audits and never requeues the batch.
+
+**The native span claim is withdrawn.** **No adapter claims a native span.** The `droid` adapter
+recognises only the plugin envelope. It used to recognise the native `genai` fingerprint by
+attribute — never by source name — and that fingerprint (`gen_ai.agent.name` = `droid`) sits on
+the trace **root alone**. The registry normalises a group's score by the group's span count, so a
+trace of one root and `k` children scores `1/(1+k)` against the registry's **0.6** threshold: a
+real turn's trace has at least one child, scores at most **0.5**, and is quarantined. Measured
+against real captured spans: **accepted 0, quarantined 2**. The `legacy` format's content-shaped
+spans carry no attribute fingerprint at all — only span names, which no adapter may claim. A
+native span therefore leaves the corpus for quarantine as **`unclaimed`**, and the quarantine row
+keeps the whole decoded packet as the audit evidence. The native **metrics** path is untouched by
+this: it is what remains of the native path.
+
+The vocabulary Factory's own export uses is:
+
+| Aspect | Value |
+|---|---|
+| Root span | `invoke_agent droid` (Internal) |
+| Children | `chat <model>` (Client); `execute_tool <tool>` (Internal) — tool spans are siblings of the chat spans, never nested |
+| Operation | `gen_ai.operation.name` ∈ `invoke_agent` \| `chat` \| `execute_tool` |
+| Agent | `gen_ai.agent.name` = `droid`, on the root |
+| Session | `gen_ai.conversation.id` = the Droid session id; `session.id` on every data point |
+| Model | `gen_ai.request.model` (chat span) |
+| Provider | `gen_ai.provider.name` ∈ `anthropic` \| `openai` \| `gcp.gemini` \| `x_ai` \| `deepseek` \| `mistral_ai` |
+| Tool | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type` = `function` |
+| Outcome | `error.type` = `rejected` for a policy-denied tool call; `gen_ai.response.finish_reasons` (array) |
+| Server | `server.address`, `server.port` |
+| Content (gated) | `gen_ai.input.messages` (root), `gen_ai.output.messages` (chat), `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` |
+| Common (every data point) | `user.id`, `user.email`, `organization.id`, `session.id`, `model.id`, `parent_session.id` |
+| Resource | `service.name` = `cli`, `service.version`, `os.type`, `os.version`, `host.arch`, `terminal.type`, `telemetry.granularity` |
+
+**Plugin-first precedence.** The plugin envelope is the only Factory span KyberDash claims, so
+there is nothing for a native span to be counted with: every native span is quarantined as
+`unclaimed` and never reaches the corpus.
+
+**What the native path cannot do.** Its metrics carry **no token or cost counters** — Factory's
+own documentation states that token and cost data "are not exported as customer OTEL metrics" —
+and the export carries **no subagent lineage**. A Factory session's counters therefore still come
+from the file source, and the native path replaces neither the plugin rows nor the file source's
+counters.
+
+**Where it is silently absent.** Factory's endpoint is configured by machine environment
+variables (`OTEL_TELEMETRY_ENDPOINT` and its siblings); there is no personal `settings.json`
+telemetry key. An organisation-managed `telemetry` block **overrides** those variables, so a
+deployment under such an override exports nothing locally and the plugin path is the only
+capture path in that deployment. KyberDash reports what it observes and never claims the native
+path is available when none arrives.
+
 ## Local harness-source refresh
 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
@@ -784,6 +1256,11 @@ contract that separates the buckets from the missing counter; until then such a 
 content in the composition chart. OpenCode steps carry usage whenever OpenCode reports it, so
 OpenCode sessions are not in this case.
 
+The one harness-scoped exception to that derivation is Factory's: a session both capture sources
+observed is **split** between them — the plugin rows are its turns, the file rows are its
+counters — and the rule that splits it is in
+[the Factory source-precedence rule](#the-factory-source-precedence-rule).
+
 ## Normalization layer
 
 ```mermaid
@@ -814,6 +1291,30 @@ per-instance suffixes, does not track content, and is not stable across reconfig
 
 - **Antigravity OTLP attribution (issue #195):** `antigravityAdapter` (`dash/src/canon/adapters/antigravity.ts`) claims OTLP spans asserting `gen_ai.agent.name === 'antigravity'`, mapping them to canonical harness `antigravity`. When that fingerprint is present, `geminiAdapter` yields to Antigravity so valid Antigravity telemetry is never quarantined under Gemini's dev-harness exclusion. The file-side `kyberdash kyber antigravity-statusline` recorder appends to `antigravity-statusline.jsonl` and attributes to harness `antigravity-cli`; it is distinct from OTLP `antigravity`. Spans are not attributed to Antigravity merely because the source is named `agy`. Legacy records from the `agy` source are re-attributed through source-scoped repair (`node dash/dist/cli.js kyber renormalize --source agy`): records with Antigravity evidence become `antigravity`, while agent-name-less spans remain quarantined as `excluded_harness`.
 - **Copilot Chat attribution (issue #192):** `copilot_chat/gen_ai` spans are correctly claimed and attributed to harness `copilot` rather than falling through to `excluded_harness` quarantine.
+
+### The status rule at the normalization seam
+
+A record's outcome, once the adapter has determined one, is **never downgraded** by the later
+timing step. `growWithReceiverTiming` (`dash/src/canon/ingest.ts`) gives the record the
+receiver's timing, and the outcome **only when the adapter did not determine one**:
+
+```typescript
+record.timestamp = span.timestamp
+record.durationMs = span.durationMs
+if (record.status !== 'error') record.status = span.status.code
+```
+
+A span carrying `error.type` therefore keeps the `error` status the `droid` adapter assigned
+from it, and the **stored** record reads `error` — so a policy-denied tool call counts as an
+error in the session's tool error counts and in the run's outcome derivation, which is the whole
+point of the adapter's rule. The error **type** stays in the record's raw attributes: it is the
+evidence of **why** the call was denied, and the status only says that it was.
+
+The rule is **inert for every other harness**. `baseRecord` stamps `status: 'unspecified'`
+(`dash/src/canon/adapters/copilot.ts`), and the `droid` adapter is the only adapter under
+`dash/src/canon/adapters/` that assigns a `record.status`; every other adapter's record still
+carries `'unspecified'` when the timing step runs, so its stored status remains the exporter's
+status code, byte for byte.
 
 ### Provider call extraction contracts
 
@@ -1125,7 +1626,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 22;
+schema is a version-controlled constant executed on construction, currently at version 23;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -1142,7 +1643,8 @@ schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined sp
 schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
 schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)), and
 schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
-schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22).
+schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22), and
+schema 23 added the metric point's interval start (`metric_point.start_time_unix_nano`) — a column costs a version bump and a migration step where the table's own `CREATE ... IF NOT EXISTS` does not, because a store that already carries the table never gains the column from the `CREATE TABLE`.
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
@@ -1947,9 +2449,11 @@ enable becomes a no-op rather than a race; another process is not covered.
 Paths resolve through a platform seam (`dash/src/capture/paths.ts`), so macOS, Linux and
 Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 
-**The registry is seven harnesses.** `CAPTURE_HARNESS_REGISTRY`
-(`dash/src/capture/harnesses/registry.ts`) declares three managed writers — `copilot`,
-`claude-code` and `opencode` (OpenCode owns a plugin file and writes no config key) — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
+**The registry is eight harnesses.** `CAPTURE_HARNESS_REGISTRY`
+(`dash/src/capture/harnesses/registry.ts`) declares four managed writers — `copilot`,
+`claude-code`, `opencode` (OpenCode owns a plugin file and writes no config key) and `factory`
+(Factory owns a marketplace tree and writes no config key) — and four `kind: 'pending'`
+writers: `codex`, `pi`, `antigravity`,
 and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
 (`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
 `enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` answers

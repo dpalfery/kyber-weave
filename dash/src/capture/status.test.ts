@@ -4,14 +4,16 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { callRoute, makeDeps, type RouteDeps } from '../server/testing.js'
 import { claudeCodeHarness } from './harnesses/claude-code.js'
 import { copilotHarness } from './harnesses/copilot.js'
 import { opencodeHarness } from './harnesses/opencode.js'
 import { pjoin, type PathEnv } from './paths.js'
-import { DEFAULT_CAPTURE_ENDPOINT, runCapture } from './index.js'
+import { DEFAULT_CAPTURE_ENDPOINT, isPluginOnly, runCapture, type PluginOnlyWriter } from './index.js'
 import { buildCaptureStatus, buildHarnessStatus, createApplicabilityFilter } from './status.js'
 import type { CaptureHarnessStatus, StatusContext } from './status.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
+import { fakeHarness } from './harnesses/factory-plugin/testing.js'
 import { KILO_PLUGIN_SOURCE } from './kilo-plugin/source.js'
 
 const temporaryHomes: string[] = []
@@ -88,6 +90,97 @@ function byId(statuses: readonly CaptureHarnessStatus[], id: string): CaptureHar
   return found
 }
 
+/** The receiver's address without its scheme: what the row must name when it is pointed here. */
+const RECEIVER_ADDRESS = DEFAULT_CAPTURE_ENDPOINT.replace(/^https?:\/\//, '')
+
+/** The Factory root of a temporary home: where Factory keeps its own settings. */
+const factoryRoot = (home: string) => join(home, '.factory')
+
+/**
+ * The machine environment variable Factory's native export reads, and the documented
+ * fallback beside it. Both are stubbed, so the developer's own shell cannot decide the
+ * fixture and the fallback cannot answer for the variable.
+ */
+function setNativeEndpoint(endpoint: string | undefined): void {
+  vi.stubEnv('OTEL_TELEMETRY_ENDPOINT', endpoint)
+  vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', undefined)
+}
+
+/**
+ * The organisation's managed settings, as the machine holds them. The organisation's
+ * `telemetry` block pins the endpoint and OVERRIDES the machine environment variable; it
+ * reaches the machine both as the cached view under the Factory root and as the
+ * system-managed file. Both are written here, under the temporary home, carrying the same
+ * endpoint, so the fixture never depends on which of the two the reader consults — and
+ * the machine's own organisation settings are never read.
+ */
+function writeOrgTelemetry(home: string, endpoint: string): void {
+  const root = factoryRoot(home)
+  const telemetry = { endpoint }
+  mkdirSync(root, { recursive: true })
+  writeFileSync(
+    join(root, 'org-managed-settings.cache.json'),
+    `${JSON.stringify(
+      {
+        orgId: 'org-test',
+        userId: 'user-test',
+        managedSettings: { telemetry },
+        factoryTier: 'team_annual',
+        revision: 1,
+        cachedAt: 0,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  const systemDir =
+    HOST === 'win32'
+      ? join(home, 'AppData', 'Roaming', 'Factory')
+      : HOST === 'linux'
+        ? join(home, 'etc', 'factory')
+        : join(home, 'Library', 'Application Support', 'Factory')
+  mkdirSync(systemDir, { recursive: true })
+  writeFileSync(join(systemDir, 'settings.json'), `${JSON.stringify({ telemetry }, null, 2)}\n`)
+}
+
+/**
+ * The printed status of one harness: the lines under its harness heading. The row's own
+ * lines are what the native export is reported in, so nothing outside the row can answer
+ * for it.
+ */
+function harnessBlock(lines: readonly string[], id: string): string[] {
+  const start = lines.findIndex((line) => line.startsWith(`harness ${id} (`))
+  if (start === -1) throw new Error(`no ${id} harness block in ${JSON.stringify(lines)}`)
+  const block: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith('  ')) break
+    block.push(line)
+  }
+  return block
+}
+
+/**
+ * The row's own lines about the native OpenTelemetry export. A row that says nothing about
+ * the native path is the defect these tests exist to catch, so the helper fails loudly
+ * instead of returning an empty string.
+ */
+function nativeText(lines: readonly string[]): string {
+  const named = lines.filter((line) => /native|otel|telemetry/i.test(line))
+  const candidates = named.length > 0 ? named : lines.filter((line) => /export/i.test(line))
+  if (candidates.length === 0) {
+    throw new Error(`the row says nothing about the native export: ${JSON.stringify(lines)}`)
+  }
+  return candidates.join('\n')
+}
+
+/**
+ * The text with its unavailability claims removed. What is left is any claim that the
+ * native path is working — the one claim the row must never make wrongly.
+ */
+function workingClaim(text: string): string {
+  return text.replace(/\bunavailable\b/gi, '').replace(/\bnot\s+available\b/gi, '')
+}
+
 async function enableViaEngine(home: string, harnessIds: string[]): Promise<void> {
   const result = await runCapture('enable', {
     homeDir: home,
@@ -95,6 +188,9 @@ async function enableViaEngine(home: string, harnessIds: string[]): Promise<void
     appDataDir: hostEnv(home).appData,
     harnessIds,
     fetchHealth: NO_LISTENER,
+    // The Factory route drives the harness's own CLI: a fake stands in for it, so no test
+    // needs the real CLI on the machine.
+    harnessCli: fakeHarness().harness,
   })
   expect(result.exitCode).toBe(0)
 }
@@ -122,7 +218,10 @@ describe('buildCaptureStatus over a temporary home', () => {
 
   it('marks managed and status-only modes', () => {
     const statuses = buildCaptureStatus(ctxFor(makeHome()))
-    expect(statuses.map((status) => [status.id, status.mode])).toEqual([
+    // The Factory row joins the registry; the rows that were already there keep their order.
+    expect(
+      statuses.filter((status) => status.id !== 'factory').map((status) => [status.id, status.mode]),
+    ).toEqual([
       ['copilot', 'managed'],
       ['claude-code', 'managed'],
       ['codex', 'status-only'],
@@ -505,6 +604,111 @@ describe('kilo plugin capture status', () => {
   })
 })
 
+describe('factory (droid) capture status', () => {
+  /**
+   * The Factory writer, which must be a managed writer that owns a plugin and no
+   * configuration key. Resolved per test, so the rest of this file still runs (and
+   * reports) while factory is not yet in the registry.
+   */
+  const factoryWriter = (): PluginOnlyWriter => {
+    const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === 'factory')
+    if (writer === undefined) throw new Error('no capture writer is registered for factory')
+    if (!isPluginOnly(writer)) throw new Error('the factory writer is not a plugin-only managed writer')
+    return writer
+  }
+
+  /** The status line that speaks about the plugin, not about the consent. */
+  const pluginLine = (row: CaptureHarnessStatus): string => {
+    const line = row.statusLines.find((text) => text.toLowerCase().includes('plugin'))
+    if (line === undefined) throw new Error(`no plugin line in ${JSON.stringify(row.statusLines)}`)
+    return line
+  }
+
+  it('lists the Factory row as a managed harness with no configuration file', () => {
+    const statuses = buildCaptureStatus(ctxFor(makeHome()))
+    const factory = byId(statuses, 'factory')
+    expect(factory.displayName).toBe('Factory (Droid)')
+    expect(factory.mode).toBe('managed')
+    // Plugin-only: no configuration key is declared, read or drift-checked.
+    expect(factory.files).toEqual([])
+  })
+
+  it('reports the plugin as off, with no receipt, before it is installed', () => {
+    const factory = byId(buildCaptureStatus(ctxFor(makeHome())), 'factory')
+    expect(factory.state).toBe('off')
+    expect(factory.receipt).toBe('absent')
+    expect(pluginLine(factory)).toMatch(/off|not installed/i)
+  })
+
+  it('reports the plugin as on with a recorded receipt after it is installed', () => {
+    const home = makeHome()
+    const writer = factoryWriter()
+    const installed = writer.filePlugin.install(home, hostEnv(home), {
+      dryRun: false,
+      harnessCli: fakeHarness().harness,
+    })
+    expect(installed.exitCode).toBe(0)
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    expect(factory.state).toBe('on')
+    expect(factory.receipt).toBe('recorded')
+    expect(pluginLine(factory)).toMatch(/installed/i)
+    expect(pluginLine(factory)).not.toMatch(/not installed/i)
+  })
+
+  it('names the resolved plugin directory and the consent', () => {
+    const home = makeHome()
+    const writer = factoryWriter()
+    writer.filePlugin.install(home, hostEnv(home), { dryRun: false, harnessCli: fakeHarness().harness })
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    // The directory the plugin resolves to is reported wherever the row carries it. The row
+    // carries it as a plain line, so the path is compared as itself: a JSON copy of the row
+    // escapes the backslashes of a Windows path, and the raw path is not a substring of it.
+    const pluginDirectory = writer.filePlugin.path(home, hostEnv(home))
+    expect(
+      factory.statusLines.some((line) => line === `plugin directory: ${pluginDirectory}`),
+      'the row names the directory the plugin resolves to',
+    ).toBe(true)
+    expect(factory.statusLines.some((line) => /consent/i.test(line))).toBe(true)
+  })
+
+  it('reports the content consent as off after an enable, because the switch does not record the prompt text', async () => {
+    const home = makeHome()
+    await enableViaEngine(home, ['factory'])
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    const consent = factory.statusLines.find((line) => line.toLowerCase().includes('consent'))
+    expect(consent).toBeDefined()
+    expect(consent).toMatch(/consent: off/i)
+  })
+
+  it('reports unknown for a marketplace tree KyberDash did not write', () => {
+    const home = makeHome()
+    const pluginDir = join(home, '.kyberdash', 'marketplaces', 'kyberdash')
+    mkdirSync(join(pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    expect(factory.state).toBe('unknown')
+  })
+
+  it('reports the same Factory row over the API', async () => {
+    const home = makeHome()
+    const deps: RouteDeps = (makeDeps as unknown as (options?: unknown) => RouteDeps)({
+      capture: { homeDir: home, platform: HOST, fetchHealth: NO_LISTENER },
+    })
+
+    const { status, body } = await callRoute('GET', '/api/kyber/capture', { deps })
+
+    expect(status).toBe(200)
+    const harnesses = (body as { harnesses: CaptureHarnessStatus[] }).harnesses
+    const factory = harnesses.find((row) => row.id === 'factory')
+    expect(factory).toBeDefined()
+    expect(factory!.state).toBe('off')
+  })
+})
+
 describe('parity with the CLI text status', () => {
   it('agrees with `capture status` on present and missing keys', async () => {
     const home = makeHome()
@@ -576,5 +780,82 @@ describe('buildHarnessStatus', () => {
   it('builds one harness on its own', () => {
     const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === 'opencode')!
     expect(buildHarnessStatus(writer, ctxFor(makeHome())).id).toBe('opencode')
+  })
+})
+
+describe('the factory native export in the status surface', () => {
+  /** The Factory row as `capture status` prints it. */
+  const printedFactoryStatus = async (home: string): Promise<string[]> => {
+    const result = await runCapture('status', {
+      homeDir: home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+    })
+    expect(result.exitCode).toBe(0)
+    return harnessBlock(result.stdout.split('\n'), 'factory')
+  }
+
+  it('reports the native export as available in the row and in the printed status', async () => {
+    const home = makeHome()
+    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
+
+    const row = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    const rowText = nativeText(row.statusLines)
+    expect(rowText).toMatch(/\bavailable\b/i)
+    expect(rowText).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    // The row says which endpoint the native export is pointed at.
+    expect(rowText).toContain(RECEIVER_ADDRESS)
+
+    const printed = nativeText(await printedFactoryStatus(home))
+    expect(printed).toMatch(/\bavailable\b/i)
+    expect(printed).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+  })
+
+  it('reports the native export as unavailable when an organisation pins the endpoint, whatever the machine variable says', async () => {
+    const home = makeHome()
+    // The machine variable points at this receiver, and the organisation pins another
+    // endpoint: the organisation's endpoint is the one that receives the traffic.
+    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
+    writeOrgTelemetry(home, 'https://otlp.acme.example')
+
+    const row = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    const rowText = nativeText(row.statusLines)
+    expect(rowText).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    // The cause is named: an organisation-pinned endpoint, not the machine variable.
+    expect(rowText).toMatch(/\borgani[sz]ation\b|\borg-managed\b|\bmanaged settings\b|\benterprise\b/i)
+    // Never reported as working, whatever the machine variable says.
+    expect(workingClaim(rowText)).not.toMatch(/\bavailable\b/i)
+
+    // The printed status says the same thing as the row.
+    const printed = nativeText(await printedFactoryStatus(home))
+    expect(printed).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    expect(printed).toMatch(/\borgani[sz]ation\b|\borg-managed\b|\bmanaged settings\b|\benterprise\b/i)
+
+    // And so does the row over the API.
+    const deps: RouteDeps = (makeDeps as unknown as (options?: unknown) => RouteDeps)({
+      capture: { homeDir: home, platform: HOST, fetchHealth: NO_LISTENER },
+    })
+    const { status, body } = await callRoute('GET', '/api/kyber/capture', { deps })
+    expect(status).toBe(200)
+    const harnesses = (body as { harnesses: CaptureHarnessStatus[] }).harnesses
+    const apiRow = harnesses.find((candidate) => candidate.id === 'factory')
+    expect(apiRow).toBeDefined()
+    const apiText = nativeText(apiRow!.statusLines)
+    expect(apiText).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    expect(apiText).toMatch(/\borgani[sz]ation\b|\borg-managed\b|\bmanaged settings\b|\benterprise\b/i)
+    expect(workingClaim(apiText)).not.toMatch(/\bavailable\b/i)
+  })
+
+  it('reports the native export as not configured when nothing configures it', async () => {
+    const home = makeHome()
+    setNativeEndpoint(undefined)
+
+    const row = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    const rowText = nativeText(row.statusLines)
+    // "Not configured" is its own verdict: neither working, nor unavailable for a reason.
+    expect(rowText).toMatch(/\bnot\s+configured\b/i)
+    expect(rowText).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
+    expect(workingClaim(rowText)).not.toMatch(/\bavailable\b/i)
   })
 })

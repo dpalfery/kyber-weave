@@ -10,6 +10,10 @@ dash/tray/vendor/glib-0.18.5/LICENSE whitespace=-blank-at-eof
 # LF-only render (bundle.test.ts drift guard). Keep it LF on every checkout, including Windows.
 dash/src/capture/harnesses/opencode-plugin/generated/plugin-source.ts eol=lf
 
+# The committed Factory plugin bundle is compared byte-for-byte with the bundle script's
+# LF-only render (bundle.test.ts drift guard). Keep it LF on every checkout, including Windows.
+dash/src/capture/harnesses/factory-plugin/generated/plugin-source.ts eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

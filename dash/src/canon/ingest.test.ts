@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
-import { ingestBatch } from './ingest.js'
+import { ADAPTERS, ingestBatch, ingestBatchWithAdapters } from './ingest.js'
+import { FACTORY_CONTENT_ATTRIBUTES, stripFactoryContent } from './droid-content.js'
 import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
+import { buildSessions } from './sessions.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
-import type { OtlpSpan } from '../otel/receiver.js'
+import type { OtlpSpan, OtlpStatusCode } from '../otel/receiver.js'
+import { resolveRootByParentage, traceGroup, type HarnessAdapter } from './adapters/base.js'
+import { baseRecord } from './adapters/copilot.js'
+import type { CanonicalRecord } from './types.js'
 import antigravitySpan from './adapters/__fixtures__/antigravity-span.json' with { type: 'json' }
 
 // The live collector had its own normalization that never went through the
@@ -746,6 +754,1043 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     expect(conversationHistory(store, 'llm-1')).toEqual([])
     expect(conversationHistory(store, 'llm-2')).toEqual([])
     expect(notMeasurableReason(store, 'llm-1', 'conversation_history')).toMatch(/OTEL_LOG_USER_PROMPTS=1/)
+    store.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The stored error status at the receiver-timing seam
+// ---------------------------------------------------------------------------
+//
+// An adapter can decide that a span FAILED — Factory's exporter marks a
+// policy-denied tool call with an `error.type` attribute, and its adapter
+// reads that attribute as the record's status: a denied call is an error, not
+// an ordinary tool call. The receiver-timing seam then hands the record the
+// exporter's own OTLP status code — and an exporter does not ALSO mark the
+// transport status as an error. The error is decided correctly at the adapter
+// and thrown away one line later, so the STORED record reads as an ordinary
+// tool call.
+//
+// THE RULE: an error status is never downgraded. The seam gives the record the
+// timing and the outcome UNLESS the adapter already determined one.
+//
+// The rule is the SEAM's, and the vehicle is interchangeable: the cases below
+// drive it through an adapter that states the outcome itself, because the
+// Factory native claim this branch withdraws (plan D50) was the vehicle the
+// rule was first exercised through.
+//
+// Every case below goes through the production ingest path. The defect only
+// appears after normalization, so a case that stopped at the adapter would
+// prove nothing.
+
+/** The session Factory's native export reports. */
+const NATIVE_SESSION = 'droid-native-session-1'
+
+/** The tool the native export names on its tool span. */
+const NATIVE_TOOL = 'Read'
+
+/** The telemetry source Factory's own native export arrives under. */
+const NATIVE_SOURCE = 'droid-native-export'
+
+/** The trace the native export's root span and its children share. */
+const NATIVE_TRACE = 'trace-native-genai'
+
+/** The telemetry source the Kyber-owned Factory plugin's export arrives under. */
+const PLUGIN_SOURCE = 'kyberdash-droid-plugin'
+
+/** The OTLP status codes an exporter can carry. */
+const EXPORTER_STATUS_CODES = ['ok', 'unset', 'error'] as const satisfies readonly OtlpStatusCode[]
+
+/**
+ * Factory's native export, in its `genai` format: the agent identity that
+ * names the span, the operation, and the conversation and session ids.
+ *
+ * The agent identity is on the ROOT alone — the export names it there and
+ * nowhere else, which is what makes a real trace's group vote 1/(1+k).
+ */
+function nativeAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    'gen_ai.operation.name': 'invoke_agent',
+    'gen_ai.agent.name': 'droid',
+    'gen_ai.conversation.id': NATIVE_SESSION,
+    'session.id': NATIVE_SESSION,
+    'gen_ai.request.model': 'claude-sonnet-4-5',
+    'gen_ai.provider.name': 'anthropic',
+    ...over,
+  }
+}
+
+/** The native export's child attributes: the operation, the ids and the model. */
+function nativeChildAttributes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    'gen_ai.operation.name': 'chat',
+    'gen_ai.conversation.id': NATIVE_SESSION,
+    'session.id': NATIVE_SESSION,
+    'gen_ai.request.model': 'claude-sonnet-4-5',
+    'gen_ai.provider.name': 'anthropic',
+    ...over,
+  }
+}
+
+/** A native export span, carrying the exporter's own OTLP status code. */
+function nativeSpan(
+  spanId: string,
+  attributes: Record<string, unknown>,
+  over: Partial<OtlpSpan> = {},
+): OtlpSpan {
+  return span(attributes, {
+    spanId,
+    traceId: `trace-${spanId}`,
+    name: 'gen_ai.chat',
+    resource: { 'service.name': NATIVE_SOURCE },
+    status: { code: 'unset' },
+    ...over,
+  })
+}
+
+/** The native export's chat span: the session's own model call. */
+function nativeTurnSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(spanId, nativeChildAttributes(), { name: 'gen_ai.chat', ...over })
+}
+
+/** The native export's policy-denied tool call: the span carrying `error.type`. */
+function deniedToolSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(
+    spanId,
+    nativeChildAttributes({
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': NATIVE_TOOL,
+      'gen_ai.tool.call.id': `call_${spanId}`,
+      'gen_ai.tool.type': 'function',
+      'error.type': 'rejected',
+    }),
+    { name: 'gen_ai.execute_tool', ...over },
+  )
+}
+
+/**
+ * The native trace's root span: the `invoke_agent` span, and the only span of
+ * a real trace that carries the agent identity.
+ */
+function nativeRootSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(spanId, nativeAttributes(), {
+    name: 'invoke_agent',
+    traceId: NATIVE_TRACE,
+    ...over,
+  })
+}
+
+/**
+ * An adapter that states the outcome itself.
+ *
+ * The seam's rule is about what happens to a status an ADAPTER determined, so
+ * the case needs an adapter that determines one. The stub claims the spans
+ * that carry `outcome.claimed` and judges a denial only when the span says
+ * `outcome.denied`; nothing else about it matters.
+ */
+const outcomeDecidingAdapter: HarnessAdapter = {
+  name: 'outcome-deciding',
+  namespaces: ['outcome'],
+  detect: (span) => (span.attributes['outcome.claimed'] === true ? 1 : 0),
+  relevance: () => 1,
+  normalize(raw) {
+    const record = baseRecord(this, raw)
+    if (raw.attributes['outcome.denied'] === true) record.status = 'error'
+    return record
+  },
+  group: traceGroup,
+  resolveRoot: resolveRootByParentage,
+  validate: () => undefined,
+  unexportedMetrics: () => [],
+}
+
+/** The session the outcome-deciding adapter's spans report. */
+const OUTCOME_SESSION = 'outcome-session-1'
+
+/** The tool the outcome-deciding adapter's span names. */
+const OUTCOME_TOOL = 'Read'
+
+/** A span the outcome-deciding adapter claims, with the exporter's status code. */
+function outcomeSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'gen_ai.tool.name': OUTCOME_TOOL,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.tool',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
+  )
+}
+
+/** The same span, with the adapter's own denial evidence on it. */
+function deniedOutcomeSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'outcome.denied': true,
+      'gen_ai.tool.name': OUTCOME_TOOL,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.tool',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
+  )
+}
+
+/** The session's model call: the turn the denied tool call belongs to. */
+function outcomeTurnSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    {
+      'outcome.claimed': true,
+      'gen_ai.usage.input_tokens': 1_000,
+      'gen_ai.conversation.id': OUTCOME_SESSION,
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'outcome.turn',
+      resource: { 'service.name': 'outcome-exporter' },
+      status: { code: 'unset' },
+      ...over,
+    },
+  )
+}
+
+/**
+ * The plugin envelope's turn span for a session: the span the Kyber-owned
+ * plugin emits for the session's own model call.
+ */
+function pluginTurnSpan(spanId: string, sessionId: string = NATIVE_SESSION): OtlpSpan {
+  return span(
+    {
+      'factory.contract_version': '1',
+      'factory.session.id': sessionId,
+      'factory.model.id': 'gpt-5-codex',
+    },
+    {
+      spanId,
+      traceId: `trace-${spanId}`,
+      name: 'factory.turn',
+      resource: { 'service.name': PLUGIN_SOURCE },
+      status: { code: 'unset' },
+    },
+  )
+}
+
+/**
+ * A native Factory row already in the corpus, as the withdrawn claim left it:
+ * the harness, the session and the export's own agent identity.
+ */
+function storedNativeRecord(): CanonicalRecord {
+  return {
+    spanId: 'native-stored',
+    traceId: 'trace-native-stored',
+    parentSpanId: null,
+    source: NATIVE_SOURCE,
+    harness: 'droid',
+    sessionId: NATIVE_SESSION,
+    name: 'gen_ai.chat',
+    op: 'llm.invoke',
+    kind: 'internal',
+    timestamp: '2026-10-30T12:00:00.000Z',
+    durationMs: 1000,
+    status: 'ok',
+    tokens: {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    },
+    content: {},
+    cost: { basis: 'unknown', status: 'no_rate' },
+    raw: { 'gen_ai.agent.name': 'droid', 'gen_ai.conversation.id': NATIVE_SESSION },
+  }
+}
+
+/**
+ * The tool rows a session's projection published, by tool name.
+ *
+ * `getSessionPayload` hands back the projection's own stored document, so the
+ * shape is read through a local type: this reads the one field the session's
+ * error surface is (canon/sessions.ts counts a tool record as an error when
+ * its stored status is `error`).
+ */
+async function projectedToolRows(
+  store: CanonStore,
+  sessionId: string,
+): Promise<Map<string, { invocations: number; errors: number | undefined }>> {
+  await buildSessions(store)
+  const payload = store.getSessionPayload(sessionId) as
+    | { tools?: Array<{ name?: unknown; invocations?: unknown; errors?: unknown }> }
+    | undefined
+  if (payload === undefined) throw new Error(`no session payload was built for ${sessionId}`)
+  const rows = new Map<string, { invocations: number; errors: number | undefined }>()
+  for (const tool of payload.tools ?? []) {
+    if (typeof tool.name !== 'string') continue
+    rows.set(tool.name, {
+      invocations: typeof tool.invocations === 'number' ? tool.invocations : 0,
+      errors: typeof tool.errors === 'number' ? tool.errors : undefined,
+    })
+  }
+  return rows
+}
+
+describe('ingestBatch — the stored error status at the receiver-timing seam', () => {
+  it('stores a denied call as an error even when the exporter status is unset', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
+
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
+    expect(
+      record?.status,
+      'a denied call must be STORED as an error, whatever the exporter status says',
+    ).toBe('error')
+    store.close()
+  })
+
+  it('stores a denied call as an error even when the exporter status is ok', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'ok' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
+
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
+    expect(
+      record?.status,
+      'an exporter status of ok must not downgrade a status the adapter already determined',
+    ).toBe('error')
+    store.close()
+  })
+
+  it('stores a span whose exporter status is error as an error', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatchWithAdapters(
+      [deniedOutcomeSpan('outcome-denied', { status: { code: 'error' } })],
+      store,
+      [outcomeDecidingAdapter],
+    )
+
+    const record = store.get('outcome-denied')
+    expect(record?.harness).toBe('outcome-deciding')
+    expect(record?.status, 'an exporter error status must reach the stored record').toBe('error')
+    store.close()
+  })
+
+  it('keeps the exporter status code exactly when no adapter determined an outcome', () => {
+    // The regression guard: the rule must not turn every record into an
+    // error, and it must not keep the adapter's neutral default either. The
+    // exporter's own code is the stored status, whatever it says.
+    for (const code of EXPORTER_STATUS_CODES) {
+      const store = new CanonStore(':memory:')
+      ingestBatchWithAdapters(
+        [outcomeSpan(`outcome-${code}`, { status: { code } })],
+        store,
+        [outcomeDecidingAdapter],
+      )
+
+      const record = store.get(`outcome-${code}`)
+      expect(record?.harness).toBe('outcome-deciding')
+      expect(
+        record?.status,
+        `a span with no adapter-determined outcome must keep the exporter status code "${code}"`,
+      ).toBe(code)
+      store.close()
+    }
+  })
+
+  it('carries the denied call into the session projection as a tool error', async () => {
+    const store = new CanonStore(':memory:')
+    ingestBatchWithAdapters(
+      [
+        outcomeTurnSpan('outcome-turn'),
+        deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } }),
+      ],
+      store,
+      [outcomeDecidingAdapter],
+    )
+
+    const rows = await projectedToolRows(store, OUTCOME_SESSION)
+    expect(rows.get(OUTCOME_TOOL)?.invocations, 'the denied call is a tool invocation').toBe(1)
+    expect(
+      rows.get(OUTCOME_TOOL)?.errors,
+      'the denied call must reach the projection as a tool error, not as an ordinary call',
+    ).toBe(1)
+    store.close()
+  })
+
+  it("leaves another harness's stored status alone beside a denied call", () => {
+    // The seam is shared by every harness, so one harness's rule must not move
+    // another harness's records: the copilot span keeps the exporter's own
+    // status code whether or not a denied call sits in the same batch.
+    const alone = new CanonStore(':memory:')
+    ingestBatch([span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } })], alone)
+
+    const beside = new CanonStore(':memory:')
+    ingestBatchWithAdapters(
+      [
+        span(geminiAttributes, { spanId: 'other-1', status: { code: 'unset' } }),
+        deniedOutcomeSpan('outcome-denied', { status: { code: 'unset' } }),
+      ],
+      beside,
+      [...ADAPTERS, outcomeDecidingAdapter],
+    )
+
+    expect(alone.get('other-1')?.harness).toBe('copilot')
+    expect(alone.get('other-1')?.status).toBe('unset')
+    expect(beside.get('other-1')?.status).toBe('unset')
+    expect(
+      beside.get('other-1')?.status,
+      'another harness must not inherit the denial',
+    ).not.toBe('error')
+    // The denied call IS in the batch, so the guard above is not vacuous: it is
+    // the presence of that call that leaves the other harness's record alone.
+    expect(
+      beside.get('outcome-denied'),
+      "the denied call is in the batch beside the other harness's span",
+    ).toBeDefined()
+    alone.close()
+    beside.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The withdrawn native Factory claim (D50)
+// ---------------------------------------------------------------------------
+//
+// Factory's own native OpenTelemetry export is not claimed by this branch: the
+// `droid` adapter's native claim is withdrawn, and a native span is
+// quarantined as `unclaimed` with its decoded packet kept as the evidence.
+//
+// THE RULES: a native span is never stored; the ingest never supersedes a
+// stored native row when the plugin's row for the same session arrives; and
+// the quarantine reason is the ordinary `unclaimed` — no native-specific
+// reason string is left in the seam.
+
+describe('ingestBatch — the withdrawn native Factory claim', () => {
+  it('quarantines the root of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeRootSpan('native-root')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-root'), 'a native span must never become a record').toBeUndefined()
+    expect(store.getQuarantine('native-root')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines a native chat span as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([nativeTurnSpan('native-turn')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-turn')).toBeUndefined()
+    expect(store.getQuarantine('native-turn')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines the tool child of a native trace as unclaimed and stores no record', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([deniedToolSpan('native-tool')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('native-tool')).toBeUndefined()
+    expect(store.getQuarantine('native-tool')?.reason).toBe('unclaimed')
+    store.close()
+  })
+
+  it('quarantines every span of a native trace alike — the root and both children', () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch(
+      [
+        nativeRootSpan('native-root'),
+        nativeTurnSpan('native-chat', { traceId: NATIVE_TRACE, parentSpanId: 'native-root' }),
+        deniedToolSpan('native-tool', { traceId: NATIVE_TRACE, parentSpanId: 'native-root' }),
+      ],
+      store,
+    )
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 3, rejected: 0 })
+    expect(store.count(), 'a native trace must leave no record behind').toBe(0)
+    for (const spanId of ['native-root', 'native-chat', 'native-tool']) {
+      expect(
+        store.getQuarantine(spanId)?.reason,
+        `${spanId} must be quarantined as unclaimed`,
+      ).toBe('unclaimed')
+    }
+    store.close()
+  })
+
+  it('keeps the decoded packet of a quarantined native span as the evidence', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([nativeRootSpan('native-root')], store)
+
+    const packet = store.getQuarantine('native-root')?.rawPayload
+    expect(typeof packet, 'the quarantined span must keep its decoded packet').toBe('string')
+    expect(packet).toContain('gen_ai.agent.name')
+    expect(packet).toContain('droid')
+    store.close()
+  })
+
+  it('no longer supersedes a stored native row when the plugin row for its session arrives', () => {
+    // The precedence rule the withdrawal removes: a native row that reached
+    // the corpus before the plugin's row for its session used to leave it for
+    // quarantine. Nothing supersedes a stored row now — the ingest stores what
+    // it claims and leaves the rest of the corpus alone.
+    const store = new CanonStore(':memory:')
+    store.upsert(storedNativeRecord())
+    ingestBatch([pluginTurnSpan('plugin-turn')], store)
+
+    expect(store.get('native-stored'), 'a stored row must not be deleted by a later batch').toBeDefined()
+    expect(
+      store.getQuarantine('native-stored'),
+      'a stored native row must not be superseded any more',
+    ).toBeUndefined()
+    // The plugin's own row is stored as before.
+    expect(store.get('plugin-turn')?.harness).toBe('droid')
+    store.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The Factory content consent gate (T42)
+// ---------------------------------------------------------------------------
+//
+// KyberDash's own consent file (`~/.kyberdash/factory-plugin.json`, with the
+// `KYBERDASH_FACTORY_CONTEXT` override) decides whether Factory's content is ever
+// stored. Factory reaches KyberDash through two routes: the Kyber-owned plugin, whose
+// prompt is gated at emission and whose tool arguments and results are byte counts
+// (never content), and Factory's NATIVE OpenTelemetry export, which carries the
+// prompt, the reply, the tool arguments and the tool result as span attributes when
+// the harness's own content switch is on.
+//
+// While the consent is off, none of that text reaches the store: not a canonical
+// record, and not the quarantine packet that keeps a span nothing claimed. The gate
+// runs BEFORE normalization and BEFORE the quarantine write, so no intermediate
+// holds the text.
+//
+// THE RULES:
+//   1. The gate covers BOTH of Factory's routes — the native export and the
+//      plugin envelope — and it strips exactly the content-bearing attributes.
+//      The correlation and usage metadata — the session, the conversation, the
+//      model, the counters — is not content and survives.
+//   2. Another harness's content is untouched. The gate is scoped to Factory's own
+//      spans, so Copilot's and pi's `gen_ai.input.messages` still reach their
+//      records.
+//   3. The file source's own records are untouched: its `userMessage` fragment is
+//      the owner's transcript, read by a different route (D57).
+//   4. The plugin route is gated here too. Its prompt attribute is gated at
+//      emission (D61), but the emission gate reads the consent file at the moment
+//      the span is mapped, and a span the plugin PARKED because the delivery
+//      failed is re-delivered later WITHOUT the consent being read again. The
+//      store-side gate is therefore the last line that can keep the owner's
+//      prompt text out of the corpus: a plugin envelope carrying
+//      `factory.turn.prompt.text` must not reach the store while the consent
+//      says off — and the envelope's identity attributes survive the gate.
+//
+// The consent file lives in the owner's home. Every case below points HOME at a
+// throwaway directory, so no case ever reads the owner's real file.
+
+/** The prompt Factory's native export carried while its content switch was on. */
+const FACTORY_PROMPT_TEXT = 'the owner asked about the private file'
+
+/** The assistant's reply, on the same export. */
+const FACTORY_REPLY_TEXT = 'the assistant answered with the private file contents'
+
+/** The tool arguments, on the same export. */
+const FACTORY_TOOL_ARGUMENTS = 'the private path /Users/owner/private.txt'
+
+/** The tool result, on the same export. */
+const FACTORY_TOOL_RESULT = 'the tool read the private file'
+
+/** The throwaway homes the consent cases wrote their consent file into. */
+const consentHomes: string[] = []
+
+/**
+ * A throwaway home holding the consent file, or no consent file at all.
+ *
+ * The file body is what the owner's decision looks like on disk: `{"version":1,
+ * "content":true}` is the only body that turns content on.
+ */
+function consentHome(body?: string): string {
+  const home = mkdtempSync(join(tmpdir(), 'kd-factory-consent-'))
+  consentHomes.push(home)
+  if (body !== undefined) {
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    writeFileSync(join(home, '.kyberdash', 'factory-plugin.json'), body)
+  }
+  return home
+}
+
+afterEach(() => {
+  // The consent override is not one of the vars the environment isolation clears,
+  // so a case that sets it would decide every case after it.
+  delete process.env['KYBERDASH_FACTORY_CONTEXT']
+  for (const home of consentHomes.splice(0)) rmSync(home, { recursive: true, force: true })
+})
+
+/**
+ * A native Factory span carrying the content the export's content switch turned on.
+ *
+ * The span is a CHILD: the `genai` format names the agent on the trace root alone,
+ * so the child carries the operation, the ids and the model — and its content.
+ */
+function nativeContentSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return nativeSpan(
+    spanId,
+    nativeChildAttributes({
+      'gen_ai.input.messages': JSON.stringify([{ role: 'user', content: FACTORY_PROMPT_TEXT }]),
+      'gen_ai.output.messages': JSON.stringify([{ role: 'assistant', content: FACTORY_REPLY_TEXT }]),
+      'gen_ai.tool.call.arguments': FACTORY_TOOL_ARGUMENTS,
+      'gen_ai.tool.call.result': FACTORY_TOOL_RESULT,
+    }),
+    { traceId: `trace-content-${spanId}`, ...over },
+  )
+}
+
+/**
+ * A Factory `legacy`-format content span: one of Factory's own `droid.*` spans,
+ * carrying its message text on `message.content`.
+ *
+ * The legacy format's content spans carry no attribute fingerprint at all, so
+ * Factory's own span names are what identify them.
+ */
+function legacyMessageSpan(spanId: string, over: Partial<OtlpSpan> = {}): OtlpSpan {
+  return span(
+    { 'message.content': FACTORY_PROMPT_TEXT, 'session.id': NATIVE_SESSION },
+    {
+      spanId,
+      traceId: `trace-legacy-${spanId}`,
+      name: 'droid.message.user',
+      resource: { 'service.name': NATIVE_SOURCE },
+      ...over,
+    },
+  )
+}
+
+/** Another harness's own shape: Copilot's vendor namespace, its counters and its messages. */
+const COPILOT_CONTENT_ATTRIBUTES = {
+  'copilot_chat.chat_session_id': '08551cf5-b064-4095-9552-8a9a0a0f78d2',
+  'copilot_chat.turn.id': 'turn-content-1',
+  'gen_ai.usage.input_tokens': 1200,
+  'gen_ai.usage.output_tokens': 150,
+  'gen_ai.input.messages': JSON.stringify([{ role: 'user', content: "another harness's own prompt" }]),
+}
+
+/** The text another harness's own content carries. */
+const OTHER_HARNESS_PROMPT_TEXT = "another harness's own prompt"
+
+describe('ingestBatch — the Factory content consent gate (T42)', () => {
+  it('stores no Factory prompt, reply, tool argument or tool result while the consent is off', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    const outcome = ingestBatch([nativeContentSpan('native-content')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1 })
+    const packet = store.getQuarantine('native-content')?.rawPayload ?? ''
+    expect(packet, 'the Factory prompt must not reach the quarantine packet').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    expect(packet, 'the Factory reply must not reach the quarantine packet').not.toContain(
+      FACTORY_REPLY_TEXT,
+    )
+    expect(packet, 'the Factory tool arguments must not reach the quarantine packet').not.toContain(
+      FACTORY_TOOL_ARGUMENTS,
+    )
+    expect(packet, 'the Factory tool result must not reach the quarantine packet').not.toContain(
+      FACTORY_TOOL_RESULT,
+    )
+    store.close()
+  })
+
+  it('stores no legacy Factory message content while the consent is off', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    const outcome = ingestBatch([legacyMessageSpan('legacy-message')], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1 })
+    const packet = store.getQuarantine('legacy-message')?.rawPayload ?? ''
+    expect(packet, "the legacy span's message content must not reach the packet").not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('keeps the correlation and usage metadata while the consent is off', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    ingestBatch(
+      [
+        nativeSpan(
+          'native-metadata',
+          nativeChildAttributes({
+            'gen_ai.input.messages': JSON.stringify([{ role: 'user', content: FACTORY_PROMPT_TEXT }]),
+            'gen_ai.usage.input_tokens': 1200,
+            'gen_ai.usage.output_tokens': 150,
+          }),
+          { traceId: 'trace-metadata-native' },
+        ),
+      ],
+      store,
+    )
+
+    // The counters, the ids and the model are measurements, not content: the gate
+    // strips the text and leaves everything that describes the call.
+    const packet = store.getQuarantine('native-metadata')?.rawPayload ?? ''
+    expect(packet).toContain('gen_ai.conversation.id')
+    expect(packet).toContain(NATIVE_SESSION)
+    expect(packet).toContain('gen_ai.request.model')
+    expect(packet).toContain('gen_ai.usage.input_tokens')
+    expect(packet).toContain('1200')
+    expect(packet, 'the prompt is still the one thing that must go').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('stores the Factory text while the consent is on', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":true}')
+
+    ingestBatch([nativeContentSpan('native-content-on')], store)
+
+    const packet = store.getQuarantine('native-content-on')?.rawPayload ?? ''
+    expect(packet, 'the consent is on, so the text is stored as it is today').toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    expect(packet).toContain(FACTORY_REPLY_TEXT)
+    expect(packet).toContain(FACTORY_TOOL_ARGUMENTS)
+    expect(packet).toContain(FACTORY_TOOL_RESULT)
+    store.close()
+  })
+
+  it('stores the Factory text while the env override turns the consent on', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+    process.env['KYBERDASH_FACTORY_CONTEXT'] = '1'
+
+    ingestBatch([nativeContentSpan('native-content-env')], store)
+
+    const packet = store.getQuarantine('native-content-env')?.rawPayload ?? ''
+    expect(packet, 'the env override wins over the file').toContain(FACTORY_PROMPT_TEXT)
+    store.close()
+  })
+
+  it('leaves another harness\'s own gen_ai.input.messages untouched', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    ingestBatch(
+      [
+        span(COPILOT_CONTENT_ATTRIBUTES, {
+          spanId: 'copilot-content',
+          name: 'copilot_chat/gen_ai',
+          traceId: 'trace-copilot-content',
+          resource: { 'service.name': 'copilot-service' },
+        }),
+      ],
+      store,
+    )
+
+    const record = store.get('copilot-content')
+    expect(record?.harness, 'the other harness\'s span is still its own').toBe('copilot')
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, "another harness's prompt must reach its own record").toContain(
+      OTHER_HARNESS_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('stores no Factory content for a child that arrives before its root', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // The child comes first: the `genai` root names the agent and is exported when
+    // the invocation ends, so a child can arrive before the span that identifies
+    // its trace.
+    ingestBatch([nativeContentSpan('native-early-child')], store)
+    const earlyPacket = store.getQuarantine('native-early-child')?.rawPayload ?? ''
+    expect(earlyPacket, 'the early child\'s prompt must not reach the packet').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+
+    // The root arrives afterwards and names the trace.
+    ingestBatch([nativeRootSpan('native-late-root')], store)
+    store.close()
+  })
+
+  it('stores no Factory content for a child that arrives after its root', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    const traceId = 'trace-root-first'
+    ingestBatch([nativeRootSpan('native-first-root', { traceId })], store)
+    ingestBatch(
+      [
+        nativeContentSpan('native-later-child', {
+          traceId,
+          parentSpanId: 'native-first-root',
+        }),
+      ],
+      store,
+    )
+
+    const packet = store.getQuarantine('native-later-child')?.rawPayload ?? ''
+    expect(packet, 'the later child\'s prompt must not reach the packet').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('stores no Factory content for a child a second harness claimed', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // The root is seen first, so the trace is known to be Factory's.
+    const traceId = 'trace-claimed-child'
+    ingestBatch([nativeRootSpan('native-claimed-root', { traceId })], store)
+
+    // The child then arrives under another harness's source, and the registry's
+    // source inheritance hands the group to that harness: the span is claimed,
+    // and its content would land in a record without the gate.
+    ingestBatch(
+      [
+        span(COPILOT_CONTENT_ATTRIBUTES, {
+          spanId: 'copilot-sibling',
+          name: 'copilot_chat/gen_ai',
+          traceId: 'trace-copilot-sibling',
+          resource: { 'service.name': 'shared-source' },
+        }),
+        nativeContentSpan('native-claimed-child', {
+          traceId,
+          parentSpanId: 'native-claimed-root',
+          resource: { 'service.name': 'shared-source' },
+          attributes: {
+            ...nativeChildAttributes({
+              'gen_ai.input.messages': JSON.stringify([
+                { role: 'user', content: FACTORY_PROMPT_TEXT },
+              ]),
+              'gen_ai.usage.input_tokens': 1200,
+              'gen_ai.usage.output_tokens': 150,
+            }),
+          },
+        }),
+      ],
+      store,
+    )
+
+    const record = store.get('native-claimed-child')
+    expect(record, 'the claimed span is stored as before').toBeDefined()
+    const raw = (record?.raw ?? {}) as Record<string, unknown>
+    expect(
+      raw['gen_ai.input.messages'],
+      'the claimed Factory span must carry no prompt',
+    ).toBeUndefined()
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, 'the claimed Factory span must carry no prompt in its parts').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('does not touch the file source\'s own records', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // The file source's records carry the owner's own first-message fragment. That
+    // route is outside the gate (D57): the fragment is the owner's transcript, read
+    // by KyberDash's file source, not by this route.
+    const fileSource: CanonicalRecord = {
+      ...storedNativeRecord(),
+      spanId: 'file-source-record',
+      raw: { userMessage: 'the owner\'s own first message fragment' },
+    }
+    store.upsert(fileSource)
+
+    ingestBatch([nativeContentSpan('native-content-beside-file')], store)
+
+    const stored = store.get('file-source-record')
+    expect(stored, 'the file source\'s record must survive the gate').toBeDefined()
+    const storedRaw = (stored?.raw ?? {}) as Record<string, unknown>
+    expect(storedRaw['userMessage']).toBe('the owner\'s own first message fragment')
+    expect(store.getQuarantine('file-source-record'), 'and it must not be quarantined').toBeUndefined()
+    store.close()
+  })
+
+  it('stores no plugin prompt text while the consent is off, and keeps the envelope\'s identity', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // The plugin's own prompt attribute is gated at emission, by the plugin's own
+    // consent read (D61) — but the emission gate is not the last gate, and it is
+    // not the only one. A span the plugin parked while the consent was on is
+    // re-delivered later without the consent being read again, so the store-side
+    // gate is what keeps the owner's prompt text out of the corpus.
+    ingestBatch(
+      [
+        span(
+          {
+            'factory.contract_version': '1',
+            'factory.session.id': NATIVE_SESSION,
+            'factory.model.id': 'gpt-5-codex',
+            'factory.tool.name': NATIVE_TOOL,
+            'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+          },
+          {
+            spanId: 'plugin-content',
+            name: 'factory.turn',
+            traceId: 'trace-plugin-content',
+            resource: { 'service.name': PLUGIN_SOURCE },
+          },
+        ),
+      ],
+      store,
+    )
+
+    const record = store.get('plugin-content')
+    expect(record?.harness).toBe('droid')
+    const pluginRaw = (record?.raw ?? {}) as Record<string, unknown>
+
+    // The owner's prompt text does not reach the stored record.
+    expect(
+      pluginRaw['factory.turn.prompt.text'],
+      'the plugin envelope must carry no prompt text while the consent is off',
+    ).toBeUndefined()
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, 'the plugin envelope must carry no prompt text in its parts').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+
+    // The envelope's identity survives the gate: the span id, the session id,
+    // the model and the tool name describe the call, and they are not the
+    // owner's text.
+    expect(record?.spanId).toBe('plugin-content')
+    expect(record?.sessionId).toBe(NATIVE_SESSION)
+    expect(pluginRaw['factory.session.id']).toBe(NATIVE_SESSION)
+    expect(pluginRaw['factory.model.id']).toBe('gpt-5-codex')
+    expect(pluginRaw['factory.tool.name']).toBe(NATIVE_TOOL)
+    expect(pluginRaw['gen_ai.tool.name']).toBe(NATIVE_TOOL)
+    store.close()
+  })
+
+  it('stores no plugin prompt text for a span the plugin parked while the consent was on and re-delivered after it was turned off', () => {
+    const store = new CanonStore(':memory:')
+
+    // The consent is ON when the plugin maps the span, so the plugin's own
+    // emission gate lets the prompt text travel. The delivery failed, so the
+    // span is parked in the plugin's file-backed spool.
+    process.env['HOME'] = consentHome('{"version":1,"content":true}')
+    const parked = span(
+      {
+        'factory.contract_version': '1',
+        'factory.session.id': NATIVE_SESSION,
+        'factory.model.id': 'gpt-5-codex',
+        'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+      },
+      {
+        spanId: 'plugin-parked',
+        name: 'factory.turn',
+        traceId: 'trace-plugin-parked',
+        resource: { 'service.name': PLUGIN_SOURCE },
+      },
+    )
+    ingestBatch([parked], store)
+    const parkedRaw = (store.get('plugin-parked')?.raw ?? {}) as Record<string, unknown>
+    expect(
+      parkedRaw['factory.turn.prompt.text'],
+      'the parked span carried the prompt text while the consent was on',
+    ).toBe(FACTORY_PROMPT_TEXT)
+
+    // The owner turns the consent off. The spool re-delivers the parked span
+    // as it was mapped — the drain does not read the consent file again — so
+    // the span arrives carrying the owner's prompt text while the consent
+    // says off.
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+    ingestBatch([parked], store)
+
+    const record = store.get('plugin-parked')
+    const raw = (record?.raw ?? {}) as Record<string, unknown>
+    expect(
+      raw['factory.turn.prompt.text'],
+      'the re-delivered parked span must carry no prompt text while the consent is off',
+    ).toBeUndefined()
+    const parts = (record?.parts ?? []).map((part) => part.text).join('\n')
+    expect(parts, 'the re-delivered parked span must carry no prompt text in its parts').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
+    store.close()
+  })
+
+  it('lists the plugin envelope\'s own prompt attribute among the attributes the gate strips', () => {
+    // The gate can only strip an attribute that is ON ITS LIST. The plugin's own
+    // prompt attribute was not on it, so nothing the gate did could take the
+    // owner's prompt text off a span that carried it.
+    const contentAttributes: readonly string[] = FACTORY_CONTENT_ATTRIBUTES
+    expect(
+      contentAttributes,
+      'the plugin envelope\'s prompt attribute must be on the gate\'s content list',
+    ).toContain('factory.turn.prompt.text')
+
+    // And the list is what the strip acts on: the text goes, the identity stays.
+    const stripped = stripFactoryContent({
+      'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+      'factory.session.id': NATIVE_SESSION,
+    })
+    expect(stripped['factory.turn.prompt.text']).toBeUndefined()
+    expect(stripped['factory.session.id']).toBe(NATIVE_SESSION)
+  })
+
+  it('stores no plugin prompt text carried by a native Factory span either', () => {
+    const store = new CanonStore(':memory:')
+    process.env['HOME'] = consentHome('{"version":1,"content":false}')
+
+    // A span Factory's OWN export sent, carrying the plugin's prompt attribute.
+    // The gate owns the span (the agent identity names it Factory's), so the
+    // gate is what takes the text off it — and it can only take off what its
+    // list names. The attribute sits in the `factory.` namespace, so the
+    // envelope marker claims the span and the contract-version guard holds it
+    // back: the quarantine packet is where a span nothing stored keeps its
+    // text, and the text must not be there.
+    ingestBatch(
+      [
+        nativeRootSpan('native-with-plugin-prompt', {
+          traceId: 'trace-native-with-plugin-prompt',
+          attributes: {
+            ...nativeAttributes(),
+            'factory.turn.prompt.text': FACTORY_PROMPT_TEXT,
+          },
+        }),
+      ],
+      store,
+    )
+
+    const packet = store.getQuarantine('native-with-plugin-prompt')?.rawPayload ?? ''
+    expect(packet, 'the native span must not carry the plugin prompt text').not.toContain(
+      FACTORY_PROMPT_TEXT,
+    )
     store.close()
   })
 })

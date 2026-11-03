@@ -328,6 +328,7 @@ describe('GET /api/kyber/capture', () => {
       'pi',
       'antigravity',
       'kilo',
+      'factory',
     ])
 
     const fixtureHarnesses = (loadFixture('status-mixed') as CaptureBodyView).harnesses ?? []

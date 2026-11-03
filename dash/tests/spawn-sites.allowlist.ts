@@ -82,6 +82,19 @@ export const SPAWN_SITE_ALLOWLIST: readonly SpawnSiteAllowance[] = [
       '300000 ms (TOOL_TIMEOUT_MS). The spawn is killed at the timeout and reports a failed exit.',
     note: 'Runs codesign, spctl and ditto on the installed bundle. Argv only; no shell.',
   },
+  {
+    file: 'src/capture/harnesses/factory-plugin/marketplace.ts',
+    pattern: 'spawnSync',
+    bound:
+      'Every call passes timeout: DEFAULT_COMMAND_TIMEOUT_MS (30000 ms) and maxBuffer: ' +
+      'DEFAULT_MAX_OUTPUT_BYTES (262144 bytes); the child is killed at the timeout and the command answers a ' +
+      'non-zero exit code. The executable is the one resolved from PATH by name (droid), the argv is a fixed ' +
+      'harness verb, and no shell is used.',
+    note:
+      'Drives the Factory (Droid) CLI: the marketplace add/remove and plugin install/uninstall commands, and ' +
+      'the two list commands that read the harness registry. It is not a self-spawn, so it does not go through ' +
+      'guardedSpawn; a test injects a fake instead of running it.',
+  },
   // ── Release and smoke scripts ──────────────────────────────────────────────────────────────────
   {
     file: 'scripts/release-acceptance/run.mjs',

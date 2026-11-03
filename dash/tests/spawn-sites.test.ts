@@ -43,7 +43,12 @@ const DASH_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SPAWN_GUARD_FILE = 'src/process/spawn-guard.ts'
 const SPAWN_FAMILY = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'])
 const CHILD_PROCESS_MODULES = new Set(['child_process', 'node:child_process'])
-const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.claude'])
+// The directories the scan does not walk: dependencies, coverage output, and the two BUILD
+// output directories. `dist` is the tsup bundle and `dist-sea` is the SEA bundle
+// (`tsup.sea.config.ts` writes `outDir: 'dist-sea'`); both are gitignored and hold the
+// bundled copies of source files that are scanned where they live, so scanning them would
+// report the same spawn site twice and fail the gate for a build artefact.
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-sea', 'coverage', '.claude'])
 const SOURCE_FILE_NAME = /\.[cm]?[jt]sx?$/
 /** Text that names the kyberdash program or its spawn target (a self-spawn, not a tool). */
 const SELF_PROGRAM_TEXT = /execPath|KYBERDASH|kyberdash|SpawnTarget|spawnTarget|JobSpawner|DetachedLauncher|SPAWN_ROLE/
