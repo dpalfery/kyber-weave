@@ -65,6 +65,13 @@ public static class SquadWorktreeMcp
                     throw new ArgumentException("--repo-root requires a non-empty value.", nameof(args));
                 }
 
+                if (args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        "--repo-root requires a value, but the next token is another flag.",
+                        nameof(args));
+                }
+
                 spliced.Add(current);
                 spliced.Add(absoluteCanonicalRoot);
                 i++;
@@ -78,6 +85,18 @@ public static class SquadWorktreeMcp
                 if (i + 1 >= args.Count)
                 {
                     throw new ArgumentException("--path requires a value.", nameof(args));
+                }
+
+                if (string.IsNullOrWhiteSpace(args[i + 1]))
+                {
+                    throw new ArgumentException("--path requires a non-empty value.", nameof(args));
+                }
+
+                if (args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        "--path requires a value, but the next token is another flag.",
+                        nameof(args));
                 }
 
                 spliced.Add(current);
@@ -150,7 +169,7 @@ public static class SquadWorktreeMcp
                 {
                     target = info.ResolveLinkTarget(returnFinalTarget: true);
                 }
-                catch (IOException ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(absolutePath), ex);
                 }

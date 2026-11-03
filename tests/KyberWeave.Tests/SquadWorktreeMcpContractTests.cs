@@ -233,6 +233,64 @@ public sealed class SquadWorktreeMcpContractTests
     }
 
     /// <summary>
+    ///     A <c>--repo-root</c> whose next token is another flag must fail closed instead of
+    ///     swallowing that flag as its value.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenRepoRootIsFollowedByAnotherFlag_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(
+                ["--repo-root", "--path", "x"],
+                Path.GetFullPath("/canonical/repo/root")));
+    }
+
+    /// <summary>
+    ///     A <c>--path</c> whose next token is another flag must fail closed instead of resolving
+    ///     the flag name as a relative path and consuming the real flag.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenPathIsFollowedByAnotherFlag_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(
+                ["--path", "--repo-root", "/repo"],
+                Path.GetFullPath("/canonical/repo/root")));
+    }
+
+    /// <summary>
+    ///     An empty <c>--path</c> value must report the missing value, not a traversal, matching the
+    ///     message the sibling <c>--repo-root</c> guard produces.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenPathValueIsEmpty_ReportsMissingValue()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(
+                ["--path", ""],
+                Path.GetFullPath("/canonical/repo/root")));
+
+        Assert.Contains("--path requires a non-empty value", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     A symlink that cannot be resolved must be reported as an <see cref="ArgumentException" />,
+    ///     not leak the platform's link-resolution exception past the helper's fail-closed contract.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenSymlinkCannotBeResolved_ThrowsArgumentException()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using TempDirectory canonicalRoot = new();
+        string loopPath = Path.Combine(canonicalRoot.Path, "loop");
+        Directory.CreateSymbolicLink(loopPath, loopPath);
+
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(["--path", "loop"], canonicalRoot.Path));
+    }
+
+    /// <summary>
     ///     The conductor surfaces must require isolated scratch paths for every tracked MCP
     ///     configuration a worktree setup can rewrite, with restoration as the fallback, so a
     ///     machine-specific absolute path is never committed. The runbook carries the per-client list.
