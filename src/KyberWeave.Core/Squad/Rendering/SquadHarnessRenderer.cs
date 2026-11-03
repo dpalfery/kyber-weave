@@ -330,7 +330,7 @@ internal sealed class SquadHarnessRenderContext
 
     /// <summary>
     /// The skill document every harness shares: <c>name</c>, a single-line <c>description</c> and
-    /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>, then any
+    /// the spec's <c>license</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>, then any
     /// <paramref name="additionalFrontmatter"/> a harness's entry-point skill carries. No model or
     /// permission keys: a skill cannot express the capability lattice.
     /// </summary>
@@ -344,9 +344,13 @@ internal sealed class SquadHarnessRenderContext
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = name,
-            ["description"] = SingleLine(description),
-            ["license"] = "MIT"
+            ["description"] = SingleLine(description)
         };
+        if (Spec.SkillLicense is not null)
+        {
+            frontmatter["license"] = Spec.SkillLicense;
+        }
+
         if (additionalFrontmatter is not null)
         {
             foreach ((string key, object? value) in additionalFrontmatter)

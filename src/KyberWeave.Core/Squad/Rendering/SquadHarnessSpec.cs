@@ -19,6 +19,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </param>
 /// <param name="ModelPolicy">How a <c>models.yml</c> entry lowers onto the harness's model key.</param>
 /// <param name="DescriptionLineBreaks">How a multi-line description collapses onto one line.</param>
+/// <param name="SkillLicense">
+/// The <c>license</c> value a skill document carries, or <see langword="null"/> for a harness
+/// whose skill format has no such key.
+/// </param>
 /// <remarks>
 /// Native versus fallback projection is not a field here: it is a fact about the target, so it
 /// lives on <see cref="SquadTargetCatalog.GetAgentProjection"/>, where the registry's validation
@@ -30,7 +34,8 @@ internal sealed record SquadHarnessSpec(
     string ProjectRoot,
     string? AgentsSubdirectory,
     SquadModelPolicy ModelPolicy,
-    SquadLineBreaks DescriptionLineBreaks = SquadLineBreaks.CarriageReturnOrLineFeed)
+    SquadLineBreaks DescriptionLineBreaks = SquadLineBreaks.CarriageReturnOrLineFeed,
+    string? SkillLicense = "MIT")
 {
     /// <summary>The canonical target token every emitted file and record carries.</summary>
     public string Token { get; } = SquadTargetCatalog.GetToken(Target);
