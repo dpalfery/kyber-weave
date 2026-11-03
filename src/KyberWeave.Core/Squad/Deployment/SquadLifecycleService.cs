@@ -163,7 +163,8 @@ public sealed class SquadLifecycleService
                 effectiveGlobalRoots,
                 loadedPresets.Count > 0 ? loadedPresets : null,
                 null,
-                _environmentReader);
+                _environmentReader,
+                request.Arbiter);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -193,9 +194,24 @@ public sealed class SquadLifecycleService
                 releaseResult.ExtractionRoot,
                 loadedPresets.Count > 0 ? loadedPresets : null);
 
-            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
-                .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
-                .ToArray();
+            // Factory's block is dropped here rather than at render time when splicing it
+            // would shadow the user's settings hooks (§10.8, R18): shadowing is a property
+            // of the target's current files, not of the render request.
+            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+                targetRoot,
+                request.Targets,
+                request.Arbiter,
+                request.Scope,
+                renderResult.Blocks);
+
+            // With the Arbiter enabled, the targets and scope that stay unenforced are
+            // recorded at render time (Req 22.4): the reason lands in the render record's
+            // Details while the receipt keeps only the code.
+            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
+                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
+                request.Arbiter,
+                request.Targets,
+                request.Scope);
 
             ISquadGlobalRootResolver? planGlobalRoots = request.Scope == SquadDeploymentScope.Instance
                 ? effectiveGlobalRoots
@@ -203,28 +219,34 @@ public sealed class SquadLifecycleService
 
             SquadDeploymentPlan plan;
             if (existingReceipt is null)
+            {
                 plan = SquadDeploymentPlan.CreateInstall(
-                    targetRoot,
-                    request.Scope,
-                    squadLock,
-                    renderResult.Files,
-                    degradations,
-                    request.Adopt,
-                    _timeProvider,
-                    planGlobalRoots,
-                    []);
+                    targetRoot: targetRoot,
+                    scope: request.Scope,
+                    squadLock: squadLock,
+                    renderedFiles: renderResult.Files,
+                    degradations: degradations,
+                    adopt: request.Adopt,
+                    timeProvider: _timeProvider,
+                    globalRoots: planGlobalRoots,
+                    siblingGlobalReceipts: [],
+                    blocks: shadowing.Blocks);
+            }
             else
+            {
                 plan = SquadDeploymentPlan.CreateUpdate(
-                    targetRoot,
-                    request.Scope,
-                    squadLock,
-                    renderResult.Files,
-                    existingReceipt,
-                    degradations,
-                    false,
-                    _timeProvider,
-                    planGlobalRoots,
-                    []);
+                    targetRoot: targetRoot,
+                    scope: request.Scope,
+                    squadLock: squadLock,
+                    renderedFiles: renderResult.Files,
+                    previousReceipt: existingReceipt,
+                    degradations: degradations,
+                    replaceManaged: false,
+                    timeProvider: _timeProvider,
+                    globalRoots: planGlobalRoots,
+                    siblingGlobalReceipts: [],
+                    blocks: shadowing.Blocks);
+            }
 
             warnings.AddRange(DegradedFileWarnings(plan));
 
@@ -387,7 +409,8 @@ public sealed class SquadLifecycleService
                 effectiveGlobalRoots,
                 loadedPresets.Count > 0 ? loadedPresets : null,
                 null,
-                _environmentReader);
+                _environmentReader,
+                request.Arbiter);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -417,9 +440,20 @@ public sealed class SquadLifecycleService
                 releaseResult.ExtractionRoot,
                 loadedPresets.Count > 0 ? loadedPresets : null);
 
-            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
-                .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
-                .ToArray();
+            // Same drop as install: a user who adds a settings hooks key after installing
+            // must not have their next update create the shadowing file (§10.8, R18).
+            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+                targetRoot,
+                targets,
+                request.Arbiter,
+                request.Scope,
+                renderResult.Blocks);
+
+            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
+                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
+                request.Arbiter,
+                targets,
+                request.Scope);
 
             ISquadGlobalRootResolver? planGlobalRoots = request.Scope == SquadDeploymentScope.Instance
                 ? effectiveGlobalRoots
@@ -430,16 +464,17 @@ public sealed class SquadLifecycleService
             // touched. The home guidance is written after that decision and before the commit, so the
             // receipt carries only a digest read back from the deployed path.
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
-                targetRoot,
-                request.Scope,
-                squadLock,
-                renderResult.Files,
-                previousReceipt,
-                degradations,
-                request.ReplaceManaged,
-                _timeProvider,
-                planGlobalRoots,
-                []);
+                targetRoot: targetRoot,
+                scope: request.Scope,
+                squadLock: squadLock,
+                renderedFiles: renderResult.Files,
+                previousReceipt: previousReceipt,
+                degradations: degradations,
+                replaceManaged: request.ReplaceManaged,
+                timeProvider: _timeProvider,
+                globalRoots: planGlobalRoots,
+                siblingGlobalReceipts: [],
+                blocks: shadowing.Blocks);
 
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
 
@@ -607,6 +642,35 @@ public sealed class SquadLifecycleService
         }
 
         return targetPresetNames;
+    }
+
+    /// <summary>
+    /// Carries the renderer degradations into receipt degradations, appending the
+    /// Arbiter unenforced-target records when the wiring is enabled.
+    /// </summary>
+    /// <remarks>
+    /// The Arbiter records are derived from the selected targets and scope (Req 22.4),
+    /// not from what the renderers emitted, so an unhooked target and a global install
+    /// are recorded even when the render itself produced no hooks.
+    /// </remarks>
+    private static IReadOnlyList<SquadDegradation> AppendArbiterDegradations(
+        IReadOnlyList<SquadDegradationRecord> rendered,
+        SquadArbiterWiring? arbiter,
+        IReadOnlyList<SquadTarget> targets,
+        SquadDeploymentScope scope)
+    {
+        List<SquadDegradation> degradations = rendered
+            .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        if (arbiter?.Enabled == true)
+        {
+            foreach (SquadDegradationRecord record in ArbiterHookWiring.TargetDegradations(targets, scope))
+            {
+                degradations.Add(new SquadDegradation(record.Target, record.CanonicalIdentity, record.Code));
+            }
+        }
+
+        return degradations;
     }
 
     /// <summary>

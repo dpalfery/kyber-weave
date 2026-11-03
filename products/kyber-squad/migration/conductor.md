@@ -6,7 +6,7 @@ selected-baseline: .github/agents/conductor.agent.md
 sources:
   .github/agents/conductor.agent.md: fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
   .github/agents/conductor-v3.agent.md: 0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-final-body-sha256: c9ca1f812e20c1fc029656425432e6fc15fc70470c205d6afab94cf7502fc269
+final-body-sha256: 0d9bb25a126490d7185de38c761e4e5d5e4cbecbf7b9865970eddceb1a974d89
 ---
 # conductor migration
 
@@ -15,7 +15,8 @@ final-body-sha256: c9ca1f812e20c1fc029656425432e6fc15fc70470c205d6afab94cf7502fc
 The canonical agent was synchronized from `.github/agents/conductor.agent.md` and later
 consolidated with `.github/agents/conductor-v3.agent.md` from Hotshot commit
 `677c3a876ba9c62f1083608596b238c9deaff167`. Both source hashes are retained in frontmatter;
-`final-body-sha256` covers the evolved, LF-normalized instruction body after YAML frontmatter.
+`final-body-sha256` covers the evolved, LF-normalized instruction body after YAML frontmatter,
+including the Arbiter routing-marker list and the status-provenance rule.
 
 ## Canonical projection
 

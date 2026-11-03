@@ -13,6 +13,8 @@ internal sealed class KyberWeaveYamlDocument
 
     public ReviewYamlSection? Review { get; set; }
 
+    public ArbiterYamlSection? Arbiter { get; set; }
+
     public McpYamlSection? Mcp { get; set; }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -40,11 +41,26 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>network.publish</c> has no built-in tool at all: it is reachable only through MCP
 /// servers, which the closed allow-list already withholds.
 /// </para>
+/// <para>
+/// Arbiter hooks lower to two Copilot surfaces because Copilot ships two hook systems.
+/// VS Code custom agents run frontmatter hooks only while the agent is active, so each
+/// dispatcher gets flat <c>PreToolUse</c> and <c>PostToolUse</c> command lists and each
+/// guarded agent a <c>PreToolUse</c> list, keyed to <c>--harness copilot-vscode</c> ([F2]);
+/// the Copilot CLI discovers <c>.github/hooks/*.json</c> instead, so one owned file gates
+/// its <c>task</c> tool with <c>--harness copilot-cli</c> for both shells ([F3]).
+/// <see cref="ArbiterHookWiring"/> decides who is gated and emits commands keyed to the
+/// <c>copilot</c> target token, so the per-surface harness token is this renderer's
+/// lowering decision: the command line is rebuilt from the wiring's caller and timeout
+/// rather than reusing <see cref="SquadArbiterHook.CommandLine"/> verbatim.
+/// </para>
 /// </remarks>
 public sealed class CopilotRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".github/agents";
     private const string SkillsDirectory = ".github/skills";
+    private const string CliHooksFileRelativePath = ".github/hooks/kyber-arbiter.json";
+    private const string VsCodeHarnessToken = "copilot-vscode";
+    private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
 
     /// <summary>The warning code for an agent body over the Copilot cap. Install and update show it only when the operator channel overlay was applied.</summary>
@@ -202,6 +218,17 @@ public sealed class CopilotRenderer : ISquadRenderer
         string? copilotGlobalRoot = ResolveCopilotGlobalRoot(request);
         string? globalAgentsRoot = ResolveGlobalAgentsRoot(copilotGlobalRoot);
 
+        // A null Arbiter must render byte for byte as before the field existed, and
+        // BuildHooks refuses a null wiring, so the guard lives here rather than in the
+        // wiring. Only hooks addressed to this target are consumed; BuildHooks also returns
+        // empty for a disabled wiring or a Global scope, which is what keeps those renders
+        // free of every hook surface.
+        List<SquadArbiterHook> arbiterHooks = request.Arbiter is null
+            ? []
+            : [.. ArbiterHookWiring.BuildHooks(source, request.Arbiter, request.Scope)
+                .Where(hook => hook.Target == SquadTargetCatalog.GetToken(SquadTarget.Copilot))];
+        IReadOnlySet<string> dispatcherAgents = ArbiterHookWiring.Dispatchers(source);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
         List<SquadRenderWarning> warnings = [];
@@ -246,6 +273,8 @@ public sealed class CopilotRenderer : ISquadRenderer
                 source.ModelProfiles.Profiles,
                 warnings,
                 request.Scope,
+                arbiterHooks,
+                dispatcherAgents,
                 globalAgentsRoot,
                 degradations,
                 agent.Name == SquadOperatorChannel.ConductorAgentName ? operatorChannelOverlay : null);
@@ -275,6 +304,11 @@ public sealed class CopilotRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
+        if (arbiterHooks.Count > 0)
+        {
+            files.Add(RenderCliHooksFile(arbiterHooks[0].TimeoutSeconds));
+        }
+
         return Task.FromResult(new SquadRenderResult(true, files, degradations, warnings, []));
     }
 
@@ -283,6 +317,8 @@ public sealed class CopilotRenderer : ISquadRenderer
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         List<SquadRenderWarning> warnings,
         SquadDeploymentScope scope,
+        IReadOnlyList<SquadArbiterHook> arbiterHooks,
+        IReadOnlySet<string> dispatcherAgents,
         string? globalAgentsRoot,
         List<SquadDegradationRecord> degradations,
         SquadOperatorChannel.Overlay? operatorChannelOverlay)
@@ -347,6 +383,12 @@ public sealed class CopilotRenderer : ISquadRenderer
         }
 
         frontmatter["metadata"] = metadata;
+
+        SquadArbiterHook? arbiterHook = arbiterHooks.FirstOrDefault(hook => hook.Caller == agent.Name);
+        if (arbiterHook is not null)
+        {
+            frontmatter["hooks"] = ArbiterHooksFrontmatter(dispatcherAgents.Contains(agent.Name), arbiterHook);
+        }
 
         string yaml = YamlSerializer.Serialize(frontmatter);
         StringBuilder builder = new();
@@ -480,6 +522,76 @@ public sealed class CopilotRenderer : ISquadRenderer
             $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
             "cannot prompt for confirmation, so these narrow to 'deny' and the " +
             "corresponding tools are withheld from the agent's 'tools' list.");
+    }
+
+    /// <summary>Builds the <c>hooks</c> frontmatter mapping for one wired agent.</summary>
+    /// <remarks>
+    /// [F2]: each event holds a flat command list with no matcher, so every tool call
+    /// reaches the hook. Dispatchers gate their dispatches on both events; guarded agents
+    /// only need the <c>PreToolUse</c> gate, because only their planning-path reads are
+    /// audited, not an output the hook would have to block after the fact.
+    /// </remarks>
+    private static Dictionary<string, object?> ArbiterHooksFrontmatter(bool isDispatcher, SquadArbiterHook hook)
+    {
+        Dictionary<string, object?> hooks = new(StringComparer.Ordinal)
+        {
+            ["PreToolUse"] = new List<object?> { HookEntry(hook) }
+        };
+
+        if (isDispatcher)
+        {
+            hooks["PostToolUse"] = new List<object?> { HookEntry(hook) };
+        }
+
+        return hooks;
+    }
+
+    private static Dictionary<string, object?> HookEntry(SquadArbiterHook hook) => new(StringComparer.Ordinal)
+    {
+        ["type"] = "command",
+        // The shared helper, not a second interpolation: Copilot runs this through a shell,
+        // so the caller has to pass the same validation every other hook surface applies.
+        ["command"] = ArbiterHookWiring.HookCommandLine(VsCodeHarnessToken, hook.Caller),
+        ["timeout"] = hook.TimeoutSeconds
+    };
+
+    /// <summary>Renders the owned Copilot CLI hook file gating the CLI's <c>task</c> tool.</summary>
+    /// <remarks>
+    /// The CLI discovers <c>.github/hooks/*.json</c> and expects Copilot hook format: a
+    /// numeric <c>version</c>, camelCase events, and per-shell command fields ([F3]). The
+    /// matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook.
+    /// Every produced hook carries the same wiring timeout, so the first hook's value
+    /// stands for the file.
+    /// </remarks>
+    private static SquadDeploymentFile RenderCliHooksFile(int timeoutSeconds)
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("version", 1);
+            writer.WriteStartObject("hooks");
+            WriteCliHookEntry(writer, "preToolUse", timeoutSeconds);
+            WriteCliHookEntry(writer, "postToolUse", timeoutSeconds);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return new SquadDeploymentFile(CliHooksFileRelativePath, stream.ToArray(), "copilot");
+    }
+
+    private static void WriteCliHookEntry(Utf8JsonWriter writer, string eventName, int timeoutSeconds)
+    {
+        writer.WriteStartArray(eventName);
+        writer.WriteStartObject();
+        writer.WriteString("type", "command");
+        writer.WriteString("matcher", "task");
+        string command = ArbiterHookWiring.HookCommandLine(CliHarnessToken);
+        writer.WriteString("bash", command);
+        writer.WriteString("powershell", command);
+        writer.WriteNumber("timeoutSec", timeoutSeconds);
+        writer.WriteEndObject();
+        writer.WriteEndArray();
     }
 
     /// <summary>

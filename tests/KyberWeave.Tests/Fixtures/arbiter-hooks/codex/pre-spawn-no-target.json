@@ -1,0 +1,14 @@
+{
+  "session_id": "sess-codex-4",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "codex-1",
+  "turn_id": "turn-4",
+  "tool_name": "spawn_agent",
+  "tool_use_id": "toolu-codex-no-target-1",
+  "tool_input": {
+    "message": "Hello.",
+    "task_name": "No target"
+  }
+}

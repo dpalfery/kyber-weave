@@ -1,0 +1,9 @@
+{
+  "session_id": "session-devin-3",
+  "prompt_id": "prompt-devin-3",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "run_subagent",
+  "tool_input": {
+    "profile": "csharp-dev"
+  }
+}

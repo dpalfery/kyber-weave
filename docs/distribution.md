@@ -29,12 +29,16 @@ follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo. Unset
 any URL that is not HTTPS. The loopback exception is
 [`KYBER_WEAVE_RELEASE_ORIGIN`](#verifying-a-release-locally).
 
-It installs `kyber-weave`, `kyber-weave-mcp`, and — from releases that publish it —
-`kyberdash`. `--no-mcp` and `--no-kyberdash` narrow that set.
+It installs `kyber-weave`, `kyber-weave-mcp`, `kyber-weave-arbiter`, and — from releases
+that publish it — `kyberdash`. `--no-mcp`, `--no-arbiter`, and `--no-kyberdash` narrow
+that set.
 
 Once those binaries are on PATH, `kyber-weave update` reads the same Release assets and
-checksums and replaces the running CLI, the sibling MCP, and an installed `kyberdash` in
-place. `--release-candidate` installs the highest-versioned non-draft release, stable or
+checksums and replaces the running CLI, the sibling MCP, an installed `kyber-weave-arbiter`,
+and an installed `kyberdash` in
+place. An absent arbiter is reported rather than created: `install.sh --no-arbiter` is an
+explicit opt-out, and a machine that installed before the arbiter existed never chose to run
+it. `--release-candidate` installs the highest-versioned non-draft release, stable or
 pre-release, so it picks `v1.0.0` over `v1.0.0-rc.1`. The script's `--prerelease` considers
 pre-releases only. Both compare by SemVer precedence across every page of the Releases list,
 not by GitHub's creation order. A positional version pins a tag without colliding with global
@@ -58,6 +62,10 @@ floor, and both compare against it with SemVer 2.0.0 precedence rather than stri
 comparison sorts `rc.10` below `rc.9`. Any future asset added to an existing release line
 needs the same treatment.
 
+The Arbiter is the second case: `kyber-weave-arbiter-<rid>` assets first appear in
+**0.1.7-rc.17** (`ARBITER_MIN_VERSION`, `SelfUpdater.ArbiterMinVersion`). A release older
+than that floor installs and updates the CLI and MCP alone.
+
 It covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of scope for
 the script — no `.zip` handling — so Windows users take the Release asset directly.
 `kyber-weave update` does extract `win-x64` `.zip` assets when replacing an existing
@@ -79,7 +87,8 @@ documents only `scripts/install.sh` and the Windows `.zip`.
 
 The .NET binaries publish `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
 
-Asset names follow `kyber-weave-<rid>` and `kyber-weave-mcp-<rid>`, `.tar.gz` everywhere
+Asset names follow `kyber-weave-<rid>`, `kyber-weave-mcp-<rid>`, and
+`kyber-weave-arbiter-<rid>`, `.tar.gz` everywhere
 except `win-x64`, which is `.zip`. Windows archives contain `*.exe`; others contain
 extensionless binaries.
 
@@ -91,7 +100,8 @@ extensions. Two mappings translate between the sets and must stay in step:
 self-updater.
 
 All three tools share one `SHA256SUMS.txt` per release, so a KyberDash archive is verified
-by exactly the mechanism the .NET binaries are.
+by exactly the mechanism the .NET binaries are. The Arbiter is the third .NET binary in
+that manifest, alongside the CLI and the MCP server.
 
 ## Squad release assets and packaging
 
@@ -185,12 +195,12 @@ Then `.github/workflows/release.yml` stamps that version onto the binaries, publ
 each RID, builds the Squad archives via `squad pack`, generates the aggregate SBOM plus
 one SBOM per published archive, attests every SBOM, and runs a
 pre-publish manifest check before creating a GitHub Release. This check verifies that
-`SHA256SUMS.txt` names exactly the expected 41 assets (20 archives, 20 per-artifact
+`SHA256SUMS.txt` names exactly the expected 51 assets (25 archives, 25 per-artifact
 SBOMs, and the aggregate SBOM — see
 [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
 and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
 
-On success, the workflow creates a GitHub Release with the 41 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs post-publish verification steps that check the published assets against the expected set, byte-compare the manifest, and verify each archive's CycloneDX SBOM attestation. If a post-publish check detects a mismatch, it fails the job (the release is already public, so these checks are detective only).
+On success, the workflow creates a GitHub Release with the 51 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs post-publish verification steps that check the published assets against the expected set, byte-compare the manifest, and verify each archive's CycloneDX SBOM attestation. If a post-publish check detects a mismatch, it fails the job (the release is already public, so these checks are detective only).
 
 ### Release notes
 
@@ -285,13 +295,21 @@ kyber-weave-mcp --version
 kyber-weave-mcp -v
 ```
 
+And for the Arbiter hook binary:
+
+```bash
+kyber-weave-arbiter --version
+# or
+kyber-weave-arbiter -v
+```
+
 Output format: exactly `kyber-weave <version>`, with the `+<sha>` build metadata removed. For example, a release candidate prints `kyber-weave 0.2.0-rc.1`. The output never contains a `+` suffix. The [local release loop](#verifying-a-release-locally) enforces this exact format on the published binaries; the release workflow's publish step does not run this check itself.
 
 The same release also stamps `dash/package.json` with that version (`npm version` in `.github/workflows/release.yml`) before the KyberDash binaries are built. The KyberDash Settings views, in the web dashboard and the tray, read the version from the engine, so for a release they show the same version that `kyber-weave --version` prints. A source checkout keeps whatever version `dash/package.json` holds, so its Settings views show that value.
 
 ## Code signing status
 
-Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 41 assets (20 archives, 20 per-artifact SBOMs, and the aggregate SBOM). A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). Post-publish checks verify the published assets and each archive's SBOM attestation after the release is live; on mismatch they fail the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
+Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 51 assets (25 archives, 25 per-artifact SBOMs, and the aggregate SBOM). A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). Post-publish checks verify the published assets and each archive's SBOM attestation after the release is live; on mismatch they fail the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
 Azure signing was ruled out on cost; GPG-signed manifests are not implemented; SignPath
 Foundation is a possible but unverified future option. See [ADR 0027](adr/0027-release-integrity-checksums-signing-deferred.md)
 for the complete decision record.
@@ -299,7 +317,7 @@ for the complete decision record.
 | Artifact | Signing Status | Notes |
 |---|---|---|
 | Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
-| Windows `.exe` files (`kyber-weave`, `kyber-weave-mcp`, `kyberdash` in `win-x64` archives) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
+| Windows `.exe` files (`kyber-weave`, `kyber-weave-mcp`, `kyber-weave-arbiter`, `kyberdash` in `win-x64` archives) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
 | macOS tray (`kyberdash-tray-darwin-*.zip`) | Developer ID-signed and notarized | Team ID `J2UNNQ466J`. Verified by `.github/workflows/release.yml` signature and notarization checks. |
 | macOS CLI and MCP binaries | Not Developer ID-signed | `install.sh` clears the macOS quarantine attribute at install time ([scripts/install.sh:735–742](../scripts/install.sh)). |
 | macOS KyberDash binary | Ad-hoc signed | Signed after the Node SEA injection in the `build-kyberdash` job, `Build Node SEA for ${{ matrix.rid }}` step ([.github/workflows/release.yml](../.github/workflows/release.yml)). |
@@ -307,22 +325,24 @@ for the complete decision record.
 
 ### Manifest completeness and the pre-publish check
 
-The release workflow enforces that `SHA256SUMS.txt` lists exactly the 41 expected assets and
-never itself. The published release contains those 41 assets plus `SHA256SUMS.txt` (42 files total).
+The release workflow enforces that `SHA256SUMS.txt` lists exactly the 51 expected assets and
+never itself. The published release contains those 51 assets plus `SHA256SUMS.txt` (52 files total).
 
-The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. Post-publish checks run after the release is created and compare the published asset names against the 41 expected assets plus `SHA256SUMS.txt`, byte-compare the published manifest, and verify each archive's SBOM attestation; on mismatch they fail the job (the release is already public, so these checks are detective only).
+The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. Post-publish checks run after the release is created and compare the published asset names against the 51 expected assets plus `SHA256SUMS.txt`, byte-compare the published manifest, and verify each archive's SBOM attestation; on mismatch they fail the job (the release is already public, so these checks are detective only).
 
 - **5** CLI: `kyber-weave-linux-x64.tar.gz`, `kyber-weave-linux-arm64.tar.gz`,
   `kyber-weave-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-win-x64.zip`
 - **5** MCP: `kyber-weave-mcp-linux-x64.tar.gz`, `kyber-weave-mcp-linux-arm64.tar.gz`,
   `kyber-weave-mcp-osx-x64.tar.gz`, `kyber-weave-mcp-osx-arm64.tar.gz`, `kyber-weave-mcp-win-x64.zip`
+- **5** Arbiter: `kyber-weave-arbiter-linux-x64.tar.gz`, `kyber-weave-arbiter-linux-arm64.tar.gz`,
+  `kyber-weave-arbiter-osx-x64.tar.gz`, `kyber-weave-arbiter-osx-arm64.tar.gz`, `kyber-weave-arbiter-win-x64.zip`
 - **5** KyberDash: `kyberdash-darwin-arm64.tar.gz`, `kyberdash-darwin-x64.tar.gz`,
   `kyberdash-linux-arm64.tar.gz`, `kyberdash-linux-x64.tar.gz`, `kyberdash-win-x64.zip`
 - **3** Tray: `kyberdash-tray-darwin-arm64.zip`, `kyberdash-tray-darwin-x64.zip`, `kyberdash-tray-win-x64-setup.exe`
 - **2** Squad: `kyber-squad-<version>.zip`, `kyber-squad-plugin-<version>.zip`
-- **20** Per-artifact SBOMs: one `<archive-stem>.cdx.json` per published archive above
+- **25** Per-artifact SBOMs: one `<archive-stem>.cdx.json` per published archive above
   (`artifact_sbom_name` in `scripts/syft-bootstrap.sh`), e.g.
-  `kyber-weave-linux-x64.cdx.json`, `kyberdash-tray-win-x64-setup.cdx.json`,
+  `kyber-weave-linux-x64.cdx.json`, `kyber-weave-arbiter-linux-x64.cdx.json`, `kyberdash-tray-win-x64-setup.cdx.json`,
   `kyber-squad-<version>.cdx.json`
 - **1** Aggregate SBOM: `kyber-weave-sbom-<version>.cdx.json`
 
@@ -334,7 +354,7 @@ deliberate step that must be coordinated with the release automation.
 
 Every release carries one aggregate Software Bill of Materials, `kyber-weave-sbom-<version>.cdx.json`
 (CycloneDX JSON, format version 1.6), plus one per-artifact SBOM per published
-archive (`<archive-stem>.cdx.json`, 20 in total). The aggregate is a
+archive (`<archive-stem>.cdx.json`, 25 in total). The aggregate is a
 machine-readable inventory of the third-party components the release depends on
 — NuGet, npm and Cargo — so that a consumer can feed it to a vulnerability
 scanner or a licence audit without unpacking the binaries. Each per-artifact
@@ -455,7 +475,7 @@ Users and maintainers can verify asset integrity by:
 3. **Whole-release download verification**: `shasum -a 256 --ignore-missing -c SHA256SUMS.txt`
    (macOS) or `sha256sum --ignore-missing -c SHA256SUMS.txt` (Linux) verifies the entire
    downloaded release. The `--ignore-missing` flag allows verification of a partial download
-   if you have only a subset of the 41 assets.
+   if you have only a subset of the 51 assets.
 4. **SBOM attestation**: `gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://cyclonedx.org/bom`
    verifies that an archive is the one its SBOM was attested against (see
    [install.md](install.md#verifying-sbom-attestations)).

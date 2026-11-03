@@ -211,6 +211,8 @@ review:
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
       blocking: true
+      applies-when:
+        paths: ["dash/**"]
     # `test` excludes the cache-refresh-lock* files because vitest's default
     # pool forks them concurrently and writes to the same lock file. The
     # dash CI invokes those under `test:locks` instead. Mirroring that
@@ -227,6 +229,8 @@ review:
       include: ["dash/**"]
       run: [scripts/proc-guard.sh, run, --, npm, run, --prefix, dash, test, --, --coverage]
       blocking: true
+      applies-when:
+        paths: ["dash/**"]
     # One severity, owned by dash/eslint.config.js: the recommended rules run
     # at error everywhere under dash/. The two-tier split that ran them as
     # warnings over the vendored subtree went with the one-time fork (ADR
@@ -236,12 +240,16 @@ review:
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
       blocking: true
+      applies-when:
+        paths: ["dash/**"]
     # Every non-test source file under dash/ must be reachable from an entry
     # point, so a deleted command cannot leave its private modules behind.
     - id: ts-reachable
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, "check:reachable"]
       blocking: true
+      applies-when:
+        paths: ["dash/**"]
 
     # The tray's Rust suite, run the way CI runs it (.github/workflows/ci.yml, working-directory
     # dash/tray/src-tauri): format check, clippy with warnings denied, then tests. --manifest-path

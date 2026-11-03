@@ -1,0 +1,13 @@
+{
+  "session_id": "session-factory-1",
+  "transcript_path": "/repo/.factory/transcripts/session-factory-1.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_input": {
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.5\n\nImplement the adapter.",
+    "subagent_type": "csharp-dev",
+    "description": "Implement T16.5"
+  }
+}
