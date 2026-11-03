@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sha256Hex } from '../../receipt.js'
 import { installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
@@ -44,6 +44,30 @@ import {
 } from './marketplace.js'
 import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
 import { allowRealSpawns, resetSpawnAllowance } from '../../../../tests/setup/spawn-guard.js'
+
+/**
+ * The options every spawn the driver makes was given.
+ *
+ * The BOUNDS are what the driver chose, and a bound is only observable in the options the
+ * spawn was given: the child's own output says nothing about the cap that was asked for.
+ * A case that wants the options turns the capture on; every other spawn — the ones the
+ * cases below need a real child for — runs for real.
+ */
+const spawnCapture = vi.hoisted(() => ({ on: false, calls: [] as Array<Record<string, unknown>> }))
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  const real = actual['spawnSync'] as (...args: unknown[]) => unknown
+  return {
+    ...actual,
+    spawnSync: (...args: unknown[]) => {
+      if (!spawnCapture.on) return real(...args)
+      spawnCapture.on = false
+      spawnCapture.calls.push((args[2] ?? {}) as Record<string, unknown>)
+      return { pid: 0, output: [], stdout: '', stderr: '', status: 0, signal: null }
+    },
+  }
+})
 
 /** The marketplace tree root, relative to the injected home. */
 const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', FACTORY_MARKETPLACE_NAME)
@@ -63,6 +87,9 @@ const dirs: string[] = []
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
   resetSpawnAllowance()
+  // The capture is off again: a case that turned it on and never reached its spawn must
+  // not capture the next case's real child.
+  spawnCapture.on = false
 })
 
 function temp(prefix: string): string {
@@ -710,7 +737,48 @@ describe('the driver that runs the harness', () => {
     expect(answer.stderr).toContain('bbbb')
     expect(answer.exitCode).toBe(0)
   })
+
+  it('never spawns the harness with an unbounded or nonsensical bound', () => {
+    // The driver has to reach its spawn call for the bound to be observable at all, so
+    // the spawn guard is told the child may start. The spawn itself is captured by the
+    // module mock, so no child process runs.
+    allowRealSpawns('the driver bounds case needs the driver to reach its spawn call; the spawn is captured, so no child runs')
+    const dir = temp('factory-driver-bounds-')
+    const script = join(dir, 'droid')
+    writeFileSync(script, '#!/bin/sh\nexit 0\n')
+    chmodSync(script, 0o755)
+
+    spawnCapture.calls.length = 0
+    // A bound that is not a number, a bound that is infinite, and a bound that is
+    // negative: none of them is a cap a child can be held to.
+    for (const timeoutMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      const cli = resolveFactoryHarnessCli({ processEnv: { PATH: dir }, timeoutMs })
+      spawnCapture.on = true
+      cli.run(['plugin', 'list'])
+    }
+    for (const maxOutputBytes of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      const cli = resolveFactoryHarnessCli({ processEnv: { PATH: dir }, maxOutputBytes })
+      spawnCapture.on = true
+      cli.run(['plugin', 'list'])
+    }
+
+    const offending = spawnCapture.calls
+      .map((options) => ({ timeout: options['timeout'], maxBuffer: options['maxBuffer'] }))
+      .filter((bounds) => !isSaneBound(bounds.timeout) || !isSaneBound(bounds.maxBuffer))
+
+    expect(
+      offending.map(
+        (bounds) => `timeout ${String(bounds.timeout)} ms, maxBuffer ${String(bounds.maxBuffer)} bytes`,
+      ),
+      'the driver never spawns with an unbounded or nonsensical bound',
+    ).toEqual([])
+  })
 })
+
+/** Whether a spawn bound is a number a child can be held to: finite, and positive. */
+function isSaneBound(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
 
 describe('the tree writer', () => {
   /**
