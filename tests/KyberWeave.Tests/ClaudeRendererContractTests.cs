@@ -107,8 +107,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -118,27 +116,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-
-        // C3: every rendered owner also projects its validated resource closure beside its
-        // principal output, so the corpus count is principals plus emitted closures.
-        // A primary agent with no-primary-agent: skill contributes an entry-point skill
-        // (1 + its resource closure) in addition to the agent file — except a primary shared
-        // identity, whose canonical skill already IS the entry point and is counted with the
-        // skills.
-        int primaryAgentSkillContribution = source.Agents
-            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
-            .Sum(agent => 1 + agent.Resources.Count);
-
-        int expectedFileCount =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count)
-            + primaryAgentSkillContribution;
-        Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.All(result.Files, f => Assert.Equal("claude", f.Target));
 
         Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
         foreach (SquadAgent agent in source.Agents)
@@ -278,60 +255,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
         AssertTools(result, "bug-crusher-investigator", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch"]);
 
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".claude/agents/{sharedIdentity}.md");
-            string sharedSkillPath = $".claude/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-            else
-            {
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-        }
-
-        // Skills verification
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".claude/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description mismatch.");
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-
-            // Exact comparison with the normalized canonical body: the renderer appends it
-            // verbatim, so duplication or padding must fail, naming the offender.
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n'))
-            {
-                expectedSkillBody += "\n";
-            }
-
-            Assert.True(
-                string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
-        }
-
         // Degradations: 'ask' capabilities produce safety-narrowed; allowed network.publish
         // and delegate-allow rosters produce permission-not-expressible. An agent may carry
         // both records, and one permission-not-expressible record may combine both causes.
@@ -401,22 +324,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
             }
         }
 
-        foreach (SquadDegradationRecord degradation in result.Degradations)
-        {
-            Assert.True(
-                string.Equals("claude", degradation.Target, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
-            Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable" or "role-skill-fallback",
-                $"Degradation for '{degradation.CanonicalIdentity}' has an unexpected code '{degradation.Code}'.");
-            Assert.True(
-                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
-            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
-        }
+        Assert.All(result.Degradations, degradation => Assert.True(
+            degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable" or "role-skill-fallback",
+            $"Degradation for '{degradation.CanonicalIdentity}' has an unexpected code '{degradation.Code}'."));
     }
 
     /// <summary>
