@@ -32,7 +32,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -245,14 +244,25 @@ function repositoryRoot(): string {
   }
 }
 
-/** The git index of this checkout: the file that records git's tracked paths. */
+/**
+ * The git index of this checkout: the file that records git's tracked paths.
+ *
+ * A checkout's `.git` is a DIRECTORY and a worktree's is a FILE that names the real git
+ * directory. Reading the path answers which one it is: a directory cannot be read, and the
+ * failure says so. Every other failure is a real failure and propagates, as it did when
+ * the directory was told apart by a check of its own.
+ */
 function gitIndexPath(): string | undefined {
   const dotGit = join(repositoryRoot(), '.git')
   if (!existsSync(dotGit)) return undefined
-  if (statSync(dotGit).isDirectory()) return join(dotGit, 'index')
-  const match = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))
-  const gitDir = match?.[1]?.trim()
-  return gitDir === undefined ? undefined : join(gitDir, 'index')
+  try {
+    const match = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))
+    const gitDir = match?.[1]?.trim()
+    return gitDir === undefined ? undefined : join(gitDir, 'index')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EISDIR') return join(dotGit, 'index')
+    throw error
+  }
 }
 
 /** The ignore files that can cover a path: the `.gitignore` of the path and of each parent. */
