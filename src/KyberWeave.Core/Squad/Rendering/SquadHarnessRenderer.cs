@@ -99,6 +99,7 @@ internal sealed class SquadHarnessRenderContext
     private HashSet<string>? _suppressedSkillIdentities;
     private HashSet<string>? _skillNames;
     private string[]? _capabilityVocabulary;
+    private object? _harnessState;
 
     public SquadHarnessRenderContext(SquadHarnessSpec spec, SquadRenderRequest request, SquadSource source)
     {
@@ -122,6 +123,8 @@ internal sealed class SquadHarnessRenderContext
     public List<SquadDegradationRecord> Degradations { get; } = [];
 
     public List<SquadRenderedBlock> Blocks { get; } = [];
+
+    public List<SquadRenderWarning> Warnings { get; } = [];
 
     public IReadOnlyDictionary<string, SquadCapabilityProfile> CapabilityProfiles =>
         Source.CapabilityProfiles.Profiles;
@@ -165,6 +168,14 @@ internal sealed class SquadHarnessRenderContext
     /// </summary>
     public SquadArbiterWiring? EnabledArbiter =>
         Request.Arbiter is { Enabled: true } && Scope == SquadDeploymentScope.Project ? Request.Arbiter : null;
+
+    /// <summary>
+    /// The harness's own per-render state, created once on first use: a renderer is shared across
+    /// concurrent renders, so state that would otherwise be a field lives on the render instead.
+    /// </summary>
+    public T GetOrCreateState<T>(Func<SquadHarnessRenderContext, T> create)
+        where T : class =>
+        (T)(_harnessState ??= create(this));
 
     public string ResolveDirectory(string subdirectory) => Spec.ResolveDirectory(subdirectory, Scope);
 
@@ -322,7 +333,11 @@ internal sealed class SquadHarnessRenderContext
     /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>. No model or
     /// permission keys: a skill cannot express the capability lattice.
     /// </summary>
-    public SquadDeploymentFile RenderSkillDocument(string name, string description, string instructionBody)
+    public SquadDeploymentFile RenderSkillDocument(
+        string name,
+        string description,
+        string instructionBody,
+        SquadYamlEmitter? emitter = null)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -333,7 +348,7 @@ internal sealed class SquadHarnessRenderContext
 
         return CreateFile(
             $"{SkillsDirectory}/{name}/SKILL.md",
-            SquadYamlEmitter.Default.Compose(frontmatter, instructionBody));
+            (emitter ?? SquadYamlEmitter.Default).Compose(frontmatter, instructionBody));
     }
 
     /// <summary>
@@ -358,7 +373,7 @@ internal sealed class SquadHarnessRenderContext
     /// null, for the renderers whose result always carried one.
     /// </summary>
     public SquadRenderResult ToResult(bool emptyBlocks = false) =>
-        new(true, Files, Degradations, [], [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
+        new(true, Files, Degradations, Warnings, [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
 
     private static JsonObject MatcherGroup(string matcher, string commandLine, int timeoutSeconds) =>
         new()

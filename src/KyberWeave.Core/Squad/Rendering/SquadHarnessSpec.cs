@@ -75,7 +75,10 @@ internal enum SquadLineBreaks
     CarriageReturnOrLineFeed,
 
     /// <summary>Normalize <c>\r\n</c> to <c>\n</c> and split on <c>\n</c> only.</summary>
-    LineFeedOnly
+    LineFeedOnly,
+
+    /// <summary>The harness reads a multi-line description, so it is emitted as authored.</summary>
+    Preserved
 }
 
 /// <summary>Model and scalar lowering shared by every harness spec.</summary>
@@ -106,6 +109,7 @@ internal static class SquadHarnessLowering
 
     /// <summary>Collapses a multi-line scalar onto one line, dropping blank lines.</summary>
     public static string SingleLine(string value, SquadLineBreaks lineBreaks) =>
+        lineBreaks == SquadLineBreaks.Preserved ? value :
         lineBreaks == SquadLineBreaks.LineFeedOnly
             ? string.Join(
                 ' ',
