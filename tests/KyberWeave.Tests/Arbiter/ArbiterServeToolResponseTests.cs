@@ -85,6 +85,41 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     /// <c>outcome:</c> line and the tool contradicts itself.
     /// </summary>
     [Fact]
+    public void Evaluate_AnOversizedFindingWithALens_IsRefusedBeforeAnyEvaluation()
+    {
+        ArbiterTools tools = CreateTools();
+
+        string response = tools.Evaluate(
+            "lens.spawn",
+            new ArbiterFacts
+            {
+                Lens = ["security"],
+                Finding = new string('x', (256 * 1024) + 1),
+            });
+
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Contains("larger than", response, StringComparison.Ordinal);
+        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+    }
+
+    [Fact]
+    public void Evaluate_AFindingWithAnInvalidIdAndALens_IsRefusedBeforeAnyEvaluation()
+    {
+        ArbiterTools tools = CreateTools();
+
+        string response = tools.Evaluate(
+            "lens.spawn",
+            new ArbiterFacts
+            {
+                Lens = ["security"],
+                Finding = "id: ../../etc/passwd\nseverity: major\n",
+            });
+
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+    }
+
+    [Fact]
     public void Evaluate_TooManyLenses_IsRefusedBeforeAnyEvaluation()
     {
         ArbiterTools tools = CreateTools();

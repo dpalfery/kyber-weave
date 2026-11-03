@@ -101,6 +101,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <summary>The most evaluations one MCP call may fan out to.</summary>
     private const int MaxFanOutUnits = 64;
 
+    /// <summary>The largest client text one MCP call may embed, in characters.</summary>
+    private const int MaxTextChars = 256 * 1024;
+
     [McpServerTool(Name = "arbiter_evaluate", ReadOnly = false, OpenWorld = false)]
     [Description("""
         Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
@@ -147,8 +150,19 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.");
         }
 
-        // A single call is bounded: each unit is a provider call and a ledger append,
-        // so an unbounded client array is a denial of service and ledger bloat.
+        // A single call is bounded in both count and bytes: each unit is a provider
+        // call and a ledger append, and a client-supplied finding or prompt is copied
+        // into every unit's prompt.
+        if (facts.Prompt is { Length: > MaxTextChars })
+        {
+            return Failure(provenance, $"The prompt is larger than {MaxTextChars} characters.");
+        }
+
+        if (facts.Finding is { Length: > MaxTextChars })
+        {
+            return Failure(provenance, $"The finding is larger than {MaxTextChars} characters.");
+        }
+
         if (facts.Lens is { Count: > MaxFanOutUnits })
         {
             return Failure(
@@ -157,26 +171,30 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         // A refutation call is one evaluation per finding id, because a REFUTE header
-        // names one finding. Ids are checked before any evaluation, so a bad id records
-        // nothing (review 20.1-2, Major).
-        List<EvaluationUnit> units = [];
-        if (facts.Lens is not { Count: > 0 } && Present(facts.Finding))
+        // names one finding. Ids are checked before any evaluation, on the lens+finding
+        // path too, so a bad id records nothing (review 20.1-2, Major).
+        List<FindingBlock>? findingBlocks = null;
+        if (Present(facts.Finding))
         {
-            List<FindingBlock> blocks = FindingBlocks(facts.Finding!);
-            if (blocks.Count > MaxFanOutUnits)
+            findingBlocks = FindingBlocks(facts.Finding!);
+            if (findingBlocks.Count > MaxFanOutUnits)
             {
                 return Failure(
                     provenance,
                     $"A refutation carries at most {MaxFanOutUnits} findings; split the call.");
             }
 
-            string? problem = FindingIdProblem(blocks);
+            string? problem = FindingIdProblem(findingBlocks);
             if (problem is not null)
             {
                 return Failure(provenance, problem);
             }
+        }
 
-            units.AddRange(blocks.Select(block => new EvaluationUnit(null, block.Id, block.Text)));
+        List<EvaluationUnit> units = [];
+        if (facts.Lens is not { Count: > 0 } && findingBlocks is not null)
+        {
+            units.AddRange(findingBlocks.Select(block => new EvaluationUnit(null, block.Id, block.Text)));
         }
         else
         {
