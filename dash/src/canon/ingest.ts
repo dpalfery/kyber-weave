@@ -32,6 +32,16 @@ import {
 import { canonicalSessionId } from './adapters/copilot.js'
 import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter, UNKNOWN_TIMESTAMP } from './adapters/copilot.js'
+import {
+  DROID_HARNESS,
+  droidAdapter,
+  isDroidPluginSpan,
+} from './adapters/droid.js'
+import {
+  UNKNOWN_DROID_CONTRACT_VERSION_REASON,
+  isDroidEnvelopeSpan,
+  isSupportedDroidEnvelope,
+} from './adapters/droid-envelope.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
 import { opencodeAdapter } from './adapters/opencode.js'
@@ -47,6 +57,16 @@ import {
   observedNamespaces,
   recordValidationProblems,
 } from './adapters/quarantine.js'
+import {
+  carriesFactoryContent,
+  FactoryTraceMemory,
+  FACTORY_TRACE_MEMORY_LIMIT,
+  isFactoryLegacySpanName,
+  isFactoryNativeRoot,
+  resolveConsentPath,
+  resolveContentConsent,
+  stripFactoryContent,
+} from './droid-content.js'
 import { DEFAULT_PENDING_PAGE_BYTES, type CanonStore } from './store.js'
 import {
   contentFromParts,
@@ -81,6 +101,10 @@ export const ADAPTERS: readonly HarnessAdapter[] = [
   // every existing vote resolves above it. The Phase 2 OpenCode task fills in
   // adapters/opencode.ts without moving this tie-break.
   opencodeAdapter,
+  // Factory (droid) claims on one fingerprint — its plugin envelope — and it
+  // is specific enough that no other adapter scores the same span, so its
+  // place in this order only breaks a tie it cannot reach.
+  droidAdapter,
 ]
 
 /** Resource attribute the OTLP convention names the emitting process with. */
@@ -114,14 +138,22 @@ export function toRawSpan(span: OtlpSpan): RawSpan {
 }
 
 /**
- * Give a normalized record the timing and outcome the adapter seam cannot
- * carry: `RawSpan` is deliberately timing-free and adapters stamp a neutral
- * epoch, while the decoded span carries the harness's own clock and status.
+ * Give a normalized record the timing the adapter seam cannot carry, and
+ * the outcome only when the adapter did not determine one: `RawSpan` is
+ * deliberately timing-free and adapters stamp a neutral epoch, while the
+ * decoded span carries the harness's own clock.
+ *
+ * The exporter's status code is not the last word on the outcome. An
+ * adapter that already determined the record failed keeps that status: an
+ * error is never downgraded here, because the exporter does not mark the
+ * span's transport status as an error. Every other record takes the span's
+ * own status code, so a harness whose adapter did not judge the outcome
+ * still stores what the exporter reported.
  */
 export function growWithReceiverTiming(record: CanonicalRecord, span: OtlpSpan): void {
   record.timestamp = span.timestamp
   record.durationMs = span.durationMs
-  record.status = span.status.code
+  if (record.status !== 'error') record.status = span.status.code
 }
 
 /** Distinguish ambient telemetry from a span merely lacking an adapter. */
@@ -319,6 +351,100 @@ function settlePendingInteractionPrompts(store: CanonStore, now: number, ttlMs: 
   }
 }
 
+// ---------------------------------------------------------------------------
+// The Factory content gate (T42/T43)
+// ---------------------------------------------------------------------------
+//
+// Factory's native OpenTelemetry export carries the prompt, the reply, the tool
+// arguments and the tool result as span attributes whenever the harness's own
+// content switch is on. KyberDash's consent file decides whether that text may be
+// stored, and this gate is where the decision is applied: BEFORE the normalization
+// and BEFORE the quarantine write, so the text is never written anywhere.
+//
+// IDENTIFICATION. The `genai` format names the agent on the trace ROOT alone
+// (`gen_ai.agent.name = 'droid'`); the children carry no identity of their own, so
+// a child is identified by its TRACE. The root's trace is remembered in a bounded
+// memory, so a child that arrives in a LATER batch is still identified. The
+// `legacy` format's content spans carry no attribute fingerprint at all, so
+// Factory's own `droid.*` span names are what identify them.
+//
+// THE FAIL-CLOSED ARM. A native child can arrive BEFORE its root: the root is
+// exported when the invocation ends, so a child that ends earlier is exported
+// earlier. Such a span is identified by neither the root nor the memory, and it is
+// unattributed — no adapter claims a native span, which is what puts it in
+// quarantine in the first place. An unattributed span's origin is unknown, so the
+// gate strips its content too. This is the one place the gate reaches past
+// Factory's own spans, and it reaches only spans that belong to NO harness: an
+// unattributed span of another harness loses its content from the quarantine
+// evidence, which is what an unknown origin is worth. A CLAIMED span of ANOTHER
+// harness keeps its content, and that is what leaves another harness's own
+// `gen_ai.input.messages` alone.
+//
+// THE CLAIMED PLUGIN ENVELOPE. The plugin gates its own prompt at emission, but a
+// span it PARKED because the delivery failed is re-delivered later without that gate
+// running again, so the store-side gate strips the claimed envelope's content too:
+// it is the last line that can keep the owner's prompt text out of the corpus. The
+// envelope's identity attributes — the span id, the session id, the model, the tool
+// name — are not content and survive the gate.
+//
+// THE RESIDUAL. A Factory child that arrives before its root AND is claimed by
+// another harness — the registry's source inheritance handed its group to a
+// confidently mapped group of the same source — keeps its content: the trace was
+// not yet known to be Factory's, and the span is claimed, so the fail-closed arm
+// does not reach it. It needs a source-name collision AND the child-first
+// ordering together.
+
+/**
+ * The bounded memory of Factory traces, shared by every batch this process ingests.
+ */
+const FACTORY_TRACES = new FactoryTraceMemory(FACTORY_TRACE_MEMORY_LIMIT)
+
+/**
+ * The owner's consent decision, read at call time: the consent file is the decision
+ * and the env override wins over it. Anything other than an explicit on is off.
+ */
+function factoryContentAllowed(): boolean {
+  return resolveContentConsent(process.env, resolveConsentPath())
+}
+
+/**
+ * Which spans of this batch are Factory's own.
+ *
+ * The trace memory is updated FIRST, so a child that arrives before its root inside
+ * one batch is identified by the root that arrives after it.
+ */
+function identifyFactorySpans(spans: readonly OtlpSpan[]): boolean[] {
+  for (const span of spans) {
+    if (isFactoryNativeRoot(span.attributes)) FACTORY_TRACES.remember(span.traceId)
+  }
+  return spans.map(
+    (span) =>
+      isFactoryLegacySpanName(span.name) ||
+      isFactoryNativeRoot(span.attributes) ||
+      FACTORY_TRACES.has(span.traceId),
+  )
+}
+
+/**
+ * The span without its content-bearing attributes. Everything else — the ids, the
+ * names, the counters, the correlation — is kept exactly as it came.
+ */
+function withoutFactoryContent(span: OtlpSpan): OtlpSpan {
+  return { ...span, attributes: stripFactoryContent(span.attributes) }
+}
+
+/**
+ * True for a span the Factory adapter claimed as its plugin envelope.
+ *
+ * The claim is what makes the span Factory's: the adapter claims the plugin
+ * envelope and nothing else, and the envelope is the plugin's own `factory.*`
+ * namespace. A span of another harness keeps its content, even one that carries
+ * Factory's own content attributes — the gate is scoped to Factory's own spans.
+ */
+function isClaimedFactoryEnvelope(raw: RawSpan, attributed: ReadonlyMap<string, string>): boolean {
+  return attributed.get(raw.spanId) === DROID_HARNESS && isDroidPluginSpan(raw)
+}
+
 /** What one batch did, so a caller can log or assert on it. */
 export type IngestOutcome = {
   /** Records validated and stored. */
@@ -373,10 +499,10 @@ export function ingestBatchWithAdapters(
 
   const rawSpans = spans.map(toRawSpan)
 
-  // The exact incoming span for the quarantine detail route (v18 `raw_payload`).
-  // Decoded-span JSON, not the normalized record: the record is what attribution made
-  // of the span, and mislabeling it as the original message is forbidden.
-  const rawPayloadOf = (index: number): string => boundRawPayload(JSON.stringify(spans[index]))
+  // The Factory content gate, in the order it has to run: which spans are Factory's
+  // own, and which of them carry content at all. Nothing is written here.
+  const factoryOwned = identifyFactorySpans(spans)
+  const contentBearing = spans.map((span) => carriesFactoryContent(span.attributes))
 
   // T1 version guard: an envelope span naming an unknown or missing contract
   // quarantines with its named reason before the vote, so no adapter can
@@ -387,32 +513,104 @@ export function ingestBatchWithAdapters(
   for (const [index, raw] of rawSpans.entries()) {
     if (!isOpencodeEnvelopeSpan(raw) || isSupportedOpencodeEnvelope(raw)) continue
     versionQuarantined.add(index)
-    store.quarantineAndDelete(
-      raw.spanId,
-      observedNamespaces(raw.attributes),
-      UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON,
-      {
-        source: raw.source,
-        name: raw.name,
-        timestamp: spans[index]?.timestamp ?? raw.timestamp,
-        rawPayload: rawPayloadOf(index),
-      },
-    )
   }
-  const attributed = registry.attribute(rawSpans.filter((_, index) => !versionQuarantined.has(index)))
+  // The droid envelope carries the same guard as the opencode one: a Factory
+  // plugin span naming an unknown or missing contract version quarantines with
+  // its own named reason before the vote, so no adapter can claim it and it
+  // is never misattributed to any harness.
+  const droidVersionQuarantined = new Set<number>()
+  for (const [index, raw] of rawSpans.entries()) {
+    if (!isDroidEnvelopeSpan(raw) || isSupportedDroidEnvelope(raw)) continue
+    droidVersionQuarantined.add(index)
+  }
+  const attributed = registry.attribute(
+    rawSpans.filter((_, index) => !versionQuarantined.has(index) && !droidVersionQuarantined.has(index)),
+  )
+
+  // The gate's decision, per span. The consent is read only when a span carries
+  // content at all: the file is the owner's decision, and a batch with no content
+  // in it has nothing to decide.
+  const contentAllowed = !contentBearing.some(Boolean) || factoryContentAllowed()
+  const stripContent = spans.map((_, index) => {
+    if (contentAllowed) return false
+    // Factory's own span: the root, the legacy names, or a known Factory trace.
+    if (factoryOwned[index]) return true
+    // A CLAIMED Factory plugin envelope. The plugin gates its own prompt at
+    // emission, but a span it parked because the delivery failed is
+    // re-delivered without that gate running again, so the store-side gate is
+    // the last line that can keep the owner's text out of the corpus. The
+    // envelope's identity attributes are not content and survive the gate.
+    if (isClaimedFactoryEnvelope(rawSpans[index]!, attributed)) return true
+    // A span no adapter claimed has no known origin, and Factory's native root
+    // can arrive after its children: its content is stripped too.
+    return !attributed.has(rawSpans[index]!.spanId) && contentBearing[index]
+  })
+
+  // The gated spans: what the rest of the pipeline sees, and what is written. The
+  // vote ran on the spans as they came — the gate is applied before the
+  // normalization and before the quarantine write, not before the attribution.
+  const gatedSpans = spans.map((span, index) =>
+    stripContent[index] ? withoutFactoryContent(span) : span,
+  )
+  const gatedRawSpans = gatedSpans.map(toRawSpan)
+
+  // The exact incoming span for the quarantine detail route (v18 `raw_payload`).
+  // Decoded-span JSON, not the normalized record: the record is what attribution made
+  // of the span, and mislabeling it as the original message is forbidden.
+  const rawPayloadOf = (index: number): string => boundRawPayload(JSON.stringify(gatedSpans[index]))
+
+  for (const [index, raw] of gatedRawSpans.entries()) {
+    if (versionQuarantined.has(index)) {
+      store.quarantineAndDelete(
+        raw.spanId,
+        observedNamespaces(raw.attributes),
+        UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON,
+        {
+          source: raw.source,
+          name: raw.name,
+          timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp,
+          rawPayload: rawPayloadOf(index),
+        },
+      )
+    }
+  }
+  for (const [index, raw] of gatedRawSpans.entries()) {
+    if (droidVersionQuarantined.has(index)) {
+      store.quarantineAndDelete(
+        raw.spanId,
+        observedNamespaces(raw.attributes),
+        UNKNOWN_DROID_CONTRACT_VERSION_REASON,
+        {
+          source: raw.source,
+          name: raw.name,
+          timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp,
+          rawPayload: rawPayloadOf(index),
+        },
+      )
+    }
+  }
 
   const unclaimed: string[] = []
-  for (const [index, raw] of rawSpans.entries()) {
-    if (versionQuarantined.has(index) || attributed.has(raw.spanId)) continue
+  for (const [index, raw] of gatedRawSpans.entries()) {
+    if (
+      versionQuarantined.has(index) ||
+      droidVersionQuarantined.has(index) ||
+      attributed.has(raw.spanId)
+    ) {
+      continue
+    }
     unclaimed.push(raw.spanId)
     store.quarantineAndDelete(
       raw.spanId,
-      observedNamespaces(raw.attributes),
+      // The namespaces the span ARRIVED with, not the gated copy's: a namespace
+      // is the vocabulary a span was written in, and it is what tells a reader
+      // which adapter is missing (R6.1). It names no content.
+      observedNamespaces(rawSpans[index]!.attributes),
       isStructuralSpan(raw) ? 'non-model span' : 'unclaimed',
       {
         source: raw.source,
         name: raw.name,
-        timestamp: spans[index]?.timestamp ?? raw.timestamp,
+        timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp,
         // The whole decoded span is the evidence the audit row keeps (B7) —
         // once the record is gone this packet is the only surviving copy.
         // No harness: attribution named none for this span.
@@ -420,7 +618,7 @@ export function ingestBatchWithAdapters(
       },
     )
   }
-  let quarantined = unclaimed.length + versionQuarantined.size
+  let quarantined = unclaimed.length + versionQuarantined.size + droidVersionQuarantined.size
   let rejected = 0
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
@@ -428,13 +626,36 @@ export function ingestBatchWithAdapters(
   // (session, call id) recurs on every turn span, and within one batch the
   // store has none of them yet, so this is what keeps the first sighting.
   const derivedSeen = new Set<string>()
-  for (const [index, raw] of rawSpans.entries()) {
+  for (const [index, raw] of gatedRawSpans.entries()) {
     const harness = attributed.get(raw.spanId)
     if (harness === undefined) continue
     const adapter = adapterByName.get(harness)
     if (adapter === undefined) {
       // Unreachable: the registry only names adapters it was built with.
       throw new Error(`attribution named unregistered harness "${harness}"`)
+    }
+
+    // The droid adapter claims the plugin envelope and NOTHING else. The
+    // registry votes per GROUP, and its source-inheritance pass can hand a
+    // group to a harness that detected none of its spans — so a span
+    // attributed to droid that is not the envelope is not the adapter's
+    // claim. It is quarantined as unclaimed, exactly as a span no adapter
+    // claimed is: never swallowed, and never stored as a droid record. The
+    // decoded packet stays as the audit evidence (B7).
+    if (harness === DROID_HARNESS && !isDroidPluginSpan(raw)) {
+      store.quarantineAndDelete(
+        raw.spanId,
+        observedNamespaces(rawSpans[index]!.attributes),
+        isStructuralSpan(raw) ? 'non-model span' : 'unclaimed',
+        {
+          source: raw.source,
+          name: raw.name,
+          timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp,
+          rawPayload: rawPayloadOf(index),
+        },
+      )
+      quarantined += 1
+      continue
     }
 
     let record: CanonicalRecord
@@ -454,11 +675,11 @@ export function ingestBatchWithAdapters(
         location: raw.spanId,
         sessionId: canonicalSessionId(raw.attributes) ?? null,
         harness,
-        timestamp: spans[index]?.timestamp ?? raw.timestamp ?? null,
+        timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp ?? null,
       })
       continue
     }
-    growWithReceiverTiming(record, spans[index]!)
+    growWithReceiverTiming(record, gatedSpans[index]!)
     if (record.op === 'unspecified') {
       // A claude-code interaction span carries the turn's only prompt text
       // (R1): harvest it for the llm.invoke children before the packet is
@@ -472,12 +693,12 @@ export function ingestBatchWithAdapters(
       // and derived sessions while retaining an auditable quarantine row.
       store.quarantineAndDelete(
         raw.spanId,
-        observedNamespaces(raw.attributes),
+        observedNamespaces(rawSpans[index]!.attributes),
         'non-model span',
         {
           source: raw.source,
           name: raw.name,
-          timestamp: spans[index]?.timestamp ?? raw.timestamp,
+          timestamp: gatedSpans[index]?.timestamp ?? raw.timestamp,
           // Same evidence as the unclaimed path, plus the harness attribution
           // named so the row is scoped for a per-harness wipe (B7/B10).
           rawPayload: rawPayloadOf(index),

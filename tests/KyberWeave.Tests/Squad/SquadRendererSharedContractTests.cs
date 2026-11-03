@@ -21,7 +21,7 @@ namespace KyberWeave.Tests.Squad;
 /// shell-implies-write record depend on the harness, so a new renderer adds its row to
 /// <see cref="ResourceProjectionContracts"/> and, when it cannot isolate the shell from writes,
 /// <see cref="ShellWithoutWriteContracts"/>. The skill document, the skill loop and degradation
-/// record identity come from the shared render pipeline (ADR 0055), so they are checked here once
+/// record identity come from the shared render pipeline (ADR 0056), so they are checked here once
 /// against each renderer's own <see cref="SquadHarnessSpec"/>; a harness suite keeps only what its
 /// harness decides.
 /// </remarks>

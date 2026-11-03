@@ -20,6 +20,7 @@ decided-by:
   - adr/0045-conductor-operator-channel-opt-in
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -296,6 +297,13 @@ targets' forms.
 **Override:** when a project droid or skill shares a name with a personal one, the project
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
 override for `~/.factory`.
+
+**The plugin subtree.** `~/.factory/plugins/` is **not** Squad's, and the
+`kyberdash-factory` capture plugin is **not** installed there: the capture-plugin step publishes a
+marketplace tree under KyberDash's own state directory and asks Factory to install the plugin from
+it, so the plugin that runs is the harness's cached copy — see
+[Global Scope](#2-global-scope---global). Squad owns `~/.factory/droids/` and
+`~/.factory/skills/` and writes nothing into the plugin subtree.
 
 **Model and reasoning effort:** a `factory:` value in `models.yml` may end in
 `[reasoningEffort=<level>]` (for example `glm-5.3[reasoningEffort=high]`). The renderer writes the
@@ -585,19 +593,51 @@ prints no such warning. Every later run anchors on the same root.
 | `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
 | `devin` | Windows: `%APPDATA%\devin`; macOS and Linux: `$XDG_CONFIG_HOME/devin` → `~/.config/devin` | `agents/<name>/AGENT.md`, `skills/<name>/SKILL.md` |
 
-**OpenCode capture plugin (global scope).** When `squad install --global` or `squad update --global`
-resolves the `opencode` target and succeeds, Squad also installs or upgrades the KyberDash OpenCode
-capture plugin, `kyberdash-opencode.js`, under the OpenCode root in the table above. Squad runs
-`kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <that root>`. Preserve
-mode keeps an edited or foreign plugin file with a warning, and it never touches `opencode.jsonc`.
-The consent file `~/.kyberdash/opencode-plugin.json` is created with content off only when absent.
-Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If `kyberdash`
-is not installed, Squad prints a skip line that names `kyber-weave update`, and Squad's own result is
-unchanged. A failed plugin step prints a warning and does not change Squad's exit code.
+**Capture plugins (global scope).** When `squad install --global` or `squad update --global`
+resolves a capture-plugin harness and succeeds, Squad also installs or upgrades that harness's
+KyberDash capture plugin, in preserve mode. The step is harness-aware: one plugin call per
+capture-plugin harness, in a fixed order, each call handed what its own harness's verb accepts.
+
+- **OpenCode.** The plugin is the file `kyberdash-opencode.js` under the OpenCode root in the
+  table above. Squad runs
+  `kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <that root>`.
+  Preserve mode keeps an edited or foreign plugin file with a warning, and it never touches
+  `opencode.jsonc`. The consent file `~/.kyberdash/opencode-plugin.json` is created with content
+  off only when absent.
+- **Factory.** The plugin is published as a marketplace tree under KyberDash's own state
+  directory, and Factory installs the plugin from it, so the plugin that runs is the harness's
+  cached copy. Squad runs
+  `kyberdash kyber capture plugin install --harness factory --preserve`.
+  The owned unit is a whole tree, so the receipt records a digest per file and the removal
+  requires every digest to match. The consent file `~/.kyberdash/factory-plugin.json` is created
+  with content off only when absent.
+- **The updater.** `kyber-weave update` reconciles the Factory plugin with the same verb, in the
+  same preserve mode, and with `--if-installed` — `kyberdash kyber capture plugin install
+  --harness factory --preserve --if-installed` — and it hands the call **no root**, because the
+  plugin is installed where the harness already holds it. A plugin the harness does not hold is
+  not added.
+
+Preserve mode never turns content capture on. For OpenCode the Settings switch does that. For
+**Factory the Settings switch deliberately does not** — it installs the capture and leaves the
+content consent exactly as you left it, and only
+`kyberdash kyber capture plugin consent --harness factory --on` (or editing the consent file
+yourself) records the decision to capture the prompt text.
+
+Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If
+`kyberdash` is not installed, Squad prints a skip line that names `kyber-weave update`, and
+Squad's own result is unchanged. A failed plugin step prints a warning and does not change
+Squad's exit code.
 The step relays the KyberDash guidance line for the plugin. After an install or upgrade it reads:
 `OpenCode 2.x picks up the capture plugin for new sessions; if KyberDash shows no new OpenCode sessions,
-restart OpenCode.` Squad cannot restart OpenCode. The plugin targets OpenCode 2.x only. See
-[Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
+restart OpenCode.` Squad cannot restart OpenCode. The OpenCode plugin targets OpenCode 2.x only.
+See [Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
+
+**What Squad does not own under `~/.factory/`.** Squad owns `~/.factory/droids/` and
+`~/.factory/skills/`. It does **not** own `~/.factory/plugins/`: that subtree is the harness's own,
+and KyberDash's `kyberdash-factory` capture plugin is not installed there — it is published as a
+marketplace tree under KyberDash's own state directory and installed by the harness. Squad never
+writes into the plugin subtree, never adopts it and never
+removes it. `squad doctor` does not check it and `squad uninstall` does not remove it.
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.

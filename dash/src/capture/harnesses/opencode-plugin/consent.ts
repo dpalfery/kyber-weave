@@ -15,7 +15,10 @@ export const OPENCODE_CONSENT_FILE_NAME = 'opencode-plugin.json'
 /** Optional override: `0` forces content off, `1` forces it on; anything else defers to the file. */
 export const KYBERDASH_OPENCODE_CONTEXT_ENV = 'KYBERDASH_OPENCODE_CONTEXT'
 
-/** The consent file is a few dozen bytes; anything larger is not ours and reads as off. */
+/**
+ * The consent file is a few dozen bytes; the bound is in UTF-8 BYTES, so anything larger
+ * is not ours and reads as off.
+ */
 const MAX_CONSENT_BYTES = 4096
 
 /** `<home>/.kyberdash/opencode-plugin.json`; `home` is injectable for tests. */
@@ -33,7 +36,7 @@ export function readContentConsent(
 ): boolean {
   try {
     const text = read(path)
-    if (text.length > MAX_CONSENT_BYTES) return false
+    if (Buffer.byteLength(text, 'utf8') > MAX_CONSENT_BYTES) return false
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false
     const record = parsed as Record<string, unknown>

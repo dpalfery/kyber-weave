@@ -9,6 +9,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import {
   MAX_RECEIVER_ERROR_SAMPLES,
   OTLP_LOGS_PATH,
+  OTLP_METRICS_PATH,
   OTLP_TRACES_PATH,
   OtlpReceiver,
   healthBodyForPeer,
@@ -137,10 +138,25 @@ describe('receiver five-minute error window', () => {
     expect(receiver.getHealth().lastErrorAt).toBeNull()
   })
 
+  it('counts a malformed OTLP metrics request too: the metrics path is a signal path', async () => {
+    const { receiver, url } = await startReceiver()
+
+    const res = await fetch(`${url}${OTLP_METRICS_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"resourceMetrics": [',
+    })
+    expect(res.status).toBe(400)
+    expect(receiver.getHealth().failures5m).toBe(1)
+    expect(receiver.getHealth().lastCode).toBe('OTLP_MALFORMED_PAYLOAD')
+  })
+
   it('excludes unknown-path 404s: they are not OTLP signal-path evidence', async () => {
     const { receiver, url } = await startReceiver()
 
-    expect((await fetch(`${url}/v1/metrics`)).status).toBe(404)
+    // A path the receiver does not serve at all. `/v1/metrics` IS served now,
+    // so it cannot stand in for "an unknown path" any more.
+    expect((await fetch(`${url}/v1/not-a-signal`)).status).toBe(404)
     expect(receiver.getHealth().failures5m).toBe(0)
   })
 

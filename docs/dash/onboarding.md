@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-11-02
 status: current
 ---
 
@@ -71,6 +71,53 @@ OpenCode. Usage, cost and timings flow once the plugin is installed and the Kybe
 Settings drawer. The [runbook](runbook.md#1b-opencode-capture-enable-and-verify) describes the consent
 file and the live gate.
 
+### Factory capture plugin
+
+KyberDash captures Factory (Droid) through a Kyber-owned **hooks plugin**, published as a
+marketplace tree that Factory installs from, so the plugin that runs is the harness's cached copy
+of it. It declares no Factory config key: your `~/.factory/settings.json` and
+`~/.factory/hooks.json` are never written by KyberDash — Factory's own commands add the
+marketplace and enabled-plugin entries to the settings file during an install KyberDash requests —
+and the plugin is removed again by `kyberdash kyber capture disable --harness factory`.
+
+**What it collects.** The plugin turns Factory's hook events into session, turn and tool spans:
+the turn boundary, the tool names and their sizes, the timing and the model. Factory's own hook
+payload carries no token counter, so the plugin reports none — the counters come from the Factory
+session file's companion settings, joined to the plugin's rows on the session id.
+
+**What consent governs.** The prompt text is content, and it is **off by default**. The consent
+file is `~/.kyberdash/factory-plugin.json`; it holds `content: false` until you say otherwise.
+
+**The Settings switch that installs the capture never turns the prompt recording on.** This
+differs from OpenCode, whose switch also sets consent, and it is deliberate: for Factory the
+switch means "install the capture", not "start recording my prompts". To record the prompt
+text, run the consent verb or edit the file yourself:
+
+```bash
+kyberdash kyber capture plugin consent --harness factory --on
+```
+
+Everything else — the turn structure, the tools, the timings, the model — flows whether or not
+consent is on.
+
+**How to turn it on.** Squad installs the plugin for you when you deploy globally with the
+Factory target:
+
+```bash
+kyber-weave squad install --global   # with the factory target resolved
+```
+
+`install.sh` does not install the Factory capture plugin. You can also install it directly:
+
+```bash
+kyberdash kyber capture enable --harness factory
+kyberdash kyber capture status --harness factory
+```
+
+If new Factory sessions do not appear, restart Factory — KyberDash cannot restart it for you.
+The [runbook](runbook.md#1c-factory-droid-capture-enable-and-verify) describes the consent verb,
+the live check and the uninstall procedure.
+
 ### Install the tray
 
 The tray ships as its own release asset from `0.1.7-rc.13`. On macOS and Windows:
@@ -95,7 +142,8 @@ One command updates KyberDash. Run `kyber-weave update`, and no other command is
   and this also runs when the release is unchanged. Nothing starts if no engine is running.
 - It relaunches the tray when a tray is installed. The tray is quit, replaced, and relaunched, and
   the previous app is restored if a step fails.
-- It upgrades the OpenCode capture plugin, but only if that plugin is already installed.
+- It upgrades the OpenCode and Factory capture plugins, but only if those plugins are already
+  installed.
 
 When the plugin file changed, the output says to restart OpenCode if new sessions do not appear. KyberDash
 cannot restart your OpenCode process. The engine then re-projects the store on its own start, so you do not run

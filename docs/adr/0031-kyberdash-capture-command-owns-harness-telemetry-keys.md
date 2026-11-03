@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-02
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -117,6 +117,85 @@ builds wrote into `opencode.jsonc`, from the key receipt, and drop that receipt 
 left in place with a warning. The OpenCode harness declares no key, so `status` renders no OTLP environment
 snippet for it. The key-level rules of decisions 1 to 3 still govern every other harness and this one-time restore.
 
+Amended 2026-11-02 (Factory (Droid) capture plugin, [ADR 0055](0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
+Factory joins the plugin-only writers. Its capture writer owns a whole plugin **tree** — the
+Kyber-owned marketplace tree it publishes — with its receipt at
+`~/.kyberdash/factory-plugin-receipt.json` and its consent file at
+`~/.kyberdash/factory-plugin.json`. It declares **no config key**, so nothing is read, written or
+receipted in a config file. Two things differ from the OpenCode writer and are deliberate: the Factory
+install is a **tree**, so its receipt records a path and a SHA-256 per file and removal requires
+every digest to match; and the Factory **Settings switch never turns the content consent on** —
+the switch installs the capture, and only the explicit consent verb
+(`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner editing the
+consent file records the decision to capture the prompt text. Nothing else in this record moves:
+the key-level rules of decisions 1 to 3 still govern every other harness, and the departure from
+ADR 0026 stays scoped to KyberDash's own plugin tree.
+
+Amended 2026-11-02 (the Factory install route, measured against Factory Droid CLI 1.1.0): the
+Factory install is **delegated to the harness's own commands**, and the owned unit is the
+Kyber-owned **marketplace tree** KyberDash publishes and then asks the harness to install from.
+The route this record first recorded for Factory — KyberDash writing a plugin directory into the
+Factory root, `~/.factory/plugins/kyberdash-factory/`, and stopping there — **never worked**,
+and that was measured rather than assumed: after that install `droid plugin list` reported
+"No plugins installed", and a real Droid turn produced no plugin spans at all. Factory loads a
+plugin that came from a **marketplace** — it copies the plugin into its own cache and enables it
+through the `enabledPlugins` setting — so the plugin that runs is the harness's **cached copy** of
+the Kyber-owned tree, and the install is `droid plugin marketplace add <the Kyber-owned
+marketplace tree>` followed by `droid plugin install kyberdash-factory@kyberdash --scope user`.
+The teardown is `droid plugin uninstall kyberdash-factory@kyberdash --scope user` followed by
+`droid plugin marketplace remove kyberdash`, and KyberDash removes its own tree afterwards,
+because a local marketplace's source directory survives the harness's removal.
+
+**KyberDash still never writes the owner's settings or hooks file.** The letter of the promise
+survives, and it is the stronger position: `enable`, `disable`, Squad and `kyber-weave update`
+never create, read, merge, rewrite or restore `~/.factory/settings.json`,
+`~/.factory/hooks.json` or their project equivalents. What changes is *who* changes the owner's
+settings file during an install KyberDash requested — the harness does, through its own
+commands, which write the `extraKnownMarketplaces` and `enabledPlugins` entries into it. That is
+a **delegated write**, and this record's own mechanism is what makes it safe: the Factory writer
+owns a whole separate file — the marketplace tree — and never a shared settings file, so
+KyberDash holds no merge of the owner's settings, no partial edit and no schema knowledge of
+it. The harness's edit is a whole-file edit, made by the harness, in the harness's own format.
+
+**The restore criterion is semantic, not byte-identity.** Because the harness's own commands
+change the owner's settings file during an install KyberDash requested, byte-identity on that
+file does not hold and is withdrawn. What holds is: no entry the install added remains; no entry
+the owner had is lost; and every other key is unchanged in content. The second half needs care,
+because it is **measured** that `droid plugin uninstall` deletes the `enabledPlugins` entry
+outright — it does not set it to `false` — and leaves the marketplace registration in place. An
+owner who had that plugin listed as disabled before the install therefore has that key removed
+by the harness's uninstall rather than restored to `false`, and the uninstaller must handle that
+case itself rather than assume the harness's commands satisfy the criterion on their own. Any
+residue the harness's uninstall leaves behind is **reported with the exact command that removes
+it**, and is never patched by hand.
+
+Three further facts about the harness are measured on Factory Droid CLI 1.1.0, and this record is
+true about them: the install **auto-enables** the plugin — the `enabledPlugins` entry appears
+with value `true` without being asked for; the registered marketplace name is the **source
+directory's basename**, not the `name` field inside the marketplace manifest, so the tree's
+directory name is load-bearing and the local-source object written into
+`extraKnownMarketplaces` is exactly the documented shape; and `droid plugin marketplace remove`
+deletes the marketplace registration and leaves `enabledPlugins` alone.
+
+**A name the harness holds that KyberDash does not own is refused, and the harness's own output
+decides it.** The harness resolves a plugin identity through the **registered marketplace name**,
+not through the tree KyberDash published: measured, a marketplace named `kyberdash` registered
+from a *different* directory makes `droid plugin install kyberdash-factory@kyberdash --scope
+user` **succeed** and install **the other tree's payload**. Nothing in the harness's answers says
+which payload is running. So the harness's registry is read as the harness reports it — the
+marketplace list with its registered **SOURCE**, the plugin list with its **STATUS** — and a
+marketplace or plugin identity KyberDash does not own is a **conflict**: strict mode refuses with
+nothing written, preserve mode keeps it with a warning, and the report names the colliding
+entry, the registry it lives in and the exact `droid plugin …` command that removes it. The
+teardown never removes an entry that is not KyberDash's.
+
+**The harness's list output is a wrapped table, and it is read as one.** The harness sizes its
+columns to the content and **truncates** a cell that does not fit, printing the overflow at the
+same offset on the lines below, so a registered path longer than its column arrives in pieces.
+The reader joins a row's pieces back into the column they start in; a reader that took one line
+per row would compare a **truncated** source against the tree KyberDash published and report a
+conflict that does not exist — on every install, on every machine whose path is long enough.
+
 ## Context
 
 KyberDash can only analyse the context it receives. Most of that context reaches it through each
@@ -222,6 +301,11 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
 - Two components now take opposite positions on harness settings. The boundary between them is
   this record's scope clause. A future component that wants to write harness settings needs its
   own record.
+- The owner's Factory settings file changes during an install KyberDash requested, and not by
+  KyberDash's hand. The harness's own commands write the `extraKnownMarketplaces` and
+  `enabledPlugins` entries and remove the `enabledPlugins` entry on uninstall, so KyberDash's
+  restore criterion is semantic rather than byte-identity, and any residue the harness leaves
+  behind is reported with the command that removes it.
 - Content is captured in full — system prompt, user prompts, tool schemas, tool arguments and
   output, skills and all turn data — with identity fields (`user.email`, account, organization
   and uuid ids) dropped at the receiver.
@@ -235,4 +319,6 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
   — the tray's ownership of the receiver
 - [ADR 0029: Per-Bucket, OTel-First Content Precedence](0029-kyberdash-per-bucket-otel-first-content-precedence.md)
   — how captured content is reconciled with file content
+- [ADR 0055: Factory (Droid) Capture Is a Hooks-Plugin Pipeline](0055-factory-capture-is-a-hooks-plugin-pipeline.md)
+  — the Factory writer this record's plugin-tree rules now cover
 - [KyberDash architecture](../dash/architecture.md)

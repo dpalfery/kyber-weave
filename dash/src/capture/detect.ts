@@ -141,6 +141,27 @@ function groupsFor(writer: CaptureHarnessWriter, home: string, env: PathEnv): Pr
           ],
         },
       ]
+    case 'factory':
+      // The harness's OWN directory is the evidence: Factory populates `~/.factory` itself,
+      // and it does so even for a Droid that never wrote a settings file. The harness's own
+      // plugin registry is the second trace — the directory the harness writes when a
+      // plugin is installed. `$FACTORY_DIR` redirects the sessions tree, never the harness's
+      // own directory, so it moves neither probe.
+      //
+      // KyberDash's marketplace tree is NOT evidence: it is KyberDash's own artifact under
+      // KyberDash's own state directory, and it says nothing about whether the harness is
+      // installed. The plugin's own state is reported separately, by the writer.
+      return [
+        {
+          probes: [
+            { label: 'Factory directory', path: pjoin(platform, home, '.factory') },
+            {
+              label: 'Factory plugin registry',
+              path: pjoin(platform, home, '.factory', 'plugins', 'installed_plugins'),
+            },
+          ],
+        },
+      ]
     default:
       // Status-only and injected writers: their one config file is the evidence.
       return [{ probes: [{ label: 'config', path: writer.resolvePath(home, env) }] }]

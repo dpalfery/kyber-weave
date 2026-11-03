@@ -365,7 +365,7 @@ internal sealed class SelfUpdater : IDisposable
 
     /// <summary>
     /// Brings the running KyberDash processes in line with the installed kyberdash: the engine (D12, C2, C3), the
-    /// tray (D12), then the OpenCode capture plugin (D13). Runs after the binaries commit on both the release-changed
+    /// tray (D12), then the capture plugins (D13). Runs after the binaries commit on both the release-changed
     /// path and the "already on" path, so one command clears a stale engine.
     /// </summary>
     /// <remarks>
@@ -394,6 +394,7 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         UpdateCapturePlugin(windows);
+        UpdateFactoryCapturePlugin(windows);
     }
 
     /// <summary>Asks the installed kyberdash to replace a running engine of another version. Starts nothing when none runs.</summary>
@@ -444,16 +445,38 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>
-    /// Installs or upgrades the OpenCode capture plugin, but only when it is already installed (D13), so an update
-    /// never adds a surface the owner did not choose. Relays the verb's OpenCode guidance lines, which KyberDash words.
+    ///     Installs or upgrades the OpenCode capture plugin, but only when it is already installed (D13), so an update
+    ///     never adds a surface the owner did not choose. Relays the verb's OpenCode guidance lines, which KyberDash words.
     /// </summary>
     private void UpdateCapturePlugin(bool windows)
+    {
+        UpdateCapturePlugin("opencode", "OpenCode", windows);
+    }
+
+    /// <summary>
+    ///     Installs or upgrades the Factory capture plugin beside the OpenCode one: the same verb, the same "only if
+    ///     already installed" flag, and no root, because the plugin is installed where the harness already has it.
+    /// </summary>
+    /// <remarks>
+    ///     The Factory plugin is optional, so a refused install is a warning and the update keeps its exit code: the
+    ///     owner can rerun the printed command.
+    /// </remarks>
+    private void UpdateFactoryCapturePlugin(bool windows)
+    {
+        UpdateCapturePlugin("factory", "Factory", windows);
+    }
+
+    /// <summary>
+    ///     Runs the capture-plugin verb for one harness. The verb names the harness it installs the plugin for, and
+    ///     KyberDash words every line it prints, so the verdict and the guidance are relayed unchanged.
+    /// </summary>
+    private void UpdateCapturePlugin(string harness, string name, bool windows)
     {
         string kyberdash = InstalledKyberDash(windows);
         if (!File.Exists(kyberdash))
         {
             _log(
-                $"kyberdash is not installed in {_host.InstallDirectory}; leaving the OpenCode capture plugin unchanged");
+                $"kyberdash is not installed in {_host.InstallDirectory}; leaving the {name} capture plugin unchanged");
             return;
         }
 
@@ -462,29 +485,30 @@ internal sealed class SelfUpdater : IDisposable
         {
             result = _captureProcess(
                 kyberdash,
-                ["kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"]);
+                ["kyber", "capture", "plugin", "install", "--harness", harness, "--preserve", "--if-installed"]);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
                                        or UnauthorizedAccessException or TimeoutException)
         {
-            _log($"warning: the OpenCode capture plugin step could not run KyberDash: {ex.Message}");
+            _log($"warning: the {name} capture plugin step could not run KyberDash: {ex.Message}");
             return;
         }
 
         if (result.ExitCode != 0)
         {
             if (MentionsUnknownCommand(result))
-                _log("this KyberDash predates the capture plugin command; the OpenCode capture plugin was not updated");
+                _log($"this KyberDash predates the capture plugin command; the {name} capture plugin was not updated");
             else
                 _log(
-                    $"warning: the OpenCode capture plugin step failed (exit {result.ExitCode}){Reason(result)}. " +
+                    $"warning: the {name} capture plugin step failed (exit {result.ExitCode}){Reason(result)}. " +
                     "The update is otherwise complete. Retry with " +
-                    "`kyberdash kyber capture plugin install --harness opencode --preserve --if-installed`.");
+                    $"`kyberdash kyber capture plugin install --harness {harness} --preserve --if-installed`.");
             return;
         }
 
-        _log(FirstLine(result.StandardOutput, "the OpenCode capture plugin is checked"));
-        foreach (string guidance in KyberDashGuidance.HarnessOpenCodeLines(result.StandardOutput))
+        string verdict = FirstLine(result.StandardOutput, string.Empty);
+        _log(verdict.Length == 0 ? $"the {name} capture plugin is checked" : verdict);
+        foreach (string guidance in KyberDashGuidance.CapturePluginGuidanceLines(harness, result.StandardOutput, verdict))
             _log(guidance);
     }
 

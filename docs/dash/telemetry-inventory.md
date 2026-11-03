@@ -4,9 +4,10 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-03
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -61,6 +62,8 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode (V2 plugin only, `kyberdash-opencode`) | Usage, reported cost, duration, request and turn structure, model, agent, tool-call names, status and sizes, and invoked skill ids flow with or without consent. The plugin posts contract-3 request, step and tool spans to the loopback receiver, and the OpenCode adapter claims only contract 3. Each step carries OpenCode's own usage integers and cost, carried verbatim. The system prompt, tool definitions, skills listing, prompt text and session title are content, and they flow only under consent. Detail: [OpenCode V2 capture plugin pipeline](architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode). | Tool inputs and results are not captured. OpenCode 1.x is not supported. Native OpenCode OpenTelemetry is not ingested (it carried no usage at 2.2.x), and the V1 table import is removed ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The OpenCode live gate (runbook §1b) is the proof of live capture; a run passed on 2026-10-31 (OpenCode 2.2.3), with the session title waived as a known limitation. |
 | OpenCode plugin (`kyberdash-opencode`) | Loads through the OpenCode 2.x `{ id, setup }` export. It subscribes to the bus (`ctx.event.subscribe()`) and registers the `prompt`, `context`, `model.request` and tool hooks. A request starts at `session.execution.started` and closes at `succeeded`, `failed` or `interrupted`. Steps and tools use OpenCode's own `created` timestamps. The outbox holds at most 500 events, sends 50 per POST, backs off 250 ms to 5 s with jitter, and times out each POST at 10 s. Delivery never blocks OpenCode. Duplicates are prevented by ownership, deterministic span ids and cleanup of superseded generations. An execution with no terminal event is emitted once as `unknown` after 30 minutes without events, or at cleanup. | Content flows only when `~/.kyberdash/opencode-plugin.json` holds `content: true`. The Settings switch and `capture enable` set it, and the `KYBERDASH_OPENCODE_CONTEXT` override takes precedence. Install never turns content on. The endpoint is the loopback receiver, and `OTEL_EXPORTER_OTLP_ENDPOINT` is not read. Versions below 2.2.1 are unverified. |
+| Factory (Droid) plugin (`kyberdash-factory`) | Session, turn and tool spans from Factory's hook events, posted to the loopback receiver as contract-1 OTLP/JSON spans; the `droid` adapter claims only the `factory.*` envelope. Model, tool name, tool status and byte sizes flow with or without consent; the prompt text is content and flows only under consent. Detail: [Factory (Droid) capture](#factory-droid-capture-the-plugin-path-and-the-file-path). | The hook payload carries no counter, so every token class reads `not_measurable` with a reason naming the file-source pairing — never zero. The content consent is off by default, and the Settings switch that installs the capture never turns it on. Where the file source observed the same session, the two are split rather than summed: the plugin rows are the session's turns and the file rows are its counters and its cost. |
+| Factory (Droid) file source | The Factory transcripts under `~/.factory/sessions`, with the counters read from the companion `<session-id>.settings.json` (`tokenUsage`: input, output, cache creation, cache read, thinking) and the session's `model`. The session total is split evenly across the session's assistant calls. Cost is priced from the bundled rate table. | The even split is a known lossy approximation: Factory records usage at session level, not per message. The companion file's `lastCallTokenUsage` carries the per-call data that would remove it. A child session's counters come from the child's **own** companion file; the parent's `childInclusiveTokenUsageBySessionId` map is the parent's aggregate view of its children and is never a token source. |
 | Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 4). `kiloReader` (`dash/src/synth/readers/kilo.ts`) is the content half of the same store: one turn per token-bearing assistant message, `nativeRecordId` equal to the Kilo `message.id`, paired to the parser's calls by `pairingId` rather than by position. Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported, and the content buckets in [Kilo Code OTLP surface](#kilo-code-capture-plugin-and-why-not-otlp) come from `message` and `part` rows. Its OTel surface is now documented and is **not ingested**: Kilo emits no model spans, usage or content. The Settings drawer row installs and removes the capture plugin (Enable and Disable), and usage collection is gated on folder import, which is scheduled off by default. |
 | Devin | File-source ingest reads CLI transcripts under `~/.local/share/devin/cli/transcripts/` and session metadata from `sessions.db`. Discovery and parse do not require `devin.acuUsdRate`; a missing or non-finite rate still yields token/tool calls with `costIsEstimated: true` (`costUSD: 0` is never a measured zero). Doctor names the missing rate when sessions exist. | Set `devin.acuUsdRate` in `~/.kyberdash/config.json` to price ACU usage; until then cost is unpriced, not absent. |
 | Warp | SQLite history under the Group Containers path opens through the read-only cache (`copyFileBestEffort`). Readable source bytes produce records even when copyfile(2) returns EPERM/EACCES; a true source EACCES/EPERM is surfaced to doctor as `permission-denied` (Full Disk Access on darwin) instead of empty sessions. Cache-dir write failures are not classified as source TCC denials. | Owner grants Full Disk Access (macOS) when the source path is TCC-denied; no fabricated rows. |
@@ -82,6 +85,8 @@ where a missing stage sits, and whether a record becomes a dashboard-visible ses
 | `claude-code` | yes — counters and content (opt-in env) | none (reference) | yes | yes | yes, measured |
 | opencode — native (`service.name=opencode`) | no. Native spans carry no contract-3 marker and no adapter claims them; they quarantine as unclaimed. (In the 2026-10-30 measurement, 0 of 55,261 native spans carried usage at 2.2.x.) | none by design ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)) | no | no | no |
 | opencode — plugin (`kyberdash-opencode`) | Contract-3 request, step and tool spans with OpenCode's usage and cost; system prompt, tools and skills under consent | none; the OpenCode live gate passed on 2026-10-31 (OpenCode 2.2.3, [runbook §1b](runbook.md#1b-opencode-capture-enable-and-verify)) | yes | yes | yes, measured for usage and cost; content `not_measurable` with a reason while consent is off |
+| droid — plugin (`kyberdash-factory`) | Contract-1 session, turn and tool spans with the model, the tool name and the byte sizes; the prompt text under consent | none by design: the hook payload carries no counter, so the token classes read `not_measurable` with a reason naming the file-source pairing | yes | yes | yes, measured for the turn and tool structure; the token classes `not_measurable` with a reason |
+| droid — native (`gen_ai.agent.name=droid`) | no. No adapter claims a native span: the `droid` adapter recognises only the plugin envelope, and the native `genai` fingerprint sits on the trace root alone, so a real turn's group scores 0.5 against the registry's 0.6 threshold. A native span quarantines as `unclaimed`, its decoded packet kept as the audit evidence. (Measured against real captured spans: accepted 0, quarantined 2.) | none by design for spans ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)); the native **metrics** path stays a capture / owner gate | no | no | no |
 | pi | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | copilot (chat) | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | antigravity | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
@@ -102,10 +107,13 @@ make a stopped exporter distinguishable from one never configured remains the
 ## In-app collection enablement
 
 The Settings drawer in the web dashboard (and `kyberdash kyber capture`) can switch OTLP
-collection on or off for two of the seven registered harnesses by editing their config keys:
-Copilot and Claude Code. OpenCode and Kilo Code install or remove their capture plugin file
+collection on or off for two of the eight registered harnesses by editing their config keys:
+Copilot and Claude Code. OpenCode, Kilo Code and Factory install or remove their capture plugin
 instead of editing a key, and that never turns the OTLP receiver on. OpenCode's switch also sets
-content consent. OpenCode writes no config key. Codex, pi and Antigravity
+content consent; **Factory's switch does not** — the Factory switch installs the capture and
+leaves the content consent exactly as the owner left it, and only the explicit consent verb or the
+owner editing `~/.kyberdash/factory-plugin.json` turns prompt recording on. OpenCode and Factory
+write no config key. Codex, pi and Antigravity
 are reported read-only. Enabling a key writer edits the harness's own config and, on a real
 enable, turns the OTLP receiver on; it is not evidence of collection. The inventory rows above
 stay gated on an owner capture: a green enable proves keys were written, not that the harness
@@ -180,6 +188,225 @@ carries no reader-compatible parts, so every content bucket stays `not_measurabl
 `READER_UNMEASURABLE` row lists all canonical content keys, and per-record measurability keys on
 the harness id for that one id (see
 [architecture](architecture.md#kilo-code-content-reader-and-id-based-pairing)).
+
+## Factory (Droid) capture: the plugin path and the file path
+
+**[VERIFIED]** Factory is **one** harness under one canonical id, `droid`, reached through two
+capture sources ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
+
+- the **plugin** source: the Kyber-owned `kyberdash-factory` plugin, whose hook events arrive over
+  OTLP as contract-1 spans in the `factory.*` namespace;
+- the **file** source: the Factory transcripts under the Factory root, whose counters come from the
+  per-session companion file `<session-id>.settings.json` beside the transcript.
+
+The two are never merged into one turn and never counted twice: they are split by what each can
+measure. The plugin rows are the session's **turns** and the file rows are its **counters** and
+its **cost**; the rule that assigns each figure to its source, and the figures it assigns, are
+in [the Factory source-precedence rule](architecture.md#the-factory-source-precedence-rule).
+
+### What the plugin measures
+
+| Dimension | From the plugin | Notes |
+|---|---|---|
+| Session boundary | `factory.session` spans at `SessionStart` and `SessionEnd`, carrying `factory.session.id` and `factory.cwd` | The cwd is a path only. |
+| Turn boundary and timing | `factory.turn` spans — one at `UserPromptSubmit`, one at `Stop` — carrying `factory.session.id` and `factory.message.id` | The prompt and the completion of one turn are two spans sharing one trace id, so the completion cannot replace the prompt's row. |
+| Model | `factory.model.id`, present only when the hook payload names a model | Absent stays absent: the model is never guessed or defaulted. |
+| Tool invocations | `factory.tool` spans at `PreToolUse` and `PostToolUse`, carrying `factory.tool.name`, `factory.tool.call_id`, `factory.tool.status` and `factory.tool.error_type` | The two hooks of one call share a span id. The tool's arguments and result **text** are not captured; only their sizes (`factory.tool.input_bytes`, `factory.tool.result_bytes`) travel. |
+| Child sessions | **None.** The `SubagentStop` event produces no span: Factory's documented payload for that event carries `task_name`, `task_result`, `task_error` and `stop_hook_active`, and no child session id — the common `session_id` is the **parent's** session, so a span there would name the parent as the child. The event is **not registered** either, so no process is spent on it | The plugin path contributes no parent-child linkage of its own. A child session is discovered by the file source as its own session, and its counters are paired from its own companion file. |
+| Prompt text | `factory.turn.prompt.text`, capped at 64 KiB and marked when it is cut | **Content**: it travels only under consent — and the store's gate strips it from a **claimed** envelope while the consent is off, so a span the plugin parked under consent-on and re-delivered after consent-off is not stored with the text. |
+| Token counters | **None.** The hook payload carries no counter, and Factory exports no token or cost data as customer OTEL metrics | Every counter class is declared `not_measurable` with a reason — never zero. |
+| Cost | **None.** No figure is fabricated and no rate table is applied to a plugin row | A plugin row's cost is absent, not zero. |
+
+### What the file source measures
+
+The Factory file provider (`dash/src/providers/droid.ts`) reads the transcript for the session
+id, the user message, the assistant turns and the tool names, and reads the companion
+`<session-id>.settings.json` for the counters and the session's model:
+
+| Dimension | From the file source | Notes |
+|---|---|---|
+| Token counters | `tokenUsage` — `inputTokens`, `outputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `thinkingTokens` — from the companion settings file | The companion file is the counter source; `~/.factory/settings.json` is not. |
+| Counter attribution | The session total is split **evenly across the session's assistant calls** | A known lossy approximation: Factory records usage at session level, not per message. The companion file's `lastCallTokenUsage` carries the per-call data that would remove it. |
+| Model | The companion file's `model` key | The session's model, not the per-turn model. |
+| Cost | Computed from the bundled rate table against that model | Factory reports no cost figure, so this is KyberDash's own arithmetic and not a Factory-reported number. |
+| Tools | The tool names the assistant turns used, plus the shell commands they ran | |
+| Content | **No content parts.** The file source has no content reader, so no transcript text becomes a content part. It does carry the session's first user message as the call's `userMessage`, which the outcome analysis reads and the raw record keeps | The plugin path is where Factory content comes from, and only under consent. |
+
+### The model a Factory session publishes
+
+A Factory session's model comes from the source that **measured** it, and the two sources do not
+measure it the same way.
+
+- **The plugin's turn** names a model only when the hook payload carries one, as
+  `factory.model.id`. Factory's own hook payload documents no model field, so a plugin-sourced
+  turn **generally names none** — and an absent model stays absent all the way down: the
+  adapter never defaults one.
+- **The file source** reads the session's model from the per-session companion settings file
+  beside the transcript (`<session-id>.settings.json`'s `model` key) and publishes it under its
+  **wrapper-stripped** name: the `custom:` prefix, any bracketed proxy suffix and the trailing
+  date suffix are removed (`custom:GLM-5.1-[Proxy]-0` → `GLM-5.1`). A companion file that names
+  no model leaves the file source with its own long-standing placeholder, `unknown`; that
+  placeholder is the file source's, not a measured model, and the plugin path never produces
+  one.
+
+The session then publishes **one** model: the model of its **turn records** when a turn record
+names one, and where no turn record names a model, the **counter record's** model. A turn's own
+model always wins, so a paired session publishes one model and never two, and a session whose
+sources named no model at all publishes none — never a default, never a guess. The same split
+that decides the counters decides the model.
+
+`~/.factory/settings.json` is never a model source. It has no top-level `model` key: the model
+lives in nested per-role blocks (`sessionDefaultSettings.model`, `missionModelSettings.workerModel`,
+`subagentModelSettings.{light,medium,heavy}Model`, `compactionModel`), and reading one would
+attribute a subagent's model to its parent.
+
+### The honest token position
+
+A **plugin-sourced row cannot measure a token counter**. It says so: the counter classes
+(`token_usage`, `output`, `cache_read`, `cache_creation`) are declared `not_measurable`, and the
+reason names the file source and the session-id pairing as where the number comes from — the
+Factory session file's companion settings supply it when that session's id matches a file-sourced
+session. The reason states the rule, never the outcome: it never claims the counter was
+measured.
+
+The plugin path's reason names **three** things: the harness, the metric that is missing, and
+the file source and the session-id pairing where the number would come from. It is **static** —
+the adapter cannot know whether a file row will pair — so it names the **rule**, not the
+outcome. The **native** path's reasons are different, and stay different: a native Factory span
+has no companion settings file of its own to pair with, so its reasons name the harness and the
+metric alone. Naming the file source there would point at a pairing that can never happen.
+
+The pairing is **exact session-id equality** — no fuzzy join, no time window, no
+counter-equality join. A plugin row whose session id matches a file-sourced session is the same
+Factory session, and the two sit in one `droid` harness bucket; one that differs is a different
+session and keeps its own honest declaration.
+
+**Tokens are never fabricated and never reported as zero.** A missing counter stays missing; a
+session that no source measured reads `not_measurable` with a reason, not `0`. The plugin never
+reads the transcript and never writes a zero. The **file source is the only source of Factory's
+counters**: the plugin contributes no counter, so the numbers come from the companion settings
+file and from nowhere else.
+
+### A child session's tokens
+
+A Factory child (subagent) session is a **first-class session on disk**: it has its own
+transcript and its own companion settings file, so the file source discovers it as its own
+session. Its counters come from **its own** companion file, `<child-id>.settings.json`, paired by
+the same exact session-id equality as any other Factory session — the child's plugin rows and the
+child's file row pair exactly as a parent's do.
+
+The **parent's** companion file carries a `childInclusiveTokenUsageBySessionId` map, and that map
+is the parent's **aggregate view of its children** — the parent's own total together with each
+child's. It is **never a token source**:
+
+- a child's usage is never folded into the parent's session totals, and
+- a child is never given the parent's counters, nor another child's.
+
+A child that measured nothing — no companion file of its own, or one carrying no `tokenUsage` —
+reads `not_measurable` with a stated reason. It never borrows.
+
+### The native export
+
+Factory's own OpenTelemetry export is an **authorized complementary** path, never the primary
+one, and **KyberDash claims no native span**: the `droid` adapter recognises only the plugin
+envelope, so a native span leaves the corpus for quarantine as `unclaimed`, its decoded packet
+kept as the audit evidence. What remains of the native path is its **metrics**, and those are
+tokenless by Factory's own documentation. The export also carries no subagent lineage. See
+[the architecture](architecture.md#factorys-native-opentelemetry-path-authorized-complementary)
+for the vocabulary, the `POST /v1/metrics` route and the withdrawal of the native span claim.
+
+**The export's effective shape is reported, and it is not the endpoint.** The endpoint says where
+the export sends; the shape says what it sends, and the two are configured by different rules.
+The **format** (`legacy` | `genai`) follows precedence — the organisation's `telemetry.format`
+wins, and where it is set the machine's `OTEL_TELEMETRY_FORMAT` is not read at all, and anything
+unrecognised resolves to `legacy`. The **granularity** (`user` | `aggregate`) follows
+most-restrictive-wins rather than precedence, so `aggregate` beats `user` whichever level each
+came from; a value that exists and cannot be read resolves to `aggregate`, the restrictive one,
+while a granularity nothing pinned stays `user`, the documented default. The **message-content
+switch** follows precedence for the organisation's `telemetry.logMessageContent`, and the
+granularity overrides every content opt-in — `aggregate` carries no per-individual content. The
+organisation's **`enabled` master switch** decides whether the export runs at all: `true` keeps it
+on even where `OTEL_CUSTOMER_ENABLED=false`, `false` keeps it off even where
+`OTEL_CUSTOMER_ENABLED=true`, and omitting it falls back to that machine variable. The status row
+names each value and **which level pinned it**, so a reader sees an export that is switched off
+rather than one that is merely pointed somewhere else.
+
+**What the consent governs, and what it does not.** KyberDash's consent file governs **the
+capture plugin's prompt text on the wire and at the store, and the content of Factory's native
+OpenTelemetry route**. It does **not** govern the Factory **file source**, which stores the owner's
+first message fragment (up to 500 characters) whatever the consent file says — that route is
+outside the consent's reach. The two routes it does govern are governed differently: the plugin's
+own hook runner reads the consent on every event and publishes the prompt text only when the
+consent is on, while on the native route the **harness's own message-content switch** decides
+whether the export carries content at all and KyberDash's consent decides whether that content may
+be stored. The native gate runs at the ingest seam, before the normalization and before the
+quarantine write, so the text reaches neither a record nor a quarantine packet; it has a
+**fail-closed arm** — a span that belongs to **no** harness has an unknown origin, so its
+content is stripped too, which covers a Factory child that arrives before its root across a
+batch boundary — and a **claimed** span of another harness keeps its content, so another harness's
+own content is untouched. **The plugin envelope is the one claimed span the gate does reach.**
+The plugin gates its own prompt at emission, but the emission gate is not the last gate: a span
+the plugin **parked** because the delivery failed is re-delivered from its spool without the
+consent being read again, so the store's gate names the envelope's own `factory.turn.prompt.text`
+among the attributes it strips and applies the verdict to a **claimed** Factory envelope. The
+envelope's identity attributes — the span id, the session id, the model, the tool name — are
+measurements, not content, and survive the gate; the plugin's tool attributes stay off the
+content list, because the plugin publishes tool arguments and results as byte counts, never as
+content.
+
+**An organisation's hard controls can refuse the route or make it inert.** `strictKnownMarketplaces`
+makes the higher-level list the ceiling for marketplace sources, `strictEnabledPlugins` makes the
+`enabledPlugins` map the exhaustive plugin allowlist — so a user-scope install is rejected — and
+`allowManagedHooksOnly` drops user- and project-level hooks, so the plugin can install, register
+as enabled and **never fire a hook**. KyberDash works around **none** of them: the only way to
+add a marketplace or an enablement without the harness's commands is to write the owner's
+settings file, which KyberDash never does. The first two are **visible** — the harness's command
+fails, and the refusal is reported with the harness's own stderr quoted. The third is **silent**,
+so the surfaces must not read "installed" as "capturing".
+
+**Native metric points are stored, not projected.** A decoded metric point becomes **one row per
+distinct decoded point** in the canon store's own `metric_point` table — a point's identity is a
+content digest **of everything the row carries, including the interval the point's measurement
+covers**, so a re-delivered point lands on the row it already occupies instead of beside it, and
+the same measurement over a different window is a different point rather than a second delivery of
+the first — and nothing projects it: the canon projection and the dashboard have no metric
+concept. A metric point is a stored fact, not a figure the dashboard shows, and no reader is told
+a metric was measured and shown as one.
+
+The row carries what the point measured: the metric's name, kind and unit, its aggregation
+temporality, the point's timestamp, **the start of the interval the point's measurement covers**,
+and its value or its count and sum, the point's attributes, the resource attributes, the scope,
+and the exporter's `service.name` as the row's **source**. A point that carried no value of its
+own keeps the value absent, never zero, and a point that declared no interval carries none —
+absent, never a fabricated zero.
+
+**The row stores the exporter's own content, verbatim.** `attributes_json` holds the point's own
+attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
+it redacts nothing. The receiver is what decides, at the decode seam and before anything is
+stored: it strips account identity from the metric **resource** and from the metric **point's own
+attributes**, exactly as it does for spans and logs. So `resource_json` carries the exporter's
+resource attributes (`service.name`, `service.version`, `os.type`, …), `attributes_json` carries
+the point's own attributes, and neither carries `user.id`, `user.email` or `organization.id` —
+Factory's native export puts those identity keys on every data point, and the receiver is where
+they are dropped, so they never reach the stored row. The keys that survive are the correlation
+and usage evidence: `session.id`, `conversation.id`, the whole `gen_ai.*` namespace, and the
+point's own measurement attributes such as `model.id` or `skill.name`. Those are not identity, so
+they are kept.
+
+A metric point has **no span**, so its row carries **no harness attribution** — there is no span
+to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
+why a **scoped per-harness wipe cannot clear these rows**: it cannot claim a row it cannot
+attribute. The full corpus wipe clears them with everything else. The table is created by the
+store's own schema with `CREATE ... IF NOT EXISTS`, so the table's own creation needs no version
+bump and no migration step: a store that predates the table opens unchanged and grows it on the
+next open. A **column** added to the table afterwards is a different matter — the same
+`IF NOT EXISTS` leaves an existing table without it — so the interval start landed with the
+**schema 23** migration, presence-guarded like the other `ADD COLUMN` steps.
+
+The writer's rule is unchanged: a sink that cannot persist metrics does not offer the port, and
+the writer **refuses** the batch rather than accepting one it would drop. The arrival is recorded
+as receiver activity under the single `otlp:metrics` key, carrying the number of points the
+batch carried.
 
 ## Claude Desktop and CLI file-synth parts (issue #216)
 

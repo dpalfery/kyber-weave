@@ -14,6 +14,7 @@ import {
   readContentConsent,
   resolveConsentPath,
 } from './consent.js'
+import { readConsentState } from './consent-write.js'
 
 const dirs: string[] = []
 const temp = (): string => {
@@ -79,5 +80,33 @@ describe('readContentConsent', () => {
   it('is off for an oversized file without parsing it', () => {
     const huge = `{"version":1,"content":true,"pad":"${'x'.repeat(100_000)}"}`
     expect(readContentConsent('/anywhere', () => huge)).toBe(false)
+  })
+
+  // The consent file has two readers: this plugin's reader, which decides whether the plugin
+  // publishes the prompt text, and the engine-side state reader, which the Settings row and
+  // `capture status` use to report the consent. They must bound the same file the same way.
+  // A file whose UTF-16 length is under 4096 but whose UTF-8 size is over 4096 is the case
+  // where a character bound and a byte bound disagree: the plugin would publish the prompt
+  // text while the status row said the consent was unreadable.
+  it('is off for a valid on-shape that is over the byte bound, and the state reader agrees', () => {
+    // The valid on-shape, with multi-byte padding in a key the shape does not forbid.
+    const text = `{"version":1,"content":true,"note":"${'中'.repeat(3000)}"}`
+    // The fixture is the one the disagreement needs: UNDER the character bound, OVER the
+    // byte bound, and still the valid on-shape.
+    expect(text.length, 'under the 4096-character bound').toBeLessThan(4096)
+    expect(Buffer.byteLength(text, 'utf8'), 'over the 4096-byte bound').toBeGreaterThan(4096)
+    const path = fileWith(text)
+
+    // The plugin reader bounds the file by bytes, so it reads it as OFF and publishes no
+    // prompt text.
+    expect(readContentConsent(path), 'the plugin reader reads the oversized file as off').toBe(false)
+
+    // The state reader must agree with it: it must not report 'on' for a file the plugin
+    // reader will not act on, or the status row would claim a capture that is not happening.
+    expect(
+      readConsentState(path),
+      'the state reader must agree with the plugin reader',
+    ).toBe('invalid')
+    expect(readConsentState(path)).not.toBe('on')
   })
 })

@@ -19,6 +19,11 @@
 // the store is touched, so a bad span in the middle of a batch writes
 // nothing.
 //
+// A third signal path serves `POST /v1/metrics`: Factory's native
+// OpenTelemetry export posts its metrics there, and OTLP/JSON is the
+// encoding it speaks. Metrics decode to their own shape and are handed to
+// the metrics sink port; the trace and log paths are untouched by them.
+//
 // Protobuf is decoded by hand — a wire-format reader plus the OTLP trace
 // schema's field numbers — because the schema is small and stable, and
 // because the merge zone carries no protobuf library the subtree could not
@@ -61,6 +66,14 @@ export const DEFAULT_OTLP_PORT = 4318
 /** OTLP/HTTP trace export path (R2.1). */
 export const OTLP_TRACES_PATH = '/v1/traces'
 export const OTLP_LOGS_PATH = '/v1/logs'
+
+/**
+ * OTLP/HTTP metrics export path. The third signal path: Factory's native
+ * OpenTelemetry export posts its metrics here (`{endpoint}/v1/metrics`), so a
+ * developer can point that export straight at this receiver — no collector in
+ * between. The export speaks OTLP/JSON on this path.
+ */
+export const OTLP_METRICS_PATH = '/v1/metrics'
 
 /**
  * Liveness probe the tray uses to tell *this* receiver from some other
@@ -116,10 +129,24 @@ export interface OtlpSignalStore extends OtlpSpanStore {
   writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void
 }
 
+/**
+ * Where decoded metrics go. A port like the span and log ones: the receiver
+ * decodes and hands over, and what happens to the metrics afterwards belongs
+ * to the store that implements it.
+ */
+export interface OtlpMetricsStore {
+  writeMetrics(metrics: readonly OtlpMetric[], hint?: OtlpWriteHint): void
+}
+
 export type OtlpReceiverStore =
   | OtlpSpanStore
   | OtlpSignalStore
-  | { spans: OtlpSpanStore; logs: { writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void } }
+  | OtlpMetricsStore
+  | {
+      spans: OtlpSpanStore
+      logs: { writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void }
+      metrics?: { writeMetrics(metrics: readonly OtlpMetric[], hint?: OtlpWriteHint): void }
+    }
 
 /** A span's OTLP status; `message` is present only when the source set one. */
 export type OtlpStatus = {
@@ -168,6 +195,53 @@ export type OtlpLog = {
   timestamp: string
   body: string | null
   attributes: Record<string, unknown>
+  resource: Record<string, unknown>
+  scope: OtlpScope
+}
+
+/**
+ * The data shape a metric carries. The OTLP metric types the JSON encoding
+ * names; `unknown` is a metric that names none of them, which carries no
+ * points rather than a fabricated zero.
+ */
+export type OtlpMetricKind = 'gauge' | 'sum' | 'histogram' | 'exponentialHistogram' | 'summary' | 'unknown'
+
+/**
+ * One metric data point. A gauge or a sum reports its own value; a histogram
+ * or a summary reports a count and a sum instead. A shape that reports none
+ * of them keeps `null` — absent, never zero.
+ */
+export type OtlpMetricDataPoint = {
+  attributes: Record<string, unknown>
+  /** Unix nanoseconds, verbatim as sent; null when the point carries none. */
+  timeUnixNano: string | null
+  /** Unix nanoseconds of the point's start, when it declares one. */
+  startTimeUnixNano: string | null
+  /** The point's own value, for a gauge or a sum. */
+  value: number | null
+  /** The point's count, for a histogram or a summary. */
+  count: number | null
+  /** The point's sum, for a histogram or a summary. */
+  sum: number | null
+}
+
+/**
+ * One decoded metric. The receiver decodes the metrics payload and hands it
+ * over as it arrived: it filters nothing by name, aggregates nothing, and
+ * invents no value a payload did not carry.
+ */
+export type OtlpMetric = {
+  name: string
+  description?: string
+  unit?: string
+  /** The data shape the metric carries. */
+  kind: OtlpMetricKind
+  /** The aggregation temporality the shape declares, verbatim (1 delta, 2 cumulative). */
+  aggregationTemporality?: number
+  /** True when a sum only grows. */
+  isMonotonic?: boolean
+  dataPoints: OtlpMetricDataPoint[]
+  /** Resource attributes of the emitting process (e.g. `service.name`). */
   resource: Record<string, unknown>
   scope: OtlpScope
 }
@@ -600,6 +674,174 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
     }
   }
   return logs
+}
+
+/**
+ * Decode an OTLP/JSON `ExportMetricsServiceRequest` body into metrics.
+ *
+ * The metrics payload is a resource, a scope and a list of metrics, each
+ * with its data points. The receiver decodes it and hands it over as it
+ * arrived: no metric is filtered by name, no point is aggregated away, and a
+ * value the payload did not carry stays absent rather than becoming a zero.
+ */
+export function decodeOtlpMetricsJson(body: string): OtlpMetric[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch (err) {
+    throw new OtlpDecodeError(`OTLP JSON body does not parse: ${message(err)}`)
+  }
+  const request = expectObject(parsed, 'OTLP payload')
+  const resourceMetrics = request.resourceMetrics
+  if (resourceMetrics === undefined || resourceMetrics === null) return []
+  if (!Array.isArray(resourceMetrics)) {
+    throw new OtlpDecodeError('resourceMetrics must be an array')
+  }
+
+  const metrics: OtlpMetric[] = []
+  for (const [rmIndex, rmRaw] of resourceMetrics.entries()) {
+    const rmWhere = `resourceMetrics[${rmIndex}]`
+    const resourceMetric = expectObject(rmRaw, rmWhere)
+
+    const resourceRaw = resourceMetric.resource
+    const resource =
+      resourceRaw === undefined || resourceRaw === null
+        ? {}
+        : stripIdentityAttributes(
+            attributesFromJson(
+              expectObject(resourceRaw, `${rmWhere}.resource`).attributes,
+              `${rmWhere}.resource.attributes`,
+            ),
+          )
+
+    const scopeMetricsRaw = resourceMetric.scopeMetrics
+    if (scopeMetricsRaw === undefined || scopeMetricsRaw === null) continue
+    if (!Array.isArray(scopeMetricsRaw)) {
+      throw new OtlpDecodeError(`${rmWhere}.scopeMetrics must be an array`)
+    }
+
+    for (const [smIndex, smRaw] of scopeMetricsRaw.entries()) {
+      const smWhere = `${rmWhere}.scopeMetrics[${smIndex}]`
+      const scopeMetric = expectObject(smRaw, smWhere)
+      const scope = scopeFromJson(scopeMetric.scope, `${smWhere}.scope`)
+
+      const metricsRaw = scopeMetric.metrics
+      if (metricsRaw === undefined || metricsRaw === null) continue
+      if (!Array.isArray(metricsRaw)) {
+        throw new OtlpDecodeError(`${smWhere}.metrics must be an array`)
+      }
+      for (const [mIndex, mRaw] of metricsRaw.entries()) {
+        metrics.push(metricFromJson(mRaw, resource, scope, `${smWhere}.metrics[${mIndex}]`))
+      }
+    }
+  }
+  return metrics
+}
+
+/** The data shapes a metric can carry; a metric naming none of them carries no points. */
+const METRIC_SHAPES = ['gauge', 'sum', 'histogram', 'exponentialHistogram', 'summary'] as const
+
+function metricFromJson(
+  raw: unknown,
+  resource: Record<string, unknown>,
+  scope: OtlpScope,
+  where: string,
+): OtlpMetric {
+  const metric = expectObject(raw, where)
+  const name = requiredString(metric.name, `${where}.name`)
+  const description = typeof metric.description === 'string' ? metric.description : undefined
+  const unit = typeof metric.unit === 'string' ? metric.unit : undefined
+
+  const shape = METRIC_SHAPES.find(
+    (candidate) => metric[candidate] !== undefined && metric[candidate] !== null,
+  )
+  if (shape === undefined) {
+    // A metric that names no data shape carries no points. That is absent,
+    // not zero: nothing here may report a measurement nobody made.
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'unknown',
+      dataPoints: [],
+      resource,
+      scope,
+    }
+  }
+
+  const data = expectObject(metric[shape], `${where}.${shape}`)
+  const pointsRaw = data.dataPoints
+  const dataPoints: OtlpMetricDataPoint[] = []
+  if (pointsRaw !== undefined && pointsRaw !== null) {
+    if (!Array.isArray(pointsRaw)) {
+      throw new OtlpDecodeError(`${where}.${shape}.dataPoints must be an array`)
+    }
+    for (const [index, pointRaw] of pointsRaw.entries()) {
+      dataPoints.push(dataPointFromJson(pointRaw, `${where}.${shape}.dataPoints[${index}]`))
+    }
+  }
+  const aggregationTemporality =
+    typeof data.aggregationTemporality === 'number' ? data.aggregationTemporality : undefined
+  const isMonotonic = typeof data.isMonotonic === 'boolean' ? data.isMonotonic : undefined
+
+  return {
+    name,
+    ...(description !== undefined ? { description } : {}),
+    ...(unit !== undefined ? { unit } : {}),
+    kind: shape,
+    ...(aggregationTemporality !== undefined ? { aggregationTemporality } : {}),
+    ...(isMonotonic !== undefined ? { isMonotonic } : {}),
+    dataPoints,
+    resource,
+    scope,
+  }
+}
+
+function dataPointFromJson(raw: unknown, where: string): OtlpMetricDataPoint {
+  const point = expectObject(raw, where)
+  const attributesRaw = point.attributes
+  const attributes =
+    attributesRaw === undefined || attributesRaw === null
+      ? {}
+      : attributesFromJson(attributesRaw, `${where}.attributes`)
+  return {
+    // A point's own attributes come from the same exporter resource as a
+    // span's, so they carry the same account identity: they are stripped on
+    // this seam too, before anything is stored.
+    attributes: stripIdentityAttributes(attributes),
+    timeUnixNano: optionalNanos(point.timeUnixNano, `${where}.timeUnixNano`),
+    startTimeUnixNano: optionalNanos(point.startTimeUnixNano, `${where}.startTimeUnixNano`),
+    // `asInt` is an int64, which proto3 JSON encodes as a string; `asDouble`
+    // is a number. A shape that reports neither has no value of its own.
+    value: numericValue(point.asInt) ?? numericValue(point.asDouble),
+    count: numericValue(point.count),
+    sum: numericValue(point.sum),
+  }
+}
+
+/**
+ * A nanosecond timestamp, verbatim as a decimal string, or null when the
+ * point carries none. A value that is not an integer count is malformed, not
+ * absent: the diagnostic names the field.
+ */
+function optionalNanos(value: unknown, where: string): string | null {
+  if (value === undefined || value === null) return null
+  return nanosToBigInt(value, where).toString()
+}
+
+/**
+ * A numeric wire value, or null when it is absent or not a number at all.
+ * proto3 JSON encodes an int64 as a string, so a numeric string is read as
+ * the number it names; anything unreadable stays absent rather than becoming
+ * a zero.
+ */
+function numericValue(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 function scopeFromJson(value: unknown, where: string): OtlpScope {
@@ -1115,9 +1357,9 @@ export type ReceiverHealthSnapshot = {
   lastErrorAt: string | null
 }
 
-/** True for the two signal paths whose failures enter the error window. */
+/** True for the three signal paths whose failures enter the error window. */
 function isOtlpSignalPath(path: string): boolean {
-  return path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH
+  return path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH || path === OTLP_METRICS_PATH
 }
 
 /** Bound an error message before retaining it; a hostile batch must not grow the window. */
@@ -1367,7 +1609,7 @@ export class OtlpReceiver {
       respondJson(res, 200, { paused: this.isPaused() })
       return
     }
-    if ((path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH) && this.isPaused()) {
+    if ((path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH || path === OTLP_METRICS_PATH) && this.isPaused()) {
       // Shed load, do not drop it: OTLP exporters retry on 503, so a paused
       // collector tells the sender to hold rather than refusing the batch.
       res.setHeader('Retry-After', '5')
@@ -1376,11 +1618,11 @@ export class OtlpReceiver {
       })
       return
     }
-    if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
+    if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH && path !== OTLP_METRICS_PATH) {
       respondJson(res, 404, {
         error: {
           code: 'OTLP_NOT_FOUND',
-            message: `unknown endpoint ${req.method} ${path}: this receiver serves POST ${OTLP_TRACES_PATH} and ${OTLP_LOGS_PATH}`,
+            message: `unknown endpoint ${req.method} ${path}: this receiver serves POST ${OTLP_TRACES_PATH}, ${OTLP_LOGS_PATH} and ${OTLP_METRICS_PATH}`,
         },
       })
       return
@@ -1394,7 +1636,12 @@ export class OtlpReceiver {
       return
     }
     const encoding = encodingForContentType(req.headers['content-type'])
-    if (encoding === undefined) {
+    // The metrics path speaks OTLP/JSON only — the encoding Factory's native
+    // export posts there — so a protobuf body is refused with a diagnostic
+    // instead of being decoded as something it is not.
+    const encodingAccepted =
+      encoding !== undefined && (path !== OTLP_METRICS_PATH || encoding === 'json')
+    if (!encodingAccepted) {
       this.recordOtlpFailure(
         'OTLP_UNSUPPORTED_MEDIA_TYPE',
         `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported on ${path}`,
@@ -1402,13 +1649,43 @@ export class OtlpReceiver {
       respondJson(res, 415, {
         error: {
           code: 'OTLP_UNSUPPORTED_MEDIA_TYPE',
-          message: `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: use application/json or application/x-protobuf`,
+          message:
+            path === OTLP_METRICS_PATH
+              ? `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: the metrics path speaks application/json`
+              : `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: use application/json or application/x-protobuf`,
         },
       })
       return
     }
 
     const body = await this.readBody(req)
+    if (path === OTLP_METRICS_PATH) {
+      const metrics = decodeOtlpMetricsJson(body.toString('utf8'))
+      const nested = this.store as unknown as { metrics?: { writeMetrics(metrics: readonly OtlpMetric[], hint?: OtlpWriteHint): void } }
+      const sink = nested.metrics ?? (this.store as Partial<OtlpMetricsStore>)
+      if (typeof sink.writeMetrics !== 'function') {
+        throw new Error('OTLP metrics require a metrics-aware receiver store')
+      }
+      // The same admission discipline the span and log paths keep (F3): shed
+      // before acceptance when the store cannot take the batch, never accept
+      // one the store would only drop later.
+      if (!this.admitOrShed(res, sink, metrics, { bytes: body.length })) return
+      try {
+        sink.writeMetrics(metrics, { bytes: body.length })
+      } catch (err) {
+        if (err instanceof BatchTooLargeError) {
+          this.shedTooLarge(res, metrics.length, err)
+          return
+        }
+        if (err instanceof WriterBackpressureError) {
+          this.shed(res, metrics.length, err)
+          return
+        }
+        throw err
+      }
+      respondJson(res, 200, { acceptedMetrics: metrics.length })
+      return
+    }
     if (path === OTLP_LOGS_PATH) {
       const logs = encoding === 'json' ? decodeOtlpLogJson(body.toString('utf8')) : decodeOtlpLogProtobuf(body)
       const nested = this.store as unknown as { logs?: { writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void } }

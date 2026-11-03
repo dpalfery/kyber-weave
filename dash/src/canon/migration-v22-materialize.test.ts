@@ -399,7 +399,7 @@ describe('schema migration v21 -> v22 (materialized summary columns)', () => {
       // No duplicate turn rows, no rewritten payload, and the version stands.
       expect(turnRowCount(store)).toBe(turnsBefore)
       expect(sessionPayloadOf(store, 'sess-full')).toBe(payloadBefore)
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
     } finally {
       store.close()
     }
@@ -414,7 +414,7 @@ describe('schema migration v21 -> v22 (materialized summary columns)', () => {
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('22')
+      expect(reopened.getMetadata('schema_version')).toBe('23')
       expect(readColumns(reopened, 'sess-full')).toEqual(materialized)
       expect(turnRowCount(reopened)).toBe(turns)
     } finally {
@@ -429,7 +429,7 @@ describe('schema migration v21 -> v22 (materialized summary columns)', () => {
     const path = v21StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('22')
+      expect(store.getMetadata('schema_version')).toBe('23')
 
       const rewritten = JSON.parse(sessionPayloadOf(store, 'sess-full')) as Record<string, unknown>
       expect(rewritten).not.toHaveProperty('turns')

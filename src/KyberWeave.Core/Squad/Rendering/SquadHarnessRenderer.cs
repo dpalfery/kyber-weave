@@ -16,7 +16,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Thirteen renderers used to restate the same guard, directory resolution, skill document,
 /// model lowering and skill loop, each a little differently. A fix to one reached the others only
 /// if someone copied it, and the per-harness test suites pinned the copies. The pipeline owns those
-/// steps once, so a harness's code is what makes it different (ADR 0055).
+/// steps once, so a harness's code is what makes it different (ADR 0056).
 /// </para>
 /// <para>
 /// The default <see cref="Render"/> is the native shape: each agent in source order through

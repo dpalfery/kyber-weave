@@ -1,5 +1,5 @@
 ---
-id: adr/0055-squad-renderers-share-one-render-pipeline
+id: adr/0056-squad-renderers-share-one-render-pipeline
 title: Squad renderers share one render pipeline
 doc-type: adr
 status: current
@@ -14,7 +14,7 @@ code-refs:
   - SquadAgentProjection
 ---
 
-# ADR 0055: Squad renderers share one render pipeline
+# ADR 0056: Squad renderers share one render pipeline
 
 ## Status
 
