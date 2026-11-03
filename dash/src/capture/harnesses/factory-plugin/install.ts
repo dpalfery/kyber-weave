@@ -288,6 +288,31 @@ function provenPluginIdentity(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The names the status surface shows
+
+/** The cap on an echoed name, so one status line stays one line. */
+const MAX_DISPLAY_NAME_CHARS = 200
+
+/**
+ * A name as the status surface shows it.
+ *
+ * The names this module echoes come out of the OWNER's tree, and a file name may hold a
+ * newline or a control character. A control character is replaced with a space, so a crafted
+ * name cannot break the line-based status surface, and the name is capped so one line stays
+ * one line. The name itself is kept, so the owner can still recognise the file a refusal is
+ * about.
+ */
+function displayName(name: string): string {
+  const cleaned = name.replace(/[\u0000-\u001f\u007f]/g, ' ')
+  return cleaned.length > MAX_DISPLAY_NAME_CHARS ? `${cleaned.slice(0, MAX_DISPLAY_NAME_CHARS)}…` : cleaned
+}
+
+/** The names as the status surface shows them, joined as one line reads them. */
+function displayNames(names: readonly string[]): string {
+  return names.map((name) => displayName(name)).join(', ')
+}
+
+// ---------------------------------------------------------------------------------------------
 // Reading the tree
 
 type TreeRead =
@@ -305,13 +330,16 @@ function readFileNoFollow(path: string): { ok: true; text: string } | { ok: fals
   try {
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
     const stat = fstatSync(fd)
-    if (!stat.isFile()) return { ok: false, detail: `${path} is not a regular file` }
+    if (!stat.isFile()) return { ok: false, detail: `${displayName(path)} is not a regular file` }
     if (stat.size > MAX_FILE_BYTES) {
-      return { ok: false, detail: `${path} is larger than the ${MAX_FILE_BYTES} byte read bound` }
+      return {
+        ok: false,
+        detail: `${displayName(path)} is larger than the ${MAX_FILE_BYTES} byte read bound`,
+      }
     }
     return { ok: true, text: readFileSync(fd, 'utf8') }
   } catch {
-    return { ok: false, detail: `${path} cannot be read as a file` }
+    return { ok: false, detail: `${displayName(path)} cannot be read as a file` }
   } finally {
     if (fd !== undefined) closeSync(fd)
   }
@@ -328,10 +356,14 @@ function readTree(pluginDir: string): TreeRead {
     rootStat = lstatSync(pluginDir)
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return { kind: 'absent' }
-    return { kind: 'unreadable', detail: `${pluginDir} cannot be read` }
+    return { kind: 'unreadable', detail: `${displayName(pluginDir)} cannot be read` }
   }
-  if (rootStat.isSymbolicLink()) return { kind: 'unreadable', detail: `${pluginDir} is a symlink` }
-  if (!rootStat.isDirectory()) return { kind: 'unreadable', detail: `${pluginDir} is not a directory` }
+  if (rootStat.isSymbolicLink()) {
+    return { kind: 'unreadable', detail: `${displayName(pluginDir)} is a symlink` }
+  }
+  if (!rootStat.isDirectory()) {
+    return { kind: 'unreadable', detail: `${displayName(pluginDir)} is not a directory` }
+  }
 
   const files: { relative: string; text: string }[] = []
   const walk = (dir: string, prefix: string): TreeRead | undefined => {
@@ -339,20 +371,27 @@ function readTree(pluginDir: string): TreeRead {
     try {
       entries = readdirSync(dir, { withFileTypes: true })
     } catch {
-      return { kind: 'unreadable', detail: `${dir} cannot be read` }
+      return { kind: 'unreadable', detail: `${displayName(dir)} cannot be read` }
     }
     for (const entry of entries) {
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       const path = join(dir, entry.name)
-      if (entry.isSymbolicLink()) return { kind: 'unreadable', detail: `${path} is a symlink` }
+      if (entry.isSymbolicLink()) {
+        return { kind: 'unreadable', detail: `${displayName(path)} is a symlink` }
+      }
       if (entry.isDirectory()) {
         const deeper = walk(path, relative)
         if (deeper !== undefined) return deeper
         continue
       }
-      if (!entry.isFile()) return { kind: 'unreadable', detail: `${path} is not a regular file` }
+      if (!entry.isFile()) {
+        return { kind: 'unreadable', detail: `${displayName(path)} is not a regular file` }
+      }
       if (files.length >= MAX_TREE_FILES) {
-        return { kind: 'unreadable', detail: `${pluginDir} holds more than ${MAX_TREE_FILES} files` }
+        return {
+          kind: 'unreadable',
+          detail: `${displayName(pluginDir)} holds more than ${MAX_TREE_FILES} files`,
+        }
       }
       const read = readFileNoFollow(path)
       if (!read.ok) return { kind: 'unreadable', detail: read.detail }
@@ -398,7 +437,7 @@ function classify(paths: FactoryPluginPaths): Classified {
   const owned = new Set<string>(FACTORY_MARKETPLACE_FILES)
   const extra = [...found.keys()].filter((relative) => !owned.has(relative)).sort()
   if (extra.length > 0) {
-    return { kind: 'foreign', detail: `${extra.join(', ')} was not written by KyberDash` }
+    return { kind: 'foreign', detail: `${displayNames(extra)} was not written by KyberDash` }
   }
 
   const receipt = readReceipt(paths.receiptFile)
@@ -412,15 +451,15 @@ function classify(paths: FactoryPluginPaths): Classified {
   const missing = FACTORY_MARKETPLACE_FILES.filter((relative) => !found.has(relative))
   if (missing.length > 0) {
     return proven
-      ? { kind: 'edited', detail: `${missing.join(', ')} is missing; it changed since install` }
-      : { kind: 'foreign', detail: `${missing.join(', ')} is not a file KyberDash writes` }
+      ? { kind: 'edited', detail: `${displayNames(missing)} is missing; it changed since install` }
+      : { kind: 'foreign', detail: `${displayNames(missing)} is not a file KyberDash writes` }
   }
 
   if (proven && receipt !== undefined) {
     for (const relative of FACTORY_MARKETPLACE_FILES) {
       const digest = receiptDigest(receipt, paths.pluginDir, relative)
       if (digest !== undefined && sha256Hex(found.get(relative) ?? '') !== digest) {
-        return { kind: 'edited', detail: `${relative} changed since install` }
+        return { kind: 'edited', detail: `${displayName(relative)} changed since install` }
       }
     }
     // The tree is KyberDash's and the owner has not touched it. Is its content the CURRENT
@@ -432,7 +471,7 @@ function classify(paths: FactoryPluginPaths): Classified {
     if (superseded.length > 0) {
       return {
         kind: 'upgrade',
-        detail: `${superseded.join(', ')} holds the bundle KyberDash wrote before, not the current one`,
+        detail: `${displayNames(superseded)} holds the bundle KyberDash wrote before, not the current one`,
       }
     }
     return { kind: 'same', receiptProven: true }
@@ -440,7 +479,7 @@ function classify(paths: FactoryPluginPaths): Classified {
 
   for (const relative of FACTORY_MARKETPLACE_FILES) {
     if (found.get(relative) !== FACTORY_MARKETPLACE_CONTENT[relative]) {
-      return { kind: 'foreign', detail: `${relative} is not the file KyberDash writes` }
+      return { kind: 'foreign', detail: `${displayName(relative)} is not the file KyberDash writes` }
     }
   }
   // The tree holds exactly what KyberDash writes, but nothing proves KyberDash wrote it.
@@ -514,7 +553,7 @@ function classifyLegacyTree(paths: FactoryPluginPaths, receipt: Receipt | undefi
   for (const [relative, text] of found) {
     const digest = digests.get(relative)
     if (digest === undefined || sha256Hex(text) !== digest) {
-      return { kind: 'unproven', path, detail: `${relative} changed since it was installed` }
+      return { kind: 'unproven', path, detail: `${displayName(relative)} changed since it was installed` }
     }
   }
   return { kind: 'proven', path }
