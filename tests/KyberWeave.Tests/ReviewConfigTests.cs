@@ -32,6 +32,30 @@ public class ReviewConfigTests
         Assert.Null(typeof(ReviewPolicy).GetProperty("MaxReviewableLines"));
     }
 
+    /// <summary>
+    /// The retired policy keys must not disappear silently: a host that still carries them is told
+    /// they are ignored rather than believing the old escalation is in force.
+    /// </summary>
+    [Fact]
+    public void LegacyReviewPolicyKeysAreReportedAsUnknown()
+    {
+        ReviewConfig config = Load("""
+            review:
+              policy:
+                always-human: true
+                max-reviewable-lines: 1000
+            """);
+
+        Assert.Contains(
+            config.Warnings,
+            warning => warning.Contains("review.policy", StringComparison.Ordinal) &&
+                       warning.Contains("always-human", StringComparison.Ordinal));
+        Assert.Contains(
+            config.Warnings,
+            warning => warning.Contains("review.policy", StringComparison.Ordinal) &&
+                       warning.Contains("max-reviewable-lines", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void GatesAreReadAsArgvInDeclarationOrder()
     {
