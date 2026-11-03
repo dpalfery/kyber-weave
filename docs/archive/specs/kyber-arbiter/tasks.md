@@ -88,8 +88,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
 
 ## Tasks
 
-- [ ] 1. Phase 1: Arbiter core (`src/KyberWeave.Core/Arbiter/`)
-- [ ] 1.1 Rule model, step-0 engine, trigger families, envelope and review notes
+- [x] 1. Phase 1: Arbiter core (`src/KyberWeave.Core/Arbiter/`)
+- [x] 1.1 Rule model, step-0 engine, trigger families, envelope and review notes
   - **Objective:** Build the harness-neutral rule model. It covers:
     - the step-0 predicates and first-match `decide` clauses;
     - the effect sets and combination rule of each trigger family;
@@ -128,7 +128,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §1.4, §1.10, §3
   - _Requirements: 1.1, 1.2, 1.4, 1.5, 10.1, 10.3, 15.1, 15.5, 15.6_
-- [ ] 1.2 Configuration section, shipped rules, validation and embedded Squad catalog
+- [x] 1.2 Configuration section, shipped rules, validation and embedded Squad catalog
   - **Objective:** Add four things:
     - the `arbiter:` configuration section;
     - the 18 shipped rules, as embedded data;
@@ -195,7 +195,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.1
   - **Packet attachments:** design §1.3, §1.4, §1.5 (the thresholds paragraph), §2, §3, §4.1, §7
   - _Requirements: 11.1, 11.2, 13.2, 14.1, 14.2, 14.3, 14.4, 16.1, 19.1, 22.2_
-- [ ] 1.3 Plan parser
+- [x] 1.3 Plan parser
   - **Objective:** Parse a plan or a spec task artifact as authored, with no generated artifacts. The parse yields its mode, tasks, files, dependencies, contract rows and out-of-scope paths.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Plans/PlanDocument.cs` (new): `PlanDocument`, `PlanTask`
@@ -217,7 +217,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §6
   - _Requirements: 9.1, 9.2, 9.3, 10.2_
-- [ ] 1.4 Git, gate-report and caller readers
+- [x] 1.4 Git, gate-report and caller readers
   - **Objective:** Read the facts the Arbiter derives itself, from git, the gate report and the caller's identity, without throwing when any source is absent.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Facts/GitFacts.cs` (new)
@@ -244,7 +244,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §1.3 (the fact definitions), §4.2
   - _Requirements: 6.4, 12.4, 21.2_
-- [ ] 1.5 Ledger and decision log
+- [x] 1.5 Ledger and decision log
   - **Objective:** Persist pre-dispatch, post-dispatch and return events, and every decision, as append-only JSON lines. Expose the queries the rules read.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Facts/ArbiterLedgerEvent.cs` (new)
@@ -269,7 +269,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.1
   - **Packet attachments:** design §1.6, §1.10 (`REPEAT`), §8.3
   - _Requirements: 3.1, 5.3, 17.4, 18.4, 21.3_
-- [ ] 1.6 Header block, trigger classification and fact builder
+- [x] 1.6 Header block, trigger classification and fact builder
   - **Objective:** Turn a harness-neutral event into a classified trigger with its labelled facts. The step that decides an event needs no Arbiter work must load no host configuration.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Facts/ArbiterEvent.cs` (new)
@@ -295,7 +295,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.2, 1.3, 1.4, 1.5
   - **Packet attachments:** design §1.3, §4, §5
   - _Requirements: 6.4, 21.1, 21.2, 25.1, 25.4_
-- [ ] 1.7 `systemone` provider and state budgets
+- [x] 1.7 `systemone` provider and state budgets
   - **Objective:** Send one batched step-1 call per trigger to TypeSafe or a local Ollama, or skip it under provider `none`. Never send more than the model's budget.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Providers/IArbiterProvider.cs` (new)
@@ -331,7 +331,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.1, 1.2
   - **Packet attachments:** design §1.4 (the `ask` fields), §1.5 (the client and the state budget); [F5]
   - _Requirements: 1.2, 17.1, 17.2, 17.3, 17.4, 19.2, 19.4, 20.2_
-- [ ] 1.8 Key resolution, credential stores and user override
+- [x] 1.8 Key resolution, credential stores and user override
   - **Objective:** Resolve the TypeSafe key the same way in every process, bound to the endpoint's origin. Store it per OS without putting it in argv, and read the per-user provider override.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/Credentials/ICredentialStore.cs` (new)
@@ -359,7 +359,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.2
   - **Packet attachments:** design §1.5 (key resolution and the store table), §7 (user override)
   - _Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 22.3_
-- [ ] 1.9 Evaluator
+- [x] 1.9 Evaluator
   - **Objective:** Provide the single entry point that the hook host, `serve` and `eval` call, running the evaluation flow end to end.
   - **Files:**
     - `src/KyberWeave.Core/Arbiter/ArbiterEvaluator.cs` (new)
@@ -380,8 +380,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.6, 1.7, 1.8
   - **Packet attachments:** design §1.2, §3, §8.4
   - _Requirements: 1.2, 1.3, 1.4, 5.1, 10.1, 10.3, 19.2, 19.4_
-- [ ] 2. Phase 1: gate applicability
-- [ ] 2.1 Gate `applies-when`, `KW-REVIEW-026` and `review gates --base`
+- [x] 2. Phase 1: gate applicability
+- [x] 2.1 Gate `applies-when`, `KW-REVIEW-026` and `review gates --base`
   - **Objective:** Let a gate declare the paths it applies to, and report a gate that does not apply as not applicable. Such a gate is neither passed nor failed.
   - **Files:**
     - `src/KyberWeave.Core/Configuration/ReviewYamlSection.cs` (`ReviewGateYaml.AppliesWhen`)
@@ -405,8 +405,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.2, 1.4
   - **Packet attachments:** design §11
   - _Requirements: 12.1, 12.2, 12.3, 12.4_
-- [ ] 3. Phase 1: CLI (`kyber-weave arbiter`)
-- [ ] 3.1 `arbiter validate | rules | plan | eval | audit`
+- [x] 3. Phase 1: CLI (`kyber-weave arbiter`)
+- [x] 3.1 `arbiter validate | rules | plan | eval | audit`
   - **Objective:** Add the read-only human surfaces of the Arbiter to the existing CLI.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Arbiter/ArbiterSettings.cs` (new, deriving from `AnalysisSettings`)
@@ -429,7 +429,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.3, 1.9
   - **Packet attachments:** design §1.6 (audit), §1.8, §7 (diagnostics)
   - _Requirements: 2.2, 5.3, 16.1, 21.3_
-- [ ] 3.2 `arbiter setup | status | doctor`
+- [x] 3.2 `arbiter setup | status | doctor`
   - **Objective:** Manage each user's provider choice and key, and diagnose a host's Arbiter installation.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Arbiter/ArbiterSetupCommand.cs` (new)
@@ -455,8 +455,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.8, 3.1, 6.5
   - **Packet attachments:** design §1.5, §1.8, §7
   - _Requirements: 19.3, 22.3, 23.1, 23.2, 23.3_
-- [ ] 4. Phase 1: hook host (`src/KyberWeave.Arbiter/`)
-- [ ] 4.1 `kyber-weave-arbiter` project, hook host, Read guard and Claude adapter
+- [x] 4. Phase 1: hook host (`src/KyberWeave.Arbiter/`)
+- [x] 4.1 `kyber-weave-arbiter` project, hook host, Read guard and Claude adapter
   - **Objective:** Ship the separate binary that harness hooks call. It fails closed, writes nothing to stdout but the decision, guards planning paths, strips routing headers, and starts with the Claude adapter.
   - **Files:**
     - `src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj` (new): mirrors `src/KyberWeave.Mcp/KyberWeave.Mcp.csproj`'s property group, with `kyber-weave-arbiter` names. It references Core only; the MCP packages arrive with `serve` in task 17.1. It adds `InternalsVisibleTo KyberWeave.Tests`.
@@ -499,7 +499,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.9
   - **Packet attachments:** design §1.2, §1.7, §1.10, §4.2, §5, §8.4, §12; [F1]
   - _Requirements: 2.1, 3.1, 3.2, 5.1, 5.2, 5.3, 16.1, 25.1, 25.2, 25.4_
-- [ ] 4.2 Copilot adapter: VS Code Local schema and Copilot CLI schema
+- [x] 4.2 Copilot adapter: VS Code Local schema and Copilot CLI schema
   - **Objective:** Gate Copilot dispatches under both tokens. Answer in the schema of the payload received, because VS Code also loads the Copilot CLI hook file.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/CopilotHookAdapter.cs` (new)
@@ -525,7 +525,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 4.1
   - **Packet attachments:** design §1.7, §4.2, §9.1 (the Copilot rows), §12; [F2], [F3]
   - _Requirements: 3.1, 5.1, 6.1, 6.4, 25.1, 25.2_
-- [ ] 4.3 OpenCode plugin-envelope adapter
+- [x] 4.3 OpenCode plugin-envelope adapter
   - **Objective:** Accept the Kyber-defined envelope that plugin shims send, and answer allow or block, optionally with stripped arguments. OpenCode is its first harness.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/PluginEnvelope.cs` (new): `kyber-arbiter.plugin-event/v1`
@@ -544,7 +544,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 4.1
   - **Packet attachments:** design §1.7 (the plugin input); [F4]
   - _Requirements: 3.1, 5.1, 6.1, 25.1_
-- [ ] 4.4 Claude return observation through the hand-back hook (blocked until Q15 is answered; written to option (a))
+- [x] 4.4 Claude return observation through the hand-back hook (blocked until Q15 is answered; written to option (a))
   - **Objective:** Observe the return of a background Claude dispatch, and deliver post-dispatch outcomes inside the hand-back.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/ClaudeHookAdapter.cs`
@@ -559,8 +559,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 4.1; decision gate Q15
   - **Packet attachments:** design §1.6, §1.10; [F1]; the Q15 decision text
   - _Requirements: 5.3, 15.1, 21.3_
-- [ ] 5. Phase 1: distribution
-- [ ] 5.1 Release workflows and scripts
+- [x] 5. Phase 1: distribution
+- [x] 5.1 Release workflows and scripts
   - **Objective:** Publish `kyber-weave-arbiter` alongside the CLI and the MCP server, and let `install.sh` install or skip it.
   - **Files:**
     - `.github/workflows/release.yml`
@@ -581,7 +581,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 4.1
   - **Packet attachments:** design §1.11
   - _Requirements: 22.1_
-- [ ] 5.2 Self-updater
+- [x] 5.2 Self-updater
   - **Objective:** Make `kyber-weave update` replace an installed arbiter the way it replaces KyberDash.
   - **Files:**
     - `src/KyberWeave.Cli/Update/SelfUpdater.cs` (`ArbiterBaseName`, `ArbiterMinVersion`, `ShouldUpdateArbiter`)
@@ -601,7 +601,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 5.1
   - **Packet attachments:** design §1.11
   - _Requirements: 22.1_
-- [ ] 5.3 Homebrew and npm packaging
+- [x] 5.3 Homebrew and npm packaging
   - **Objective:** Ship the third binary through Homebrew and npm.
   - **Files:**
     - `homebrew/kyber-weave.rb`
@@ -619,8 +619,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §1.11
   - _Requirements: 22.1_
-- [ ] 6. Phase 1: Squad wiring
-- [ ] 6.1 Render request member and hook-wiring helper
+- [x] 6. Phase 1: Squad wiring
+- [x] 6.1 Render request member and hook-wiring helper
   - **Objective:** Carry the host's Arbiter settings into rendering, and decide in one place which agents get which hooks, with which command line, on which targets.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/SquadRenderModels.cs`: `SquadRenderRequest` gains an optional trailing `SquadArbiterWiring? Arbiter = null`, where `SquadArbiterWiring(bool Enabled, int HookTimeoutSeconds)` is new
@@ -651,7 +651,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §10.1, §10.5, §10.7
   - _Requirements: 6.1, 22.2, 22.4, 25.3_
-- [ ] 6.2 Claude renderer hooks
+- [x] 6.2 Claude renderer hooks
   - **Objective:** Render the Claude hooks into agent and entry-point skill frontmatter.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs` (`RenderAgent`, `RenderPrimaryAgentEntryPointSkill`)
@@ -664,7 +664,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 6.1
   - **Packet attachments:** design §10.1, §10.2 (the Claude row); [F1]
   - _Requirements: 6.1, 22.2, 25.2_
-- [ ] 6.3 Copilot renderer hooks
+- [x] 6.3 Copilot renderer hooks
   - **Objective:** Render the Copilot in VS Code agent hooks, and Copilot CLI's own hook file.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs` (`RenderAgent`, `RenderAsync`)
@@ -677,7 +677,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 6.1
   - **Packet attachments:** design §10.2 (the Copilot row); [F2], [F3]
   - _Requirements: 6.1, 22.2, 25.2_
-- [ ] 6.4 OpenCode renderer shim
+- [x] 6.4 OpenCode renderer shim
   - **Objective:** Render the OpenCode plugin that bridges to the binary through task 4.3's envelope. Its generator is reusable, because Kilo takes the same shim (task 16.2).
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ArbiterPluginShim.cs` (new): renders the shim for a given harness token
@@ -693,7 +693,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 4.3, 6.1
   - **Packet attachments:** design §1.7 (the plugin input), §10.2 (the OpenCode row); [F4]
   - _Requirements: 6.1, 22.2, 25.1_
-- [ ] 6.5 Squad CLI plumbing and arbiter probe
+- [x] 6.5 Squad CLI plumbing and arbiter probe
   - **Objective:** Pass the host's Arbiter settings from `squad install` and `squad update` into rendering. Record what stays unenforced, print the trust steps, and probe the binary.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Deployment/SquadLifecycleService.cs`: `SquadInstallRequest` and `SquadUpdateRequest` gain an optional trailing `SquadArbiterWiring? Arbiter = null`, passed into both `SquadRenderRequest` constructions
@@ -712,7 +712,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.2, 6.1
   - **Packet attachments:** design §10.5, §10.7
   - _Requirements: 5.3, 22.2, 22.4_
-- [ ] 6.6 Claude hand-back hooks on dispatch targets (blocked until Q15 is answered; written to option (a))
+- [x] 6.6 Claude hand-back hooks on dispatch targets (blocked until Q15 is answered; written to option (a))
   - **Objective:** Render the hand-back hook that task 4.4 consumes.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`
@@ -724,8 +724,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 6.2; decision gate Q15
   - **Packet attachments:** [F1]; the Q15 decision text
   - _Requirements: 21.3_
-- [ ] 7. Phase 1: agent and skill contracts (all `always-human` except the skill and test files)
-- [ ] 7.1 Conductor contract
+- [x] 7. Phase 1: agent and skill contracts (all `always-human` except the skill and test files)
+- [x] 7.1 Conductor contract
   - **Objective:** Make the conductor write the routing headers and planner markers, keep workers to their packets, and follow escalation envelopes exactly.
   - **Files:**
     - `products/kyber-squad/agents/conductor.md`
@@ -748,7 +748,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §1.10, §4.3, §4.4, §5, §8.1, §8.2
   - _Requirements: 15.1, 15.2, 15.4, 21.1, 21.2, 25.2_
-- [ ] 7.2 Architect and product-owner contracts
+- [x] 7.2 Architect and product-owner contracts
   - **Objective:** Give `architect` its escalation route, its three outcomes and the D31 attestation, and have both planners mark their investigator dispatches.
   - **Files:**
     - `products/kyber-squad/agents/architect.md`
@@ -769,7 +769,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §8.1, §8.2, §8.3
   - _Requirements: 15.2, 15.3, 15.4_
-- [ ] 7.3 Code-review contracts
+- [x] 7.3 Code-review contracts
   - **Objective:** Make the review council write `LENS:` and `REFUTE:` headers, act on the Arbiter's review notes, pass `--base`, and cite the audit.
   - **Files:**
     - `products/kyber-squad/agents/code-reviewer.md`
@@ -791,7 +791,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** none
   - **Packet attachments:** design §1.10 (review notes), §5, §11
   - _Requirements: 11.1, 11.2, 11.5, 11.6, 12.1, 13.1, 21.3_
-- [ ] 7.4 test-dev RED evidence line
+- [x] 7.4 test-dev RED evidence line
   - **Objective:** Make RED evidence a line the hook can read.
   - **Files:**
     - `products/kyber-squad/agents/test-dev.md`
@@ -804,8 +804,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 7.3
   - **Packet attachments:** design §2 (`MODE-001`)
   - _Requirements: 14.1_
-- [ ] 8. Phase 1: documentation
-- [ ] 8.1 Phase 1 canonical documentation
+- [x] 8. Phase 1: documentation
+- [x] 8.1 Phase 1 canonical documentation
   - **Objective:** Make the canonical documentation describe what Phase 1 delivers, so it is current when the Phase 1 PR merges.
   - **Files:**
     - `docs/adr/0028-kyber-arbiter-three-step-decision-gates.md` (new)
@@ -840,8 +840,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 1.1–1.9, 2.1, 3.1, 3.2, 4.1–4.4, 5.1–5.3, 6.1–6.6, 7.1–7.4
   - **Packet attachments:** the design, the requirements and the delivered code. A documentation task may read the specification (Req 25.3).
   - _Requirements: 7.3, 20.1, 20.3_
-- [ ] 9. Phase 1: verification
-- [ ] 9.1 Phase 1 integrated verification
+- [x] 9. Phase 1: verification
+- [x] 9.1 Phase 1 integrated verification
   - **Objective:** Prove the Phase 1 tree against every gate the repository requires, before review.
   - **Files:** none. This task verifies only.
   - **Acceptance:**
@@ -867,8 +867,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 8.1
   - **Packet attachments:** none
   - _Requirements: 7.1, 13.1_
-- [ ] 10. Phase 1: review
-- [ ] 10.1 Phase 1 code review
+- [x] 10. Phase 1: review
+- [x] 10.1 Phase 1 code review
   - **Objective:** One council pass over the Phase 1 PR.
   - **Files:** none.
   - **Acceptance:**
@@ -878,8 +878,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 9.1
   - **Packet attachments:** none
   - _Requirements: 13.1, 13.2_
-- [ ] 11. Phase 2: owned blocks in shared hook files
-- [ ] 11.1 JSON hook-block splice
+- [x] 11. Phase 2: owned blocks in shared hook files
+- [x] 11.1 JSON hook-block splice
   - **Objective:** Splice, identify, remove and diff Squad's entries inside a hook file the user also owns, without disturbing the user's entries. It covers every shared-file shape the later harnesses need.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Deployment/SquadHookJsonBlock.cs` (new)
@@ -909,7 +909,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 10.1 (phase gate)
   - **Packet attachments:** design §10.4; [F6], [F7], [F10], [F11], [F12]
   - _Requirements: 8.1, 8.2, 8.4_
-- [ ] 11.2 Receipt v3, render blocks, deployment plan and lifecycle
+- [x] 11.2 Receipt v3, render blocks, deployment plan and lifecycle
   - **Objective:** Carry rendered blocks from renderers to the receipt, so install, update and uninstall own exactly the block.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/SquadRenderModels.cs`: `SquadRenderResult` gains an optional trailing `IReadOnlyList<SquadRenderedBlock>? Blocks = null`; `SquadRenderedBlock(Target, RelativePath, Format, Entries)` is new
@@ -935,7 +935,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 11.1
   - **Packet attachments:** design §10.4
   - _Requirements: 8.1, 8.2, 8.4_
-- [ ] 11.3 Block drift in `squad status` and `squad doctor`
+- [x] 11.3 Block drift in `squad status` and `squad doctor`
   - **Objective:** Report owned blocks, and any hand edits inside them.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Squad/SquadStatusCommand.cs`
@@ -948,8 +948,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 11.2
   - **Packet attachments:** design §10.4
   - _Requirements: 8.4_
-- [ ] 12. Phase 2: Pi, Codex and Cursor
-- [ ] 12.1 Pi adapter
+- [x] 12. Phase 2: Pi, Codex and Cursor
+- [x] 12.1 Pi adapter
   - **Objective:** Accept Pi dispatches through the plugin envelope.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/PluginHookAdapters.cs` (register `pi`: tool `Agent`, target `subagent_type`, prompt `prompt`)
@@ -961,7 +961,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 10.1 (phase gate)
   - **Packet attachments:** design §1.7 (the plugin input); [F8]
   - _Requirements: 5.1, 6.2, 25.1_
-- [ ] 12.2 Pi renderer extension
+- [x] 12.2 Pi renderer extension
   - **Objective:** Render the Pi extension that bridges to the binary.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`
@@ -978,7 +978,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 10.1 (phase gate)
   - **Packet attachments:** design §1.7, §10.2 (the Pi row); [F8]
   - _Requirements: 6.2, 22.2, 25.1_
-- [ ] 12.3 Codex adapter
+- [x] 12.3 Codex adapter
   - **Objective:** Gate Codex sub-agent spawns, and strip routing headers through `updatedInput`.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/CodexHookAdapter.cs` (new)
@@ -997,7 +997,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 10.1 (phase gate)
   - **Packet attachments:** design §1.7, §9.1 (the Codex row), §12; [F7]
   - _Requirements: 5.1, 6.2, 25.1_
-- [ ] 12.4 Codex renderer block
+- [x] 12.4 Codex renderer block
   - **Objective:** Render Squad's owned block in `.codex/hooks.json`.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`
@@ -1010,7 +1010,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 11.2
   - **Packet attachments:** design §10.2 (the Codex row), §10.4; [F7]
   - _Requirements: 6.2, 8.1, 8.2, 22.2_
-- [ ] 12.5 Cursor adapter
+- [x] 12.5 Cursor adapter
   - **Objective:** Gate Cursor `Task` dispatches.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/CursorHookAdapter.cs` (new)
@@ -1031,7 +1031,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 12.3 (shared `CommandHookAdapters.cs`)
   - **Packet attachments:** design §1.7, §9.1 (the Cursor row), §12; [F6]
   - _Requirements: 5.1, 6.2, 25.1_
-- [ ] 12.6 Cursor renderer block
+- [x] 12.6 Cursor renderer block
   - **Objective:** Render Squad's owned block in `.cursor/hooks.json`.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`
@@ -1043,7 +1043,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 11.2
   - **Packet attachments:** design §10.2 (the Cursor row), §10.4; [F6]
   - _Requirements: 5.3, 6.2, 8.1, 8.2, 22.2_
-- [ ] 12.7 Phase 2 target roster and trust steps
+- [x] 12.7 Phase 2 target roster and trust steps
   - **Objective:** Mark Pi, Codex and Cursor as hooked, and give their trust steps.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ArbiterHookWiring.cs`
@@ -1057,8 +1057,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 12.2, 12.4, 12.6
   - **Packet attachments:** design §10.7
   - _Requirements: 6.2, 22.2_
-- [ ] 13. Phase 2: documentation
-- [ ] 13.1 Phase 2 canonical documentation
+- [x] 13. Phase 2: documentation
+- [x] 13.1 Phase 2 canonical documentation
   - **Objective:** Make the canonical documentation describe owned blocks and the Phase 2 harnesses.
   - **Files:**
     - `docs/adr/0029-squad-owned-blocks-in-shared-hook-files.md` (new)
@@ -1080,8 +1080,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 11.3, 12.1, 12.5, 12.7
   - **Packet attachments:** the design, the requirements and the delivered code
   - _Requirements: 8.3, 7.3_
-- [ ] 14. Phase 2: verification
-- [ ] 14.1 Phase 2 integrated verification
+- [x] 14. Phase 2: verification
+- [x] 14.1 Phase 2 integrated verification
   - **Objective:** Prove the Phase 2 tree before review.
   - **Files:** none.
   - **Acceptance:**
@@ -1097,8 +1097,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 13.1
   - **Packet attachments:** none
   - _Requirements: 8.1, 8.4_
-- [ ] 15. Phase 2: review
-- [ ] 15.1 Phase 2 code review
+- [x] 15. Phase 2: review
+- [x] 15.1 Phase 2 code review
   - **Objective:** One council pass over the Phase 2 PR.
   - **Files:** none.
   - **Acceptance:** `code-reviewer` runs once over the Phase 2 change, passing `--base` to `review gates`.
@@ -1106,8 +1106,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 14.1
   - **Packet attachments:** none
   - _Requirements: 13.1_
-- [ ] 16. Phase 3: Kilo, Antigravity, Factory and Devin
-- [ ] 16.1 Kilo adapter
+- [x] 16. Phase 3: Kilo, Antigravity, Factory and Devin
+- [x] 16.1 Kilo adapter
   - **Objective:** Accept Kilo dispatches through the plugin envelope.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/PluginHookAdapters.cs` (register `kilo`: tool `task`, target `subagent_type`, prompt `prompt`)
@@ -1117,7 +1117,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** [F4], [F9]
   - _Requirements: 6.3, 25.1_
-- [ ] 16.2 Kilo renderer shim
+- [x] 16.2 Kilo renderer shim
   - **Objective:** Render the Kilo plugin from the OpenCode shim generator.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`
@@ -1129,7 +1129,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §10.2 (the Kilo row); [F9]
   - _Requirements: 6.3, 22.2, 25.1_
-- [ ] 16.3 Antigravity adapter
+- [x] 16.3 Antigravity adapter
   - **Objective:** Gate Antigravity `invoke_subagent` calls, each of which may launch several sub-agents.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/AntigravityHookAdapter.cs` (new)
@@ -1148,7 +1148,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §1.7, §9.1 (the Antigravity row); [F10]
   - _Requirements: 5.1, 6.3_
-- [ ] 16.4 Antigravity renderer group
+- [x] 16.4 Antigravity renderer group
   - **Objective:** Render Squad's owned hook group in `.agents/hooks.json`.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`
@@ -1161,7 +1161,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §10.2 (the Antigravity row), §10.4, §10.5; [F10]
   - _Requirements: 6.3, 8.1, 8.2, 22.2_
-- [ ] 16.5 Factory adapter
+- [x] 16.5 Factory adapter
   - **Objective:** Gate Factory `Task` dispatches.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/FactoryHookAdapter.cs` (new)
@@ -1180,7 +1180,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.3 (shared `CommandHookAdapters.cs`)
   - **Packet attachments:** design §1.7, §9.1 (the Factory row), §12; [F11]
   - _Requirements: 5.1, 6.3, 25.1_
-- [ ] 16.6 Factory renderer block and shadowing check
+- [x] 16.6 Factory renderer block and shadowing check
   - **Objective:** Render Squad's owned block in `.factory/hooks.json`, except where that would shadow the user's own hooks.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`
@@ -1195,7 +1195,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §10.2 (the Factory row), §10.4, §10.8; [F11]
   - _Requirements: 6.3, 8.1, 8.2, 22.2_
-- [ ] 16.7 Devin adapter
+- [x] 16.7 Devin adapter
   - **Objective:** Gate Devin `run_subagent` calls.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/Adapters/DevinHookAdapter.cs` (new)
@@ -1214,7 +1214,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.5 (shared `CommandHookAdapters.cs`)
   - **Packet attachments:** design §1.7, §9.1 (the Devin row), §12; [F12]
   - _Requirements: 5.1, 6.3, 25.1_
-- [ ] 16.8 Devin renderer block
+- [x] 16.8 Devin renderer block
   - **Objective:** Render Squad's owned block in `.devin/hooks.v1.json`.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/DevinRenderer.cs`
@@ -1227,7 +1227,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §10.2 (the Devin row), §10.4, §10.5; [F12]
   - _Requirements: 6.3, 8.1, 8.2, 22.2_
-- [ ] 16.9 Unobservable returns (blocked until Q17 is answered; written to option (a))
+- [x] 16.9 Unobservable returns (blocked until Q17 is answered; written to option (a))
   - **Objective:** Keep pre-dispatch gating useful where a harness cannot observe returns.
   - **Files:**
     - `src/KyberWeave.Arbiter/Hooks/IHarnessHookAdapter.cs` (`ObservesReturns`, a default interface member that is `true`)
@@ -1242,8 +1242,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.3; decision gate Q17
   - **Packet attachments:** design §2; the Q17 decision text
   - _Requirements: 6.3, 10.1, 14.4_
-- [ ] 17. Phase 3: MCP fallback for Warp and ZCode
-- [ ] 17.1 `kyber-weave-arbiter serve`
+- [x] 17. Phase 3: MCP fallback for Warp and ZCode
+- [x] 17.1 `kyber-weave-arbiter serve`
   - **Objective:** Serve the D4 fallback as a stdio MCP server in the Arbiter binary.
   - **Files:**
     - `src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj` (`ModelContextProtocol` 2.2.0 and `Microsoft.Extensions.Hosting` 10.0.12, the versions `KyberWeave.Mcp` pins)
@@ -1264,7 +1264,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 15.1 (phase gate)
   - **Packet attachments:** design §1.9
   - _Requirements: 2.1, 4.1, 4.2, 18.3_
-- [ ] 17.2 Renderer MCP grants and filters
+- [x] 17.2 Renderer MCP grants and filters
   - **Objective:** Grant the Arbiter server only to `decision.query: allow` agents on fallback targets, and to no agent on a hooked target.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs` (`QualifiedMcpToolNames`, `GrantsMcp`)
@@ -1278,7 +1278,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.8 (shared `DevinRenderer.cs`)
   - **Packet attachments:** design §10.6
   - _Requirements: 4.1, 6.5_
-- [ ] 17.3 `decision.query` and the Arbiter server in canonical Squad data
+- [x] 17.3 `decision.query` and the Arbiter server in canonical Squad data
   - **Objective:** Add the capability to every profile, and declare the Arbiter server and its tools.
   - **Files:**
     - `products/kyber-squad/profiles/capabilities.yml`
@@ -1297,7 +1297,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 17.1, 17.2
   - **Packet attachments:** design §10.6
   - _Requirements: 4.1, 6.5_
-- [ ] 17.4 Fallback contract text
+- [x] 17.4 Fallback contract text
   - **Objective:** Tell the conductor and the review council what to do when they hold `arbiter_evaluate`.
   - **Files:**
     - `products/kyber-squad/agents/conductor.md`
@@ -1315,7 +1315,7 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 17.1
   - **Packet attachments:** design §1.9, §5, §10.6
   - _Requirements: 4.1, 4.2_
-- [ ] 17.5 Phase 3 target roster, fallback records and setup steps
+- [x] 17.5 Phase 3 target roster, fallback records and setup steps
   - **Objective:** Mark the Phase 3 harnesses as hooked or fallback-only, and give their setup steps.
   - **Files:**
     - `src/KyberWeave.Core/Squad/Rendering/ArbiterHookWiring.cs`
@@ -1328,8 +1328,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.2, 16.4, 16.6, 16.8
   - **Packet attachments:** design §10.5, §10.7
   - _Requirements: 6.3, 6.5, 22.2_
-- [ ] 18. Phase 3: documentation
-- [ ] 18.1 Phase 3 canonical documentation
+- [x] 18. Phase 3: documentation
+- [x] 18.1 Phase 3 canonical documentation
   - **Objective:** Make the canonical documentation describe the Phase 3 harnesses and the fallback.
   - **Files:**
     - `docs/kyber-arbiter/architecture.md`
@@ -1351,8 +1351,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 16.1, 16.7, 16.9, 17.3, 17.4, 17.5
   - **Packet attachments:** the design, the requirements and the delivered code
   - _Requirements: 4.3, 7.3_
-- [ ] 19. Phase 3: verification
-- [ ] 19.1 Phase 3 integrated verification
+- [x] 19. Phase 3: verification
+- [x] 19.1 Phase 3 integrated verification
   - **Objective:** Prove the Phase 3 tree before review.
   - **Files:** none.
   - **Acceptance:**
@@ -1369,8 +1369,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 18.1
   - **Packet attachments:** none
   - _Requirements: 4.1, 6.3, 6.5_
-- [ ] 20. Phase 3: review
-- [ ] 20.1 Phase 3 code review
+- [x] 20. Phase 3: review
+- [x] 20.1 Phase 3 code review
   - **Objective:** One council pass over the Phase 3 PR.
   - **Files:** none.
   - **Acceptance:** `code-reviewer` runs once over the Phase 3 change, passing `--base` to `review gates`. `NEEDS_HUMAN` is expected on reserved paths (D13).
@@ -1378,8 +1378,8 @@ Resolved to option (a): dispatch targets receive frontmatter `PreToolUse` hook o
   - **Depends on:** 19.1
   - **Packet attachments:** none
   - _Requirements: 13.1_
-- [ ] 21. Closeout
-- [ ] 21.1 `docs-dev` closeout
+- [x] 21. Closeout
+- [x] 21.1 `docs-dev` closeout
   - **Objective:** Verify the whole delivery, finish the canonical documentation, archive this specification, and remove the superseded plan.
   - **Files:**
     - The canonical documents created in 8.1, 13.1 and 18.1, for final consistency only
