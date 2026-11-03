@@ -32,15 +32,39 @@ public static class SquadWorktreeMcp
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(canonicalRoot);
 
-        string absoluteCanonicalRoot = Path.GetFullPath(canonicalRoot);
+        if (!Path.IsPathRooted(canonicalRoot))
+        {
+            throw new ArgumentException(
+                "The canonical root must be an absolute path; a relative value would resolve against the " +
+                "caller's current directory, which may be the worktree rather than the canonical checkout.",
+                nameof(canonicalRoot));
+        }
+
+        string absoluteCanonicalRoot = ResolveRealPath(Path.GetFullPath(canonicalRoot));
         List<string> spliced = new(args.Count);
 
         for (int i = 0; i < args.Count; i++)
         {
             string current = args[i];
-
-            if (string.Equals(current, "--repo-root", StringComparison.Ordinal) && i + 1 < args.Count)
+            if (string.IsNullOrWhiteSpace(current))
             {
+                throw new ArgumentException(
+                    "Command-line arguments must not contain null or whitespace entries.",
+                    nameof(args));
+            }
+
+            if (string.Equals(current, "--repo-root", StringComparison.Ordinal))
+            {
+                if (i + 1 >= args.Count)
+                {
+                    throw new ArgumentException("--repo-root requires a value.", nameof(args));
+                }
+
+                if (string.IsNullOrWhiteSpace(args[i + 1]))
+                {
+                    throw new ArgumentException("--repo-root requires a non-empty value.", nameof(args));
+                }
+
                 spliced.Add(current);
                 spliced.Add(absoluteCanonicalRoot);
                 i++;
@@ -49,19 +73,21 @@ public static class SquadWorktreeMcp
             {
                 spliced.Add($"--repo-root={absoluteCanonicalRoot}");
             }
-            else if (string.Equals(current, "--path", StringComparison.Ordinal) && i + 1 < args.Count)
+            else if (string.Equals(current, "--path", StringComparison.Ordinal))
             {
+                if (i + 1 >= args.Count)
+                {
+                    throw new ArgumentException("--path requires a value.", nameof(args));
+                }
+
                 spliced.Add(current);
-                string pathVal = args[i + 1];
-                string resolvedPath = ResolveAndValidateContainedPath(pathVal, absoluteCanonicalRoot);
-                spliced.Add(resolvedPath);
+                spliced.Add(ResolveAndValidateContainedPath(args[i + 1], absoluteCanonicalRoot));
                 i++;
             }
             else if (current.StartsWith("--path=", StringComparison.Ordinal))
             {
                 string pathVal = current["--path=".Length..];
-                string resolvedPath = ResolveAndValidateContainedPath(pathVal, absoluteCanonicalRoot);
-                spliced.Add($"--path={resolvedPath}");
+                spliced.Add($"--path={ResolveAndValidateContainedPath(pathVal, absoluteCanonicalRoot)}");
             }
             else
             {
@@ -79,9 +105,10 @@ public static class SquadWorktreeMcp
             throw new ArgumentException("Path traversal outside canonical repository root is prohibited.");
         }
 
-        string resolvedPath = Path.IsPathRooted(pathVal)
-            ? Path.GetFullPath(pathVal)
-            : Path.GetFullPath(pathVal, absoluteCanonicalRoot);
+        string resolvedPath = ResolveRealPath(
+            Path.IsPathRooted(pathVal)
+                ? Path.GetFullPath(pathVal)
+                : Path.GetFullPath(pathVal, absoluteCanonicalRoot));
 
         string prefix = absoluteCanonicalRoot.EndsWith(Path.DirectorySeparatorChar)
             ? absoluteCanonicalRoot
@@ -94,6 +121,56 @@ public static class SquadWorktreeMcp
         }
 
         return resolvedPath;
+    }
+
+    /// <summary>
+    ///     Resolves every symbolic link in an absolute path so the containment check sees the path
+    ///     real I/O would reach, not just its lexically normalized spelling.
+    /// </summary>
+    private static string ResolveRealPath(string absolutePath)
+    {
+        string root = Path.GetPathRoot(absolutePath)
+                      ?? throw new ArgumentException("The path must be absolute.", nameof(absolutePath));
+        string current = root;
+
+        foreach (string segment in absolutePath[root.Length..].Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+
+            FileSystemInfo info = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+
+            if (info.LinkTarget is not null)
+            {
+                FileSystemInfo? target;
+                try
+                {
+                    target = info.ResolveLinkTarget(returnFinalTarget: true);
+                }
+                catch (IOException ex)
+                {
+                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(absolutePath), ex);
+                }
+
+                if (target is null)
+                {
+                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(absolutePath));
+                }
+
+                current = target.FullName;
+            }
+            else if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                throw new ArgumentException(
+                    $"Reparse point '{current}' cannot be resolved safely.",
+                    nameof(absolutePath));
+            }
+        }
+
+        return current;
     }
 
     /// <summary>
@@ -140,13 +217,4 @@ public static class SquadWorktreeMcp
                 "Worktrees must not symlink .codegraph; access CodeGraph through the canonical root binding.");
     }
 
-    /// <summary>
-    ///     Alias for <see cref="EnsureNoCodegraphSymlink(string)" />.
-    /// </summary>
-    /// <param name="worktreeDirectory">The path to the worktree directory.</param>
-    [UsedImplicitly]
-    public static void VerifyNoCodegraphSymlink(string worktreeDirectory)
-    {
-        EnsureNoCodegraphSymlink(worktreeDirectory);
-    }
 }

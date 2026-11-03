@@ -168,4 +168,84 @@ public sealed class SquadWorktreeMcpContractTests
 
         Assert.Throws<ArgumentException>(() => SquadWorktreeMcp.SpliceArguments(inputArgs, canonicalRoot));
     }
+
+    /// <summary>
+    ///     A relative canonical root would be resolved against the caller's current directory, which
+    ///     may be the worktree rather than the canonical checkout, so it must fail closed.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenCanonicalRootIsRelative_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(["--repo-root", "."], "relative/canonical/root"));
+    }
+
+    /// <summary>
+    ///     A trailing <c>--repo-root</c> without a value must fail closed rather than pass the bare
+    ///     flag to the child process.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenRepoRootFlagHasNoValue_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(["--repo-root"], Path.GetFullPath("/canonical/repo/root")));
+    }
+
+    /// <summary>
+    ///     A trailing <c>--path</c> without a value must fail closed rather than pass the bare flag
+    ///     to the child process.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenPathFlagHasNoValue_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(["--path"], Path.GetFullPath("/canonical/repo/root")));
+    }
+
+    /// <summary>
+    ///     A null element in the argument list must be rejected as an argument error, not escape as
+    ///     a <see cref="NullReferenceException" />.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenArgumentElementIsNull_ThrowsArgumentException()
+    {
+        string[] inputArgs = ["--repo-root", ".", null!];
+
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(inputArgs, Path.GetFullPath("/canonical/repo/root")));
+    }
+
+    /// <summary>
+    ///     A <c>--path</c> that is a symlink to a directory outside the canonical root must be
+    ///     rejected: lexical normalization alone does not follow the link, so real I/O would escape.
+    /// </summary>
+    [Fact]
+    public void WorktreeMcpHelper_WhenPathSymlinkEscapesCanonicalRoot_ThrowsArgumentException()
+    {
+        using TempDirectory canonicalRoot = new();
+        using TempDirectory outsideRoot = new();
+
+        string linkPath = Path.Combine(canonicalRoot.Path, "escape");
+        Directory.CreateSymbolicLink(linkPath, outsideRoot.Path);
+
+        Assert.Throws<ArgumentException>(
+            () => SquadWorktreeMcp.SpliceArguments(["--path", "escape"], canonicalRoot.Path));
+    }
+
+    /// <summary>
+    ///     The conductor surfaces must enumerate every tracked MCP configuration a worktree setup can
+    ///     rewrite, so a machine-specific absolute path is restored from all of them before integration.
+    /// </summary>
+    [Theory]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(ConductorExecutionPath)]
+    public void ConductorSurfaces_EnumerateTrackedMcpConfigsRestoredAfterWorktreeSetup(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        Assert.Contains("git checkout --", content, StringComparison.Ordinal);
+        Assert.Contains(".mcp.json", content, StringComparison.Ordinal);
+        Assert.Contains(".factory/mcp.json", content, StringComparison.Ordinal);
+        Assert.Contains(".agents/mcp_config.json", content, StringComparison.Ordinal);
+    }
 }
