@@ -60,10 +60,20 @@ public static class CallerResolver
         if (Header(headers, "LENS") is not null || Header(headers, "REFUTE") is not null)
             return "code-reviewer";
         string? target = Header(headers, "TARGET") ?? Header(headers, "DELEGATION_TARGET");
-        if (target is not null && target.Contains("planner", StringComparison.OrdinalIgnoreCase))
+        if (target is not null && IsPlannerTarget(target))
             return "conductor";
         return null;
     }
+
+    /// <summary>
+    /// The canonical planner agents. A target name is matched exactly, never by a
+    /// substring: <c>release-planner-tool</c> is not a planner and must not make a
+    /// non-conductor caller look like the conductor.
+    /// </summary>
+    private static bool IsPlannerTarget(string target) =>
+        target.Equals("architect", StringComparison.OrdinalIgnoreCase)
+        || target.Equals("product-owner", StringComparison.OrdinalIgnoreCase)
+        || target.Equals("product-planning", StringComparison.OrdinalIgnoreCase);
 
     private static string? Header(IReadOnlyDictionary<string, string?> headers, string name)
     {

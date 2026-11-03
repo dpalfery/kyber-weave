@@ -169,6 +169,32 @@ public sealed class ArbiterReadersTests : IDisposable
     }
 
     [Fact]
+    public void BlobIds_IgnoreRootedAndParentEscapingPaths()
+    {
+        string repo = InitRepoWithCommit("inside.txt");
+        try
+        {
+            File.WriteAllText(Path.Combine(repo, "inside.txt"), "two\n");
+            string outside = Path.Combine(Path.GetDirectoryName(repo)!, "outside.txt");
+            File.WriteAllText(outside, "outside\n");
+
+            IReadOnlyDictionary<string, string> blobs = GitFacts.GetBlobIds(
+                repo,
+                ["inside.txt", "/etc/passwd", outside, "../outside.txt", "a\nb"]);
+
+            Assert.Contains("inside.txt", blobs.Keys);
+            Assert.DoesNotContain("/etc/passwd", blobs.Keys);
+            Assert.DoesNotContain(outside, blobs.Keys);
+            Assert.DoesNotContain("../outside.txt", blobs.Keys);
+            Assert.DoesNotContain("a\nb", blobs.Keys);
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
     public void OutsideARepositoryOrWithoutGit_EveryGitFactIsAbsentAndNothingThrows()
     {
         string plain = NewTempPath();
@@ -259,11 +285,18 @@ public sealed class ArbiterReadersTests : IDisposable
 
         Dictionary<string, string?> plannerHeaders = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["TARGET"] = "squad-planner",
+            ["TARGET"] = "architect",
         };
         CallerResolution planner = CallerResolver.Resolve(headers: plannerHeaders);
         Assert.Equal(CallerSource.Header, planner.Source);
         Assert.Equal("conductor", planner.Caller);
+
+        Dictionary<string, string?> lookalikeHeaders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["TARGET"] = "release-planner-tool",
+        };
+        CallerResolution lookalike = CallerResolver.Resolve(headers: lookalikeHeaders);
+        Assert.Equal(CallerSource.None, lookalike.Source);
 
         Dictionary<string, string?> markerOnly = new(StringComparer.OrdinalIgnoreCase)
         {

@@ -80,7 +80,7 @@ public static class GitFacts
         // hash-object aborts the whole batch on the first unreadable path, so only
         // files that still exist go on stdin; the rest have no blob to record.
         List<string> existing = paths
-            .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(Path.Combine(workingDirectory, p)))
+            .Where(p => IsRepoRelative(p) && File.Exists(Path.Combine(workingDirectory, p)))
             .Distinct(StringComparer.Ordinal)
             .ToList();
         Dictionary<string, string> blobs = new(StringComparer.Ordinal);
@@ -229,6 +229,18 @@ public static class GitFacts
     }
 
     /// <returns>The child's stdout on exit zero; <c>null</c> when git cannot answer.</returns>
+    /// <summary>
+    /// A plan path is repository-relative: a rooted path, a parent segment, or an embedded
+    /// newline would either escape the repository or add a second path to the
+    /// <c>--stdin-paths</c> batch. Those never reach <c>File.Exists</c> or git.
+    /// </summary>
+    private static bool IsRepoRelative(string path) =>
+        !string.IsNullOrWhiteSpace(path)
+        && !Path.IsPathRooted(path)
+        && !path.Contains('\n', StringComparison.Ordinal)
+        && !path.Contains('\r', StringComparison.Ordinal)
+        && !path.Split('/', '\\').Any(segment => segment == "..");
+
     private static string? RunGit(
         string workingDirectory,
         string gitExecutable,

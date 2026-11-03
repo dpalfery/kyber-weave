@@ -26,6 +26,11 @@ public sealed class LoopbackAddressTests
     [InlineData("[0:0:0:0:0:0:0:1]")]
     [InlineData("127.0.0.1")]
     [InlineData("127.1.2.3")]
+    // inet_aton spellings of 127.0.0.1.
+    [InlineData("2130706433")]
+    [InlineData("0x7f000001")]
+    [InlineData("0x7f.0.0.1")]
+    [InlineData("0177.0.0.1")]
     [InlineData("::1")]
     public void ALoopbackHostIsRecognized(string host)
     {
@@ -46,6 +51,7 @@ public sealed class LoopbackAddressTests
     [InlineData("example.com")]
     [InlineData("192.168.1.1")]
     [InlineData("10.0.0.1")]
+    [InlineData("3232235777")]
     public void ANonLoopbackHostIsNot(string host)
     {
         Assert.False(LoopbackAddress.IsLoopbackHost(host));

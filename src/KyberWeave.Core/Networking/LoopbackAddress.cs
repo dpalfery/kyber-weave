@@ -52,7 +52,94 @@ internal static class LoopbackAddress
             return true;
         }
 
-        return IPAddress.TryParse(normalized, out IPAddress? address) && IsLoopback(address);
+        if (IPAddress.TryParse(normalized, out IPAddress? address) && IsLoopback(address))
+        {
+            return true;
+        }
+
+        return TryParseNonCanonical(normalized, out IPAddress? nonCanonical)
+            && nonCanonical is not null
+            && IsLoopback(nonCanonical);
+    }
+
+    /// <summary>
+    /// The inet_aton spellings <see cref="IPAddress.TryParse(string, out IPAddress)"/> does not
+    /// accept: one 32-bit integer, or four dotted parts in decimal, octal or hexadecimal.
+    /// A loopback endpoint written that way must not be mistaken for a remote host, which
+    /// would send its key over the network or refuse a local provider.
+    /// </summary>
+    private static bool TryParseNonCanonical(string host, out IPAddress? address)
+    {
+        address = null;
+        string[] parts = host.Split('.');
+        if (parts.Length == 1)
+        {
+            if (TryParsePart(parts[0], out uint single))
+            {
+                address = new IPAddress(single);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (parts.Length != 4)
+        {
+            return false;
+        }
+
+        byte[] bytes = new byte[4];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!TryParsePart(parts[i], out uint part) || part > byte.MaxValue)
+            {
+                return false;
+            }
+
+            bytes[i] = (byte)part;
+        }
+
+        address = new IPAddress(bytes);
+        return true;
+    }
+
+    private static bool TryParsePart(string text, out uint value)
+    {
+        value = 0;
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return uint.TryParse(
+                text[2..],
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value);
+        }
+
+        if (text.Length > 1 && text[0] == '0')
+        {
+            foreach (char digit in text.AsSpan(1))
+            {
+                if (digit is < '0' or > '7')
+                {
+                    return false;
+                }
+
+                value = (value * 8) + (uint)(digit - '0');
+            }
+
+            return true;
+        }
+
+        return uint.TryParse(
+            text,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out value);
     }
 
     /// <summary>The name with a single trailing root dot removed, and otherwise unchanged.</summary>
