@@ -90,6 +90,15 @@ public sealed class ArbiterRuleEngineTests
     }
 
     [Fact]
+    public void Equals_EqualFiniteDoublesTooLargeForDecimal_CompareTrue()
+    {
+        ArbiterFactSet facts = Facts(("huge", 1e300, ArbiterFactLabel.Asserted));
+
+        Assert.True(RulePredicate.Equals("huge", RuleOperand.Literal(1e300)).Evaluate(facts));
+        Assert.False(RulePredicate.Equals("huge", RuleOperand.Literal(1e299)).Evaluate(facts));
+    }
+
+    [Fact]
     public void Equals_FactRef_ComparesTwoFacts()
     {
         ArbiterFactSet facts = Facts(

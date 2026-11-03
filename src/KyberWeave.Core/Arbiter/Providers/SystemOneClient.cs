@@ -123,7 +123,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                 response = await _client.SendAsync(
                     request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 return UndecidableAll(askRules, null, null, true);
             }
@@ -147,7 +147,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                     {
                         await Task.Delay(delay, timeout.Token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
                         return UndecidableAll(askRules, null, null, true);
                     }
@@ -185,7 +185,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 
                     body = Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     return UndecidableAll(askRules, null, null, true);
                 }
@@ -274,10 +274,21 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                 return RuleEngine.Undecidable;
             }
 
-            string mapped = rule.Ask.Levels is { Count: > 0 } levels
-                ? levels[(int)Math.Clamp(
-                    Math.Round(score, MidpointRounding.AwayFromZero), 0d, levels.Count - 1d)]
-                : score.ToString(CultureInfo.InvariantCulture);
+            string mapped;
+            if (rule.Ask.Levels is { Count: > 0 } levels)
+            {
+                double rounded = Math.Round(score, MidpointRounding.AwayFromZero);
+                if (rounded < 0 || rounded > levels.Count - 1)
+                {
+                    return RuleEngine.Undecidable;
+                }
+
+                mapped = levels[(int)rounded];
+            }
+            else
+            {
+                mapped = score.ToString(CultureInfo.InvariantCulture);
+            }
             return rule.Answers.Contains(mapped, StringComparer.Ordinal)
                 ? mapped
                 : RuleEngine.Undecidable;

@@ -468,9 +468,22 @@ public sealed record RulePredicate
 
         if (IsNumeric(left) && IsNumeric(right))
         {
-            return TryToDecimal(left, out decimal leftDecimal)
-                && TryToDecimal(right, out decimal rightDecimal)
-                && leftDecimal == rightDecimal;
+            if (TryToDecimal(left, out decimal leftDecimal)
+                && TryToDecimal(right, out decimal rightDecimal))
+            {
+                return leftDecimal == rightDecimal;
+            }
+
+            // Two finite floating-point values too large for decimal still compare
+            // as doubles. Non-finite values are unequal, never an error.
+            if (IsFloating(left) && IsFloating(right))
+            {
+                double leftDouble = Convert.ToDouble(left, System.Globalization.CultureInfo.InvariantCulture);
+                double rightDouble = Convert.ToDouble(right, System.Globalization.CultureInfo.InvariantCulture);
+                return double.IsFinite(leftDouble) && double.IsFinite(rightDouble) && leftDouble == rightDouble;
+            }
+
+            return false;
         }
 
         return left.Equals(right);
@@ -478,6 +491,8 @@ public sealed record RulePredicate
 
     private static bool IsNumeric(object value) =>
         value is sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal;
+
+    private static bool IsFloating(object value) => value is float or double;
 
     /// <summary>
     /// Converts a numeric fact to <see cref="decimal"/> without letting a non-finite or
@@ -491,7 +506,7 @@ public sealed record RulePredicate
             result = Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
             return true;
         }
-        catch (OverflowException)
+        catch (Exception ex) when (ex is OverflowException or FormatException or InvalidCastException)
         {
             result = default;
             return false;

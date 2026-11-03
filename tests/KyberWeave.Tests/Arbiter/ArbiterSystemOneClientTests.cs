@@ -176,7 +176,7 @@ public sealed class ArbiterSystemOneClientTests
     }
 
     [Fact]
-    public async Task Score_OutOfRangeValue_ClampsToTheLastLevelInsteadOfOverflowing()
+    public async Task Score_OutOfRangeValue_IsUndecidable()
     {
         const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + ScoreRuleId + "\":" +
             "{\"type\":\"score\",\"score\":1e300,\"legend\":{\"0\":\"low\",\"1\":\"high\"}," +
@@ -186,7 +186,19 @@ public sealed class ArbiterSystemOneClientTests
 
         ArbiterStep1BatchResult result = await client.AskStep1Async([ScoreRule()], Facts());
 
-        Assert.Equal("high", result.AnswersByRule[ScoreRuleId]);
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ScoreRuleId]);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_PropagatesInsteadOfBecomingUndecidable()
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody()));
+        using SystemOneClient client = Client(handler);
+        using CancellationTokenSource cancellation = new();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.AskStep1Async([ChoiceRule()], Facts(), cancellationToken: cancellation.Token));
     }
 
     [Fact]
