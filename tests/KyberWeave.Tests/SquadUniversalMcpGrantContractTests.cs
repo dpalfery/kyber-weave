@@ -519,6 +519,36 @@ public sealed class SquadUniversalMcpGrantContractTests
     }
 
     /// <summary>
+    /// Antigravity must apply the orchestrator-excluded partition to every declared server, not only
+    /// to <c>codegraph</c>: a future <c>context7</c> declaration is granted to read-entitled
+    /// specialists, withheld from <c>conductor</c>, and emitted in ordinal order.
+    /// </summary>
+    [Fact]
+    public async Task WhenContext7Declared_AntigravityGrantsItToSpecialistsAndWithholdsFromConductor()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("kyber-weave", "context7");
+
+        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".agents/agents/conductor/agent.md");
+        IReadOnlyList<string> conductorServers = McpServerEntryNames(Frontmatter(conductorFile));
+        Assert.Equal(["kyber-weave"], conductorServers);
+
+        foreach (string specialist in new[] { "csharp-dev", "test-dev", "architect" })
+        {
+            SquadDeploymentFile specialistFile = Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".agents/agents/{specialist}/agent.md");
+            IReadOnlyList<string> servers = McpServerEntryNames(Frontmatter(specialistFile));
+            Assert.Equal(["context7", "kyber-weave"], servers);
+        }
+    }
+
+    /// <summary>
     /// When <c>codegraph</c> is declared in <c>products/kyber-squad/mcp.json</c>, FactoryRenderer
     /// emits <c>codegraph</c> in <c>mcpServers</c> for non-orchestrator specialists while withholding
     /// it from <c>conductor</c> (per ADR 0050).
