@@ -2650,6 +2650,36 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// The npm postinstall's shared member check rejects drive-absolute paths and
+    /// backslash parent segments, not only POSIX <c>../</c>.
+    /// </summary>
+    [Fact]
+    public void NpmArchiveEntryValidationRejectsDriveAbsoluteAndParentSegments()
+    {
+        const string Script = """
+            const d = require('./npm/lib/download.js');
+            for (const name of ['kyber-weave', 'dir/file']) d.assertSafeArchiveEntry(name);
+            for (const name of ['../evil', '/abs', 'C:/Temp/pwn.txt', 'C:foo', 'a\\..\\..\\pwn.txt']) {
+              try { d.assertSafeArchiveEntry(name); process.exit(3); } catch {}
+            }
+            """;
+        ProcessStartInfo startInfo = new("node")
+        {
+            WorkingDirectory = KyberWeaveTestPaths.ToolRoot,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-e");
+        startInfo.ArgumentList.Add(Script);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+
+        Assert.True(result.ExitCode == 0, Describe(result));
+    }
+
+    /// <summary>
     /// A byte flipped in the asset after <c>SHA256SUMS.txt</c> is written exits
     /// non-zero, reports a SHA-256 mismatch, and leaves the install directory
     /// without <c>kyber-weave</c>. The live install path must be the thing that

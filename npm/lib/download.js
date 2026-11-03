@@ -188,7 +188,12 @@ function assertSafeArchiveEntry(name) {
     throw new Error("Archive contains an empty member name");
   }
   const normalized = name.replace(/\\/g, "/");
-  if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
+  if (
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:/.test(normalized) ||
+    normalized.includes("\0") ||
+    normalized.split("/").includes("..")
+  ) {
     throw new Error(`Archive contains an unsafe member: ${name}`);
   }
 }
@@ -200,7 +205,8 @@ function assertSafeArchive(archivePath, rid) {
       const script =
         `$zip=[System.IO.Compression.ZipFile]::OpenRead('${escaped}'); ` +
         "try { $zip.Entries | ForEach-Object { " +
-        "if ($_.FullName -match '(^|/)\\.\\.(/|$)' -or [System.IO.Path]::IsPathRooted($_.FullName)) { " +
+        "$name = $_.FullName -replace '\\','/'; " +
+        "if ($name -match '(^|/)\\.\\.(/|$)' -or [System.IO.Path]::IsPathRooted($name) -or $name -match '^[A-Za-z]:') { " +
         "throw \"unsafe zip entry: $($_.FullName)\" } } } finally { $zip.Dispose() }";
       execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
         stdio: "inherit",

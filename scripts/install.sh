@@ -606,16 +606,22 @@ kyber_weave_apply_release_origin
 verify_archive_members() {
     archive="$1"
     members=$(tar -tzf "$archive") || die "could not list ${archive}"
-    printf '%s\n' "$members" | while IFS= read -r member; do
+    while IFS= read -r member; do
         case "$member" in
             /*|../*|*/../*|*/..|..) die "refusing unsafe archive member '${member}' in ${archive}" ;;
         esac
-    done
-    tar -tvzf "$archive" | while IFS= read -r line; do
+    done <<EOF
+$members
+EOF
+    listing=$(tar -tvzf "$archive") || die "could not inspect ${archive}"
+    while IFS= read -r line; do
         case "$line" in
-            l*|h*) die "refusing link member in ${archive}" ;;
+            [-d]*) ;;
+            *) die "refusing a non-regular archive member in ${archive}" ;;
         esac
-    done
+    done <<EOF
+$listing
+EOF
 }
 
 if [ "${KYBER_WEAVE_INSTALL_LIB:-0}" = "1" ]; then
