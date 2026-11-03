@@ -60,8 +60,17 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadHarnessRenderContext context = new(Spec, request, SquadRenderSource.Load(request, Spec.Target));
-        return Task.FromResult(Render(context));
+        SquadSource source = SquadRenderSource.Load(request, Spec.Target);
+
+        // Canonical names become directory and file names in every harness's tree, so a name carrying
+        // path syntax is rejected here, before any file is built from it, rather than left to the
+        // registry's portable-path check after the render.
+        foreach (string name in source.Agents.Select(agent => agent.Name).Concat(source.Skills.Select(skill => skill.Name)))
+        {
+            SquadHarnessRenderContext.ValidateCanonicalName(name);
+        }
+
+        return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
     }
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
@@ -100,7 +109,7 @@ internal sealed class SquadHarnessRenderContext
     private HashSet<string>? _suppressedSkillIdentities;
     private HashSet<string>? _skillNames;
     private string[]? _capabilityVocabulary;
-    private object? _harnessState;
+    private readonly Dictionary<Type, object> _harnessState = [];
 
     public SquadHarnessRenderContext(SquadHarnessSpec spec, SquadRenderRequest request, SquadSource source)
     {
@@ -175,8 +184,19 @@ internal sealed class SquadHarnessRenderContext
     /// concurrent renders, so state that would otherwise be a field lives on the render instead.
     /// </summary>
     public T GetOrCreateState<T>(Func<SquadHarnessRenderContext, T> create)
-        where T : class =>
-        (T)(_harnessState ??= create(this));
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(create);
+        if (_harnessState.TryGetValue(typeof(T), out object? existing))
+        {
+            return (T)existing;
+        }
+
+        T created = create(this) ?? throw new InvalidOperationException(
+            $"Harness '{Token}' produced no {typeof(T).Name} render state.");
+        _harnessState.Add(typeof(T), created);
+        return created;
+    }
 
     public string ResolveDirectory(string subdirectory) => Spec.ResolveDirectory(subdirectory, Scope);
 

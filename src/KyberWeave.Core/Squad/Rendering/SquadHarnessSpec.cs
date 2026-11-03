@@ -153,7 +153,12 @@ internal static class SquadHarnessLowering
         string level = modelValue[(start + suffixPrefix.Length)..^1];
         if (!allowedLevels.Contains(level, StringComparer.Ordinal))
         {
-            string accepted = $"{string.Join(", ", allowedLevels.Take(allowedLevels.Count - 1))}, or {allowedLevels[^1]}";
+            string accepted = allowedLevels.Count switch
+            {
+                0 => "no level",
+                1 => allowedLevels[0],
+                _ => $"{string.Join(", ", allowedLevels.Take(allowedLevels.Count - 1))}, or {allowedLevels[^1]}"
+            };
             throw new SquadRenderValidationException(
                 $"Invalid reasoningEffort '{level}' in model value '{modelValue}': {harnessDisplayName} accepts {accepted}.");
         }

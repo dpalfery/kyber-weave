@@ -285,7 +285,7 @@ public sealed class SquadRendererSharedContractTests
     /// What a harness emits is its own, under its own root: every file carries the harness token and,
     /// at project scope, sits under the spec's root; every record names the harness and carries the
     /// body digest of the agent it describes, so a receipt cannot attribute a lowering to the wrong
-    /// harness or the wrong revision.
+    /// harness, the wrong revision or the wrong output identity.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShippedTargetsAtEachScope))]
@@ -316,6 +316,17 @@ public sealed class SquadRendererSharedContractTests
             Assert.Equal(spec.Token, record.Target);
             Assert.True(agents.TryGetValue(record.CanonicalIdentity, out SquadAgent? agent), record.CanonicalIdentity);
             Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+
+            // A native harness records under the agent's own name; only role-skill lowering may
+            // record the role-prefixed skill it emitted instead.
+            if (SquadTargetCatalog.GetAgentProjection(target) == SquadAgentProjection.Native)
+            {
+                Assert.Equal(record.CanonicalIdentity, record.OutputIdentity);
+            }
+            else
+            {
+                Assert.Contains(record.OutputIdentity, new[] { record.CanonicalIdentity, $"role-{record.CanonicalIdentity}" });
+            }
         });
     }
 
@@ -331,6 +342,7 @@ public sealed class SquadRendererSharedContractTests
         SquadRenderResult project = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Project);
         SquadRenderResult global = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Global);
 
+        Assert.All(project.Files, file => Assert.StartsWith(root, file.RelativePath, StringComparison.Ordinal));
         Assert.Equal(
             project.Files.Select(file => file.RelativePath[root.Length..]).Order(StringComparer.Ordinal),
             global.Files.Select(file => file.RelativePath).Order(StringComparer.Ordinal));

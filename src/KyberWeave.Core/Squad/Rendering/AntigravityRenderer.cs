@@ -120,7 +120,6 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         // Emit canonical skills first, preserving the established ordering.
         foreach (SquadSkill skill in context.Source.Skills)
         {
-            SquadHarnessRenderContext.ValidateCanonicalName(skill.Name);
             context.Files.Add(context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody));
         }
 
@@ -214,7 +213,6 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
 
     private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        SquadHarnessRenderContext.ValidateCanonicalName(agent.Name);
         SquadCapabilityProfiles capabilityProfiles = context.Source.CapabilityProfiles;
         SquadModelProfiles modelProfiles = context.Source.ModelProfiles;
         IReadOnlyList<McpServerDeclaration> declaredMcpServers = context.GetOrCreateState(McpPlan.Create).DeclaredServers;
