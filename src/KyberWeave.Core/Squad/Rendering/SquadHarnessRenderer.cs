@@ -60,18 +60,55 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadRenderSource.Load(request, Spec.Target);
-
-        // Canonical names become directory and file names in every harness's tree, so a name carrying
-        // path syntax is rejected here, before any file is built from it, rather than left to the
-        // registry's portable-path check after the render. Only path syntax is rejected: a name such
-        // as "a..b" is one portable segment and renders as it always has.
-        foreach (string name in source.Agents.Select(agent => agent.Name).Concat(source.Skills.Select(skill => skill.Name)))
+        // Argument and target errors above throw at the call; a failure loading or rendering the
+        // source faults the returned task, as an asynchronous method's failure does.
+        try
         {
-            SquadHarnessRenderContext.ValidatePathSegment(name);
+            SquadSource source = SquadRenderSource.Load(request, Spec.Target);
+            ValidateOutputNames(source);
+            return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException<SquadRenderResult>(exception);
+        }
+    }
+
+    /// <summary>
+    /// Canonical names and resource paths become directory and file names in every harness's tree,
+    /// so anything carrying path syntax is rejected here, before any file is built from it, rather
+    /// than left to the registry's portable-path check after the render. Only path syntax is
+    /// rejected: a name such as "a..b" is one portable segment and renders as it always has.
+    /// </summary>
+    private static void ValidateOutputNames(SquadSource source)
+    {
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadHarnessRenderContext.ValidatePathSegment(agent.Name);
+            ValidateResourcePaths(agent.Name, agent.Resources);
         }
 
-        return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
+        foreach (SquadSkill skill in source.Skills)
+        {
+            SquadHarnessRenderContext.ValidatePathSegment(skill.Name);
+            ValidateResourcePaths(skill.Name, skill.Resources);
+        }
+    }
+
+    private static void ValidateResourcePaths(string owner, IReadOnlyList<SquadResource> resources)
+    {
+        foreach (SquadResource resource in resources)
+        {
+            if (string.IsNullOrWhiteSpace(resource.RelativePath) ||
+                resource.RelativePath.StartsWith('/') ||
+                resource.RelativePath.Contains('\\', StringComparison.Ordinal) ||
+                resource.RelativePath.Split('/').Any(segment => segment.Length == 0 || segment.Trim('.').Length == 0))
+            {
+                throw new SquadRenderValidationException(
+                    $"Resource '{resource.RelativePath}' owned by '{owner}' is not a relative path of portable " +
+                    "segments, so it cannot be projected beside its principal.");
+            }
+        }
     }
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
@@ -228,6 +265,15 @@ internal sealed class SquadHarnessRenderContext
     public SquadDegradationRecord Degradation(SquadAgent agent, string code, string details) =>
         new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
 
+    /// <summary>The fallback profile <paramref name="agent"/> names, failing closed when none is declared.</summary>
+    public SquadFallbackProfile FallbackProfileFor(SquadAgent agent) =>
+        Source.FallbackProfiles.Profiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile)
+            ? profile
+            : throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' references fallback profile '{agent.Fallback}', which " +
+                "profiles/fallbacks.yml does not declare. Declared profiles: " +
+                $"{string.Join(", ", Source.FallbackProfiles.Profiles.Keys.Order(StringComparer.Ordinal))}.");
+
     /// <summary>
     /// Decides how a primary-invocation agent projects on a harness with no primary-agent
     /// primitive, from its fallback profile's <c>no-primary-agent</c> value. A canonical skill
@@ -237,7 +283,7 @@ internal sealed class SquadHarnessRenderContext
     /// </summary>
     public SquadPrimaryLowering ResolvePrimaryLowering(SquadAgent agent, Func<string> collisionMessage)
     {
-        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        SquadFallbackProfile fallbackProfile = FallbackProfileFor(agent);
         if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
         {
             if (!SkillNames.Contains(agent.Name))
@@ -280,7 +326,7 @@ internal sealed class SquadHarnessRenderContext
         Func<SquadFallbackProfile, bool, IEnumerable<SquadDegradationRecord>> loweredRecords)
     {
         SquadPrimaryLowering lowering = ResolvePrimaryLowering(agent, collisionMessage);
-        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        SquadFallbackProfile fallbackProfile = FallbackProfileFor(agent);
         switch (lowering)
         {
             case SquadPrimaryLowering.ReuseCanonicalSkill:
@@ -337,7 +383,7 @@ internal sealed class SquadHarnessRenderContext
             $"identity. {Spec.DisplayName} renders both {agentForm} and an entry-point skill, " +
             "so this is a fail-closed condition rather than a naming collision " +
             "this renderer can resolve on its own.");
-        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        SquadFallbackProfile fallbackProfile = FallbackProfileFor(agent);
         switch (lowering)
         {
             case SquadPrimaryLowering.ReuseCanonicalSkill:
@@ -359,16 +405,26 @@ internal sealed class SquadHarnessRenderContext
 
     /// <summary>
     /// The declared capabilities <paramref name="agent"/>'s profile does not deny, in vocabulary
-    /// order; empty when the profile does not resolve.
+    /// order.
     /// </summary>
-    public IReadOnlyList<string> NonDenyCapabilities(SquadAgent agent) =>
-        CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile)
-            ? CapabilityVocabulary
-                .Where(capability =>
-                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision != SquadPermissionDecision.Deny)
-                .ToList()
-            : [];
+    public IReadOnlyList<string> NonDenyCapabilities(SquadAgent agent)
+    {
+        // An unresolvable profile is a source error, not an absence of constraints: reading it as
+        // "nothing constrained" would drop the record that says the harness cannot enforce them.
+        if (!CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        {
+            throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' references capability profile '{agent.CapabilityProfile}', which " +
+                "profiles/capabilities.yml does not declare. Declared profiles: " +
+                $"{string.Join(", ", CapabilityProfiles.Keys.Order(StringComparer.Ordinal))}.");
+        }
+
+        return CapabilityVocabulary
+            .Where(capability =>
+                profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                decision != SquadPermissionDecision.Deny)
+            .ToList();
+    }
 
     /// <summary>
     /// The record for capability decisions a harness cannot express, or null when none are
@@ -474,7 +530,14 @@ internal sealed class SquadHarnessRenderContext
         {
             foreach ((string key, object? value) in additionalFrontmatter)
             {
-                frontmatter[key] = value;
+                // The shared keys are the document's identity; an entry-point extra may add keys,
+                // never replace them.
+                if (!frontmatter.TryAdd(key, value) || string.Equals(key, "license", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"Skill frontmatter key '{key}' is reserved by the shared skill document.",
+                        nameof(additionalFrontmatter));
+                }
             }
         }
 
@@ -542,11 +605,8 @@ internal sealed class SquadHarnessRenderContext
     /// </summary>
     public static void ValidateCanonicalName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name) ||
-            name.Contains('/', StringComparison.Ordinal) ||
-            name.Contains('\\', StringComparison.Ordinal) ||
-            name.Contains("..", StringComparison.Ordinal) ||
-            name.Trim('.').Length == 0)
+        ValidatePathSegment(name);
+        if (name.Contains("..", StringComparison.Ordinal))
         {
             throw new SquadRenderValidationException(
                 $"Canonical name '{name}' is not a valid single-segment path for rendering.");

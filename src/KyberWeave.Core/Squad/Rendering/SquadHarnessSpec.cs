@@ -98,10 +98,19 @@ internal static class SquadHarnessLowering
         string harnessToken,
         SquadModelPolicy policy)
     {
-        if (policy == SquadModelPolicy.NotRendered ||
-            !modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+        if (policy == SquadModelPolicy.NotRendered)
         {
             return null;
+        }
+
+        // An unresolvable profile is a source error; omitting the key would silently hand the agent
+        // the harness default instead of the model its profile names.
+        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+        {
+            throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' references model profile '{agent.ModelProfile}', which " +
+                "profiles/models.yml does not declare. Declared profiles: " +
+                $"{string.Join(", ", modelProfiles.Keys.Order(StringComparer.Ordinal))}.");
         }
 
         if (profile.HarnessModels.TryGetValue(harnessToken, out string? harnessModel))
@@ -137,6 +146,14 @@ internal static class SquadHarnessLowering
         IReadOnlyList<string> allowedLevels,
         string harnessDisplayName)
     {
+        // An empty level list is the harness's misconfiguration, not the operator's model value.
+        if (allowedLevels.Count == 0)
+        {
+            throw new ArgumentException(
+                $"{harnessDisplayName} declares no reasoningEffort levels.",
+                nameof(allowedLevels));
+        }
+
         const string suffixPrefix = "[reasoningEffort=";
         int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
         if (start < 0)
@@ -153,12 +170,9 @@ internal static class SquadHarnessLowering
         string level = modelValue[(start + suffixPrefix.Length)..^1];
         if (!allowedLevels.Contains(level, StringComparer.Ordinal))
         {
-            string accepted = allowedLevels.Count switch
-            {
-                0 => "no level",
-                1 => allowedLevels[0],
-                _ => $"{string.Join(", ", allowedLevels.Take(allowedLevels.Count - 1))}, or {allowedLevels[^1]}"
-            };
+            string accepted = allowedLevels.Count == 1
+                ? allowedLevels[0]
+                : $"{string.Join(", ", allowedLevels.Take(allowedLevels.Count - 1))}, or {allowedLevels[^1]}";
             throw new SquadRenderValidationException(
                 $"Invalid reasoningEffort '{level}' in model value '{modelValue}': {harnessDisplayName} accepts {accepted}.");
         }

@@ -300,7 +300,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
     private static void RenderPrimaryAgent(SquadHarnessRenderContext context, SquadAgent agent, McpPlan mcp)
     {
         SquadSource source = context.Source;
-        SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
+        SquadFallbackProfile fallbackProfile = context.FallbackProfileFor(agent);
 
         if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
         {

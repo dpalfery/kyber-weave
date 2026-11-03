@@ -327,7 +327,32 @@ public sealed class SquadRendererSharedContractTests
             {
                 Assert.Contains(record.OutputIdentity, new[] { record.CanonicalIdentity, $"role-{record.CanonicalIdentity}" });
             }
+
+            Assert.Contains(record.Code, DegradationCodes);
+            Assert.NotNull(record.Details);
+            if (!IsKnownEmptyCommandCodeRecord(target, record))
+            {
+                Assert.False(string.IsNullOrWhiteSpace(record.Details), $"'{record.CanonicalIdentity}' {record.Code} has no details.");
+            }
         });
+    }
+
+    /// <summary>
+    /// The pipeline's name gate runs inside every renderer, not only in the helper: a source whose
+    /// agent name carries path syntax fails the render before any file is built.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachRendererRefusesACanonicalNameThatIsNotOnePathSegment(SquadTarget target)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource tampered = source with
+        {
+            Agents = [.. source.Agents.Select((agent, index) => index == 0 ? agent with { Name = "nested/agent" } : agent)]
+        };
+
+        await Assert.ThrowsAsync<SquadRenderValidationException>(() => RendererFor(target).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
     }
 
     /// <summary>
@@ -400,6 +425,25 @@ public sealed class SquadRendererSharedContractTests
 
     private static ISquadRenderer RendererFor(SquadTarget target) =>
         SquadCommandComposition.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
+
+    /// <summary>The degradation codes a default render may record, whatever the harness.</summary>
+    private static readonly string[] DegradationCodes =
+    [
+        "capability-not-isolable",
+        "omitted",
+        "permission-not-expressible",
+        "resource-links-rewritten",
+        "role-skill-fallback",
+        "safety-narrowed"
+    ];
+
+    /// <summary>
+    /// Command Code records <c>permission-not-expressible</c> with empty details for agents it has
+    /// nothing to say about. Removing those records changes receipts, so it is a deliberate output
+    /// change tracked separately; this is the only empty record the contract tolerates.
+    /// </summary>
+    private static bool IsKnownEmptyCommandCodeRecord(SquadTarget target, SquadDegradationRecord record) =>
+        target == SquadTarget.CommandCode && record.Code == "permission-not-expressible";
 
     private static SquadHarnessSpec SpecFor(SquadTarget target) =>
         Assert.IsAssignableFrom<SquadHarnessRenderer>(RendererFor(target)).Spec;
