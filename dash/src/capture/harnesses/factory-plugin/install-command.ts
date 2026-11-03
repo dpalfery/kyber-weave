@@ -117,8 +117,10 @@ export function runFactoryPluginInstall(
   try {
     result = installFactoryPlugin(options.homeDir, options.env, pluginOptions)
   } catch (error) {
-    // Reduced to the errno code: a Node fs message names the owner's absolute paths.
-    const code = (error as NodeJS.ErrnoException).code ?? 'unknown'
+    // Reduced to the errno code: a Node fs message names the owner's absolute paths. The
+    // code is read through the optional chain, so a failure that is not an object at all
+    // is reported as unknown instead of raising a second failure over the first.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code ?? 'unknown'
     return {
       exitCode: 1,
       stdout: '',
@@ -174,7 +176,9 @@ export function runFactoryPluginConsent(
   try {
     writeContentConsent(consentFile, content)
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? 'unknown'
+    // The errno code is read through the optional chain: a failure that is not an object
+    // at all has no code, and reading one anyway raises a second failure over the first.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code ?? 'unknown'
     return {
       exitCode: 1,
       stdout: '',

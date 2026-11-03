@@ -111,7 +111,9 @@ export function createConsentIfAbsent(path: string): 'created' | 'present' {
     writeFileSync(path, consentBody(false), { flag: 'wx' })
     return 'created'
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
+    // The errno code is read through the optional chain: a failure that is not an object
+    // at all has no code, and reading one anyway raises a second failure over the first.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
     if (code === 'EEXIST' || code === 'EISDIR') return 'present'
     throw error
   }
