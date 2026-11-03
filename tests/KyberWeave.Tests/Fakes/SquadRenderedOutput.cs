@@ -39,6 +39,9 @@ internal static class SquadRenderedOutput
 
         YamlStream stream = new();
         stream.Load(new StringReader(yaml));
+        Assert.True(
+            stream.Documents.Count == 1,
+            $"'{identity}' frontmatter holds {stream.Documents.Count} YAML documents; expected exactly one.");
         YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
         return (root, body);
     }

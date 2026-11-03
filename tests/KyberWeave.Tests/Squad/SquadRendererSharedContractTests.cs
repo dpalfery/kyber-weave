@@ -14,9 +14,12 @@ namespace KyberWeave.Tests.Squad;
 /// <remarks>
 /// Each of these used to be copied into every harness suite with only the renderer and target
 /// swapped, so changing the contract meant the same edit in a dozen files, and a renderer added
-/// later got whichever copies someone remembered. Rows now come from the production list, so a new
-/// renderer is held to all of it the day it ships. How a harness's files look stays in that
-/// harness's own suite.
+/// later got whichever copies someone remembered. The target checks take their rows from the
+/// production list, so a new renderer is held to them the day it ships. Resource projection and the
+/// shell-implies-write record depend on the harness, so a new renderer adds its row to
+/// <see cref="ResourceProjectionContracts"/> and, when it cannot isolate the shell from writes,
+/// <see cref="ShellWithoutWriteContracts"/>. How a harness's files look stays in that harness's own
+/// suite.
 /// </remarks>
 public sealed class SquadRendererSharedContractTests
 {
@@ -32,13 +35,13 @@ public sealed class SquadRendererSharedContractTests
     private static readonly Dictionary<SquadTarget, Func<ISquadRenderer, Task>> ResourceProjectionContracts = new()
     {
         [SquadTarget.Copilot] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Copilot, ".github/agents/bug-crusher-investigator.agent.md", ".github/agents", ".github/skills"),
+            renderer, SquadTarget.Copilot, $".github/agents/{ResourceBearingSquadFixture.AgentName}.agent.md", ".github/agents", ".github/skills"),
         [SquadTarget.Claude] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Claude, ".claude/agents/bug-crusher-investigator.md", ".claude/agents", ".claude/skills"),
+            renderer, SquadTarget.Claude, $".claude/agents/{ResourceBearingSquadFixture.AgentName}.md", ".claude/agents", ".claude/skills"),
         [SquadTarget.Codex] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Codex, ".codex/agents/bug-crusher-investigator.toml", ".codex/agents", ".codex/skills"),
+            renderer, SquadTarget.Codex, $".codex/agents/{ResourceBearingSquadFixture.AgentName}.toml", ".codex/agents", ".codex/skills"),
         [SquadTarget.Cursor] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Cursor, ".cursor/agents/bug-crusher-investigator.md", ".cursor/agents", ".cursor/skills"),
+            renderer, SquadTarget.Cursor, $".cursor/agents/{ResourceBearingSquadFixture.AgentName}.md", ".cursor/agents", ".cursor/skills"),
         [SquadTarget.Devin] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
             renderer,
             SquadTarget.Devin,
@@ -46,13 +49,13 @@ public sealed class SquadRendererSharedContractTests
             $".devin/agents/{ResourceBearingSquadFixture.AgentName}",
             ".devin/skills"),
         [SquadTarget.Factory] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Factory, ".factory/droids/bug-crusher-investigator.md", ".factory/droids", ".factory/skills"),
+            renderer, SquadTarget.Factory, $".factory/droids/{ResourceBearingSquadFixture.AgentName}.md", ".factory/droids", ".factory/skills"),
         [SquadTarget.Pi] = renderer => SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            renderer, SquadTarget.Pi, ".pi/agents/bug-crusher-investigator.md", ".pi/agents", ".pi/skills"),
+            renderer, SquadTarget.Pi, $".pi/agents/{ResourceBearingSquadFixture.AgentName}.md", ".pi/agents", ".pi/skills"),
         [SquadTarget.Kilo] = renderer => SquadResourceRenderingContract.AssertDiscoveryGuardedProjectionAsync(
             renderer, SquadTarget.Kilo, $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md", ".kilo/agents", ".kilo/skills"),
         [SquadTarget.OpenCode] = renderer => SquadResourceRenderingContract.AssertDiscoveryGuardedProjectionAsync(
-            renderer, SquadTarget.OpenCode, ".opencode/agents/bug-crusher-investigator.md", ".opencode/agents", ".opencode/skills"),
+            renderer, SquadTarget.OpenCode, $".opencode/agents/{ResourceBearingSquadFixture.AgentName}.md", ".opencode/agents", ".opencode/skills"),
         [SquadTarget.Warp] = renderer => SquadResourceRenderingContract.AssertFallbackProjectionAsync(
             renderer, SquadTarget.Warp, ".warp/skills"),
     };
@@ -81,11 +84,17 @@ public sealed class SquadRendererSharedContractTests
     public static TheoryData<SquadTarget> TargetsThatCannotIsolateTheShellFromWrites() =>
         new(ShellWithoutWriteContracts.Keys);
 
-    [Theory]
-    [MemberData(nameof(ShippedTargets))]
-    public void EachRendererClaimsExactlyItsOwnTarget(SquadTarget target)
+    /// <summary>
+    /// Asserted over the renderers themselves, not over the targets they claim: a renderer that
+    /// claims no target contributes no row to <see cref="ShippedTargets"/>, so every per-target
+    /// check below would silently skip it.
+    /// </summary>
+    [Fact]
+    public void EveryShippedRendererClaimsExactlyOneTarget()
     {
-        Assert.Equal([target], RendererFor(target).SupportedTargets);
+        Assert.All(SquadCommandComposition.CreateRenderers(), renderer => Assert.True(
+            renderer.SupportedTargets.Count == 1,
+            $"{renderer.GetType().Name} claims {renderer.SupportedTargets.Count} targets; expected exactly one."));
     }
 
     [Theory]
