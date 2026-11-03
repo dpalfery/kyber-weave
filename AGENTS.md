@@ -21,11 +21,14 @@ gate before Ready / Kilo review. Map changed files to tests:
 - .NET: `scripts/fast-loop.sh --class <Area>*` (builds first), or build then filter:
   `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
   `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
+  Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
 - KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
   (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
   zero tests. Check the run reports a non-zero test count.
 - Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
-- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test <filter>`.
+- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test '<test_name_substring>'`
+  (the filter is optional; omit it to run the whole crate when the change touches shared crate
+  code, which is what `fast-loop.sh` does).
 - Governed docs: `docs validate . --merge-ready` and `docs drift .`.
 
 Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`

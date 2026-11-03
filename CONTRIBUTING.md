@@ -73,7 +73,7 @@ More detail: [README.md](README.md) and [docs/](docs/).
 
 - [ ] Change is focused and explained
 - [ ] Tests added or updated when behavior changes
-- [ ] `dotnet build` and the tests targeting your change pass locally (CI runs the full suite; run it locally too for cross-cutting changes: `src/KyberWeave.Core` shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI workflows, migrations/schemas)
+- [ ] `dotnet build` and the tests targeting your change pass locally (CI runs the full suite; run `scripts/fast-loop.sh --full` (`review gates . --all`) locally too for cross-cutting changes: `src/KyberWeave.Core` shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI workflows, migrations/schemas)
 - [ ] Docs or samples updated when user-facing behavior changes
 - [ ] Linked issue (if applicable)
 
