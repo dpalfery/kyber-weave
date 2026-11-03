@@ -3,6 +3,10 @@
     "kyber-weave": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
+    },
+    "codegraph": {
+      "command": "codegraph",
+      "args": ["serve", "--mcp", "--path", "."]
     }
   }
 }

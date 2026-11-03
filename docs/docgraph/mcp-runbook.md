@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -1417,6 +1417,30 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
 
 `docs init --provision` runs the same provisioning against the git root of the scaffolded path. It
 does not change the default: without the flag, `docs init` starts no process.
+
+## Git worktrees and MCP binding
+
+When tasks execute concurrently in isolated git worktrees, MCP servers such as `kyber-weave-mcp`
+and `codegraph` must follow the **worktree MCP canonical binding** protocol:
+
+- **Canonical binding and argument splicing**: Worktree configurations must bind MCP servers to the
+  canonical repository root rather than ephemeral worktree directories. The configuration helper
+  splices `--repo-root` and `--path` to absolute canonical paths.
+- **Symlink prohibition**: Worktree setup protocols strictly prohibit .codegraph symlinks.
+  Never symlink `.codegraph/` into a worktree; background file watchers and concurrent writes can
+  corrupt the canonical database or trigger cross-process lock contention. Worktrees must fail closed
+  if a `.codegraph` symbolic link or reparse point is detected.
+- **Conditional worktree indexing**: Ephemeral worktrees share the canonical CodeGraph index by default.
+  Conditional worktree indexing runs `codegraph init .` inside the worktree only when a task's
+  acceptance criteria explicitly require indexing newly added branch symbols.
+- **Targeted doctor check**: In a worktree without its own `.codegraph/`, running `kyber-weave doctor --check .`
+  reports failure on `codegraph.index` with a hint to run `kyber-weave doctor --provision`, which would trigger an
+  unneeded full re-index if executed, hence `--check <canonical-root>` is required. The worktree setup
+  protocol runs the targeted check:
+  ```bash
+  kyber-weave doctor --check <canonical-root>
+  ```
+  This asserts the health and responsiveness of the canonical index and MCP servers before worker tasks dispatch.
 
 ## Troubleshooting
 

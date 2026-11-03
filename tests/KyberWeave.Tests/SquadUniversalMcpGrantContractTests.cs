@@ -474,6 +474,98 @@ public sealed class SquadUniversalMcpGrantContractTests
     }
 
     /// <summary>
+    /// When <c>codegraph</c> is declared in <c>products/kyber-squad/mcp.json</c>, AntigravityRenderer
+    /// emits <c>codegraph</c> in <c>mcpServers</c> for non-orchestrator specialists while withholding
+    /// it from <c>conductor</c> (per ADR 0050).
+    /// </summary>
+    [Fact]
+    public async Task WhenCodegraphDeclared_AntigravityEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("kyber-weave", "codegraph");
+
+        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // 1. Conductor (orchestrator): must receive kyber-weave, but NOT codegraph
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".agents/agents/conductor/agent.md");
+        YamlMappingNode conductorFrontmatter = Frontmatter(conductorFile);
+        IReadOnlyList<string> conductorServers = McpServerEntryNames(conductorFrontmatter);
+
+        Assert.Contains("kyber-weave", conductorServers, StringComparer.Ordinal);
+        Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
+
+        // 2. Read-entitled specialists: csharp-dev, test-dev, architect
+        string[] specialists = ["csharp-dev", "test-dev", "architect"];
+        foreach (string specialist in specialists)
+        {
+            SquadDeploymentFile specialistFile = Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".agents/agents/{specialist}/agent.md");
+            YamlMappingNode frontmatter = Frontmatter(specialistFile);
+            IReadOnlyList<string> servers = McpServerEntryNames(frontmatter);
+
+            Assert.Contains(
+                "kyber-weave",
+                servers,
+                StringComparer.Ordinal);
+            Assert.Contains(
+                "codegraph",
+                servers,
+                StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// When <c>codegraph</c> is declared in <c>products/kyber-squad/mcp.json</c>, FactoryRenderer
+    /// emits <c>codegraph</c> in <c>mcpServers</c> for non-orchestrator specialists while withholding
+    /// it from <c>conductor</c> (per ADR 0050).
+    /// </summary>
+    [Fact]
+    public async Task WhenCodegraphDeclared_FactoryEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("kyber-weave", "codegraph");
+
+        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Factory);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // 1. Conductor (orchestrator): must receive kyber-weave, but NOT codegraph
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".factory/droids/conductor.md");
+        YamlMappingNode conductorFrontmatter = Frontmatter(conductorFile);
+        IReadOnlyList<string>? conductorServers = Sequence(conductorFrontmatter, "mcpServers");
+        Assert.NotNull(conductorServers);
+
+        Assert.Contains("kyber-weave", conductorServers, StringComparer.Ordinal);
+        Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
+
+        // 2. Read-entitled specialists: csharp-dev, test-dev, architect
+        string[] specialists = ["csharp-dev", "test-dev", "architect"];
+        foreach (string specialist in specialists)
+        {
+            SquadDeploymentFile specialistFile = Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".factory/droids/{specialist}.md");
+            YamlMappingNode frontmatter = Frontmatter(specialistFile);
+            IReadOnlyList<string>? servers = Sequence(frontmatter, "mcpServers");
+            Assert.NotNull(servers);
+
+            Assert.Contains(
+                "kyber-weave",
+                servers,
+                StringComparer.Ordinal);
+            Assert.Contains(
+                "codegraph",
+                servers,
+                StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary>
     /// Whether one target positively grants <c>kyber-weave</c> to one agent, or
     /// <see langword="null"/> when the target renders no surface that could carry the grant.
     /// </summary>

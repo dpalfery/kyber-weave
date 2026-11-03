@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -86,57 +86,91 @@ implemented and registered renderers today.
 
 ---
 
-## High-Level Architecture
+## Architectural Overview
 
 ```mermaid
 flowchart TD
-    subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["24 Canonical Agents\n(agents/*.md)"]
-        Skills["28 Canonical Skills\n(skills/*)"]
-        Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
+    subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
+        Agents["agents/*.md (24 Agents)"]
+        Skills["skills/*/SKILL.md (28 Skills)"]
+        Profiles["profiles/*.yml (Lattice & Models)"]
+        Catalog["squad.yml / toolchain.yml"]
     end
 
-    subgraph CoreEngine["Kyber-Squad Core Engine (KyberWeave.Core.Squad)"]
-        Parser["SquadSourceLoader\n(YAML & Markdown AST)"]
-        IR["AgentIR / SkillIR\nIntermediate Representation"]
-        Lattice["Capability & Permission\nLattice Evaluator"]
-        Overlay["Preset Overlay Seam\n(SquadRenderSource)"]
-        Registry["SquadRendererRegistry\nTarget Dispatcher"]
-        TxEngine["SquadTransaction\nJournal & Recovery Engine"]
+    subgraph Loader["Normalization & Invariant Engine"]
+        SourceLoader["SquadSourceLoader"]
+        Lattice["Capability & Permission Lattice"]
+        SchemaValidator["Source Schema Enforcement"]
     end
 
-    subgraph StateAndStorage["Home State Store (~/.kyber-weave/squad/)"]
-        Lock["squad.lock.yml\n(v1 or v2 with presets)"]
-        Receipt["squad.receipt.json\n(Asset Ownership & Hashes)"]
-        ProjectReg["registry.json\n(Project Directory Index)"]
-        Instances["instances/ & instance-state/\n(Isolated Harness Environments)"]
+    subgraph IR["Intermediate Representation"]
+        AgentIR["SquadAgent (AgentIR)"]
+        SkillIR["SquadSkill (SkillIR)"]
     end
 
-    subgraph Targets["Target Harness Deployments"]
-        Claude[".claude/ & ~/.claude/"]
-        Copilot[".github/ & ~/.copilot/"]
-        Cursor[".cursor/ & ~/.cursor/"]
-        Codex[".codex/ & ~/.codex/"]
-        Antigravity[".agents/ & ~/.gemini/config/"]
-        Pi[".pi/ & ~/.pi/agent/"]
-        OpenCode[".opencode/ & ~/.config/opencode/"]
-        Kilo[".kilo/ & ~/.config/kilo/"]
-        Warp[".warp/ & ~/.warp/"]
-        Factory[".factory/ & ~/.factory/"]
-        ZCode[".zcode/ & ~/.zcode/"]
-        Devin[".devin/ & AppData/devin/"]
-        CommandCode[".commandcode/ & ~/.commandcode/"]
+    subgraph Lowering["Target-Specific Lowering Engine"]
+        Registry["SquadRendererRegistry"]
+        NativeRender["Native Renderers\n(Claude, Cursor, Codex, Copilot, Antigravity, OpenCode, Kilo, Pi, Factory, ZCode, Devin, CommandCode)"]
+        FallbackRender["Fallback Role-Skill Lowering\n(Warp)"]
     end
 
-    CanonicalSource --> Parser
-    Parser --> IR
-    IR --> Lattice
-    Lattice --> Overlay
-    Overlay --> Registry
-    Registry --> TxEngine
-    TxEngine --> StateAndStorage
-    TxEngine --> Targets
-    StateAndStorage -. links .-> Instances
+    subgraph Transaction["Transactional Deployment Engine"]
+        TxEngine["SquadTransaction"]
+        Rollback["Intent Journal & Backup Slots"]
+        StateStore["Home State: projects/ & global/\n(Lock v1/v2, Receipt v1/v2, Registry)"]
+    end
+
+    subgraph Targets["Target Filesystems"]
+        ClaudeOut[".claude/"]
+        CursorOut[".cursor/"]
+        CodexOut[".codex/"]
+        CopilotOut[".github/"]
+        AntigravityOut[".agents/"]
+        OpenCodeOut[".opencode/"]
+        KiloOut[".kilo/"]
+        PiOut[".pi/"]
+        FactoryOut[".factory/"]
+        WarpOut[".warp/"]
+        ZCodeOut[".zcode/"]
+        DevinOut[".devin/"]
+        CommandCodeOut[".commandcode/"]
+    end
+
+    Agents --> SourceLoader
+    Skills --> SourceLoader
+    Profiles --> SourceLoader
+    Catalog --> SourceLoader
+
+    SourceLoader --> SchemaValidator
+    SchemaValidator --> Lattice
+    Lattice --> AgentIR
+    Lattice --> SkillIR
+
+    AgentIR --> Registry
+    SkillIR --> Registry
+
+    Registry --> NativeRender
+    Registry --> FallbackRender
+
+    NativeRender --> TxEngine
+    FallbackRender --> TxEngine
+
+    TxEngine --> StateStore
+    TxEngine --> Rollback
+
+    TxEngine --> ClaudeOut
+    TxEngine --> CursorOut
+    TxEngine --> CodexOut
+    TxEngine --> CopilotOut
+    TxEngine --> AntigravityOut
+    TxEngine --> OpenCodeOut
+    TxEngine --> KiloOut
+    TxEngine --> PiOut
+    TxEngine --> FactoryOut
+    TxEngine --> WarpOut
+    TxEngine --> ZCodeOut
+    TxEngine --> DevinOut
+    TxEngine --> CommandCodeOut
 ```
 
 ---
@@ -619,7 +653,8 @@ kyberdash kyber capture plugin install --harness opencode --preserve --config-di
 - **Guidance wording.** Squad prints no OpenCode restart line of its own. It relays the `harness opencode: `
   lines the verb prints, and KyberDash owns their wording (ADR 0031). After an install or
   upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
-  for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.`
+  for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.` Squad cannot restart OpenCode. The plugin targets OpenCode 2.x only. See
+  [ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md).
 - **Support.** The plugin targets OpenCode 2.x only. Squad does not check the OpenCode version before it
   runs the verb ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 
@@ -736,6 +771,7 @@ and validates.
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
 | `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; primary agents lower to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
 | `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
+| `commandcode` | `CommandCodeRenderer` | `.commandcode/agents/<name>.md` | `.commandcode/skills/<name>/SKILL.md` (primary agents also as entry point) | Native |
 
 - **Codex primary-agent entry points**: the renderer keeps every native agent at
   `.codex/agents/<name>.toml`. For a primary agent without a same-name canonical skill, it also
@@ -1040,7 +1076,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/<name>.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/<name>.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/<name>.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/<name>.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to slash commands), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. The repository carries no project-level self-deployment: root `.github/agents/`,
@@ -1327,6 +1363,19 @@ execution throughput, conductor does not serialize all task execution or test ru
   artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
   assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
   targeted tests simultaneously without mutual interference or file locks.
+- **Worktree MCP canonical binding**: Parallel workers running in ephemeral worktrees bind MCP servers
+  (`kyber-weave-mcp` and `codegraph`) to the canonical repository root rather than the worktree root.
+  Worktree MCP setup splices `--repo-root` and `--path` arguments to absolute canonical paths. Worktree
+  setup environments strictly forbid .codegraph symlinks: linking `.codegraph/` into a worktree is
+  banned because concurrent writes and background watchers rewrite canonical database state from
+  worktree checkouts. Setup fails closed if a `.codegraph` symlink or reparse point is detected.
+- **Subagent MCP exposure across renderers**: Subagents deployed into worktrees inherit MCP server bindings
+  appropriate to their capability profiles. CodeGraph MCP access is granted to non-orchestrator specialists
+  (such as `architect`, `csharp-dev`, and `research-agent`) that require semantic symbol navigation, while
+  strictly withheld from pure orchestrators like `conductor` per [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md).
+- **Conditional worktree indexing**: Ephemeral worktrees reuse the canonical CodeGraph index. `codegraph init .`
+  is executed in a worktree only when a task's explicit acceptance criteria require indexing newly added branch
+  symbols.
 - **Serialized branch-head integration**: Only final integration and branch-head mutations are
   serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
   recording shared index and review gate state, and running `git push` execute sequentially at the
