@@ -491,6 +491,36 @@ public sealed class ArbiterLedgerTests : IDisposable
     }
 
     [Fact]
+    public void Reads_IgnoreNullDecisionLines_InsteadOfThrowing()
+    {
+        Directory.CreateDirectory(ArbiterDirectory);
+        File.WriteAllText(
+            Path.Combine(ArbiterDirectory, DecisionLog.FileName),
+            "null\n" + ArbiterJson.Serialize(Decision(At(0), RuleEffects.Escalate, ["KW-ARB-TEST-001"])) + "\n");
+
+        var log = new DecisionLog(ArbiterDirectory);
+
+        Assert.Single(log.ReadAll());
+        Assert.Equal(2, log.Repeat("KW-ARB-TEST-001", "docs/plans/plan.md", "plan-digest-1", "T3"));
+    }
+
+    [Fact]
+    public void Reads_IgnoreNullLedgerLines_InsteadOfThrowing()
+    {
+        Directory.CreateDirectory(ArbiterDirectory);
+        File.WriteAllText(
+            Path.Combine(ArbiterDirectory, InFlightLedger.FileName),
+            "null\n" + ArbiterJson.Serialize(NewEvent(At(0), ArbiterLedgerPhases.Pre)) + "\n");
+
+        var ledger = new InFlightLedger(ArbiterDirectory);
+
+        Assert.Single(ledger.ReadAll());
+        Assert.Empty(ledger.InFlightPaths());
+        Assert.Empty(ledger.CompletedTasks());
+        Assert.Empty(ledger.RedEvidenceTasks());
+    }
+
+    [Fact]
     public async Task DecisionLog_Repeat_CountsPriorEscalationsMatchingRuleAndPlanKey()
     {
         var decisions = new DecisionLog(ArbiterDirectory);

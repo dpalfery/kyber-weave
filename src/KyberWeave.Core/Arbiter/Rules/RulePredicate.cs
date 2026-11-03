@@ -468,8 +468,9 @@ public sealed record RulePredicate
 
         if (IsNumeric(left) && IsNumeric(right))
         {
-            return Convert.ToDecimal(left, System.Globalization.CultureInfo.InvariantCulture)
-                == Convert.ToDecimal(right, System.Globalization.CultureInfo.InvariantCulture);
+            return TryToDecimal(left, out decimal leftDecimal)
+                && TryToDecimal(right, out decimal rightDecimal)
+                && leftDecimal == rightDecimal;
         }
 
         return left.Equals(right);
@@ -477,6 +478,25 @@ public sealed record RulePredicate
 
     private static bool IsNumeric(object value) =>
         value is sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal;
+
+    /// <summary>
+    /// Converts a numeric fact to <see cref="decimal"/> without letting a non-finite or
+    /// out-of-range value throw out of step 0, which is documented as never throwing.
+    /// A value that cannot be represented makes the comparison false, never an error.
+    /// </summary>
+    private static bool TryToDecimal(object value, out decimal result)
+    {
+        try
+        {
+            result = Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            result = default;
+            return false;
+        }
+    }
 
     private static IReadOnlyList<object?> ToList(object? value)
     {

@@ -50,7 +50,7 @@ public sealed class DecisionLog
     public IReadOnlyList<ArbiterDecisionRecord> ReadAll() =>
         [.. ArbiterLogFiles.ReadCompleteLines(FilePath)
             .Select(line => JsonSerializer.Deserialize<ArbiterDecisionRecord>(line, ArbiterJson.Options))
-            .Select(d => d!)];
+            .OfType<ArbiterDecisionRecord>()];
 
     /// <summary>
     /// The <c>REPEAT</c> count: one plus the number of earlier escalation

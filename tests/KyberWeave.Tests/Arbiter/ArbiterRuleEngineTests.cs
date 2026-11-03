@@ -75,6 +75,21 @@ public sealed class ArbiterRuleEngineTests
     }
 
     [Fact]
+    public void Equals_NonFiniteOrOverflowingNumericFacts_ReturnFalseInsteadOfThrowing()
+    {
+        ArbiterFactSet facts = Facts(
+            ("nan", double.NaN, ArbiterFactLabel.Asserted),
+            ("inf", double.PositiveInfinity, ArbiterFactLabel.Asserted),
+            ("huge", 1e300, ArbiterFactLabel.Asserted),
+            ("one", 1.0, ArbiterFactLabel.Asserted));
+
+        Assert.False(RulePredicate.Equals("nan", RuleOperand.Literal(1.0)).Evaluate(facts));
+        Assert.False(RulePredicate.Equals("inf", RuleOperand.Literal(1.0)).Evaluate(facts));
+        Assert.False(RulePredicate.Equals("huge", RuleOperand.Literal(1.0)).Evaluate(facts));
+        Assert.True(RulePredicate.Equals("one", RuleOperand.Literal(1.0)).Evaluate(facts));
+    }
+
+    [Fact]
     public void Equals_FactRef_ComparesTwoFacts()
     {
         ArbiterFactSet facts = Facts(

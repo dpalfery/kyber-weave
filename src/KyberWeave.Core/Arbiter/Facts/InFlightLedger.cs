@@ -185,7 +185,7 @@ public sealed class InFlightLedger
     public IReadOnlyList<ArbiterLedgerEvent> ReadAll() =>
         [.. ArbiterLogFiles.ReadCompleteLines(FilePath)
             .Select(line => JsonSerializer.Deserialize<ArbiterLedgerEvent>(line, ArbiterJson.Options))
-            .Select(e => e!)];
+            .OfType<ArbiterLedgerEvent>()];
 
     /// <summary>
     /// Resolves the pre event a post event pairs with: by <c>call-id</c> where
