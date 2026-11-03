@@ -46,7 +46,7 @@ import { buildHarnessRollup } from '../src/canon/harnesses.js'
 import { ingestBatch } from '../src/canon/ingest.js'
 import { projectCanonicalStore } from '../src/canon/projection.js'
 import { CanonStore } from '../src/canon/store.js'
-import { FACTORY_CONSENT_FILE_NAME } from '../src/capture/harnesses/factory-plugin/consent.js'
+import { FACTORY_CONSENT_FILE_NAME, KYBERDASH_FACTORY_CONTEXT_ENV } from '../src/capture/harnesses/factory-plugin/consent.js'
 import { runHook } from '../src/capture/harnesses/factory-plugin/entry.js'
 import { readSpoolEvents } from '../src/capture/harnesses/factory-plugin/spool.js'
 import { OtlpReceiver, type OtlpSpan } from '../src/otel/receiver.js'
@@ -128,6 +128,8 @@ async function replayRecordedFactorySessions(store: CanonStore, root: string): P
   mkdirSync(stateDir, { recursive: true })
 
   const accepted: OtlpSpan[] = []
+  // The consent the file holds for the phase being replayed, mirrored to the store gate.
+  let storeConsent = false
   let ingestFailure: unknown
   const receiver = new OtlpReceiver({
     port: 0,
@@ -137,6 +139,13 @@ async function replayRecordedFactorySessions(store: CanonStore, root: string): P
     store: {
       write(spans: readonly OtlpSpan[]): void {
         accepted.push(...spans)
+        // The store-side content gate reads the owner's consent from the owner's HOME
+        // (`~/.kyberdash/factory-plugin.json`), which in production is the very file the hook
+        // runner reads. This world keeps its consent file under a temp state dir instead, so
+        // the store gate is told the same decision the file holds for this phase; without it
+        // the gate reads the CI runner's home (no file, so off) and strips the consent-on prompt.
+        const previous = process.env[KYBERDASH_FACTORY_CONTEXT_ENV]
+        process.env[KYBERDASH_FACTORY_CONTEXT_ENV] = storeConsent ? '1' : '0'
         try {
           ingestBatch(spans, store)
         } catch (error) {
@@ -145,6 +154,9 @@ async function replayRecordedFactorySessions(store: CanonStore, root: string): P
           // at the stage that broke, with the reason, instead of quietly losing a hook event.
           ingestFailure = ingestFailure ?? error
           throw error
+        } finally {
+          if (previous === undefined) delete process.env[KYBERDASH_FACTORY_CONTEXT_ENV]
+          else process.env[KYBERDASH_FACTORY_CONTEXT_ENV] = previous
         }
       },
     },
@@ -152,8 +164,10 @@ async function replayRecordedFactorySessions(store: CanonStore, root: string): P
   await receiver.start()
   try {
     writeConsent(consentPath, false)
+    storeConsent = false
     await replaySession(receiver, stateDir, consentPath, recordedFactoryHooks('content-off'))
     writeConsent(consentPath, true)
+    storeConsent = true
     await replaySession(receiver, stateDir, consentPath, recordedFactoryHooks('content-on'))
   } finally {
     await receiver.stop()
