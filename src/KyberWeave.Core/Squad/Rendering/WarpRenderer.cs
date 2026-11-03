@@ -166,7 +166,7 @@ public sealed class WarpRenderer : SquadHarnessRenderer
         SquadAgent agent)
     {
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles = context.CapabilityProfiles;
-        if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        if (!capabilityProfiles.ContainsKey(agent.CapabilityProfile))
         {
             throw new SquadRenderValidationException(
                 $"Agent '{agent.Name}' references capability profile '{agent.CapabilityProfile}', " +
@@ -177,15 +177,9 @@ public sealed class WarpRenderer : SquadHarnessRenderer
 
         // Warp skills are instruction-only: any non-deny decision is unenforceable
         // at the harness boundary, so it is named rather than invented into frontmatter.
-        List<string> constrained = context.CapabilityVocabulary
-            .Where(capability =>
-                profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                decision != SquadPermissionDecision.Deny)
-            .ToList();
-
         return context.CapabilitiesNotExpressible(
             agent,
-            constrained,
+            context.NonDenyCapabilities(agent),
             "Warp skills cannot express capability permissions",
             "skill");
     }

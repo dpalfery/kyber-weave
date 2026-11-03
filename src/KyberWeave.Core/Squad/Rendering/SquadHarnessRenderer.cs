@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Serialization;
@@ -195,6 +196,51 @@ internal sealed class SquadHarnessRenderContext
         new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
 
     /// <summary>
+    /// Decides how a primary-invocation agent projects on a harness with no primary-agent
+    /// primitive, from its fallback profile's <c>no-primary-agent</c> value. A canonical skill
+    /// already holding the identity is reused when the identity is declared shared, and otherwise
+    /// fails closed with <paramref name="collisionMessage"/>: a native target has no <c>role-</c>
+    /// escape hatch.
+    /// </summary>
+    public SquadPrimaryLowering ResolvePrimaryLowering(SquadAgent agent, Func<string> collisionMessage)
+    {
+        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
+        {
+            if (!SkillNames.Contains(agent.Name))
+            {
+                return SquadPrimaryLowering.EntryPointSkill;
+            }
+
+            return SharedIdentities.Contains(agent.Name)
+                ? SquadPrimaryLowering.ReuseCanonicalSkill
+                : throw new SquadRenderValidationException(collisionMessage());
+        }
+
+        if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
+        {
+            return SquadPrimaryLowering.Omit;
+        }
+
+        throw new SquadRenderValidationException(
+            $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
+            $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
+    }
+
+    /// <summary>
+    /// The declared capabilities <paramref name="agent"/>'s profile does not deny, in vocabulary
+    /// order; empty when the profile does not resolve.
+    /// </summary>
+    public IReadOnlyList<string> NonDenyCapabilities(SquadAgent agent) =>
+        CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile)
+            ? CapabilityVocabulary
+                .Where(capability =>
+                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                    decision != SquadPermissionDecision.Deny)
+                .ToList()
+            : [];
+
+    /// <summary>
     /// The record for capability decisions a harness cannot express, or null when none are
     /// constrained. <paramref name="reason"/> completes "but …" and names why the harness cannot
     /// express them.
@@ -249,6 +295,29 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>
+    /// Adds Squad's owned block for a shared hook file whose containers are <c>PreToolUse</c> and
+    /// <c>PostToolUse</c> matcher groups, when the request enables Arbiter. Files are untouched
+    /// either way: the block travels separately for the deployment plan to splice.
+    /// </summary>
+    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher)
+    {
+        if (EnabledArbiter is not { } arbiter)
+        {
+            return;
+        }
+
+        string commandLine = ArbiterHookWiring.HookCommandLine(Token);
+        Blocks.Add(new SquadRenderedBlock(
+            Token,
+            SquadHookJsonBlock.RelativePath(format),
+            format,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
+            ]));
+    }
+
+    /// <summary>
     /// The skill document every harness shares: <c>name</c>, a single-line <c>description</c> and
     /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>. No model or
     /// permission keys: a skill cannot express the capability lattice.
@@ -291,6 +360,19 @@ internal sealed class SquadHarnessRenderContext
     public SquadRenderResult ToResult(bool emptyBlocks = false) =>
         new(true, Files, Degradations, [], [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
 
+    private static JsonObject MatcherGroup(string matcher, string commandLine, int timeoutSeconds) =>
+        new()
+        {
+            ["matcher"] = matcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = commandLine,
+                    ["timeout"] = timeoutSeconds
+                })
+        };
+
     /// <summary>
     /// Rejects a canonical name that is not a single portable path segment, before any file is
     /// built from it.
@@ -307,6 +389,22 @@ internal sealed class SquadHarnessRenderContext
                 $"Canonical name '{name}' is not a valid single-segment path for rendering.");
         }
     }
+}
+
+/// <summary>How a primary-invocation agent projects where the harness has no primary-agent primitive.</summary>
+internal enum SquadPrimaryLowering
+{
+    /// <summary><c>no-primary-agent: skill</c>: the agent body renders as its own entry-point skill.</summary>
+    EntryPointSkill,
+
+    /// <summary>
+    /// <c>no-primary-agent: skill</c> on a shared identity: the same-name canonical skill is the
+    /// entry point, so nothing is emitted for the agent beyond what the skill loop emits.
+    /// </summary>
+    ReuseCanonicalSkill,
+
+    /// <summary><c>no-primary-agent: omit</c>: no entry point is emitted.</summary>
+    Omit
 }
 
 /// <summary>A YAML serializer that is safe to share across concurrent renders.</summary>
