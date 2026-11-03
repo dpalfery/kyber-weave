@@ -233,19 +233,44 @@ public sealed class SquadWorktreeMcpContractTests
     }
 
     /// <summary>
-    ///     The conductor surfaces must enumerate every tracked MCP configuration a worktree setup can
-    ///     rewrite, so a machine-specific absolute path is restored from all of them before integration.
+    ///     The conductor surfaces must require isolated scratch paths for every tracked MCP
+    ///     configuration a worktree setup can rewrite, with restoration as the fallback, so a
+    ///     machine-specific absolute path is never committed. The runbook carries the per-client list.
     /// </summary>
     [Theory]
     [InlineData(ConductorAgentPath)]
     [InlineData(ConductorExecutionPath)]
-    public void ConductorSurfaces_EnumerateTrackedMcpConfigsRestoredAfterWorktreeSetup(string relativePath)
+    public void ConductorSurfaces_RequireIsolatedPathsForEveryTrackedMcpConfig(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
 
-        Assert.Contains("git checkout --", content, StringComparison.Ordinal);
-        Assert.Contains(".mcp.json", content, StringComparison.Ordinal);
-        Assert.Contains(".factory/mcp.json", content, StringComparison.Ordinal);
-        Assert.Contains(".agents/mcp_config.json", content, StringComparison.Ordinal);
+        Assert.Contains("isolated per-task scratch paths for every tracked MCP configuration", content, StringComparison.Ordinal);
+        Assert.Contains("never rewrite a tracked configuration in place", content, StringComparison.Ordinal);
+        Assert.Contains("git checkout -- <path>", content, StringComparison.Ordinal);
+        Assert.Contains("MCP runbook enumerates the per-client configuration files", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The MCP runbook must enumerate every project-scope MCP configuration a worktree setup can
+    ///     rewrite, so the conductor's generic requirement has a concrete list behind it.
+    /// </summary>
+    [Fact]
+    public void McpRunbook_EnumeratesTrackedMcpConfigsRestoredAfterWorktreeSetup()
+    {
+        string content = ReadRepoFile(McpRunbookDocPath);
+
+        foreach (string config in new[]
+                 {
+                     ".mcp.json",
+                     ".factory/mcp.json",
+                     ".cursor/mcp.json",
+                     ".vscode/mcp.json",
+                     ".agents/mcp_config.json",
+                     "opencode.json",
+                     "zcode.json",
+                     ".zcode/config.json",
+                     "kilo.jsonc"
+                 })
+            Assert.Contains(config, content, StringComparison.Ordinal);
     }
 }
