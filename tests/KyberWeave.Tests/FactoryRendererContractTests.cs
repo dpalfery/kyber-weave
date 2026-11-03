@@ -628,7 +628,7 @@ public sealed class FactoryRendererContractTests : IDisposable
             ]
         };
 
-        SquadRenderValidationException refused = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+        SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
             new FactoryRenderer().RenderAsync(new SquadRenderRequest(
                 ProductRoot,
                 [SquadTarget.Factory],

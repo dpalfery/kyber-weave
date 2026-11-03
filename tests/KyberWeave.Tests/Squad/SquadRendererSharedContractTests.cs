@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Squad.Validation;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -345,6 +346,8 @@ public sealed class SquadRendererSharedContractTests
             rows.Add(target, "model-profile");
             rows.Add(target, "capability-profile");
             rows.Add(target, "fallback");
+            rows.Add(target, "copilot-capability-profile");
+            rows.Add(target, "devin-capability-profile");
         }
 
         return rows;
@@ -352,7 +355,8 @@ public sealed class SquadRendererSharedContractTests
 
     /// <summary>
     /// An agent naming a profile its source does not declare fails the render on every harness,
-    /// whether or not that harness reads the profile, so no harness guesses at a grant or a model.
+    /// whether or not that harness reads the profile, so no harness guesses at a grant or a model:
+    /// a preloaded source passes the same source validation the loader applies.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShippedTargetsWithEachUnresolvableProfile))]
@@ -369,15 +373,17 @@ public sealed class SquadRendererSharedContractTests
                     {
                         "model-profile" => agent with { ModelProfile = "undeclared" },
                         "capability-profile" => agent with { CapabilityProfile = "undeclared" },
+                        "copilot-capability-profile" => agent with { CopilotCapabilityProfile = "undeclared" },
+                        "devin-capability-profile" => agent with { DevinCapabilityProfile = "undeclared" },
                         _ => agent with { Fallback = "undeclared" }
                     })
             ]
         };
 
-        SquadRenderValidationException refused = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+        SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
             RendererFor(target).RenderAsync(
                 new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
-        Assert.Contains(key, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("undeclared", refused.Message, StringComparison.Ordinal);
     }
 
     public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnsafeOutputName()
@@ -387,6 +393,7 @@ public sealed class SquadRendererSharedContractTests
         {
             rows.Add(target, "agent-name");
             rows.Add(target, "skill-name");
+            rows.Add(target, "non-portable-skill-name");
             rows.Add(target, "resource-path");
         }
 
@@ -412,6 +419,11 @@ public sealed class SquadRendererSharedContractTests
             "skill-name" => source with
             {
                 Skills = [.. source.Skills.Select((skill, index) => index == 0 ? skill with { Name = ".." } : skill)]
+            },
+            // One segment, but not a portable one: a Windows filesystem cannot hold a trailing dot.
+            "non-portable-skill-name" => source with
+            {
+                Skills = [.. source.Skills.Select((skill, index) => index == 0 ? skill with { Name = "skill." } : skill)]
             },
             _ => source with
             {

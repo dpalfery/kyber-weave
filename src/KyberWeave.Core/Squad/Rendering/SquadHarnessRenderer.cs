@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Validation;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -65,60 +66,28 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         try
         {
             SquadSource source = SquadRenderSource.Load(request, Spec.Target);
-            ValidateProfileReferences(source);
+
+            // Path safety first, then the same validation the loader applies to source read from
+            // disk, so a preloaded source is held to every reference rule (profiles, target-scoped
+            // profiles, shared identities) rather than to a renderer-local subset of them.
             ValidateOutputNames(source);
+            SquadSourceValidator.Validate(
+                source.Bundle,
+                source.Agents,
+                source.Skills,
+                source.ModelProfiles,
+                source.CapabilityProfiles,
+                source.FallbackProfiles);
+
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
         }
-        catch (OperationCanceledException canceled)
+        catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)
         {
-            return Task.FromCanceled<SquadRenderResult>(canceled.CancellationToken.IsCancellationRequested
-                ? canceled.CancellationToken
-                : new CancellationToken(canceled: true));
+            return Task.FromCanceled<SquadRenderResult>(canceled.CancellationToken);
         }
         catch (Exception exception)
         {
             return Task.FromException<SquadRenderResult>(exception);
-        }
-    }
-
-    /// <summary>
-    /// Every profile an agent names must resolve before any harness renders it. An unresolvable
-    /// reference is a source error, not an absence of constraints or of a model, so the render
-    /// fails closed on every harness alike rather than each one guessing (ADR 0056). The loader
-    /// already enforces this for source read from disk; a preloaded source is held to it here.
-    /// </summary>
-    private static void ValidateProfileReferences(SquadSource source)
-    {
-        foreach (SquadAgent agent in source.Agents)
-        {
-            RequireProfile(agent, "model-profile", agent.ModelProfile, source.ModelProfiles.Profiles.Keys, "profiles/models.yml");
-            RequireProfile(agent, "capability-profile", agent.CapabilityProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
-            RequireProfile(agent, "fallback", agent.Fallback, source.FallbackProfiles.Profiles.Keys, "profiles/fallbacks.yml");
-            if (agent.CopilotCapabilityProfile is { } copilotProfile)
-            {
-                RequireProfile(agent, "copilot-capability-profile", copilotProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
-            }
-
-            if (agent.DevinCapabilityProfile is { } devinProfile)
-            {
-                RequireProfile(agent, "devin-capability-profile", devinProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
-            }
-        }
-    }
-
-    private static void RequireProfile(
-        SquadAgent agent,
-        string key,
-        string profile,
-        IEnumerable<string> declared,
-        string declaringFile)
-    {
-        string[] names = [.. declared.Order(StringComparer.Ordinal)];
-        if (!names.Contains(profile, StringComparer.Ordinal))
-        {
-            throw new SquadRenderValidationException(
-                $"Agent '{agent.Name}' {key} '{profile}' is not declared in {declaringFile}. " +
-                $"Declared: {string.Join(", ", names)}.");
         }
     }
 
@@ -158,7 +127,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                     continue;
                 }
             }
-            catch (Exception exception) when (exception is not SquadRenderValidationException)
+            catch (Exception exception) when (exception is SquadPathContainmentException or SquadDeploymentConflictException)
             {
                 throw new SquadRenderValidationException(
                     $"Resource '{resource.RelativePath}' owned by '{owner}' is not a portable relative path: {exception.Message}",
@@ -657,7 +626,7 @@ internal sealed class SquadHarnessRenderContext
                        name.Trim('.').Length != 0 &&
                        string.Equals(SquadPathPolicy.NormalizeRelativePath(name), name, StringComparison.Ordinal);
         }
-        catch (Exception exception) when (exception is not SquadRenderValidationException)
+        catch (Exception exception) when (exception is SquadPathContainmentException or SquadDeploymentConflictException)
         {
             portable = false;
         }

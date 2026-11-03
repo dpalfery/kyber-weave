@@ -55,10 +55,11 @@ harness meant a registry edit.
    only by accident, the spec keeps both forms (for example, `SquadLineBreaks.LineFeedOnly`), so
    unifying them is a separate, deliberate output change.
 6. **The pipeline fails closed on unsafe or unresolvable source before any harness renders.**
-   Every agent's model, capability and fallback profile must resolve, and every canonical name and
-   resource path must pass the registry's `SquadPathPolicy`. A miss refuses the render on every
-   harness alike, rather than each harness guessing at a grant or a model. The loader already
-   enforces the profile rule for source read from disk; a preloaded source is held to it here.
+   The source passes `SquadSourceValidator.Validate`, the same validation the loader applies to
+   source read from disk: every model, capability, fallback, Copilot and Devin profile an agent
+   names must resolve and suit its target. Every canonical name and resource path must pass the
+   registry's `SquadPathPolicy`. A miss refuses the render on every harness alike, rather than each
+   harness guessing at a grant or a model; a preloaded source is held to the same rules.
 7. **Shared behaviour is tested once.** `SquadRendererSharedContractTests` holds every renderer to
    its own spec for the skill document, file roots, global-scope layout, and record identity. A
    harness suite keeps only what that harness decides.
