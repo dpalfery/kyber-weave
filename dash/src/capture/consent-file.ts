@@ -28,6 +28,8 @@ import { dirname } from 'node:path'
  * then claim a capture that is not happening.
  */
 const MAX_CONSENT_BYTES = 4096
+/** The size of one read in readBoundedText. */
+const BOUNDED_READ_CHUNK_BYTES = 64 * 1024
 
 /** absent: no file. on/off: a valid file. invalid: not our shape. unreadable: exists but cannot be read as a file. */
 export type ConsentState = 'absent' | 'on' | 'off' | 'invalid' | 'unreadable'
@@ -65,15 +67,19 @@ export function readConsentState(path: string): ConsentState {
  * between the size check and the read is still never materialised past the bound.
  */
 export function readBoundedText(handle: number, max: number): string | undefined {
-  const buffer = Buffer.alloc(max + 1)
-  let filled = 0
-  while (filled < buffer.length) {
-    const got = readSync(handle, buffer, filled, buffer.length - filled, null)
+  // Read in modest chunks so a small file costs a small buffer: the ceiling is a bound on
+  // what may be read, not an allocation every read pays for up front.
+  const chunks: Buffer[] = []
+  let total = 0
+  while (total <= max) {
+    const chunk = Buffer.allocUnsafe(Math.min(BOUNDED_READ_CHUNK_BYTES, max + 1 - total))
+    const got = readSync(handle, chunk, 0, chunk.length, null)
     if (got === 0) break
-    filled += got
+    chunks.push(got === chunk.length ? chunk : chunk.subarray(0, got))
+    total += got
   }
-  if (filled > max) return undefined
-  return buffer.subarray(0, filled).toString('utf8')
+  if (total > max) return undefined
+  return Buffer.concat(chunks, total).toString('utf8')
 }
 
 /** The state the consent file's text names, or 'invalid' when the text is not our shape. */

@@ -145,4 +145,46 @@ describe('the spool byte bound', () => {
       SPOOL_MAX_BYTES,
     )
   })
+  it('never reads past the bound when the spool grows after it was measured', async () => {
+    const stateDir = temp('factory-spool-grown-')
+    const spoolFile = join(factorySpoolDir(stateDir), SPOOL_FILE_NAME)
+    mkdirSync(factorySpoolDir(stateDir), { recursive: true })
+    // Twice the ceiling on disk, while the measure below reports a 100-byte file: the
+    // file grew between the fstat and the read.
+    writeFileSync(spoolFile, `${JSON.stringify({ blob: 'x'.repeat(2 * SPOOL_MAX_BYTES) })}\n`)
+
+    const reads: string[] = []
+    let bytesRead = 0
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>
+      const realReadFile = actual['readFileSync'] as (...args: unknown[]) => unknown
+      const realRead = actual['readSync'] as (...args: unknown[]) => number
+      const realFstat = actual['fstatSync'] as (...args: unknown[]) => { size: number }
+      return {
+        ...actual,
+        readFileSync: (...args: unknown[]) => {
+          reads.push(`readFileSync ${String(args[0])}`)
+          return realReadFile(...args)
+        },
+        readSync: (...args: unknown[]) => {
+          const got = realRead(...args)
+          bytesRead += got
+          return got
+        },
+        fstatSync: (...args: unknown[]) => {
+          const stat = realFstat(...args)
+          Object.defineProperty(stat, 'size', { value: 100 })
+          return stat
+        },
+      }
+    })
+    vi.resetModules()
+    const spool = await import('./spool.js')
+
+    const events = spool.readSpoolEvents(stateDir)
+
+    expect(reads, 'the spool file is never read whole').toEqual([])
+    expect(bytesRead, 'the read stops one byte past the bound').toBeLessThanOrEqual(SPOOL_MAX_BYTES + 1)
+    expect(events, 'a spool that grew past the bound holds no events').toEqual([])
+  })
 })
