@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -30,65 +31,6 @@ public sealed class KiloRendererContractTests : IDisposable
     public void Dispose()
     {
         // No disposable state: suite reads canonical checked-in corpus.
-    }
-
-    /// <summary>
-    ///     Shared identities are read from the loaded fallback profile so the test follows the
-    ///     same generic single-projection contract as the renderer.
-    /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source)
-    {
-        return source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    ///     The shared identities whose canonical skill is suppressed: those carried by a subagent,
-    ///     whose file already holds the identical body. A primary shared identity reuses its
-    ///     canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
-    ///     resolver so the test cannot drift from the contract.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
-    {
-        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-    }
-
-    [Fact]
-    public void SupportedTargets_IsExactlyKilo()
-    {
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
-
-        Assert.Equal([SquadTarget.Kilo], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Claude, SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("claude", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonKiloTarget()
-    {
-        KiloRenderer renderer = new();
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
     [Fact]
@@ -367,45 +309,6 @@ public sealed class KiloRendererContractTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task RenderAsync_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            SquadDeploymentFile file1 = first.Files[i];
-            SquadDeploymentFile file2 = second.Files[i];
-
-            Assert.Equal(file1.RelativePath, file2.RelativePath);
-            Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span),
-                $"Content differed for file '{file1.RelativePath}'.");
-        }
-    }
-
-    [Fact]
-    public async Task RenderAsync_Kilo_ProjectsLinkedAgentAndSkillResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertDiscoveryGuardedProjectionAsync(
-            new KiloRenderer(),
-            SquadTarget.Kilo,
-            $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md",
-            ".kilo/agents",
-            ".kilo/skills");
-    }
-
     /// <summary>
     ///     The extension guard maps <c>references/x.md</c> to <c>references/x.markdown</c>; an agent
     ///     whose closure holds both spellings would overwrite one file with the other, so the
@@ -674,39 +577,6 @@ public sealed class KiloRendererContractTests : IDisposable
                 Assert.True(first.Files[i].Content.Span.SequenceEqual(other.Files[i].Content.Span));
             }
         }
-    }
-
-    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
-    {
-        const string delimiter = "---\n";
-        Assert.True(
-            text.StartsWith(delimiter, StringComparison.Ordinal),
-            $"'{identity}' is missing the opening frontmatter delimiter.");
-        int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
-        Assert.True(end > 0, $"'{identity}' is missing a closing '---' frontmatter delimiter.");
-
-        string yaml = text[delimiter.Length..(end + 1)];
-        string body = text[(end + 5)..];
-
-        YamlStream stream = new();
-        stream.Load(new StringReader(yaml));
-        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
-        return (root, body);
-    }
-
-    private static string RequireScalar(YamlMappingNode node, string key, string identity)
-    {
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
-        {
-            string presentKeys = string.Join(", ", node.Children.Keys
-                .OfType<YamlScalarNode>()
-                .Select(existing => existing.Value ?? "<null>"));
-            throw new InvalidOperationException(
-                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
-        }
-
-        return Assert.IsType<YamlScalarNode>(value).Value
-               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 
     /// <summary>

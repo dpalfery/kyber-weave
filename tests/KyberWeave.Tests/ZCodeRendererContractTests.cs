@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -107,23 +108,6 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// truncating it (<c>MAX_DESCRIPTION_LENGTH</c>, <c>skill_description_too_long</c>).
     /// </summary>
     private const int MaxDescriptionLength = 1024;
-
-    private static HashSet<string> SharedIdentities(SquadSource source)
-    {
-        return source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
-    /// A primary shared identity reuses its canonical skill as the entry point, so it is
-    /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
-    {
-        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-    }
 
     private const string ArbiterServer = "kyber-weave-arbiter";
 
@@ -346,42 +330,6 @@ public sealed class ZCodeRendererContractTests : IDisposable
         // No disposable state: the suite reads the checked-in corpus, plus per-test fixture
         // copies disposed locally via `using`. IDisposable is implemented per the
         // test-coding standard so a future class-level fixture has a home.
-    }
-
-    [Fact]
-    public void SupportedTargets_IsExactlyZCode()
-    {
-        SquadRendererRegistry registry = new([new ZCodeRenderer()]);
-
-        Assert.Equal([SquadTarget.ZCode], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new ZCodeRenderer()]);
-
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.ZCode, SquadTarget.Cursor],
-            SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource));
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("cursor", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonZCodeTarget()
-    {
-        ZCodeRenderer renderer = new();
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Copilot],
-            SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource)));
     }
 
     [Fact]
@@ -1118,76 +1066,6 @@ public sealed class ZCodeRendererContractTests : IDisposable
                     char.IsAsciiLetterOrDigit(character) || character is '_' or '-',
                     $"'{name}' contains '{character}', which toModelVisibleMcpNamePart rewrites."));
         });
-    }
-
-    /// <summary>
-    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
-    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
-    /// shell tools (Bash) and withheld write tools (Edit, Write).
-    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
-    /// </summary>
-    [Fact]
-    public async Task RenderAsync_ZCode_RecordsCapabilityNotIsolableForShellImpliesWrite()
-    {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        string[] grantedShellTools = ["Bash"];
-        string[] withheldWriteTools = ["Edit", "Write"];
-
-        List<string> expectedAgents = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) &&
-                            e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) &&
-                             w == SquadPermissionDecision.Allow;
-                return exec && !write;
-            })
-            .Select(a => a.Name)
-            .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
-
-        Assert.NotEmpty(expectedAgents);
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed =
-                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
-                exec == SquadPermissionDecision.Allow;
-            bool writeAllowed =
-                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
-                write == SquadPermissionDecision.Allow;
-
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
-                d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
-
-            if (executeAllowed && !writeAllowed)
-            {
-                Assert.NotNull(record);
-                Assert.Equal("zcode", record.Target);
-                Assert.Equal(agent.Name, record.CanonicalIdentity);
-                Assert.Equal(agent.Name, record.OutputIdentity);
-                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
-                Assert.NotNull(record.Details);
-                foreach (string shellTool in grantedShellTools)
-                {
-                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
-                }
-
-                foreach (string writeTool in withheldWriteTools)
-                {
-                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
-                }
-            }
-            else
-            {
-                Assert.Null(record);
-            }
-        }
     }
 
     private static bool IsAgentOrCommand(SquadDeploymentFile file)

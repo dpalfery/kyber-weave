@@ -74,26 +74,6 @@ public sealed class WarpRendererContractTests : IDisposable
             $"Expected products/kyber-squad under ToolRoot at '{ProductRoot}'.");
     }
 
-    [Fact]
-    public void SupportedTargets_IsExactlyWarp()
-    {
-        WarpRenderer renderer = new();
-        Assert.Equal([SquadTarget.Warp], renderer.SupportedTargets);
-    }
-
-    /// <summary>The renderer refuses a request for any target but Warp.</summary>
-    [Fact]
-    public async Task RenderAsync_RejectsNonWarpTarget()
-    {
-        WarpRenderer renderer = new();
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
-    }
-
     /// <summary>
     /// Renders the shipped corpus and checks every agent and skill lands at its Warp path,
     /// with collisions derived from the source.
@@ -314,47 +294,6 @@ public sealed class WarpRendererContractTests : IDisposable
             d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase));
 
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Warp_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new WarpRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Warp],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            Assert.Equal(first.Files[i].RelativePath, second.Files[i].RelativePath);
-            Assert.Equal(first.Files[i].Target, second.Files[i].Target);
-            Assert.True(first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span));
-        }
-
-        // File paths, targets, contents, and degradation records must remain byte/value
-        // identical across renders of the same canonical source.
-        Assert.Equal(first.Degradations.Count, second.Degradations.Count);
-        for (int i = 0; i < first.Degradations.Count; i++)
-        {
-            Assert.Equal(first.Degradations[i], second.Degradations[i]);
-        }
-    }
-
-    [Fact]
-    public async Task RenderAsync_Warp_ProjectsSkillAndLoweredAgentResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertFallbackProjectionAsync(
-            new WarpRenderer(),
-            SquadTarget.Warp,
-            ".warp/skills");
     }
 
     [Fact]

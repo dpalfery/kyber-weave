@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-03
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -90,6 +90,7 @@ Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing t
 
 - **Synthetic release sources for plumbing and lifecycle**: Tests verifying deployment state machines, receipts, locks, and CLI exit codes use `SyntheticValidSquadReleaseSource` (~15 small files) rather than copying the full 203-file corpus on every run. Reserve `CorpusSquadReleaseSource` for end-to-end installation contracts and canonical prose checks.
 - **Immutable test corpus caching**: Read-only contract tests asserting renderer templates and model presets (such as `SquadModelPresetRenderTests`, `CopilotRendererTests`, `AntigravityRendererContractTests`, and `SquadRustGoSpecialistTests`) consume lazy, thread-safe instances via `TestSquadCorpus.CanonicalSource` and cached unpreset baseline renders, avoiding hundreds of redundant disk reads and YAML/Markdown parsing across test theories.
+- **One cross-harness renderer contract**: What every Squad renderer owes whatever its harness lives once in `SquadRendererSharedContractTests`. The target checks — claiming exactly one target, refusing a request for another, rendering the corpus byte-for-byte the same twice — run automatically for every renderer `SquadCommandComposition.CreateRenderers()` returns. Resource projection and the `capability-not-isolable` record where the shell implies write depend on the harness, so a new renderer adds its row to `ResourceProjectionContracts` and, when it cannot isolate the shell from writes, to `ShellWithoutWriteContracts`. A harness's own suite asserts only that harness's file format. Do not copy a shared invariant into it; add the harness's row to the shared suite instead.
 - **Git repository templates**: Tests requiring git repositories (such as Review Council gate command tests) use `TestGitRepositoryTemplate.CreateRepositoryCopy` to copy a pre-seeded, committed repository directory (<2ms, 0 child processes) instead of spawning repeated `git init`/`add`/`commit` OS child processes per fixture.
 
 ## Internals are in scope
@@ -117,6 +118,7 @@ not a test to adjust.
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
 | `ProcessConsoleCapture` | Lock-free, `AsyncLocal` console capture isolating stdout, stderr, and Spectre console width per async context |
 | `TestSquadCorpus` | Thread-safe, lazy-cached immutable canonical `SquadSource` and target baseline renders |
+| `SquadRenderedOutput` | Reading rendered Squad files back: frontmatter split, required scalars, shared and suppressed identities |
 | `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
 | `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
