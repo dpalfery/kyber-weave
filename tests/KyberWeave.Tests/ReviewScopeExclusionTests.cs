@@ -1,4 +1,3 @@
-using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 
@@ -7,8 +6,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Scoped line counting excludes generated churn — lockfiles and scratch output — from
 /// effective changed lines, while <c>ChangedPaths</c> still lists them so reviewers keep
-/// seeing lockfile bumps. With size-based escalation removed, large source diffs approve
-/// normally when deterministic gates and review findings are clean.
+/// seeing lockfile bumps. Scope is reporting metadata, not a verdict input.
 /// </summary>
 /// <remarks>
 /// Exclusion set: <c>*.lock</c>, <c>package-lock.json</c>, <c>pnpm-lock.yaml</c>,
@@ -17,15 +15,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ReviewScopeExclusionTests
 {
-    private static readonly DateOnly Today = new(2026, 8, 20);
-
     private const int SourceOnlyLines = 200;
     private const int ExcludedLines = 18_000;
-
-    private static ReviewOutcome Evaluate()
-    {
-        return VerdictEngine.Evaluate([], [], new ReviewConfig(), Today);
-    }
 
     private static ReviewScope ScopeWithExcludedCounts(string excludedPath)
     {
@@ -50,11 +41,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(lockfile);
 
-        ReviewOutcome outcome = Evaluate();
-
         Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
-        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
-        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-009");
         Assert.Contains(lockfile, scope.ChangedPaths);
     }
 
@@ -65,11 +52,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(scratchPath);
 
-        ReviewOutcome outcome = Evaluate();
-
         Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
-        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
-        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-009");
         Assert.Contains(scratchPath, scope.ChangedPaths);
     }
 
@@ -145,7 +128,7 @@ public sealed class ReviewScopeExclusionTests
     /// deterministic gates and review findings are clean.
     /// </summary>
     [Fact]
-    public void SourceOnlyLargeDiffApprovesWhenGatesAndFindingsAreClean()
+    public void SourceOnlyLargeDiffKeepsItsFullEffectiveLineCount()
     {
         Dictionary<string, int> pathLineCounts = new()
         {
@@ -154,11 +137,6 @@ public sealed class ReviewScopeExclusionTests
         };
         ReviewScope scope = new(["src/A.cs", "src/B.cs"], 21_000, pathLineCounts);
 
-        ReviewOutcome outcome = Evaluate();
-
         Assert.Equal(21_000, scope.EffectiveChangedLines);
-        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
-        Assert.Equal(0, outcome.ExitCode);
-        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-009");
     }
 }

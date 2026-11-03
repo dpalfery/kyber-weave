@@ -140,6 +140,11 @@ public sealed record DroppedFinding(ReviewFinding Finding, string Code, string R
 /// <param name="ChangedPaths">Repository-relative paths the diff touches.</param>
 /// <param name="ChangedLines">Total added and removed lines.</param>
 /// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
+/// <remarks>
+/// Scope is reporting metadata for reviewers. It is not an input to
+/// <see cref="VerdictEngine.Evaluate" />; the verdict is computed from findings, gates, config,
+/// and the evaluation date only.
+/// </remarks>
 public sealed record ReviewScope(
     IReadOnlyList<string> ChangedPaths,
     int ChangedLines,

@@ -43,7 +43,10 @@ public sealed record FindingsReport(
     /// <summary>The current findings format.</summary>
     public const string CurrentSchema = "kyber-weave.review-findings/v1";
 
-    /// <summary>The scope this report describes.</summary>
+    /// <summary>
+    /// The scope metadata this report describes. The verdict engine does not consume it; callers
+    /// use it to report the change's size and paths.
+    /// </summary>
     public ReviewScope ToScope()
     {
         return new ReviewScope(ChangedPaths, ChangedLines, PathLineCounts);

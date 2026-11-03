@@ -191,7 +191,7 @@ public class ReviewVerdictTests
     }
 
     [Fact]
-    public void TouchToAuthPathWithCleanGatesAndNoFindingsIsApproved()
+    public void RetiredReservedPathRuleEmitsNoDiagnostics()
     {
         ReviewOutcome outcome = Evaluate(
             gates: [new GateResult("test", true, 0, "passed")]);
@@ -218,7 +218,7 @@ public class ReviewVerdictTests
         Assert.Equal(expected, PathGlob.IsMatch(pattern, path));
 
     [Fact]
-    public void LargeChangeWithCleanGatesAndNoFindingsIsApproved()
+    public void RetiredSizeCeilingRuleEmitsNoDiagnostics()
     {
         ReviewOutcome outcome = Evaluate(
             gates: [new GateResult("test", true, 0, "passed")]);
@@ -230,11 +230,11 @@ public class ReviewVerdictTests
     }
 
     /// <summary>
-    /// Size is an attention limit, not a risk signal — a large clean diff must not be graded
-    /// riskier than a small dirty one just for being large.
+    /// Scope size is reporting metadata, not a risk input. The risk grade comes from findings
+    /// and gates, so a large clean scope stays low and a critical finding raises it.
     /// </summary>
     [Fact]
-    public void SizeAloneDoesNotRaiseTheRiskGrade()
+    public void RiskGradeComesFromFindingsNotScopeMetadata()
     {
         ReviewScope large = Scope(9_999);
         Assert.Equal(9_999, large.EffectiveChangedLines);
