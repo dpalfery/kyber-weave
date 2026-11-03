@@ -73,7 +73,7 @@ More detail: [README.md](README.md) and [docs/](docs/).
 
 - [ ] Change is focused and explained
 - [ ] Tests added or updated when behavior changes
-- [ ] `dotnet build` / `dotnet test` pass locally
+- [ ] `dotnet build` and the tests targeting your change pass locally (CI runs the full suite)
 - [ ] Docs or samples updated when user-facing behavior changes
 - [ ] Linked issue (if applicable)
 
