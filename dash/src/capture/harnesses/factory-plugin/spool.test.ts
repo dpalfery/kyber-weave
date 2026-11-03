@@ -8,11 +8,11 @@
 // on a character. A bound that counts CHARACTERS is therefore not a bound on the bytes the file
 // holds, and the ceiling the constant documents is not the ceiling the file respects.
 
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FACTORY_KEYS } from './contract.js'
 import { SPOOL_MAX_BYTES, appendSpoolEvent, factorySpoolDir } from './spool.js'
@@ -32,6 +32,8 @@ const SPOOL_FILE_NAME = 'spool.jsonl'
 const dirs: string[] = []
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  vi.doUnmock('node:fs')
+  vi.resetModules()
 })
 
 function temp(prefix: string): string {
@@ -96,5 +98,48 @@ describe('the spool byte bound', () => {
       statSync(spoolFile).size,
       'the spool file holds at most SPOOL_MAX_BYTES bytes',
     ).toBeLessThanOrEqual(SPOOL_MAX_BYTES)
+  })
+
+  it('does not read a spool file that is already over the byte bound', async () => {
+    const stateDir = temp('factory-spool-over-')
+    const spoolFile = join(factorySpoolDir(stateDir), SPOOL_FILE_NAME)
+    mkdirSync(factorySpoolDir(stateDir), { recursive: true })
+    // A spool over the bound: one event bigger than the whole ceiling, which a spool
+    // file can only hold if it was replaced by something that is not a spool.
+    writeFileSync(spoolFile, `${JSON.stringify({ blob: 'x'.repeat(SPOOL_MAX_BYTES + 1024) })}\n`)
+
+    // The reads the reader makes are recorded: the bound has to hold BEFORE the file is
+    // read, or the whole file is allocated first and the bound only refuses it afterwards.
+    const reads: string[] = []
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>
+      const real = actual['readFileSync'] as (...args: unknown[]) => unknown
+      return {
+        ...actual,
+        readFileSync: (...args: unknown[]) => {
+          reads.push(String(args[0]))
+          return real(...args)
+        },
+      }
+    })
+    vi.resetModules()
+    const spool = await import('./spool.js')
+
+    const events = spool.readSpoolEvents(stateDir)
+
+    expect(
+      reads,
+      'a spool file that is already over the bound is never read',
+    ).not.toContain(spoolFile)
+    // Whatever the reader hands back is inside the bound: a reader that refuses the file
+    // holds no events at all, and a reader that keeps the newest ones holds fewer than
+    // the ceiling. Either way the bound is what the reader answers to.
+    const held = events.reduce<number>(
+      (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+      0,
+    )
+    expect(held, 'the events the reader hands back fit inside the byte bound').toBeLessThanOrEqual(
+      SPOOL_MAX_BYTES,
+    )
   })
 })

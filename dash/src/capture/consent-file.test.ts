@@ -24,13 +24,15 @@
 
 import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const made: string[] = []
 
 afterEach(() => {
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+  vi.doUnmock('node:fs')
+  vi.resetModules()
 })
 
 function tempDir(): string {
@@ -198,5 +200,101 @@ describe('the consent file is bounded by bytes, and every reader bounds it the s
       'the state reader must agree with the two content readers',
     ).toBe('invalid')
     expect(readConsentState(path)).not.toBe('on')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+// The reader and the writer, at their edges
+
+/** The shared consent module, as the tests load it. */
+type ConsentModule = typeof import('./consent-file.js')
+
+/**
+ * The shared consent module, loaded with the file system's reads recorded.
+ *
+ * The case is about WHAT the reader reads: a file that is already over the bound must
+ * not be read at all, so the bound holds before the content is materialised. `node:fs` is
+ * replaced for the load, so every read the module makes is recorded, and the real module
+ * is put back in the `afterEach`.
+ */
+async function loadWithRecordedReads(): Promise<{
+  module: ConsentModule
+  reads: string[]
+}> {
+  const reads: string[] = []
+  vi.doMock('node:fs', async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>
+    const real = actual['readFileSync'] as (...args: unknown[]) => unknown
+    return {
+      ...actual,
+      readFileSync: (...args: unknown[]) => {
+        reads.push(String(args[0]))
+        return real(...args)
+      },
+    }
+  })
+  vi.resetModules()
+  const module = await import('./consent-file.js')
+  return { module, reads }
+}
+
+/**
+ * The shared consent module, loaded with every write failing with `failure`.
+ *
+ * A write that fails with a value that is not an object is what a patched or wrapped
+ * `node:fs` can do, and what the catch in the writer must survive: the failure it
+ * existed to report is the one that has to reach the caller.
+ */
+async function loadWithFailingWrite(failure: unknown): Promise<ConsentModule> {
+  vi.doMock('node:fs', async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>
+    return {
+      ...actual,
+      writeFileSync: () => {
+        throw failure
+      },
+    }
+  })
+  vi.resetModules()
+  return import('./consent-file.js')
+}
+
+describe('the consent file is bounded before it is read', () => {
+  it('does not read a consent file that is already over the byte bound', async () => {
+    const dir = tempDir()
+    const path = consentPathIn(dir)
+    mkdirSync(dirname(path), { recursive: true })
+    // A file over the bound: 64 KiB, sixteen times the 4096-byte bound. It is well
+    // formed JSON, so only the bound can reject it.
+    writeFileSync(path, `{"version":1,"content":true,"note":"${'x'.repeat(64 * 1024)}"}`)
+
+    const { module, reads } = await loadWithRecordedReads()
+    const state = module.readConsentState(path)
+
+    expect(
+      reads,
+      'a consent file that is already over the bound is never read',
+    ).not.toContain(path)
+    expect(state, 'the over-bound file is invalid').toBe('invalid')
+  })
+})
+
+describe('the consent writer reports the failure it caught', () => {
+  it('propagates the original failure when the write throws a value that is not an object', async () => {
+    const path = consentPathIn(tempDir())
+    const module = await loadWithFailingWrite(null)
+
+    let raised: unknown = 'nothing was raised'
+    try {
+      module.createConsentIfAbsent(path)
+    } catch (error) {
+      raised = error
+    }
+
+    expect(
+      raised,
+      'the failure is the one the write threw, not a TypeError about reading .code of it',
+    ).not.toBeInstanceOf(TypeError)
+    expect(raised, 'the original failure is what propagates').toBeNull()
   })
 })

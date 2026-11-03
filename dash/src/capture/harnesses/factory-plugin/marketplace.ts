@@ -305,6 +305,32 @@ function unreachableHarness(cause: string): FactoryHarnessCli {
 }
 
 /**
+ * The timeout the driver holds one command to.
+ *
+ * A bound that is not a number, is infinite, or is not positive is not a bound at all:
+ * `spawnSync` reads an infinite timeout as "no timeout", so the child is held to nothing.
+ * A bound the driver cannot use falls back to the documented default rather than reaching
+ * the spawn.
+ */
+function commandTimeoutMs(requested: number | undefined): number {
+  if (requested === undefined) return DEFAULT_COMMAND_TIMEOUT_MS
+  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_COMMAND_TIMEOUT_MS
+  return Math.floor(requested)
+}
+
+/**
+ * The cap on the bytes one command's output may contribute.
+ *
+ * The same rule as the timeout: a cap that is not a finite positive number is no cap, so
+ * the documented default is used instead.
+ */
+function commandOutputBytes(requested: number | undefined): number {
+  if (requested === undefined) return DEFAULT_MAX_OUTPUT_BYTES
+  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_MAX_OUTPUT_BYTES
+  return Math.floor(requested)
+}
+
+/**
  * Resolve the harness's CLI from PATH and bind a driver to it.
  *
  * The driver runs one command at a time, with a bounded runtime and a bounded output
@@ -315,8 +341,8 @@ export function resolveFactoryHarnessCli(
   options: FactoryHarnessCliOptions = {},
 ): FactoryHarnessCli {
   const processEnv = options.processEnv ?? process.env
-  const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS
-  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
+  const timeoutMs = commandTimeoutMs(options.timeoutMs)
+  const maxOutputBytes = commandOutputBytes(options.maxOutputBytes)
   // The guard's own limits, asked of the guard rather than re-implemented here: the deny
   // mode, the depth limit, and a role that may not spawn at all. The INJECTED environment
   // is asked as well, so a test that injects a deny flag is refused exactly as it asked.

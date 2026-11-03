@@ -55,7 +55,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { Readable } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FACTORY_KEYS } from './contract.js'
 
@@ -618,5 +619,135 @@ describe('the Factory spool is bounded and survives the process', () => {
     const spoolDir = (dir as (root: string) => string)(stateDir)
     expect(spoolDir.startsWith(stateDir + sep)).toBe(true)
     expect(spoolDir.endsWith(join('capture', 'factory'))).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+// The payload the runner reads from stdin
+
+/**
+ * Put a stream in the runner's place of the host's stdin, and hand back the call that
+ * puts the real one back.
+ *
+ * The runner reads `process.stdin` directly, so this is the only way to drive its reader
+ * with a payload of the test's choosing — a stream that is too large, or one that never
+ * ends. The real descriptor is restored afterwards, so the rest of the file still sees
+ * the process's own stdin.
+ */
+function replaceProcessStdin(stream: Readable): () => void {
+  const original = Object.getOwnPropertyDescriptor(process, 'stdin')
+  Object.defineProperty(process, 'stdin', { value: stream, configurable: true, enumerable: true })
+  return () => {
+    if (original !== undefined) Object.defineProperty(process, 'stdin', original)
+  }
+}
+
+/**
+ * Run the hook runner with the host's stdin as the ONLY source of the payload.
+ *
+ * The `readStdin` seam is deliberately not injected: the case is about the runner's own
+ * reader, and a seam would replace the very code under test.
+ */
+async function runHookOnProcessStdin(input: {
+  fetch: Receiver['fetch']
+  stateDir: string
+  consentPath: string
+}): Promise<RunResult> {
+  const entry = await import('./entry.js')
+  const run = (entry as { runHook?: unknown }).runHook
+  if (typeof run !== 'function') {
+    throw new Error('entry.ts must export runHook(options): Promise<number>')
+  }
+  let stdout = ''
+  let stderr = ''
+  const code = await (
+    run as (options: Record<string, unknown>) => Promise<number>
+  )({
+    fetchFn: input.fetch,
+    consentPath: input.consentPath,
+    stateDir: input.stateDir,
+    stdout: (text: string) => {
+      stdout += text
+    },
+    stderr: (text: string) => {
+      stderr += text
+    },
+  })
+  return { code, stdout, stderr }
+}
+
+describe('the hook runner bounds the payload it reads from stdin', () => {
+  /**
+   * The payload the runner cannot hold. A hook payload is a few kilobytes — the prompt it
+   * carries is capped at 64 KiB — so sixteen megabytes is past any bound a one-shot hook
+   * may reasonably take, and the payload is well formed JSON: a reader that takes it all
+   * and parses it delivers a span, which is what makes the refusal observable.
+   */
+  function oversizedPayload(): Buffer {
+    return Buffer.concat([
+      Buffer.from('{"hook_event_name":"SessionStart","session_id":"ses_oversized","pad":"'),
+      Buffer.alloc(16 * 1024 * 1024, 'x'),
+      Buffer.from('"}'),
+    ])
+  }
+
+  it('refuses a payload past the bound instead of accumulating it', async () => {
+    const stateDir = tempDir()
+    const rcv = receiver()
+    const restore = replaceProcessStdin(Readable.from([oversizedPayload()], { objectMode: false }))
+    try {
+      // The module registry is reset so a reader that takes its stream when it loads sees
+      // the fake stream and not the process's own stdin.
+      vi.resetModules()
+      const outcome = await runHookOnProcessStdin({
+        fetch: rcv.fetch,
+        stateDir,
+        consentPath: consentPathIn(stateDir),
+      })
+
+      expect(outcome.code, 'the runner never fails its host').toBe(0)
+      expect(
+        rcv.attempts.length,
+        'a payload past the bound is refused, not accumulated and delivered',
+      ).toBe(0)
+    } finally {
+      restore()
+    }
+  })
+
+  it('gives up on a payload that never ends instead of waiting forever', async () => {
+    const stateDir = tempDir()
+    const rcv = receiver()
+    // A stream that never pushes and never ends: the harness that wrote it is still there.
+    const never = new Readable({
+      read() {
+        // Nothing: the stream stays open, and the reader waits on it.
+      },
+    })
+    const restore = replaceProcessStdin(never)
+    try {
+      vi.resetModules()
+      const outcome = await Promise.race([
+        runHookOnProcessStdin({
+          fetch: rcv.fetch,
+          stateDir,
+          consentPath: consentPathIn(stateDir),
+        }),
+        new Promise((resolve) => {
+          // Ten seconds is ten times the delivery deadline the runner already holds
+          // itself to: a hook that waits longer than that for a payload is holding the
+          // host that runs it.
+          const timer = setTimeout(() => resolve('still reading'), 10_000)
+          timer.unref()
+        }),
+      ])
+
+      expect(
+        outcome,
+        'the runner gives up on a payload that never ends, rather than holding the host forever',
+      ).not.toBe('still reading')
+    } finally {
+      restore()
+    }
   })
 })

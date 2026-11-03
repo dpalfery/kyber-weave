@@ -119,6 +119,8 @@ const tempDirs: string[] = []
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
   vi.unstubAllEnvs()
+  vi.doUnmock('node:fs')
+  vi.resetModules()
 })
 
 function fixture(prefix: string): Fixture {
@@ -365,5 +367,43 @@ describe('capture plugin install --harness factory', () => {
     })
     expect(result.exitCode).toBe(0)
     expect(consentContent(f)).toBe(true)
+  })
+
+  it('reports the install failure when the write throws a value that is not an object', async () => {
+    const f = fixture('factory-command-throw-')
+    // The tree write fails with a value that is not an object: a wrapped or patched file
+    // system can do that, and the command's catch has to survive it. The failure is the
+    // one the write threw, so the command reports it instead of raising over it.
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>
+      const wrap = (name: string) => (...args: unknown[]) => {
+        if (String(args[0]).startsWith(f.home)) throw null
+        return (actual[name] as (...a: unknown[]) => unknown)(...args)
+      }
+      return {
+        ...actual,
+        openSync: wrap('openSync'),
+        writeFileSync: wrap('writeFileSync'),
+        renameSync: wrap('renameSync'),
+      }
+    })
+    vi.resetModules()
+
+    let raised: unknown
+    let result: PluginInstallCommandResult | undefined
+    try {
+      result = await run(f)
+    } catch (error) {
+      raised = error
+    }
+
+    expect(
+      raised,
+      'the command reports the failure instead of raising over the one it caught',
+    ).toBeUndefined()
+    expect(result?.exitCode, 'a failed write is exit 1').toBe(1)
+    expect(result?.stderr, 'the message names the unknown code').toContain(
+      'could not write the Factory capture plugin (unknown)',
+    )
   })
 })

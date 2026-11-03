@@ -267,6 +267,27 @@ describe('installFactoryPlugin: strict mode', () => {
     expect(existsSync(f.receiptFile)).toBe(false)
   })
 
+  it('reports a foreign file whose name carries a control character without breaking the line', () => {
+    const f = fixture('factory-foreign-control-')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    // The owner's own file, with a newline and a control character in its name: the name
+    // is owner-controlled, and the status surface is line-based.
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'owner\nnotes\u0007.md'), 'mine\n')
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.reason).toBe('conflict')
+    expect(result.err.length, 'the refusal carries a message').toBeGreaterThan(0)
+    for (const line of result.err) {
+      expect(
+        line,
+        'the message carries no control character, so a crafted name cannot break the line',
+      ).not.toMatch(/[\u0000-\u001f\u007f]/)
+    }
+    expect(result.err.join(' '), 'the file name is still recognizable').toContain('owner')
+  })
+
   it('refuses a tree whose files do not match what Kyber writes, and writes nothing', () => {
     const f = fixture('factory-mismatch-')
     mkdirSync(join(f.pluginDir, '.factory-plugin'), { recursive: true })

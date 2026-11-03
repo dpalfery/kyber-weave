@@ -15,7 +15,7 @@
 // code into the small bounded process it runs in.
 
 import { randomBytes } from 'node:crypto'
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 /**
@@ -34,14 +34,30 @@ export type ConsentState = 'absent' | 'on' | 'off' | 'invalid' | 'unreadable'
 
 /** Never throws, and never returns the file's text. */
 export function readConsentState(path: string): ConsentState {
-  let text: string
+  let handle: number
   try {
-    text = readFileSync(path, 'utf8')
+    handle = openSync(path, 'r')
   } catch (error) {
-    // One read attempt, no existence pre-check: a missing entry is the only 'absent'.
+    // The OPEN is the check: a path that names nothing at all is 'absent', and one that
+    // cannot be opened for any other reason is 'unreadable'.
     return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' ? 'absent' : 'unreadable'
   }
-  if (Buffer.byteLength(text, 'utf8') > MAX_CONSENT_BYTES) return 'invalid'
+  try {
+    // The file is measured through the descriptor BEFORE its content is read, so a file
+    // that is already over the bound is refused without ever being materialised.
+    const stat = fstatSync(handle)
+    if (!stat.isFile()) return 'unreadable'
+    if (stat.size > MAX_CONSENT_BYTES) return 'invalid'
+    return parseConsentText(readFileSync(handle, 'utf8'))
+  } catch {
+    return 'unreadable'
+  } finally {
+    closeSync(handle)
+  }
+}
+
+/** The state the consent file's text names, or 'invalid' when the text is not our shape. */
+function parseConsentText(text: string): ConsentState {
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 'invalid'
@@ -95,7 +111,9 @@ export function createConsentIfAbsent(path: string): 'created' | 'present' {
     writeFileSync(path, consentBody(false), { flag: 'wx' })
     return 'created'
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
+    // The errno code is read through the optional chain: a failure that is not an object
+    // at all has no code, and reading one anyway raises a second failure over the first.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
     if (code === 'EEXIST' || code === 'EISDIR') return 'present'
     throw error
   }

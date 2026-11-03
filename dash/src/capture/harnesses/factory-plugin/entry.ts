@@ -50,6 +50,25 @@ const TAIL_CAP_BYTES = 64 * 1024
 const DEFAULT_REQUEST_TIMEOUT_MS = 2000
 /** Bound on one response-body teardown: disposal must never wedge the hook. */
 const BODY_DISPOSE_TIMEOUT_MS = 250
+/**
+ * The cap on the bytes one hook payload may carry.
+ *
+ * The payload is the harness's own JSON: the event name, the ids, and the values the mapper
+ * measures. The one part of it that is text is the prompt, and the mapper caps that at 64 KiB
+ * itself. A megabyte is sixteen times that cap, so a real payload sits comfortably inside the
+ * bound, and a payload past it is REFUSED rather than accumulated: this process runs inside
+ * somebody else's tool, and their memory is not the hook's to spend.
+ */
+const MAX_STDIN_BYTES = 1024 * 1024
+/**
+ * The deadline of one payload read.
+ *
+ * The harness writes the payload and closes its stdin, so a read that is still waiting after
+ * this belongs to a harness that never closed it. The hook gives up on it rather than hold the
+ * tool that ran it: five seconds is more than twice the delivery deadline the runner holds
+ * itself to, and no payload that is going to arrive needs that long.
+ */
+const STDIN_READ_TIMEOUT_MS = 5_000
 
 /** Everything the runner needs. Every seam is injected, so a test never touches the network. */
 export type HookRunOptions = {
@@ -262,11 +281,41 @@ function parsePayload(raw: string): Record<string, unknown> | undefined {
   return parsed as Record<string, unknown>
 }
 
-/** The whole of the process stdin, as text. */
+/**
+ * The whole of the process stdin, as text.
+ *
+ * The read is bounded twice: by the bytes the payload may carry and by the time the read may
+ * take. A payload past the byte cap is refused rather than accumulated, and a stdin that never
+ * ends is given up on — a hook that waits forever is a hook that holds the tool that ran it.
+ */
 async function readProcessStdin(): Promise<string> {
   const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
-  return Buffer.concat(chunks).toString('utf8')
+  let bytes = 0
+  const read = (async (): Promise<string> => {
+    for await (const chunk of process.stdin) {
+      const buffer = Buffer.from(chunk)
+      bytes += buffer.length
+      if (bytes > MAX_STDIN_BYTES) {
+        throw new Error(`the hook payload is over the ${MAX_STDIN_BYTES} byte bound`)
+      }
+      chunks.push(buffer)
+    }
+    return Buffer.concat(chunks).toString('utf8')
+  })()
+  let timer: NodeJS.Timeout | undefined
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // The stream is closed as well: a reader still waiting on it would keep this
+      // process alive after the deadline, which is the very thing the deadline is for.
+      process.stdin.destroy()
+      reject(new Error(`the hook payload was not read within ${STDIN_READ_TIMEOUT_MS} ms`))
+    }, STDIN_READ_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([read, expiry])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
