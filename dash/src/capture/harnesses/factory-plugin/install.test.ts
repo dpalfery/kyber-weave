@@ -55,7 +55,11 @@ const OWNED_FILES = [
   'kyberdash-factory/hooks/kyberdash-factory.mjs',
 ]
 
-/** A symlink test is meaningless on Windows, where the installer cannot create one. */
+/**
+ * A case that needs POSIX: a symlink test is meaningless on Windows, where the installer
+ * cannot create one, and a file name carrying a control character cannot exist there,
+ * because Windows forbids control characters in a file name.
+ */
 const POSIX_ONLY = process.platform === 'win32'
 
 /** The receipt the installer writes: the marketplace tree, not one file. */
@@ -267,7 +271,9 @@ describe('installFactoryPlugin: strict mode', () => {
     expect(existsSync(f.receiptFile)).toBe(false)
   })
 
-  it('reports a foreign file whose name carries a control character without breaking the line', () => {
+  // Windows forbids control characters in a file name, so the crafted name this case
+  // plants cannot exist there and the file is never created: the case is POSIX-only.
+  it.skipIf(POSIX_ONLY)('reports a foreign file whose name carries a control character without breaking the line', () => {
     const f = fixture('factory-foreign-control-')
     mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
     // The owner's own file, with a newline and a control character in its name: the name
