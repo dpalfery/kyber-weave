@@ -47,15 +47,14 @@ public sealed class McpRepositoryRootTests : IDisposable
         string firstRoot = RepositoryRootResolver.Resolve(["--repo-root", "."], first, null);
         string secondRoot = RepositoryRootResolver.Resolve(["--repo-root", "."], second, null);
 
-        IReadOnlyList<DocumentHit> firstHits = CreateHost(firstRoot).Current().Explore(
-            "first-only-marker", maxDocs: 5, charBudget: DocumentIndex.DefaultCharBudget);
-        IReadOnlyList<DocumentHit> secondHits = CreateHost(secondRoot).Current().Explore(
-            "second-only-marker", maxDocs: 5, charBudget: DocumentIndex.DefaultCharBudget);
+        ExploreAnswer firstAnswer = CreateHost(firstRoot).Current().Explore("first-only-marker");
+        ExploreAnswer secondAnswer = CreateHost(secondRoot).Current().Explore("second-only-marker");
 
-        Assert.Contains(firstHits, hit => hit.Document.RelativePath == "docs/first-only.md");
-        Assert.DoesNotContain(firstHits, hit => hit.Document.RelativePath == "docs/second-only.md");
-        Assert.Contains(secondHits, hit => hit.Document.RelativePath == "docs/second-only.md");
-        Assert.DoesNotContain(secondHits, hit => hit.Document.RelativePath == "docs/first-only.md");
+        Assert.False(firstAnswer.IsMiss);
+        Assert.False(secondAnswer.IsMiss);
+        Assert.Equal("docs/first-only.md", firstAnswer.SourceDocument!.RelativePath.Replace('\\', '/'));
+        Assert.Equal("docs/second-only.md", secondAnswer.SourceDocument!.RelativePath.Replace('\\', '/'));
+        Assert.NotEqual(firstAnswer.SourceDocument.RelativePath, secondAnswer.SourceDocument.RelativePath);
     }
 
     [Fact]

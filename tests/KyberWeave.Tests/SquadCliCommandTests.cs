@@ -927,8 +927,8 @@ public sealed class SquadCliCommandTests : IDisposable
 
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
         string deployedFile2 = Path.Combine(targetDir, "skills", "test-dev", "SKILL.md");
-        string receiptPath = Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json");
-        string lockPath = Path.Combine(targetDir, ".kyber-weave", "squad.lock.yml");
+        string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.receipt.json");
+        string lockPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.lock.yml");
 
         Assert.True(File.Exists(deployedFile1));
         Assert.True(File.Exists(deployedFile2));
@@ -967,7 +967,7 @@ public sealed class SquadCliCommandTests : IDisposable
             ("skills/test-dev/SKILL.md", "Use when writing tests.\n"));
 
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
-        string receiptPath = Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json");
+        string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.receipt.json");
 
         SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
 
@@ -1073,9 +1073,10 @@ public sealed class SquadCliCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Successfully installed", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
-        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.lock.yml")));
-        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json")));
+        string homeState = HomeProjectStateDirectory(userPaths, targetDir);
+        Assert.True(Directory.Exists(homeState));
+        Assert.True(File.Exists(Path.Combine(homeState, "squad.lock.yml")));
+        Assert.True(File.Exists(Path.Combine(homeState, "squad.receipt.json")));
     }
 
     [Fact]
@@ -1644,9 +1645,7 @@ public sealed class SquadCliCommandTests : IDisposable
         using TempDirectory fixture = new TempDirectory();
         string targetRoot = fixture.Path;
         string appDataDir = Path.Combine(fixture.Path, "app-data");
-        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
         Directory.CreateDirectory(appDataDir);
-        Directory.CreateDirectory(fakeCodexRoot);
         FakeUserPaths userPaths = new(appDataDir);
         SquadStateStore stateStore = new(userPaths);
 
@@ -1659,30 +1658,28 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedLegacyGlobalDeployment(targetRoot, stateStore,
             (".codex/agents/conductor.toml", "conductor content"));
 
-        string? originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
-        try
-        {
-            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexRoot);
+        // This run must name the receipt's recorded root, not the resolver's per-target
+        // answer. An earlier revision set CODEX_HOME process-globally to stand in for that
+        // answer, but ResolveUninstallGlobalTargetRoots short-circuits the legacy branch
+        // before consulting any resolver, so the variable was never read here — it only
+        // raced SquadPathSafetyTests, which drives the real resolver through the same
+        // override variables in a parallel test class. The injected resolver below still
+        // pins the lifecycle's roots, and targetRoot is a temp directory, so the assertion
+        // still fails if this branch ever does consult a resolver.
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        using CorpusSquadReleaseSource releaseSource = new();
+        SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+        SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings
+            {
+                Path = targetRoot,
+                Global = true,
+                Yes = true
+            }));
 
-            SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
-            using CorpusSquadReleaseSource releaseSource = new();
-            SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
-            SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
-            CommandExecution execution = Capture(() => command.Execute(
-                null!,
-                new SquadUninstallSettings
-                {
-                    Path = targetRoot,
-                    Global = true,
-                    Yes = true
-                }));
-
-            Assert.Contains($"codex writes beneath {targetRoot}.", execution.Output, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("CODEX_HOME", originalCodexHome);
-        }
+        Assert.Contains($"codex writes beneath {targetRoot}.", execution.Output, StringComparison.Ordinal);
     }
 
     #endregion
@@ -1746,6 +1743,14 @@ public sealed class SquadCliCommandTests : IDisposable
             digits);
         return count;
     }
+
+    private static string HomeProjectStateDirectory(ISquadUserPaths userPaths, string projectRoot) =>
+        Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "projects",
+            SquadPhysicalRootIdentity.Resolve(projectRoot).Key);
 
     private static void SeedDeployment(
         string targetRoot,
@@ -1860,6 +1865,8 @@ public sealed class SquadCliCommandTests : IDisposable
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 
     private sealed class FakeGlobalRootResolver(SquadTarget target, string root)

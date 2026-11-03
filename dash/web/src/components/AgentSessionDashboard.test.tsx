@@ -8,6 +8,7 @@ import {
   AgentSessionLoader,
   type AgentSessionPayload,
   type DrawerContent,
+  type SessionRequestItem,
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
@@ -15,6 +16,11 @@ import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
+import skillsFixtures from './fixtures/skills-payload.json'
+import type { KyberTurnContentResult } from '../lib/kyberApi.js'
+import { readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 type ReactInternals = {
@@ -127,8 +133,8 @@ const sampleSession: AgentSessionPayload = {
     'Tokens computed with o200k_base tokenizer.',
   ],
   requests: [
-    { request: 'Analyze the recursion bug in ast.ts', turns: 3, model: 'claude-3-5-sonnet' },
-    { request: 'Apply the patch and verify tests pass', turns: 2, model: 'claude-3-5-sonnet' },
+    { request: 'Analyze the recursion bug in ast.ts', prompt: 'Analyze the recursion bug in ast.ts', turns: 3, model: 'claude-3-5-sonnet' },
+    { request: 'Apply the patch and verify tests pass', prompt: 'Apply the patch and verify tests pass', turns: 2, model: 'claude-3-5-sonnet' },
   ],
   reconciliation: [
     {
@@ -498,6 +504,14 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('1 never called')
   })
 
+  it('renders the token totals once, in the Session Overview cards, with no separate Underlying Token Totals section', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+
+    expect(html).not.toContain('Underlying Token Totals')
+    expect(html).not.toContain('data-testid="cost-tokens-section"')
+    expect(html).toContain('Cache Hit Ratio')
+  })
+
   it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
     const unavailableToolCalls: AgentSessionPayload = {
       ...sampleSession,
@@ -692,7 +706,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
   it('renders Execution Timeline with call tree and duration bars toggle', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
     expect(html).toContain('data-testid="execution-timeline-section"')
-    expect(html).toContain('4 · Execution Timeline &amp; Call Tree')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
     expect(html).toContain('data-testid="timeline-tab-tree"')
     expect(html).toContain('data-testid="timeline-tab-bars"')
     expect(html).toContain('data-testid="timeline-tree-view"')
@@ -731,6 +745,42 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('$0.85')
     expect(html).toContain('reported')
     expect(html).toContain('reported by harness')
+  })
+
+  // The engine stamps a harness-reported cost as basis `harness`; `harness_reported` is the
+  // legacy spelling. Before the fix the tile read only the legacy one, so a `harness` cost was
+  // labelled "published rates". Both must read as reported.
+  const costTile = (html: string) =>
+    html.slice(html.indexOf('data-testid="metric-cost"'), html.indexOf('Cache Hit Ratio'))
+
+  it.each(['harness', 'harness_reported'])('labels cost basis %s as reported by the harness', (basis) => {
+    const reportedSession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'pi',
+      summary: {
+        ...sampleSession.summary,
+        cost: { usd: 0.85, basis, status: 'ok' },
+      },
+    }
+    const tile = costTile(renderHtml(<AgentSessionDashboard session={reportedSession} />))
+    expect(tile).toContain('>reported<')
+    expect(tile).toContain('reported by harness')
+    expect(tile).not.toContain('published rates')
+  })
+
+  it('labels a published cost basis as published rates, not reported', () => {
+    const publishedSession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'pi',
+      summary: {
+        ...sampleSession.summary,
+        cost: { usd: 0.85, basis: 'published', status: 'ok' },
+      },
+    }
+    const tile = costTile(renderHtml(<AgentSessionDashboard session={publishedSession} />))
+    expect(tile).toContain('>published<')
+    expect(tile).toContain('published rates')
+    expect(tile).not.toContain('reported by harness')
   })
 
   it('keeps session.timeline[0] in children so invoke_agent is not swallowed when timeline has 1 element', () => {
@@ -914,6 +964,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
         part: 'tool_definitions',
+        toolName: 'read_file',
       })
 
       const spanTree = renderWithState('bars')
@@ -1040,16 +1091,21 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       expect(spendChartsEl).not.toBeNull()
 
       // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
+      // A plain turn selection opens the whole-turn lossless view (not the
+      // payload row alone): the drawer resolves the exact zero-based index
+      // through the turn-content endpoint.
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
       expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 1')
-      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
+      expect(capturedTitle).toBe('Turn 1 · Full context')
+      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(0)
+      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-1')
 
       // 0-based transport lookup: index 1 is Turn 2.
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 2')
-      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
+      expect(capturedTitle).toBe('Turn 2 · Full context')
+      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(1)
+      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-2')
 
       // 0-based turn lookup with bucket: tool_definitions
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
@@ -1558,5 +1614,682 @@ describe('AgentSessionDashboard cache tiles (issue #185)', () => {
     expect(html).not.toContain('on 0 turns')
     // The ratio tile falls back to its honest dash without a served ratio.
     expect(html).toContain('Cache Hit Ratio')
+  })
+})
+
+describe('AgentSessionDashboard: session-level system_prompt request', () => {
+  it('omits the turn span for system_prompt but keeps it for other buckets', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendCharts = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+
+      // The session-level system prompt must not carry the turn span: the
+      // first turn span holds no prompt, so a span-scoped request 404s.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'system_prompt')
+      const systemRequest = (drawerFrom(renderWithState())!.props as { contentRequest?: Record<string, unknown> }).contentRequest
+      expect(systemRequest).toEqual({ sessionId: 'sess-abc-123', part: 'system_prompt' })
+      expect(systemRequest).not.toHaveProperty('span')
+
+      // Normal per-turn buckets keep their prior span behavior.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'turn-span-1',
+        part: 'tool_definitions',
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+describe('AgentSessionDashboard: whole-turn selection', () => {
+  it('opens a lossless whole-turn view with the exact zero-based turn index', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendCharts = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+
+      // A plain turn selection (no bucket) opens the whole-turn view backed
+      // by the turn-content endpoint with the exact zero-based index and the
+      // explicit lossless path — never a span or bucket request.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
+      const drawer = drawerFrom(renderWithState())!
+      expect(drawer.props as Record<string, unknown>).toMatchObject({ title: 'Turn 2 · Full context' })
+      expect((drawer.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        turnIndex: 1,
+        full: true,
+      })
+
+      // Turn 0 resolves to transport 0, the first turn span — not a neighbor.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        turnIndex: 0,
+        full: true,
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+/** The markup from one section's test id up to the next section's test id. */
+function sectionOf(html: string, fromTestId: string, toTestId: string): string {
+  const start = html.indexOf(`data-testid="${fromTestId}"`)
+  const end = html.indexOf(`data-testid="${toTestId}"`)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  return html.slice(start, end)
+}
+
+describe('AgentSessionDashboard: Skills section (4 · Skills)', () => {
+  // The fixture's summary and skills blocks are merged onto the existing B1-shaped
+  // session. Its turns array is left alone: it is the per-turn spend list the rest
+  // of the dashboard already reads.
+  const realistic = skillsFixtures.realistic
+  const skillsSession = {
+    ...sampleSession,
+    summary: { ...sampleSession.summary, ...realistic.summary },
+    skills: realistic.skills,
+  } as unknown as AgentSessionPayload
+
+  it('numbers the skills section 4 and renumbers the execution timeline to 5', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    expect(html).toContain('4 · Skills')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
+    expect(html).not.toContain('4 · Execution Timeline')
+    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(html.indexOf('4 · Skills'))
+    expect(html.indexOf('4 · Skills')).toBeLessThan(html.indexOf('5 · Execution Timeline &amp; Call Tree'))
+  })
+
+  it('renders the skills-listed and skills-invoked tiles inside the skills section', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('data-testid="skills-tile-listed"')
+    expect(section).toContain('data-testid="skills-tile-invoked"')
+    expect(section).toContain('data-testid="skill-row-docs"')
+  })
+
+  it('reads a session with no skills key as not yet projected, never as no skills', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('not yet projected')
+    expect(section).not.toMatch(/no skills/i)
+  })
+
+  it('keeps the skills section free of currency figures and waste wording', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).not.toMatch(/[$€£¥]/)
+    expect(section).not.toMatch(/waste/i)
+  })
+
+  it('opens the skill drawer when a skill row is clicked', () => {
+    let capturedOpen = false
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
+        }
+        if (initial === '') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionDashboard({ session: skillsSession })
+      const skillRow = findElementByTestId(tree, 'skill-row-docs')
+      expect(skillRow).not.toBeNull()
+      expect((skillRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
+
+      ;(skillRow!.props as { onClick: () => void }).onClick()
+      expect(capturedOpen).toBe(true)
+      expect(capturedTitle).toBe('Skill: docs')
+      expect((capturedContent as { skill: { name: string } }).skill.name).toBe('docs')
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
+      }
+    }
+  })
+})
+
+/** Depth-first search over the element tree for the first element matching `predicate`. */
+function findElementWhere(node: unknown, predicate: (el: React.ReactElement) => boolean): React.ReactElement | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElementWhere(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (predicate(node)) return node
+  return findElementWhere((node.props as { children?: unknown }).children, predicate)
+}
+
+/**
+ * Clicks a skill row through the real wiring (SkillsPanel onSelectSkill ->
+ * openDrawerForSkill) and returns the props the dashboard hands its drawer.
+ * The hook shim is the same stateful one the whole-turn selection test uses.
+ */
+function openSkillDrawer(session: AgentSessionPayload, skillName: string): React.ComponentProps<typeof SessionInspectorDrawer> {
+  const internals = internalsOf()
+  const originalUseState = internals?.H?.useState
+  const state: unknown[] = []
+  let cursor = 0
+  const renderContent = () => {
+    cursor = 0
+    return AgentSessionContent({ session })
+  }
+  if (internals?.H) {
+    internals.H.useState = (initial: unknown) => {
+      const index = cursor++
+      if (!(index in state)) {
+        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      return [
+        state[index],
+        (next: unknown) => {
+          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+        },
+      ]
+    }
+  }
+  try {
+    const panel = findElementWhere(renderContent(), (el) => typeof (el.props as { onSelectSkill?: unknown }).onSelectSkill === 'function')
+    expect(panel).not.toBeNull()
+    const row = session.skills && 'rows' in session.skills ? session.skills.rows.find((r) => r.name === skillName) : undefined
+    expect(row).toBeDefined()
+    ;(panel!.props as { onSelectSkill: (r: unknown) => void }).onSelectSkill(row)
+    const drawer = findElementWhere(renderContent(), (el) => el.type === SessionInspectorDrawer)
+    expect(drawer).not.toBeNull()
+    return drawer!.props as React.ComponentProps<typeof SessionInspectorDrawer>
+  } finally {
+    if (internals?.H) {
+      internals.H.useState = originalUseState
+    }
+  }
+}
+
+function turnContentBody(turnIndex: number, extra: Record<string, unknown>): KyberTurnContentResult {
+  return { sessionId: 'sess-abc-123', turnIndex, blocks: [], parts: [], assembledText: '', ...extra } as unknown as KyberTurnContentResult
+}
+
+describe('AgentSessionDashboard: skills headline comes from the served counts (F1, F4)', () => {
+  it('renders the served headline in the skills section, not a count of the rows', () => {
+    const served = skillsFixtures.servedCountsDifferFromRows
+    const session = {
+      ...sampleSession,
+      summary: { ...sampleSession.summary, ...served.summary },
+      skills: served.skills,
+    } as unknown as AgentSessionPayload
+    const html = renderHtml(<AgentSessionDashboard session={session} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('5 of 7 listed skills had no observed invocation')
+    expect(section).not.toContain('2 of 3 listed skills')
+  })
+
+  it('shows the no-skill line and no headline for a measurable payload with no rows', () => {
+    const empty = skillsFixtures.noRecordedSkills
+    const session = {
+      ...sampleSession,
+      summary: { ...sampleSession.summary, ...empty.summary },
+      skills: empty.skills,
+    } as unknown as AgentSessionPayload
+    const html = renderHtml(<AgentSessionDashboard session={session} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('No skill was recorded for this session.')
+    expect(section).not.toContain('data-testid="skills-headline"')
+    expect(section).not.toMatch(/had no observed invocation/)
+  })
+})
+
+describe('AgentSessionDashboard: skill drawer reads the first listed turn (F2)', () => {
+  it('titles the drawer with the skill and requests the lossless turn content for its first listed turn', () => {
+    const row = { name: 'docs', listed: true, invocations: 2, turns_listed: [1, 2], derived_tokens: 38 }
+    const session = { ...sampleSession, skills: { measurable: true, rows: [row] } } as unknown as AgentSessionPayload
+    const drawerProps = openSkillDrawer(session, 'docs')
+    expect(drawerProps.title).toBe('Skill: docs')
+
+    // Both turns are cached under the whole-turn key. Only the first listed turn
+    // may supply the listing text.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    qc.setQueryData(
+      ['kyber-turn-content-full', 'sess-abc-123', 1],
+      turnContentBody(1, { skills: { listed: [{ name: 'docs', text: 'FIRST_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
+    )
+    qc.setQueryData(
+      ['kyber-turn-content-full', 'sess-abc-123', 2],
+      turnContentBody(2, { skills: { listed: [{ name: 'docs', text: 'LATER_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
+    )
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer {...drawerProps} />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain('FIRST_LISTED_TURN_TEXT')
+    expect(html).not.toContain('LATER_LISTED_TURN_TEXT')
+  })
+})
+
+describe('KyberSessionTurnSkills (F3): exported types must be used or removed', () => {
+  // The repo already walks web/src as text in kyber.test.ts, so a source-level
+  // check is the established pattern here. It passes when the type is removed.
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) return sourceFiles(full)
+      return /\.(?:ts|tsx)$/.test(entry.name) && !/\.test\.(?:ts|tsx)$/.test(entry.name) ? [full] : []
+    })
+  }
+
+  it('has no exported KyberSessionTurnSkills that nothing in web/src references', () => {
+    const webSrc = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const files = sourceFiles(webSrc)
+    const declaredIn = files.filter((file) => /export type KyberSessionTurnSkills\b/.test(readFileSync(file, 'utf8')))
+    if (declaredIn.length === 0) return
+    const referencedIn = files.filter((file) => {
+      const text = readFileSync(file, 'utf8').replace(/export type KyberSessionTurnSkills\b[^\n]*/g, '')
+      return /\bKyberSessionTurnSkills\b/.test(text)
+    })
+    expect(referencedIn, `KyberSessionTurnSkills is exported from ${declaredIn.join(', ')} but unused`).not.toEqual([])
+  })
+})
+
+describe('AgentSessionDashboard: tool drawer when the harness exports no definitions', () => {
+  it('shows an honest notice and issues no content request', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    // Synthetic Antigravity-shaped session: tool rows, but no turn carries
+    // definitions and the summary lists no offered tools.
+    const session = {
+      ...sampleSession,
+      harness: 'antigravity-cli',
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+      turns: sampleSession.turns?.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
+    } as unknown as AgentSessionPayload
+
+    const render = () => {
+      stateCursor = 0
+      return AgentSessionContent({ session })
+    }
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      ;(findElementByTestId(render(), 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
+      const drawer = drawerFrom(render())!
+      const props = drawer.props as { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+      expect(props.contentRequest).toBeUndefined()
+      expect(props.rawContent).not.toHaveProperty('definitionUnavailableNotice')
+      const html = renderHtml(<>{props.children as React.ReactNode}</>)
+      expect(html).toContain('data-testid="tool-definition-unavailable"')
+      expect(html).toContain('antigravity-cli does not export tool definitions')
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Antigravity and Copilot CLI payloads (synthetic). These pin the display
+// contract the implementer must meet; see the report for the field names.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reason the tool-definitions area states for a Copilot CLI session. The
+ * `<tools>` section of the system prompt is usage guidance, so a reader must
+ * not take it for the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** Visible text: tags dropped, entities decoded, whitespace collapsed. */
+function visibleTextOf(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+}
+
+/** The markup from one tool row's testid up to the next tool row. */
+function toolRowHtml(html: string, name: string): string {
+  const start = html.indexOf(`data-testid="tool-row-${name}"`)
+  if (start < 0) return ''
+  const next = html.indexOf('data-testid="tool-row-', start + 1)
+  return html.slice(start, next < 0 ? undefined : next)
+}
+
+type DrawerProps = { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+
+function drawerElementIn(node: unknown): React.ReactElement | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = drawerElementIn(child)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (node.type === SessionInspectorDrawer) return node
+  return drawerElementIn((node.props as { children?: unknown }).children)
+}
+
+/** Clicks a tool row and returns the props the dashboard hands its inspector drawer. */
+function openToolDrawer(session: AgentSessionPayload, toolName: string): DrawerProps {
+  const internals = internalsOf()
+  const originalUseState = internals?.H?.useState
+  const state: unknown[] = []
+  let stateCursor = 0
+
+  if (internals?.H) {
+    internals.H.useState = (initial: unknown) => {
+      const index = stateCursor++
+      if (!(index in state)) {
+        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      return [
+        state[index],
+        (next: unknown) => {
+          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+        },
+      ]
+    }
+  }
+
+  const render = () => {
+    stateCursor = 0
+    return AgentSessionContent({ session })
+  }
+
+  try {
+    ;(findElementByTestId(render(), `tool-row-${toolName}`)!.props as { onClick: () => void }).onClick()
+    return drawerElementIn(render())!.props as DrawerProps
+  } finally {
+    if (internals?.H) {
+      internals.H.useState = originalUseState
+    }
+  }
+}
+
+describe('AgentSessionDashboard: Antigravity tools list', () => {
+  // Invoked tools carry their counts; a tool never invoked still appears, with 0.
+  const antigravity = {
+    ...sampleSession,
+    harness: 'antigravity-cli',
+    tools: [
+      { name: 'read_file', server: 'antigravity', invocations: 4, in_definitions: false },
+      { name: 'grep_search', server: 'antigravity', invocations: 2, in_definitions: false },
+      { name: 'unused_tool', server: 'antigravity', invocations: 0, in_definitions: false },
+    ],
+  } as unknown as AgentSessionPayload
+
+  it('lists each invoked tool beside its invocation count', () => {
+    const html = renderHtml(<AgentSessionContent session={antigravity} />)
+    expect(visibleTextOf(toolRowHtml(html, 'read_file'))).toMatch(/read_file.*\b4\b/)
+    expect(visibleTextOf(toolRowHtml(html, 'grep_search'))).toMatch(/grep_search.*\b2\b/)
+  })
+})
+
+describe('AgentSessionDashboard: Copilot CLI tool definitions reason', () => {
+  it('states the Copilot reason verbatim in the tool-definitions area, and issues no content request', () => {
+    const copilot = {
+      ...sampleSession,
+      harness: 'copilot',
+      turns: [],
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+    } as unknown as AgentSessionPayload
+
+    const props = openToolDrawer(copilot, 'read_file')
+
+    expect(props.contentRequest).toBeUndefined()
+    expect(visibleTextOf(renderHtml(<>{props.children as React.ReactNode}</>))).toContain(
+      COPILOT_TOOL_DEFINITIONS_REASON,
+    )
+  })
+})
+
+/**
+ * One request item as the API serves it. `request` names the request by its span id;
+ * `prompt` previews the user's prompt, and is null or absent when content capture is
+ * off; `turns` is the request's real turn count.
+ */
+type RequestFixture = SessionRequestItem
+
+function sessionWithRequests(requests: RequestFixture[]): AgentSessionPayload {
+  return { ...sampleSession, requests }
+}
+
+/**
+ * The markup of the `<div>` carrying `testId`. Open and close tags are balanced, so
+ * markup nested inside the element cannot cut it short.
+ */
+function divMarkupByTestId(html: string, testId: string): string {
+  const open = html.indexOf(`data-testid="${testId}"`)
+  expect(open, `a rendered element with data-testid="${testId}"`).toBeGreaterThan(-1)
+  const start = html.lastIndexOf('<div', open)
+  const tags = /<(\/?)div[\s>]/g
+  tags.lastIndex = start
+  let depth = 0
+  for (let m = tags.exec(html); m !== null; m = tags.exec(html)) {
+    depth += m[1] ? -1 : 1
+    if (depth === 0) return html.slice(start, m.index + m[0].length)
+  }
+  throw new Error(`the <div> for data-testid="${testId}" never closes`)
+}
+
+/**
+ * Each user request in the list is labelled by its prompt preview, or `Request N` by its
+ * position when it has none, and shows its own turn count. A span id identifies the
+ * request; it is never its label.
+ */
+describe('AgentSessionDashboard: user request labels', () => {
+  const flakyRetry = 'Trace the flaky ingest retry'
+  const verifyFix = 'Verify the fix against the retry suite'
+  const spanIds = ['span-7f3a9c21b0d4e5f6', 'span-18c2d9e0a4b7f355', 'span-c04e11d7a9b26f08'] as const
+
+  function requestListText(session: AgentSessionPayload): string {
+    return visibleTextOf(divMarkupByTestId(renderHtml(<AgentSessionDashboard session={session} />), 'user-requests'))
+  }
+
+  it('labels each request with its prompt preview followed by its own turn count', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: verifyFix, turns: 2 },
+      ]),
+    )
+    expect(list).toContain(`${flakyRetry} (3 turns)`)
+    expect(list).toContain(`${verifyFix} (2 turns)`)
+  })
+
+  it('labels a request whose prompt is null or absent as Request N, by its 1-based position', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: null, turns: 2 },
+        { request: spanIds[2], turns: 4 },
+      ]),
+    )
+    expect(list).toContain('Request 2 (2 turns)')
+    expect(list).toContain('Request 3 (4 turns)')
+  })
+
+  it('labels a request whose prompt is a not_measurable object as Request N, never rendering the object', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: { availability: 'not_measurable', reason: 'content capture off' }, turns: 2 },
+        { request: spanIds[1], prompt: flakyRetry, turns: 1 },
+      ]),
+    )
+    expect(list).toContain('Request 1 (2 turns)')
+    expect(list).not.toContain('not_measurable')
+  })
+
+  it('never shows a raw span id as a request label', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: null, turns: 2 },
+        { request: spanIds[2], turns: 4 },
+      ]),
+    )
+    for (const spanId of spanIds) {
+      expect(list, `span id ${spanId} shown as a label`).not.toContain(spanId)
+    }
   })
 })

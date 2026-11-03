@@ -20,7 +20,7 @@ keeps the artifact versioned, diagnosed, or honest about what it renders.
 **Kyber Utilities** is the deployment control plane for those artifacts. It stages Kyber-owned
 files at per-user locations, records every file it owns with a SHA-256 digest in its own receipt,
 and prints the exact activation snippet — with absolute paths — for the user to apply themselves.
-The first slice ships the `statusline` utility for three harnesses.
+The first slice ships the `statusline` utility for four harnesses.
 
 It is deliberately **not** a settings manager. It never creates, edits, merges, or reads a shared
 harness settings file, and it deploys nothing into a directory a harness auto-loads. That boundary
@@ -69,7 +69,7 @@ changes a harness's behaviour on its own.
   for any harness, any command, including `--dry-run`.
 - It deploys nothing into a directory a harness auto-loads.
 - It is not a wider utility platform: there is no plugin registry, no generic utility schema, and
-  no second utility type. The slice is one utility for three harnesses.
+  no second utility type. The slice is one utility for four harnesses.
 
 The reasoning behind that boundary is [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md).
 
@@ -82,6 +82,7 @@ The reasoning behind that boundary is [ADR 0026](../adr/0026-kyber-utilities-own
 | Claude Code | Status line (`type: command`) | `statusLine` in the user's Claude settings |
 | Antigravity CLI (`agy`) | Status line (`type: command`) | `statusLine` in the `agy` settings — `agy` does not expand `~` |
 | Pi | Footer extension | `settings.json` `extensions` |
+| Command Code | Status segment (mod) | copy the staged mod into `~/.commandcode/mods/`, then `/reload` |
 
 Gemini CLI is out of scope; the Gemini-family target is `agy`.
 

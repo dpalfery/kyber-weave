@@ -21,6 +21,7 @@ import {
   prefixAvailability,
 } from '../canon/measurability.js'
 import type { ContextLimitSource } from '../canon/context-window.js'
+import { extractInvokedSkills, extractListedSkills } from '../canon/skills.js'
 import { isNotMeasurable } from '../canon/types.js'
 import type {
   CanonicalRecord,
@@ -892,21 +893,92 @@ export function delegationOverhead(input: DelegationOverheadInput): SignalResult
 
 export type SkillUtilisationInput = {
   harness?: string
+  /** Skill names the harness listed (from canon/skills.ts, see `readListedSkillNames`). */
   referencedSkills?: readonly string[]
+  /** Skill names that were invoked, each counted once (see `readInvokedSkillNames`). */
   executedSkills?: readonly string[]
+  /** Set when the listing or the invocations are not measurable: a reason, never a zero. */
+  unmeasuredReason?: string
+  /**
+   * Superseded: skill names are no longer parsed from prompt text. Kept so existing
+   * callers still type-check; it is not read.
+   */
   contextContent?: string
   measurability?: Measurability
 }
 
-const SKILL_TAG_REGEX = /<skill\s+name=["']([^"']+)["']/gi
-const SKILL_COLON_REGEX = /(?:skill|tool_skill):\s*([a-zA-Z0-9_-]+)/gi
+/** Names read from one skill source, or the reason that source is not measurable. */
+export type SkillNamesRead = { measurable: true; names: string[] } | { measurable: false; reason: string }
 
 /**
- * Evaluates referenced vs executed skills (Decision D16).
+ * The skill names listed across the records, read from canon/skills.ts. A name listed
+ * by any record counts once. Absent listing sources are reported as not measurable.
+ */
+export function readListedSkillNames(
+  records: readonly CanonicalRecord[],
+  measurability?: Measurability,
+): SkillNamesRead {
+  const declared = measurability?.['skills_listed']
+  if (declared !== undefined && isNotMeasurable(declared)) return { measurable: false, reason: declared.reason }
+
+  const names = new Set<string>()
+  let measurableRecords = 0
+  let firstReason: string | undefined
+  for (const record of records) {
+    const listing = extractListedSkills(record)
+    if ('availability' in listing) {
+      firstReason ??= listing.reason
+      continue
+    }
+    measurableRecords++
+    for (const skill of listing.skills) names.add(skill.name)
+  }
+  if (measurableRecords === 0) {
+    return {
+      measurable: false,
+      reason: firstReason ?? 'No records were supplied, so the skills listed are not measurable.',
+    }
+  }
+  return { measurable: true, names: [...names] }
+}
+
+/**
+ * The skill names invoked across the records, read from canon/skills.ts: Skill tool
+ * call arguments and the raw invoked key. Tool names never count as skills.
+ */
+export function readInvokedSkillNames(
+  records: readonly CanonicalRecord[],
+  measurability?: Measurability,
+): SkillNamesRead {
+  const declared = measurability?.['skills_invoked']
+  if (declared !== undefined && isNotMeasurable(declared)) return { measurable: false, reason: declared.reason }
+
+  const invoked = extractInvokedSkills(records)
+  if ('availability' in invoked) return { measurable: false, reason: invoked.reason }
+  return { measurable: true, names: [...new Set(invoked.invocations.map((invocation) => invocation.name))] }
+}
+
+/**
+ * The skill sets `skillUtilisation` is given. An unmeasurable listing or invocation
+ * source yields a reason and no sets, so the signal reads not measurable, never zero.
+ */
+function skillSetsForUtilisation(
+  listed: SkillNamesRead,
+  invoked: SkillNamesRead,
+): Pick<SkillUtilisationInput, 'referencedSkills' | 'executedSkills' | 'unmeasuredReason'> {
+  if (!listed.measurable) return { unmeasuredReason: listed.reason }
+  if (!invoked.measurable) return { unmeasuredReason: invoked.reason }
+  return { referencedSkills: listed.names, executedSkills: invoked.names }
+}
+
+/**
+ * Evaluates listed vs invoked skills (Decision D16).
  *
  * Rules:
- * - Stamped at low confidence per Decision D16 because no current agent harness
- *   exports explicit skill activation telemetry.
+ * - The listed set and the invoked set come from canon/skills.ts. Prompt text is
+ *   not parsed, and a tool name is never a skill.
+ * - Stamped at low confidence per Decision D16 because a skill that is listed but
+ *   not invoked may still shape output, so activation is inferred.
  * - Measurement class is `inferred`.
  * - Ranked last per Decision D6 and D16.
  */
@@ -918,27 +990,16 @@ export function skillUtilisation(input: SkillUtilisationInput): SignalResult<num
     }
   }
 
-  let referenced = input.referencedSkills ? [...input.referencedSkills] : []
-
-  // Extract from contextContent if referencedSkills not provided directly
-  if (referenced.length === 0 && input.contextContent) {
-    const seen = new Set<string>()
-
-    SKILL_TAG_REGEX.lastIndex = 0
-    for (const match of input.contextContent.matchAll(SKILL_TAG_REGEX)) {
-      if (match[1]) seen.add(match[1].trim())
-    }
-    SKILL_COLON_REGEX.lastIndex = 0
-    for (const match of input.contextContent.matchAll(SKILL_COLON_REGEX)) {
-      if (match[1]) seen.add(match[1].trim())
-    }
-    referenced = [...seen]
+  if (input.unmeasuredReason !== undefined) {
+    return { status: 'not_measurable', reason: input.unmeasuredReason }
   }
+
+  const referenced = [...new Set((input.referencedSkills ?? []).map((s) => s.trim()).filter((s) => s !== ''))]
 
   if (referenced.length === 0) {
     return {
       status: 'not_measurable',
-      reason: 'No skill references or definitions identified in prompt context.',
+      reason: 'No skill references or definitions identified: no skill listing names any skill.',
     }
   }
 
@@ -1152,8 +1213,10 @@ export function computeSignals(input: SignalEngineInput): SignalEngineResults {
   const skillUtilisationInput: SkillUtilisationInput = input.skillUtilisation ?? {
     harness,
     measurability,
-    contextContent: turnRecords.map((r) => r.content.system_prompt ?? '').join('\n'),
-    executedSkills: toolRecords.map((r) => r.name),
+    ...skillSetsForUtilisation(
+      readListedSkillNames(records, measurability),
+      readInvokedSkillNames(records, measurability),
+    ),
   }
   const resSkillUtilisation = skillUtilisation(skillUtilisationInput)
 

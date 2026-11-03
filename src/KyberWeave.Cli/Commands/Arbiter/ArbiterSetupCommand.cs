@@ -36,7 +36,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
     /// write (with a hint to use <c>TYPESAFE_API_KEY</c>); detection failures only
     /// silence the suggestion, never the run.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();

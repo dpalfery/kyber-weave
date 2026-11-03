@@ -1,0 +1,14 @@
+{
+  "mode": "tui",
+  "cwd": "/synthetic/kyber-commandcode-workspace",
+  "model": "Kyber Synthetic CommandCode Model",
+  "branch": "kyber/synthetic-branch",
+  "turnNumber": 3,
+  "usage": {
+    "inputTokens": 700,
+    "outputTokens": 30,
+    "cachedTokens": 12,
+    "totalTokens": 742
+  },
+  "contextWindow": 200000
+}

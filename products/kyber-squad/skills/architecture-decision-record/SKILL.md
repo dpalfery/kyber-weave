@@ -1,6 +1,6 @@
 ---
 name: architecture-decision-record
-description: Capture an architectural decision as an ADR once it has been reached — a choice that constrains future work, had viable alternatives that were rejected, and would be expensive to revisit. Use when a design discussion has converged on such a decision, when the user asks for an ADR, or when a decision needs superseding. Do NOT use for reversible implementation choices, library picks with no lasting constraint, or to minute a discussion that has not concluded.
+description: Capture an architectural decision as an ADR once it has been reached — a choice that constrains future work, had viable alternatives that were rejected, and would be expensive to revisit. Use when a design discussion has converged on such a decision, when the user asks for an ADR, or when a recorded decision changes. Do NOT use for reversible implementation choices, library picks with no lasting constraint, or to minute a discussion that has not concluded.
 license: MIT
 ---
 
@@ -39,12 +39,12 @@ If the user declines, do not write it and do not raise it again in the same sess
 
 ## Placement and identity
 
-Active ADRs live in the path declared as **Architecture Decision Records** in the repository root `AGENTS.md` Config Registry; superseded ones move to the archive path recorded there. Read the repository documentation standard for the lifecycle, and the documentation ontology for the frontmatter schema, before writing.
+Active ADRs live in the path declared as **Architecture Decision Records** in the repository root `AGENTS.md` Config Registry; a record wholly replaced by one on a different subject moves to the archive path recorded there. Read the repository documentation standard for the lifecycle, and the documentation ontology for the frontmatter schema, before writing.
 
 - Filename: `ADR-{YYYY-MM-DD}-{kebab-slug}.md`
 - Frontmatter `id`: `adr/{YYYY-MM-DD}-{kebab-slug}` — the date is the decision date, and it never changes afterwards.
 - `doc-type: adr`, `status: current`.
-- `supersedes`: the `id` of any ADR this one replaces. Otherwise `[]`.
+- `supersedes`: the `id` of an ADR this one genuinely replaces, a record on a different subject. Otherwise `[]`. A changed decision is never a new record.
 - `code-refs` / `api-endpoints`: symbols and routes the decision governs, when the decision is about specific code. These are validated against the code graph, so every entry must resolve.
 
 ## Structure
@@ -90,11 +90,11 @@ advocacy, not a record. State what becomes harder, what is now manual, what a fu
 change will have to work around.
 ```
 
-## Superseding
+## Changing a decision
 
-**NEVER edit the decision out of an accepted ADR.** A reversal is itself a decision, and the record of what was believed before is what makes the reversal legible.
+**An accepted ADR is edited in place to state only the decision in force.** When a decision changes, rewrite the record so it says what is true now, and remove the superseded wording rather than keeping it beside the new text as history. git holds the history. An `Amended <date>: <one-line reason>` note is optional when the change matters to a reader.
 
-To supersede: write a new ADR naming the old one's `id` in `supersedes`, set the old one's `status` to `superseded`, add a line under its title pointing to the replacement, and move it to the archive path. Documents that referenced the old decision through `decided-by` are updated to point at the new one.
+Only a decision on a different subject that replaces an existing record gets a new ADR. That ADR names the replaced `id` in `supersedes`. The replaced record's `status` is set to `superseded`, it moves to the archive path, and documents that referenced it through `decided-by` are updated to point at the new one.
 
 ## Linking the decision to what it governs
 

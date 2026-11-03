@@ -1,10 +1,16 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import {
+  CanonStore,
+  SCHEMA_VERSION,
+  WAL_SIZE_LIMIT_BYTES,
+  compressRaw,
+  systemPromptTextsFromContentColumns,
+} from './store.js'
 import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
@@ -187,6 +193,90 @@ describe('CanonStore round trip', () => {
     store.upsert(record({ raw }))
 
     expect(store.get('span-1')?.raw).toEqual(raw)
+  })
+})
+
+describe('CanonStore iterateAll (streaming corpus walk)', () => {
+  it('yields every record whole, in timestamp order, matching listAll', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record({ spanId: 'span-b', timestamp: '2026-08-29T12:00:01.000Z' }),
+      record({ spanId: 'span-a', timestamp: '2026-08-29T12:00:00.000Z' }),
+      record({ spanId: 'span-c', timestamp: '2026-08-29T12:00:02.000Z' }),
+    ])
+
+    expect([...store.iterateAll()]).toEqual(store.listAll())
+    expect([...store.iterateAll()].map((r) => r.spanId)).toEqual(['span-a', 'span-b', 'span-c'])
+    store.close()
+  })
+
+  it('streams one record at a time rather than materializing the corpus', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record({ spanId: 'span-1', timestamp: '2026-08-29T12:00:00.000Z' }),
+      record({ spanId: 'span-2', timestamp: '2026-08-29T12:00:01.000Z' }),
+      record({ spanId: 'span-3', timestamp: '2026-08-29T12:00:02.000Z' }),
+    ])
+
+    // A caller that stops early leaves the rest of the corpus unread: the
+    // walk is a live cursor, not a snapshot taken up front. A snapshot
+    // implementation (e.g. yielding from `listAll`) would fail the spy
+    // below even though it passes the first-row assertion above it.
+    const listAll = vi.spyOn(store, 'listAll')
+    const walker = store.iterateAll()
+    expect(Object.prototype.toString.call(walker)).toBe('[object Generator]')
+    expect(walker.next().value?.spanId).toBe('span-1')
+    walker.return?.(undefined)
+    expect([...store.iterateAll()].map((r) => r.spanId)).toEqual(['span-1', 'span-2', 'span-3'])
+    expect(listAll).not.toHaveBeenCalled()
+    store.close()
+  })
+
+  it('yields nothing on an empty store', () => {
+    const store = new CanonStore(':memory:')
+    expect([...store.iterateAll()]).toEqual([])
+    store.close()
+  })
+})
+
+describe('CanonStore Claude model-call candidate lookups', () => {
+  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
+    record({
+      spanId,
+      traceId: 'trace-claude',
+      harness: 'claude-code',
+      sessionId: 'session-claude',
+      op: 'llm.invoke',
+      raw: telemetryPayload(2 * 1024, 'Synthetic heavy raw payload.'),
+      ...overrides,
+    })
+
+  it('returns only id, start and duration for a trace, and only Claude model calls', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      claudeCall('call-a', { timestamp: '2026-08-29T12:00:00.000Z', durationMs: 250 }),
+      claudeCall('call-tool', { op: 'tool.execute' }),
+      claudeCall('call-pi', { harness: 'pi' }),
+      claudeCall('call-other-trace', { traceId: 'trace-other' }),
+    ])
+
+    expect(store.claudeModelCallCandidatesInTrace('trace-claude')).toEqual([
+      { spanId: 'call-a', timestamp: '2026-08-29T12:00:00.000Z', durationMs: 250 },
+    ])
+    store.close()
+  })
+
+  it('returns the same lightweight shape for a session', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      claudeCall('call-s1'),
+      claudeCall('call-s2', { traceId: 'trace-two', sessionId: 'session-claude', timestamp: '2026-08-29T12:00:01.000Z' }),
+    ])
+
+    const candidates = store.claudeModelCallCandidatesInSession('session-claude')
+    expect(candidates.map((c) => c.spanId).sort()).toEqual(['call-s1', 'call-s2'])
+    for (const c of candidates) expect(Object.keys(c).sort()).toEqual(['durationMs', 'spanId', 'timestamp'])
+    store.close()
   })
 })
 
@@ -1379,8 +1469,8 @@ describe('CanonStore wipe (issue #312)', () => {
     expect(store.getPrediction('pred-cursor')?.id).toBe('pred-cursor')
     expect(store.getProblems().some((p) => p.harness === 'pi')).toBe(false)
     expect(store.getProblems().some((p) => p.harness === 'cursor')).toBe(true)
-    // Per-harness wipe cannot scope quarantine rows (no harness column):
-    // they stay, and the confirm UI must disclose that.
+    // The row names no harness, so a per-harness wipe has no attribution to
+    // scope by: it stays. D-Q3 scopes attributed rows, never unattributed ones.
     expect(store.getQuarantine('ghost-pi')?.spanId).toBe('ghost-pi')
     store.close()
   })
@@ -1406,11 +1496,42 @@ describe('CanonStore wipe (issue #312)', () => {
     expect(store.listSourceCheckpoints()).toHaveLength(0)
     expect(store.countQuarantine()).toBe(0)
     expect(store.getProblems()).toHaveLength(0)
-    // Operational audit survives a wipe-all.
+    // Operational audit survives a wipe-all: `refresh_run` per ADR 0032 D8,
+    // and `metadata` because the shared settings live in it.
     expect(store.getIngestLog()).toHaveLength(1)
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('last_clean_at')).toBeDefined()
     store.close()
+  })
+
+  it('wipeAll returns the file to the size its contents need', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    // The store runs in WAL mode, so rows a commit wrote can still be sitting
+    // in the sidecar: the size that matters is both files together.
+    const onDiskBytes = (): number => {
+      const main = statSync(path).size
+      const wal = existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0
+      return main + wal
+    }
+    try {
+      // Free pages are what a wipe used to leave behind: grow the file with
+      // rows the wipe deletes, then check it comes back down. Before this
+      // reclamation a wiped store kept every page it had ever allocated.
+      const many: CanonicalRecord[] = []
+      for (let index = 0; index < 200; index += 1) {
+        many.push(record({ spanId: `span-${index}`, content: { system_prompt: 'p'.repeat(50_000) } }))
+      }
+      store.upsertMany(many)
+      const before = onDiskBytes()
+
+      store.wipeAll()
+
+      expect(store.count()).toBe(0)
+      expect(onDiskBytes()).toBeLessThan(before / 2)
+    } finally {
+      store.close()
+    }
   })
 
   it('rolls back the whole wipe when a delete fails', () => {
@@ -1452,6 +1573,138 @@ describe('CanonStore wipe (issue #312)', () => {
     expect(report.records).toBe(0)
     expect(store.get('span-pi')?.spanId).toBe('span-pi')
     expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+})
+
+// Plan 2026-10-10 (D-Q3), T15 RED: T14 gave `quarantine`, `pending_logs`, and
+// `quarantined_logs` the harness a row belongs to, so a per-harness wipe can
+// scope them. The wipe does not read those columns yet, so every attributed row
+// below survives a `wipeHarnesses(['claude-code'])` that is meant to take the
+// `claude-code` rows and the folded `claude-desktop` ones with them.
+// `wipeAll` keeps its unconditional clears, and that pin stays green.
+describe('wipeHarnesses scopes quarantine and log rows (plan 2026-10-10, D-Q3)', () => {
+  /**
+   * The ids a table still holds, in the table's own order. Read straight from
+   * the store because the contract is about the rows themselves, not a view of
+   * them, and only `quarantine` has a list accessor.
+   */
+  function survivingIds(
+    store: CanonStore,
+    table: 'quarantine' | 'pending_logs' | 'quarantined_logs',
+  ): string[] {
+    const idColumn = table === 'quarantine' ? 'span_id' : 'log_id'
+    const rows = store
+      .getDatabase()
+      .prepare(`SELECT ${idColumn} AS id FROM ${table} ORDER BY ${idColumn}`)
+      .all() as { id: string }[]
+    return rows.map((row) => row.id)
+  }
+
+  /** A stored record for the wiped harness, so the wipe takes its real path. */
+  function seedWipeTarget(store: CanonStore): void {
+    store.upsert(record({ spanId: 'span-code', harness: 'claude-code' }))
+  }
+
+  /**
+   * A log row tagged with a harness. The INSERT is direct on purpose: this test
+   * pins the column the wipe scopes, not how a row came to carry it, so it must
+   * not depend on `addPendingLog` / `quarantineLog` being what production ends
+   * up using. `migration.test.ts:706` seeds the same `log_id` / `payload` /
+   * `reason` shape with the column added.
+   */
+  function seedLogRow(
+    store: CanonStore,
+    table: 'pending_logs' | 'quarantined_logs',
+    logId: string,
+    harness: string | null,
+  ): void {
+    const payload = JSON.stringify({ logId, harness })
+    const db = store.getDatabase()
+    if (table === 'pending_logs') {
+      db.prepare('INSERT INTO pending_logs (log_id, payload, harness) VALUES (?, ?, ?)').run(
+        logId,
+        payload,
+        harness,
+      )
+      return
+    }
+    db.prepare(
+      'INSERT INTO quarantined_logs (log_id, payload, reason, harness) VALUES (?, ?, ?, ?)',
+    ).run(logId, payload, 'could not correlate log to a canonical span', harness)
+  }
+
+  it('deletes quarantine rows attributed to the wiped harness and its folded spelling, keeping the rest', () => {
+    const store = new CanonStore(':memory:')
+    seedWipeTarget(store)
+    // Both spellings as records, like the existing fold test (1325-1332): a
+    // `claude-desktop` record is what makes the front-end spelling part of the
+    // wipe's own name set, and its quarantine row must go with the code one's.
+    store.upsert(record({ spanId: 'span-desktop', harness: 'claude-desktop' }))
+    store.quarantine('span-q-code', ['gen_ai'], 'unclaimed', { harness: 'claude-code' })
+    store.quarantine('span-q-desktop', ['claude_code'], 'non-model span', {
+      harness: 'claude-desktop',
+    })
+    store.quarantine('span-q-copilot', ['copilot'], 'unclaimed', { harness: 'copilot' })
+    // No harness named: null is "unknown attribution", never "matches the wipe".
+    store.quarantine('span-q-unnamed', ['gen_ai'], 'unclaimed')
+
+    store.wipeHarnesses(['claude-code'])
+
+    // Both records went, so the wipe ran; the attributed audit rows must have
+    // gone with them, leaving only the other-harness and unattributed ones.
+    expect(store.get('span-code')).toBeUndefined()
+    expect(store.get('span-desktop')).toBeUndefined()
+    expect(survivingIds(store, 'quarantine')).toEqual(['span-q-copilot', 'span-q-unnamed'])
+    store.close()
+  })
+
+  it('deletes pending and quarantined log rows attributed to the wiped harness and its folded spelling', () => {
+    const store = new CanonStore(':memory:')
+    seedWipeTarget(store)
+    // Same as the quarantine case: the folded spelling rides in the wipe's name
+    // set because a `claude-desktop` record exists, not because this test
+    // prescribes how the wipe computes that set.
+    store.upsert(record({ spanId: 'span-desktop', harness: 'claude-desktop' }))
+    seedLogRow(store, 'pending_logs', 'log-pending-code', 'claude-code')
+    seedLogRow(store, 'pending_logs', 'log-pending-desktop', 'claude-desktop')
+    seedLogRow(store, 'pending_logs', 'log-pending-copilot', 'copilot')
+    seedLogRow(store, 'pending_logs', 'log-pending-unnamed', null)
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-code', 'claude-code')
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-desktop', 'claude-desktop')
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-copilot', 'copilot')
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-unnamed', null)
+
+    store.wipeHarnesses(['claude-code'])
+
+    expect(store.get('span-code')).toBeUndefined()
+    expect(store.get('span-desktop')).toBeUndefined()
+    expect(survivingIds(store, 'pending_logs')).toEqual([
+      'log-pending-copilot',
+      'log-pending-unnamed',
+    ])
+    expect(survivingIds(store, 'quarantined_logs')).toEqual([
+      'log-quarantined-copilot',
+      'log-quarantined-unnamed',
+    ])
+    store.close()
+  })
+
+  it('wipeAll still clears quarantine and both log tables', () => {
+    const store = new CanonStore(':memory:')
+    seedWipeTarget(store)
+    store.quarantine('span-q-code', ['gen_ai'], 'unclaimed', { harness: 'claude-code' })
+    store.quarantine('span-q-copilot', ['copilot'], 'unclaimed', { harness: 'copilot' })
+    seedLogRow(store, 'pending_logs', 'log-pending-code', 'claude-code')
+    seedLogRow(store, 'pending_logs', 'log-pending-copilot', 'copilot')
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-code', 'claude-code')
+    seedLogRow(store, 'quarantined_logs', 'log-quarantined-unnamed', null)
+
+    store.wipeAll()
+
+    expect(store.countQuarantine()).toBe(0)
+    expect(survivingIds(store, 'pending_logs')).toEqual([])
+    expect(survivingIds(store, 'quarantined_logs')).toEqual([])
     store.close()
   })
 })
@@ -1540,12 +1793,14 @@ describe('CanonStore finding indexes (council review)', () => {
 
 
 describe('store migrations v17: quarantine and problems schema upgrade', () => {
-  it('bumps SCHEMA_VERSION to 17 and initializes fresh database with new quarantine and problems columns', () => {
-    expect(SCHEMA_VERSION).toBe(17)
+  it('initializes a fresh database at the current schema with the v17 quarantine and problems columns', () => {
+    // Plan 2026-10-10 (B10) moves the schema past the live codex store's 18, so
+    // the version pin here tracks SCHEMA_VERSION rather than a fixed 17.
+    expect(SCHEMA_VERSION).toBe(22)
 
     const path = tempStorePath()
     const store = new CanonStore(path)
-    expect(store.getMetadata('schema_version')).toBe('17')
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     store.close()
 
     const verifyDb = new DatabaseSync(path)
@@ -1677,9 +1932,9 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
     `)
     v14Db.close()
 
-    // 2. Open with CanonStore: should run migrations up to 17
+    // 2. Open with CanonStore: should run migrations up to the current version
     const migrated = new CanonStore(path)
-    expect(migrated.getMetadata('schema_version')).toBe('17')
+    expect(migrated.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
 
     // 3. Verify existing rows are preserved
     const qRow = migrated.getQuarantine('span-v14-q')
@@ -1716,5 +1971,142 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
 
     verifyDb.close()
     migrated.close()
+  })
+})
+
+// Plan 2026-10-10 (B7/B10): a quarantined span's raw packet survives only in its
+// quarantine row, and `harness` is what lets a per-harness wipe scope that row.
+// Both are written by `quarantineAndDelete` and asserted on the stored row,
+// because the row is what a restart reads back.
+describe('CanonStore quarantine evidence metadata (plan 2026-10-10, B7/B10)', () => {
+  it('persists the raw payload and harness a caller supplies with the quarantine row', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const packet = JSON.stringify({
+      name: 'claude_code.interaction',
+      attributes: { 'span.type': 'interaction', user_prompt: 'why is the inspector empty?' },
+    })
+    // Assigned to a variable so the metadata travels structurally; the options
+    // object gains rawPayload/harness with T14.
+    const metadata = {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+      timestamp: '2026-10-10T10:00:00.000Z',
+      rawPayload: packet,
+      harness: 'claude-code',
+    }
+    try {
+      store.quarantineAndDelete('span-evidence', ['claude_code'], 'non-model span', metadata)
+    } finally {
+      store.close()
+    }
+
+    const db = new DatabaseSync(path)
+    try {
+      const columns = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map(
+        (column) => column.name,
+      )
+      expect(columns).toEqual(expect.arrayContaining(['raw_payload', 'harness']))
+      const row = db
+        .prepare('SELECT raw_payload, harness FROM quarantine WHERE span_id = ?')
+        .get('span-evidence') as { raw_payload: string | null; harness: string | null }
+      expect(row.raw_payload).toBe(packet)
+      expect(row.harness).toBe('claude-code')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves raw_payload and harness NULL when the caller supplies no evidence', () => {
+    // An audit row with no packet must read back as absent evidence, never as an
+    // invented payload (B7's `rawPayload: null`).
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.quarantineAndDelete('span-no-evidence', ['pi'], 'unresolved parent span', {
+        source: 'pi',
+        name: 'llm_request',
+        timestamp: '2026-09-01T00:00:00.000Z',
+      })
+    } finally {
+      store.close()
+    }
+
+    const db = new DatabaseSync(path)
+    try {
+      const row = db
+        .prepare('SELECT raw_payload, harness FROM quarantine WHERE span_id = ?')
+        .get('span-no-evidence') as { raw_payload: string | null; harness: string | null }
+      expect(row.raw_payload).toBeNull()
+      expect(row.harness).toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('reads a corrupt namespaces cell as absent rather than throwing', () => {
+    // One corrupt cell must not turn the detail route into a 500 — the
+    // route is exactly where an operator looks when the store is already
+    // suspect, so a parse failure reads as an empty namespace list while
+    // the row's other facts still answer.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.quarantine('span-corrupt-ns', ['claude_code'], 'non-model span', {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+    })
+    store.close()
+
+    const raw = new DatabaseSync(path)
+    try {
+      raw.prepare("UPDATE quarantine SET namespaces = 'not-json' WHERE span_id = 'span-corrupt-ns'").run()
+    } finally {
+      raw.close()
+    }
+
+    const reopened = new CanonStore(path)
+    try {
+      const entry = reopened.getQuarantineEntry('span-corrupt-ns')
+      expect(entry?.namespaces).toEqual([])
+      expect(entry?.reason).toBe('non-model span')
+      expect(entry?.source).toBe('claude-code')
+    } finally {
+      reopened.close()
+    }
+  })
+})
+
+describe('systemPromptTextsFromContentColumns', () => {
+  it('drops system_prompt parts whose text is missing or not a string (corrupt blob)', () => {
+    const parts = [
+      { part: 'system_prompt', order: 0 },
+      { part: 'system_prompt', order: 1, text: 42 },
+      { part: 'system_prompt', order: 2, text: '' },
+      { part: 'system_prompt', order: 3, text: 'kept' },
+    ]
+    expect(systemPromptTextsFromContentColumns(null, compressRaw(parts))).toEqual(['kept'])
+  })
+})
+
+describe('connection pragmas for bulk writes', () => {
+  it('syncs at NORMAL and bounds the write-ahead log', () => {
+    const store = new CanonStore(tempStorePath())
+    // The handle is released even when an assertion fails, so a red run cannot
+    // leave a live file handle for the cleanup hook to fight (an EBUSY-shaped
+    // problem on Windows).
+    try {
+      const db = store.getDatabase()
+      // 1 = NORMAL. The default for a WAL database here is FULL, which fsyncs the
+      // sidecar on every commit — what a per-source-unit folder import pays for.
+      expect((db.prepare('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
+      // Without a limit a checkpoint reclaims nothing on disk: the sidecar keeps
+      // the high-water mark a burst reached for the life of the database.
+      expect(
+        (db.prepare('PRAGMA journal_size_limit').get() as { journal_size_limit: number })
+          .journal_size_limit,
+      ).toBe(WAL_SIZE_LIMIT_BYTES)
+    } finally {
+      store.close()
+    }
   })
 })

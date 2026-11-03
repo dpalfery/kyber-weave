@@ -5,25 +5,36 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
-  - adr/0033-kyber-arbiter-three-step-decision-gates
-  - adr/0034-squad-owned-blocks-in-shared-hook-files
+  - adr/0053-kyber-arbiter-three-step-decision-gates
+  - adr/0054-squad-owned-blocks-in-shared-hook-files
+  - adr/0034-factory-droid-entry-point-skill
+  - adr/0037-squad-state-in-user-home
+  - adr/0044-squad-lock-v2-and-instance-deployment-scope
+  - adr/0045-conductor-operator-channel-opt-in
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
+  - adr/0050-universal-kyber-weave-mcp-grant
 code-refs:
   - SquadDeploymentPlan
+  - SquadStateMigration
+  - SquadCanonicalProfileStore
+  - SquadLifecycleService
+  - SquadModelPresetValidator
 ---
 
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Twelve harness targets
-are declared; all twelve are currently implemented and registered.
+It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
+**28 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
+implemented and registered.
 
 ---
 
@@ -33,10 +44,10 @@ All squad operations are grouped under the `squad` branch:
 
 ```bash
 # Install squad into project (or global) scope
-kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>]
+kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>] [--no-capture-plugin]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>]
+kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--projects <all|none|PATH>] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>] [--no-capture-plugin]
 
 # Uninstall squad deployment
 kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
@@ -49,6 +60,18 @@ kyber-weave squad doctor [path] [--global] [--path <PATH>]
 
 # Build release packages (repository maintainer only)
 kyber-weave squad pack --format <apm|plugins|all> --out <directory>
+
+# Manage model presets
+kyber-weave squad preset use <name> --target <targets> [--global] [--dry-run]
+kyber-weave squad preset clear --target <targets> [--global]
+kyber-weave squad preset list
+kyber-weave squad preset show <name> --target <target>
+
+# Run harness against an isolated instance configured with the active preset
+kyber-weave squad run <target> [-- <args>...]
+
+# Remove a specific harness preset instance
+kyber-weave squad instance remove --target <target> --preset <name> [--yes]
 ```
 
 **Version pinning.** `squad install` and `squad update` accept `-v|--version <VERSION>` to pin the
@@ -62,15 +85,21 @@ version — there is no guard; the pinned version is deployed as asked. (`squad 
 same `-v|--version`, but there it stamps the package manifests and archives rather than pinning a
 release to deploy.)
 
+**Global scope and projects.** `--global` takes no path: the global anchor is your home directory
+(one legacy single-root case excepted, see [Deployment Scopes](#deployment-scopes)), so a positional path or `--path`
+given with `--global` is ignored with a warning. `--projects` applies to
+`squad update --global` only, and is rejected with **exit code 2** anywhere else. It is covered under
+[Updating global and registered projects](#updating-global-and-registered-projects).
+
 ---
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares twelve coding-harness targets:
+Kyber-Squad declares thirteen coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
-| `codex` | — | `.codex/` | Native agents | Implemented and registered |
+| `codex` | — | `.codex/` | Native agents + primary-agent entry-point skills | Implemented and registered |
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
 | `claude` | — | `.claude/` | Native agents + primary-agent entry-point skill | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
@@ -82,29 +111,47 @@ Kyber-Squad declares twelve coding-harness targets:
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 | `zcode` | — | `.zcode/` | Native agents (with conductor lowered to slash command) | Implemented and registered |
 | `devin` | — | `.devin/` | Native agents (directory per agent, with conductor lowered to skill) | Implemented and registered |
+| `commandcode` | `command-code` | `.commandcode/` | Native agents (with conductor also rendered as an entry-point skill) | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with the primary agent lowered to a slash command), and `devin` (native subagents and skills, with the primary agent lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native agents with primary-agent entry-point skills), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) have renderers. All thirteen declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 12 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 13 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
-- **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
+- **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms. Under `--global` the root is the home directory and this selection is ignored, with a warning.
 - **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
 - **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
 
+### Codex notes
+
+Codex keeps each agent as a native TOML file at `.codex/agents/<name>.toml`. For a primary
+agent without a same-name canonical skill, Kyber-Squad also derives an entry-point skill at
+`.codex/skills/<name>/SKILL.md` from the agent description and instruction body, with the
+agent's resource files beside it. This gives Codex a skill entry point for primary roles such
+as `conductor` without removing the native agent file.
+
+The primary shared identities `product-owner` and `bug-crusher` use their existing canonical
+skills as entry points; Kyber-Squad emits no second derived skill for them. If another primary
+agent has a same-name canonical skill but is not declared a shared identity, rendering fails
+closed because both artifacts would claim the same skill path. In global scope, Codex output
+uses `agents/<name>.toml` and `skills/<name>/SKILL.md` under the target root, without the
+project `.codex/` prefix.
+
 ### Claude notes
 
-Claude renders the primary `conductor` agent as both a subagent (for enforced invocation) and an
-entry-point skill (for main-thread access). The following operational details ensure correct
-deployment and use:
+Claude renders each primary agent as both a subagent (for enforced invocation) and an
+entry-point skill (for main-thread access). The `conductor` derives its entry-point skill from the
+agent body; the two root wrappers `product-owner` and `bug-crusher` reuse their canonical skill as
+the entry point instead ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The
+following operational details ensure correct deployment and use:
 
 **Three ways to run the conductor:**
 
@@ -153,69 +200,54 @@ With both a global and a project Squad install:
 - `/conductor` (skill) resolves to the **personal** copy at `~/.claude/skills/conductor/SKILL.md`
   (skills: personal over project).
 - `@agent-conductor` and `--agent conductor` resolve to the **project** copy at
-  `.claude/agents/conductor.md` (agents: project over user).
+  `.claude/agents/conductor.md` (subagents: project over personal).
 
-This scope-precedence rule is Claude Code's built-in behaviour; Squad documents it but neither
-designs nor corrects it.
+To ensure that personal skills load during project development, operators may configure personal
+skills within project settings, e.g.:
 
-**Cloud sessions (CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1).**
-On 2026-09-25, cloud sessions were observed with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`,
-which disables subagent nesting entirely:
-- A subagent conductor has no Agent tool and cannot delegate. Use `/conductor` instead.
-- Specialists that delegate further (`architect`, `product-owner`, `code-reviewer`) cannot
-  nest in cloud sessions.
-- `/conductor` runs in the main thread at depth 0, so it works and reaches you.
+```json
+{
+  "skills": ["~/.claude/skills"]
+}
+```
 
-This is not documented in public Claude Code docs; it is an observed environment constraint.
-By default a subagent can spawn subagents up to 3 layers below the main conversation; the
-override is the environment variable `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.
+This points Claude at your personal skills directory while working in a project.
 
-**Global paths and live reload.**
-- Global subagent: `~/.claude/agents/conductor.md` with references beside it.
-- Global skill: `~/.claude/skills/conductor/SKILL.md` with references beside it.
-- Claude Code watches `~/.claude/skills/` and picks up added skills without restart (provided
-  the directory exists before the session started; a top-level `~/.claude/` directory created
-  after session start needs a restart).
-- `/conductor` appears only after `squad update` with a release that carries it; until then,
-  older releases still have the subagent-only form.
+**Cloud sessions (SSH / Docker containers / devcontainers / github.dev).**
+Claude Code environments with spawn depth 1 (including observed behavior in Cloud sessions)
+disable nested delegation, making subagents unable to dispatch further agents. Operators should
+verify subagent delegation within their execution environment.
 
----
+**MCP servers.**
+Subagents inherit MCP tools declared by the session. Ensure any MCP servers referenced in
+`allowed-tools` are properly declared in Claude Code settings (`mcpServers`).
 
 ### Pi notes
 
-Pi is a third-party coding agent that renders Squad agents natively through the
-`@tintinweb/pi-subagents` extension
-([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)). The following operational
-details ensure correct deployment and coexistence with other targets:
+Pi supports native subagents through `@gotgenes/pi-subagents` (`@tintinweb/pi-subagents`),
+deploying agents to `.pi/agents/<name>.md` and skills to `.pi/skills/<name>/SKILL.md`
+([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
+Primary-invocation agents (`conductor`) are lowered to skills at `.pi/skills/<name>/SKILL.md`
+to prevent nested subagent depth exhaustion.
 
-**Prerequisite**: Pi agent output needs `@tintinweb/pi-subagents` 0.19.0 or later, which requires
-Pi 0.84.0 or later. Install the extension via Pi's `settings.json` `packages` entry beforehand;
-`squad doctor` does not detect it, so verify it is configured before installing the `pi` target.
+**Tool extensions**: Pi agents requesting MCP or external tools map their requirements to
+the verified `pi-tools` `ext:` entries, which render as `extensions: [pi-mcp-adapter]` plus
+those `ext:` tool names appended to its capability-derived `tools` CSV. That agent requires
+the `pi-mcp-adapter` extension in the deployment harness. `network.publish` still has no
+built-in Pi tool and still records `permission-not-expressible`.
 
-**Project trust**: Pi's agent loader has no trust check, so project `.pi/agents/` loads
-regardless of project trust. Project `.pi/skills/` loads only for projects trusted in
-`~/.pi/agent/trust.json`, so the conductor skill under `.pi/skills/conductor/` requires project
-trust. Global skills and agents are not gated by trust.
-
-**Override and collision behaviour**: Project `.pi/agents/<name>.md` files override
-identically-named global agents in `~/.pi/agent/agents/` silently — no diagnostic is printed, and
-this is the intended project authority mechanism. By contrast, project `.pi/skills/conductor/`
-taking precedence over a global `~/.pi/agent/skills/conductor` is a real name collision: Pi prints
-a diagnostic naming the skipped global file, and `/skill:conductor` then loads the Squad
-conductor. `conductor-v3` has a different name and is unaffected; outside the project, the global
-skill is unchanged.
-
-**Subagent depth and delegation**: The conductor runs as a top-level skill at depth 0, not as a
-subagent, so its specialist delegates (`architect`, `code-reviewer`, and others) start at depth 1
-and can still delegate one level further to depth 2 under Pi's default `maxSubagentDepth: 2`
-(main 0, subagent 1, nested child 2). A depth cap set below 2 silently disables the nested
-delegation that `architect` and `code-reviewer` require. Recommend `maxSubagentDepth: 2` or
-higher in `.pi/subagents.json` for full capability.
-
-**Fallback and strict dispatch**: By default, an unknown agent type falls back to Pi's
-`general-purpose` agent (all tools). To enforce strict dispatch of Squad agents only, set
-`fallbackSubagent: none` in the project's `.pi/subagents.json`; Squad does not write this file, so
-the operator manages it.
+**`kyber-weave` needs no such declaration.** The renderer derives that half of the overlay for
+every agent entitled to `kyber-weave`, so the emitted file carries `extensions: [pi-mcp-adapter]`,
+the proxy entry `ext:pi-mcp-adapter/mcp`, and one
+`ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool, merged with whatever the
+agent declares. The namespace maps the server's hyphen to an underscore — that is
+`pi-mcp-adapter`'s rule, and it is why the entries are `mcp__kyber_weave__…` and not
+`mcp__kyber-weave__…`. It arrived in adapter 6.0.0 and 7.0.0 is the supported target; on 5.x the
+proxy entry still reaches the server and only the per-tool names resolve to nothing. A primary
+agent lowered to a skill carries neither key, so `conductor` reaches the server through its
+session rather than through the file.
+The next `squad update` / `squad install --target pi` re-renders receipt-managed agent files
+with the overlay wiring and overwrites them, superseding any manual patch of those files.
 
 **Coexistence with Antigravity**: `--target antigravity,pi` produces disjoint output trees —
 `.agents/` (Antigravity agents and skills) and `.pi/` (Pi) — so neither target overwrites or orphans the
@@ -234,12 +266,65 @@ Factory custom droids are Markdown files under `.factory/droids/` (project) and
 write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
 `~/.agent/skills/`.
 
+**Entry point:** the Factory app dispatches droids as subagents and has no session-parent
+selector ([ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), so each primary agent also
+renders as an entry-point skill under `.factory/skills/<name>/SKILL.md` (personal
+`~/.factory/skills/<name>/SKILL.md`). The `conductor` derives its entry-point skill from the agent
+body; the two root wrappers `product-owner` and `bug-crusher` reuse their canonical skill
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). Invoke a primary agent
+through its skill; the droid at `.factory/droids/<name>.md` is kept for
+Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
+allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to it.
+
+**MCP servers:** a Task-dispatched droid sees MCP servers only through the `mcpServers`
+whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
+names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
+`kyber-weave`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
+capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md));
+`mcpServers: []` remains the fail-closed value for a droid whose profile grants no read
+entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
+omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
+list exists to prevent. App-level configuration is the other half of the same wiring and it is
+yours, not Squad's: Squad writes no Factory settings file, does not create, adopt, or check
+`.factory/mcp.json` or `~/.factory/mcp.json`, and `squad doctor` verifies neither. A droid needs
+both halves — Squad's whitelist names a server, and your file launches it — so wire the file
+first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
+carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
+tools. [MCP access across harnesses](#mcp-access-across-harnesses) carries the rule and the other
+targets' forms.
+
 **Override:** when a project droid or skill shares a name with a personal one, the project
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
 override for `~/.factory`.
 
+**Model and reasoning effort:** a `factory:` value in `models.yml` may end in
+`[reasoningEffort=<level>]` (for example `glm-5.3[reasoningEffort=high]`). The renderer writes the
+bare model as `model:` and the level as `reasoningEffort:`. Factory accepts only `low`, `medium`,
+or `high`; any other level fails the render. The renderer never emits `reasoningEffort` without a
+pinned `model` (Factory ignores it on `inherit`), so leave the suffix off `inherit` entries.
+
 **Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
 lists discovered skills. Confirm names there after install.
+
+### Command Code notes
+
+Command Code agents are single Markdown files under `.commandcode/agents/` (project) and
+`~/.commandcode/agents/` (personal / `--global`); skills live at
+`.commandcode/skills/<name>/SKILL.md` and `~/.commandcode/skills/<name>/SKILL.md`. Squad does
+not write the `.agents/skills/` tree Command Code also reads. Layout and frontmatter were read
+from the `command-code` npm package 1.84.0.
+
+**Entry point:** Command Code runs custom agents only as subagents, so each primary agent also
+renders as an entry-point skill, the same shape as Factory. Invoke it as `/conductor`.
+
+**Tools:** `tools` lists Command Code's snake_case tool names (`read_file`, `grep`,
+`shell_command`, ...). An omitted `tools` grants nothing in Command Code; Squad always writes the
+list. Subagents never get the `agent` tool, so `delegate` is not expressible, and MCP tools are
+not granted.
+
+**Models:** a `commandcode:` value in `models.yml` may end in `[reasoningEffort=<level>]`, where
+the level is `off`, `low`, `medium`, `high`, `xhigh`, or `max`. No profile pins one yet, so every
+agent inherits the session model.
 
 ### Devin notes
 
@@ -266,9 +351,9 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
+| `general` | `swe-2-high` | dal-dev, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
-| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage, task-reviewer |
+| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
 recommendation there. A model outside your organization's allowlist is an administrator
@@ -321,8 +406,10 @@ fails on a missing file, create the empty file and re-run the request — the co
 fallback when the harness withholds file creation from subagents. See
 [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
 
-**Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
-deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
+**Conductor and delegation**: Devin has no primary-agent primitive, so each primary agent is
+deployed as a skill — the `conductor` as the skill `conductor`, invoked as `/conductor`, and the
+two root wrappers `product-owner` and `bug-crusher` through their own canonical skills
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)) — and runs in the main Devin Local
 session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
 or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
 on Devin: Devin cannot limit nested delegation to a roster, so Squad
@@ -349,28 +436,139 @@ every skill appears under two names.
 **Inspect:** `devin doctor` reports which custom profiles loaded and flags malformed
 frontmatter, and `devin skills list` lists discovered skills. Confirm names there after install.
 
+## MCP access across harnesses
+
+Squad renders a per-agent MCP grant on every target whose harness accepts one, from a single rule:
+**the `kyber-weave` server is granted to every agent whose capability profile resolves and allows
+`filesystem.read`, the pure orchestrator `conductor` included**
+([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The `codegraph` and `context7`
+servers keep the original non-orchestrator rule. The predicate itself lives once, on
+`CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
+agreeing with the others.
+
+**Two targets cannot express it for the `conductor` at all.** On Devin and Pi the conductor is a
+lowered skill, and a skill on either harness carries no grant vehicle — Devin's skills take no
+rendered `allowed-tools`, Pi's take no `tools` or `extensions`. So the orchestrator's reach there is
+whatever its session already has, and that is a structural boundary rather than a narrower grant.
+The parity guard pins both targets by name, so a change to either shows up as a failing assertion
+instead of a quiet discrepancy.
+
+**Why the orchestrator is included.** One `kyber-weave` tool is `agent_coding_standards`, which
+hands an agent the coding standard it must follow. The conductor writes no code but dispatches,
+reviews digests, and answers owner questions about what a specialist was required to do, and the
+standard settles those questions. The earlier carve-out excluded the orchestrator from every
+server on the reasoning that a routing role has no use for lookups; that reasoning still holds for
+a symbol lookup and a third-party documentation lookup, and the owner overturned it for the
+standards tool.
+
+**The orchestrator's reach is a recorded widening, not an oversight.** `conductor`'s profile denies
+`filesystem.search`, so the eight documentation tools reach text that decision withholds. It is
+accepted because every tool on that server is read-only, and `process.execute: deny` and every
+other profile decision are untouched. Do not "fix" it back: change the ADR first.
+
+| Harness | How the grant is expressed | `conductor` |
+|---|---|---|
+| Claude | Tool-level wildcards in the agent's `tools` allow-list | `mcp__kyber-weave__*`, and neither `mcp__codegraph__*` nor `mcp__context7__*` |
+| ZCode | Enumerated `mcp__<server>__<tool>` names; no wildcard is expanded | The eight `kyber-weave` names, and neither of the other two servers |
+| Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kyber-weave` only through the session it runs in |
+| OpenCode | The server-scoped permission key `kyber-weave_*` | Granted |
+| Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kyber-weave` names |
+| Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kyber-weave]` |
+| Copilot | The agent's own `copilot-tools` frontmatter entry `kyber-weave/*` — canonical source, not renderer output | That one entry |
+| Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
+| Kilo | The agent frontmatter `permission` map entry `kyber-weave_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kyber-weave_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |
+| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with `command`/`args` read from the squad's own `mcp.json`; no entry when the squad declares none | Granted: `mcpServers: [{name: kyber-weave, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
+| Cursor, Codex, Warp | No per-agent key: MCP reach is inherited from the session | Reaches `kyber-weave` as soon as you wire the server |
+
+**Wiring, not granting, is your half.** Every row above decides whether an agent is *allowed* to
+call a server. Nothing in Squad launches one: the operator declares the server in the client's own
+configuration file, and the [MCP runbook](../docgraph/mcp-runbook.md#wiring-it-up) carries the
+exact entry for each client — including the ones whose key is not `mcpServers` and whose file is
+not `.mcp.json`. Wire the file first, then confirm the agent's rendered grant; a grant with no
+server to launch resolves to nothing.
+
+**What Kilo, Antigravity, and Pi each need from you beyond the rendered grant.** **Kilo** takes the
+server in `kilo.jsonc`'s `mcp` key — an agent file cannot add one. **Antigravity** takes the
+workspace `.agents/mcp_config.json`, and additionally its own `mcp(server/*)` policy patterns
+decide whether a call is approved, since MCP tools default to Ask there; keep the same
+`--repo-root` in that entry as the rendered one, because a same-named global server definition can
+take precedence over the per-agent declaration. **Pi** takes a project `.mcp.json` (or
+`~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, or the adapter's own agent-directory `mcp.json`),
+and a project-scoped server needs a trust approval on first use. On Pi, the overlay also needs
+`pi-mcp-adapter` **6.0.0** or later: the `mcp__<server>__<tool>` naming the entries use arrived in
+that release, 7.0.0 is the supported target, and on 5.x the `mcp` proxy entry still works while the
+enumerable per-tool names do not.
+
+**ZCode is the one hard prerequisite.** ZCode treats every name in `toolchain.yml`'s
+`required-mcp-tools` as a required connected server, so a ZCode install that does not declare
+`kyber-weave` is a `squad doctor` failure for every agent, `conductor` included. On the other
+targets an unwired server is simply an inert grant.
+
+**Three harnesses have no per-agent surface, and that is the finding rather than a gap.** Cursor
+subagents inherit every tool from the parent, including MCP tools, with no `tools` allow-list key;
+Codex custom agents inherit the parent's MCP servers and a custom agent file cannot override those
+settings; Warp supports MCP but Squad's Warp surface is role skills, which carry no tool scoping
+(citations in [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The goal is met on all
+three the moment the server is wired, and a per-agent key written for them would be a claim the
+harness does not honour. Kilo, Antigravity, and Pi do have a per-agent surface, and all three
+wiring forms above were established against a pinned build — `@kilocode/cli` 7.8.18 for Kilo,
+`agy` 1.4.12 for Antigravity, and `pi-mcp-adapter` 7.0.0 for Pi's tool naming — rather than
+assumed. On Pi the naming is the one place the spelling differs per harness: the namespace maps the
+server's hyphen to an underscore, so the entries read `mcp__kyber_weave__…`, and a
+`mcp__kyber-weave__…` entry on Pi names no registered tool.
+
+**If you author an agent,** do not add a per-agent MCP declaration for `kyber-weave`: the rule
+derives it from the capability profile, and a hand-written copy is a second source that will go
+stale. Two edits do exist, and both are declared rather than derived:
+
+- **Factory's server list** comes from `products/kyber-squad/mcp.json`, and naming a server there
+  is not enough — `SquadToolchainRosterGuardTests` fails until the same name is a
+  `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun the squad's own
+  roster contract.
+- **Copilot's per-agent entry** lives in the agent's own `copilot-tools` list. That is where
+  `conductor` gains `kyber-weave/*`, and the visible review diff for that grant is a frontmatter
+  line on the primary agent, not a renderer change.
+
 ---
 
 ## Deployment Scopes
 
-Kyber-Squad operates across two deployment scopes:
+Kyber-Squad operates across three deployment scopes:
 
 ### 1. Project Scope (Default)
 
 When run without `--global`, `kyber-weave squad` deploys agents and skills directly into the specified workspace root (defaulting to the current directory `.`):
 
-- Deployment state is persisted in project files:
-  - `.kyber-weave/squad.lock.yml` — records bundle versions, toolchain signatures, and target configurations.
-  - `.kyber-weave/squad.receipt.json` — tracks ownership, relative file paths, installation timestamps, and SHA-256 hashes.
-- Lock and receipt files should be committed to version control to maintain team-wide agent synchronization.
+- Deployment state is kept in your home directory, not in the repository, under `~/.kyber-weave/squad/projects/<root-key>/`:
+  - `squad.lock.yml` — records bundle versions, toolchain signatures, and target configurations.
+  - `squad.receipt.json` — tracks ownership, relative file paths, installation timestamps, and SHA-256 hashes.
+- `<root-key>` is the lowercase SHA-256 of the project's canonical physical path. A symbolic link or a
+  differently spelled path to the same directory resolves to the same state.
+- Each project install, update, and import is recorded in the registry, `~/.kyber-weave/squad/registry.json`,
+  which is how a global update finds the project. Uninstalling the project removes its entry. See
+  [Registered projects](#registered-projects).
+- The lock and receipt are no longer committed to version control, and Squad does not write them into the
+  repository. Earlier releases did. Migration imports those files on first use (see
+  [Migration from earlier layouts](#migration-from-earlier-layouts)); the in-repo copies are left in place,
+  and `squad doctor` reports them.
 
 ### 2. Global Scope (`--global`)
 
-Passing `--global` keeps Squad's lock and receipt in the per-user application-data tree
-(`KyberWeave/squad/roots/<root-key>/`) and writes the rendered agents and skills into each
-harness's own global directory — not into the project path and not into a single shared
-"home" folder. `--global` is symmetric across `install`, `update`, `uninstall`, `status`,
-and `doctor`.
+Passing `--global` keeps Squad's lock and receipt in one place, `~/.kyber-weave/squad/global/`, and
+writes the rendered agents and skills into each harness's own global directory — not into the project
+path and not into a single shared "home" folder. `--global` is symmetric across `install`, `update`,
+`uninstall`, `status`, and `doctor`.
+
+The global anchor is your home directory. Under `--global`, a path argument (positional or `--path`) is
+ignored with a warning, and the directory you run from has no effect. The warning is not printed when the
+path is `.`. There is one global receipt, and global state is not listed in the registry.
+
+One legacy case differs. If the home holds a pre-existing single-root global receipt, its relative paths
+belong to one root. Migration runs first and records that root as an absolute `targetRoot`, and then the
+anchor is that recorded root, not your home and not the directory you run from. A path given with
+`--global` still produces a warning in this case, and the warning names the recorded root. A legacy receipt
+that records no absolute root keeps the path you gave, or the current directory when you gave none, and
+prints no such warning. Every later run anchors on the same root.
 
 | Target | Global root (override env var → default) | Global-scope relative paths |
 |---|---|---|
@@ -386,6 +584,20 @@ and `doctor`.
 | `warp` | `~/.warp` (no override) | `skills/<name>/SKILL.md` |
 | `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
 | `devin` | Windows: `%APPDATA%\devin`; macOS and Linux: `$XDG_CONFIG_HOME/devin` → `~/.config/devin` | `agents/<name>/AGENT.md`, `skills/<name>/SKILL.md` |
+
+**OpenCode capture plugin (global scope).** When `squad install --global` or `squad update --global`
+resolves the `opencode` target and succeeds, Squad also installs or upgrades the KyberDash OpenCode
+capture plugin, `kyberdash-opencode.js`, under the OpenCode root in the table above. Squad runs
+`kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <that root>`. Preserve
+mode keeps an edited or foreign plugin file with a warning, and it never touches `opencode.jsonc`.
+The consent file `~/.kyberdash/opencode-plugin.json` is created with content off only when absent.
+Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If `kyberdash`
+is not installed, Squad prints a skip line that names `kyber-weave update`, and Squad's own result is
+unchanged. A failed plugin step prints a warning and does not change Squad's exit code.
+The step relays the KyberDash guidance line for the plugin. After an install or upgrade it reads:
+`OpenCode 2.x picks up the capture plugin for new sessions; if KyberDash shows no new OpenCode sessions,
+restart OpenCode.` Squad cannot restart OpenCode. The plugin targets OpenCode 2.x only. See
+[Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.
@@ -410,6 +622,196 @@ and `flash` for the remaining profiles. Versioned model ids such as Claude's
 follow the harness's alias resolution. Cursor's planning pin carries `effort=high`.
 
 **Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
+
+### 3. Instance Scope (`SquadDeploymentScope.Instance`)
+
+Instance scope isolates harness configuration and agent deployment for concurrent execution across
+projects without modifying project trees or altering global harness configuration:
+
+- Each instance directory is located at `~/.kyber-weave/squad/instances/<target>/<preset>/`.
+- Deployment state (lock, receipt, and link manifests) lives in
+  `~/.kyber-weave/squad/instance-state/<target>/<preset>/`.
+- Mutex synchronization is keyed to the physical instance root key (`kyber-weave-squad-<root-key>`).
+- Links back to the user's main harness home directory allow shared history, authentication, and
+  user settings to function seamlessly while agents and models remain completely isolated.
+- Instance roots are managed via `squad run`, listed in `squad status --global`, and cleaned via
+  `squad instance remove`.
+
+### Registered projects
+
+The registry at `~/.kyber-weave/squad/registry.json` lists each project install by its physical path, the
+time it was last updated in UTC, and its targets. It is an index, not the authority: a project's receipt
+under `projects/<root-key>/` is what Squad trusts.
+
+`kyber-weave squad status --global` lists each registered project and flags a stale one. A project is stale
+when:
+
+- its path no longer exists, because the repository was moved or deleted;
+- the physical identity of its path no longer matches its key; or
+- its receipt is missing.
+
+A project that has a receipt but no registry entry is added back when Squad next lists the registry. Squad
+lists it, and so rebuilds it, in `kyber-weave squad status --global`, `kyber-weave squad update --global`
+(including when `--projects` names a path), and `kyber-weave squad doctor`. No other command reconciles
+the registry.
+
+If a registry write fails after an install or update has committed, Squad prints a warning that names the
+fix, rerunning `kyber-weave squad status --global`. The transaction is not failed.
+
+No command unregisters a stale entry. An entry whose directory no longer exists stays flagged until that
+path returns, and `squad doctor` reports it as stale.
+
+### Updating global and registered projects
+
+`kyber-weave squad update --global` updates the global deployment. After a successful global update, Squad
+can also update registered projects, so they stay on the same release.
+
+In an **interactive terminal**, a picker opens after the global update succeeds. It lists **All**, **None**,
+then each registered project path. A stale project is shown as `(stale: <reason>)`.
+
+- **All** selects every project that is not stale.
+- **None**, or an empty selection, selects nothing.
+- **None** combined with another choice fails validation, and the picker asks again.
+- A selected stale project is skipped with a warning.
+
+**Without a terminal, or with `--projects`**, the picker does not open. `--projects` accepts `all`, `none`,
+or one or more project paths, and it can be repeated. Without the flag, a non-interactive run updates no
+project.
+
+```bash
+kyber-weave squad update --global --projects all
+kyber-weave squad update --global --projects ~/src/service-a --projects ~/src/service-b
+```
+
+- A named path must be a registered project or hold importable in-repo state. Otherwise the command exits
+  with **exit code 2** before any global work, and the hint names the nearest registered path.
+- A named path that is registered but stale is warned about and skipped.
+- `--projects` is valid only with `squad update --global`. Anywhere else it exits with **exit code 2**.
+
+Each selected project is updated through the same path as `kyber-weave squad update` run in that project:
+
+- It uses that project's own targets and exclusions, from its configuration and receipt.
+- The global run passes `--version` and `--dry-run` through. It does not pass `--target`, `--exclude`, or
+  `--replace-managed`.
+- Selecting a project counts as consent, so the per-project confirmation is not shown.
+- Projects are updated one after another. A failure in one project does not stop the others. A summary is
+  printed, and the command exits with **exit code 1** if any project failed.
+- Under `--dry-run`, a selected project that still needs its in-repo state imported is reported as
+  skipped, with the note that it will be imported on the next run without `--dry-run`. Any other
+  selected project is previewed. Nothing is written either way.
+
+The picker also opens under `--global --dry-run` when the terminal is interactive and `--projects` is
+absent, and the projects you pick are then handled as above.
+
+To overwrite a project's locally edited managed files, run `kyber-weave squad update --replace-managed` in
+that project. A global run never forces an overwrite in a project.
+
+If the global update fails, no picker opens and the command exits with **exit code 1**.
+
+### Replacing managed files in global scope
+
+`kyber-weave squad update --global --target all --replace-managed` overwrites files Squad owns in the global
+deployment, even when you have edited them. It never overwrites a file Squad does not own. If a new path
+collides with a file you wrote by hand, the whole run fails with `UnmanagedCollision` and writes nothing. The
+hint names the two ways forward: `kyber-weave squad install --global --adopt`, when the bytes already match,
+or moving the file aside.
+
+### Migration from earlier layouts
+
+Migration runs automatically before every squad verb (`install`, `update`, `status`, `uninstall`, and
+`doctor`). It never deletes a file, and running it again after it has succeeded changes nothing.
+
+- **Global.** Squad looks for a global deployment in the legacy application-data tree, at
+  `KyberWeave/squad/roots/<root-key>/`, and ignores empty folders. If exactly one non-empty legacy global
+  deployment exists and `~/.kyber-weave/squad/global/` has no receipt, Squad copies its receipt and lock
+  there. The legacy files are left in place. A legacy deployment recorded against a single root needs that
+  root to be found: from its recorded absolute target root, from the registry, or by matching the home
+  directory or the directory you run from. If the root cannot be found, the deployment is reported and not
+  migrated.
+- **More than one** non-empty legacy global deployment: none is migrated. Each is reported with guidance.
+  Squad does not choose one for you.
+- **Projects.** When a project-scope command, or a picker-driven update, reaches a project that has no home
+  state but still has `.kyber-weave/squad.receipt.json` in its repository, Squad imports the receipt and lock
+  into `~/.kyber-weave/squad/projects/<root-key>/` and registers the project. The repository's files are not
+  changed. From then on the home state is authoritative.
+- **Dry run.** With `--dry-run`, nothing is written, and the migration ledger is not written either. The output
+  states that the legacy state at each path will be migrated on the next run without `--dry-run`. Install,
+  update, and uninstall stop after that report.
+- **Locking and interruption.** Each copy or import runs under the same lease an install takes for the root.
+  If another transaction holds it, nothing is written, a warning says so, and the next run retries. A global
+  copy writes the lock first and the receipt last. A crash that leaves a lock with no receipt is completed on
+  the next run, as long as the home lock is byte-identical to the legacy lock. A different home lock blocks the
+  copy and is reported for you to inspect.
+- **Ledger.** Squad records each completed copy and import in `~/.kyber-weave/squad/migration-ledger.json`, so
+  an uninstall of migrated state is not undone when the legacy files are migrated again. A malformed ledger is
+  read as empty, with a warning. Fresh installs are not affected by the ledger.
+
+**Upgrade every machine that runs Squad.** Older CLI versions keep reading the legacy locations, and the legacy
+files are kept so that rolling back to an older CLI still finds state. Once a project has been imported, its
+home state wins, so any change made to its legacy files after import is not seen by the newer CLI.
+
+### Doctor findings
+
+`kyber-weave squad doctor` runs the migration before it reports, so it can write. It is not a read-only check.
+It reports these:
+
+- **Stale registry entries**: a registered project whose path is missing, whose key no longer matches, or whose
+  receipt is missing. Doctor warns that global updates skip it until its path is restored or its receipt is
+  reinstalled. Uninstall cannot clear the entry: it requires an existing project directory, so an entry whose
+  directory is gone stays flagged until that path returns. `squad update --global --projects` skips a stale
+  named path with a warning.
+- **Unmigrated legacy global roots**: a legacy global deployment that was not migrated, with the reason and the
+  guidance for it. This includes the roots that were ambiguous (more than one legacy receipt, none chosen), those
+  whose binding root could not be resolved, and those already migrated, whose home copy was removed on purpose.
+- **Retained in-repo state**: a registered project, still live, that holds `.kyber-weave/squad.lock.yml` or
+  `.kyber-weave/squad.receipt.json` from an earlier release. Squad retained these files, and they should be
+  removed from version control. A stale project is not warned about this way.
+
+---
+
+## Kyber-Weave skills in a Squad deployment
+
+Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
+`kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
+Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
+release. The six follow the Squad lifecycle at the same scope and on the same targets as the Squad
+skills:
+
+- **Global scope.** `kyber-weave squad install --global` writes them into each selected harness's
+  user-level skills folder. For Claude Code that is `~/.claude/skills/kyber-docs-authoring/SKILL.md`,
+  beside `~/.claude/skills/task-gate/SKILL.md`.
+- **Project scope.** `kyber-weave squad install` writes them into the project's harness folders the same way.
+- **Receipt.** They are recorded in the Squad receipt. `squad status`, `squad update`, and
+  `squad uninstall` treat them as Squad files.
+
+They arrive with a release that carries them. Run `kyber-weave update`, or
+`kyber-weave squad update --global` for a global deployment, to move to that release. A
+`kyber-weave` run from a repository checkout gets them from the checkout at once.
+
+### Where Kyber-Squad is deployed, skip the docs-init skill
+
+`kyber-weave docs init` also deploys the Kyber-Weave skills, through APM, into the project. Where
+Kyber-Squad is already deployed, those skills would arrive twice, so run `docs init` with `--no-skill`:
+
+```bash
+kyber-weave docs init . --no-skill
+```
+
+A project that uses Squad at project scope and also runs `docs init` shares some folders. For the
+Antigravity target, both write `.agents/skills/<name>`. Neither writer refuses the other's file by
+design. If `docs init` writes a path that Squad owns, `kyber-weave squad status` reports the file as
+modified. If Squad meets a file that `docs init` wrote and Squad does not own, `squad install` or
+`squad update` refuses and writes nothing. A harness that reads both user and project folders may
+list a skill name twice when Squad is global and `docs init` targets that harness in the project. The
+impact of that is low.
+
+### An unmanaged copy blocks the update
+
+If you copied a Kyber-Weave skill by hand to a path that Squad now deploys to, for example
+`~/.claude/skills/kyber-docs-authoring`, `kyber-weave squad update --global` refuses with
+`UnmanagedCollision` and writes nothing. Remove the copy and run the update again. If the copy's
+bytes match the release, `kyber-weave squad install --global --adopt` claims it instead.
 
 ---
 
@@ -491,11 +893,14 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
+Run diagnostic checks on renderer coverage (which of the thirteen declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
 
 ```bash
 kyber-weave squad doctor
 ```
+
+Both scopes also report stale registry entries, unmigrated legacy global roots, and in-repo state retained
+from an earlier release. See [Doctor findings](#doctor-findings).
 
 ### Uninstalling
 
@@ -512,6 +917,94 @@ kyber-weave squad uninstall --yes
 ```
 
 Locally modified files are preserved during uninstallation unless explicitly cleaned up by the operator. If no receipt exists, uninstall is a clean no-op.
+
+`kyber-weave squad uninstall --global` removes only global state and files. It opens no picker and changes no
+registered project. A project uninstall also removes that project's registry entry.
+
+---
+
+## Concurrent Harness Instances
+
+Model profiles and presets have their own page: **[Model profiles and model presets](model-profiles.md)**.
+That page covers the six semantic profiles, the per-harness token shapes, creating and
+validating a preset, and switching or reverting one.
+
+This section covers the other half of the same problem: running a harness against a selected
+preset in an isolated instance, so two projects can use different profiles at the same time.
+
+### 1. Running Isolated Harness Instances (`squad run`)
+
+Different projects frequently require different model presets on the same harness simultaneously.
+Deploying agents directly into project repositories clutters source control, while modifying the
+global home creates cross-project interference.
+
+Kyber-Squad solves this with `squad run`:
+
+```bash
+# Launch a harness using the active project preset selection
+kyber-weave squad run claude
+
+# Pass arguments directly to the underlying harness executable
+kyber-weave squad run claude -- --verbose --dangerously-skip-permissions
+```
+
+When `kyber-weave squad run <target> [-- <args>...]` is executed:
+1. Squad resolves the current project's selection from `~/.kyber-weave/squad/selections/<root-key>.yml`.
+   If no selection is configured for `<target>`, it exits with **exit code 2** and suggests `squad preset use`.
+2. It looks up the harness in `SquadInstanceCatalog`. If the target status is `Unsupported` or
+   `SpikePending`, it exits with **exit code 2** stating the reason.
+3. It provisions or refreshes an isolated instance directory at
+   `~/.kyber-weave/squad/instances/<target>/<preset>/` under `SquadDeploymentScope.Instance`.
+4. It synchronizes links from the main harness home directory into the instance, ensuring user
+   authentication, settings, and command history remain available.
+5. It spawns the harness CLI with the appropriate configuration or home redirection environment
+   variable (e.g. `CLAUDE_CONFIG_DIR`) pointing at the instance directory.
+6. Arguments following `--` are forwarded verbatim to the harness CLI. On Windows, npm `.cmd` shims
+   are located via `PATHEXT` and executed under `cmd.exe` with proper argument escaping.
+7. Squad waits for harness process exit and propagates its exact exit code.
+
+### 2. Cleaning Instances (`squad instance remove`)
+
+Harness instances can be inspected via `squad status --global` (under the `Instances` heading)
+and pruned with `instance remove`:
+
+```bash
+kyber-weave squad instance remove --target claude --preset fast [--yes]
+```
+
+Removal reads the instance's `links.json` manifest and safely removes created symbolic links,
+hard links, and directory junctions without following them into the user's main home directory.
+
+### 3. Harness Instance Support Matrix
+
+The `SquadInstanceCatalog` defines the redirection mechanism and support status for each target:
+
+| Target | Executable | Kind | Environment Variable | Status | Behavior and Isolation |
+|---|---|---|---|---|---|
+| `claude` | `claude` | `HomeReplace` | `CLAUDE_CONFIG_DIR` | `Ready` | Replaces home; settings/history linked; Keychain sign-in shared. |
+| `codex` | `codex` | `HomeReplace` | `CODEX_HOME` | `Ready` | Replaces home; `auth.json` linked in file mode; keyring mode per instance. |
+| `copilot` | `copilot` | `HomeReplace` | `COPILOT_HOME` | `Ready` | Replaces entire home; keychain token shared. |
+| `pi` | `pi` | `HomeReplace` | `PI_CODING_AGENT_DIR` | `Ready` | Replaces agent dir; settings, sessions, and auth linked. |
+| `opencode` | `opencode` | `ConfigLayer` | `OPENCODE_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
+| `kilo` | `kilo` | `ConfigLayer` | `KILO_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
+| `cursor` | `cursor` | `ConfigLayer` | `CURSOR_CONFIG_DIR` | `SpikePending` | Config layer; CLI config redirection pending verification. |
+| `zcode` | `zcode` | `ConfigLayer` | `ZCODE_STORAGE_DIR` | `SpikePending` | Config layer; `ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR` pending verification. |
+| `antigravity` | `antigravity` | `None` | *None* | `Unsupported` | Antigravity does not support configuration or home directory redirection via environment variable. |
+| `factory` | `factory` | `None` | *None* | `Unsupported` | Factory does not support configuration or home directory redirection via environment variable. |
+| `commandcode` | `commandcode` | `None` | *None* | `Unsupported` | CommandCode only supports global `HOME` redirection, which affects all system tools. |
+| `devin` | `devin` | `None` | *None* | `Unsupported` | Devin stores configuration in system app data and does not support instance directory redirection. |
+| `warp` | `warp` | `None` | *None* | `Unsupported` | Warp deploys skills only and does not support agent directory redirection. |
+
+- **`HomeReplace`**: The environment variable points the harness at a complete home directory.
+  Rendered agents exist directly in the instance, while all other top-level directories and files
+  from the main home are linked.
+- **`ConfigLayer`**: The harness supports a secondary configuration folder loaded after global config.
+  Only rendered agents reside in the instance folder.
+- **`Ready`**: Verified and supported for concurrent execution via `squad run`.
+- **`SpikePending`**: Candidate configuration variables identified; awaiting live platform verification.
+  Attempting `squad run` exits 2 with guidance.
+- **`Unsupported`**: Harness cannot isolate configuration per instance without global side effects.
+  Attempting `squad run` exits 2 with explanation.
 
 ---
 
@@ -535,7 +1028,7 @@ renders no hooks either — and record `arbiter-not-enforced` in the receipt.
 On `codex`, `cursor`, `antigravity`, `factory`, and `devin` the hooks live in a file the
 user also owns — or, on Antigravity, beside groups the user owns. Squad splices its own
 marked entries into those files
-([ADR 0034](../adr/0034-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
+([ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
 entry's location and digest in `kyber-squad.receipt/v3`; the user's entries are left in
 place. A hand edit inside Squad's entries is reported by `squad status` and `squad doctor`
 as drift, naming the file and the container. On `pi` and `kilo` the hook is an owned
@@ -572,16 +1065,241 @@ Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
 
 ---
 
+## Operator channel (opt-in, Copilot CLI global scope)
+
+The conductor can reach you during an unattended (autonomous) run through an MCP server you
+run yourself. You choose its name. It is off by default, and the default output does not
+change. Squad does not ship that server. Turn it on in three steps:
+
+1. Declare your server in `$COPILOT_HOME/mcp-config.json` (`~/.copilot/mcp-config.json` when
+   `COPILOT_HOME` is unset), under the `mcpServers` object, using the name you chose. It must
+   offer one send tool and one blocking receive tool, and return only replies you have authorised.
+2. Set both environment variables in the environment that runs Squad:
+   - `KYBER_SQUAD_OPERATOR_CHANNEL=true`. Only the exact value `true` turns it on.
+   - `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER=<your server name>`. Use letters, digits, `.`, `_`, or
+     `-`, at most 64 characters.
+3. Run `kyber-weave squad install --global` or `kyber-weave squad update --global`. The
+   conductor is rendered with the channel only when steps 1 and 2 both hold.
+
+With the gate on and Copilot CLI at global scope, install or update prints a warning and renders the
+conductor without the channel when:
+
+- `operator-channel-server-name-missing`: the server name variable is unset or empty.
+- `operator-channel-server-name-invalid`: the name breaks the rule above. The raw value is not written
+  into any file.
+- `operator-channel-server-absent`: the name is valid but is not declared under `mcpServers`.
+
+Limits:
+
+- Copilot CLI at global scope is the only target that carries the channel. Other targets and
+  project scope get only the `operator-channel-not-rendered` record against the conductor, and no name
+  warning, whatever the name variable holds. Their conductor is unchanged.
+- The install reads only `$COPILOT_HOME/mcp-config.json`. A config passed with
+  `--additional-mcp-config` is not seen, so the channel stays off.
+- The config file is followed through a symlink to its target. A zero-length target is refused before
+  it is opened, and so is any target that is not a regular file. The file is capped at 1 MiB, and a
+  leading byte order mark is skipped. Any I/O, permission, or JSON error counts as the server being
+  absent. The zero-length test is an approximation: .NET cannot report a file's type without opening it,
+  so a special file that reports a non-zero length is not caught by it.
+- The gate is read when Squad renders, not when the conductor runs. To turn it off, unset the
+  variable and run `update --global` again.
+- A reply answers one hard-block question. It never authorises merge, publish, delete, or spend,
+  and it never approves a gate or widens scope.
+- The per-call wait of the receive tool is up to five minutes. The MCP client's own timeout is not
+  documented, so confirm it in your sandbox before relying on the full wait.
+
+Design and trust model: [ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md) and
+[architecture §8](architecture.md#8-rendering).
+
+---
+
 ## Delivery circuit-breaker
 
+For delivery intake, a concrete failure is diagnosed before routing by artifact,
+even when the request also names an explicit plan/spec choice or an existing plan.
+The conductor preserves that choice and existing artifact for the post-diagnosis
+handoff. An explicit choice without an undiagnosed failure skips the intake assessment.
+For a nontrivial diagnosed defect in a Ready task, the architect assesses whether the
+approved contract still fits. Required revisions return to the artifact author and
+reopen approval before implementation; unchanged contracts return to the original worker.
+
+The conductor keeps the same developer session for a task's review fixes and
+verification when the harness can resume it. The reviewer remains independent and
+can retain its own review history between passes. Stateless harnesses receive a
+self-contained recovery brief with previous findings, decisions, and failed approaches.
+The conductor records session handles and replacement reasons on the execution artifact.
+
 Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
-unbounded test-fix loops: 3 incremental fixes per worker invocation, 2 conductor
+unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 2 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
 cluster identity, JEV checkpoints, and the closed trigger set are in
 [architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and the
 [requirements harvest](requirements.md#conductor-execution-circuit-breaker).
 Kyber-Squad has no separate runbook; this onboarding page is the operator pointer.
+
+---
+
+## Task execution runbook: inlined packets, fast testing, and completion digests
+
+Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
+and standardized completion digests to minimize token consumption and eliminate validation churn:
+
+### Inlined task packets (zero plan context hunting)
+
+Conductor task packets are self-contained. Rather than pointing workers to large plan or
+specification documents under `<plan-index>` or `<specification-index>` (which workers are
+forbidden from reading), the conductor inlines five essential items directly into each dispatch packet:
+
+1. **Objective and strict boundary**: Explicit statement of what to change and what must not be touched.
+2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
+3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
+4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
+5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+
+### Fast assembly runner invocation
+
+Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
+
+```bash
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+```
+
+Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
+against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
+on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
+runs are reserved strictly for the final council review, which runs it once per run, on the
+integrated head. A worker's task end runs only the test classes its task touched. A task with no
+covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
+
+### Standardized 6-field completion digest
+
+Workers report dispatch completion using an unambiguous 6-field schema:
+
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
+```
+
+Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
+Standardizing this schema eliminates rejection rework caused by formatting variations.
+
+---
+
+## User-home response guidance
+
+Every user-facing reply from the deployed `conductor` and `bug-crusher` agents follows one shape:
+a title line, a bottom line of at most three sentences, and the open decisions. The shape is owned
+by the shipped default. The operator changes the wording by editing one file, and no skill is
+involved any more.
+
+**Where it lands.** `squad install` creates `~/.kyber-weave/response-guidance.md` with the shipped
+default when the file is absent (a global install, not a dry run and not a project-scope install).
+`squad install` and `squad update` then copy the file's effective text into a `<response-preferences>`
+block in the deployed `conductor` and `bug-crusher` entry files of every target. The file belongs to
+no harness and sits beside the `squad/` state directory under your home. `squad pack` does not read
+it: a packed archive always carries the shipped default.
+
+**Edit it, then update.** Edit `~/.kyber-weave/response-guidance.md`, then run `squad update`
+(add `--global` for a global deployment). Update refreshes every entry file you have not edited, and
+the agents read the new text on their next turn. Running `squad update` alone does not change a
+file you have not touched, and it never overwrites an edit to the home file.
+
+**Locally edited entry files stop receiving updates.** If you edit a deployed `conductor` or
+`bug-crusher` entry file by hand, update keeps your bytes and reports it in the warnings. That file
+stops receiving response-preference updates until you delete it or re-deploy.
+
+**Project scope commits your text.** A project-scope install writes your effective text into the
+entry files of every target in that repository. Those files are committed, so the text becomes part
+of the repository. You own it; review it like any other repository instruction.
+
+**How the file is refreshed.** `squad update --global` builds and validates the deployment plan
+first, takes the deployment lease, then writes the guidance and commits the receipt while it still
+holds the lease; the digest it records is one it read back from the file on disk. So a run that is
+refused before it can deploy — an unmanaged file in the way, a failed adoption check, a legacy
+layout, or another update already holding the lease — leaves your guidance exactly as it was, and
+`--dry-run` writes nothing. The one window left is a failure after the guidance was written and
+before the receipt committed: the new default stays in place. Run `squad update --global` again and
+it adopts that file without rewriting it and records the ownership it was missing. If a newer release
+has changed the default wording in the meantime, Squad cannot tell the file from one you edited, so it
+keeps it and warns; delete the file to take the new default.
+
+| State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
+|---|---|
+| Absent | Installs the shipped default and records it in the receipt. |
+| Present, and its bytes already equal the shipped default | Records it in the receipt without writing anything, and reports nothing. This covers a file left by a run that failed before its receipt was committed. |
+| Present, and its bytes still match the default the receipt recorded | Replaces it with the current default, and records the new digest. |
+| Present, and edited by you | Preserves it and reports that it was kept. Your wording is never overwritten. |
+| Present, with no record that Squad wrote it and bytes of your own | Preserves it and reports that it was kept. Delete the file if you want the shipped default back. |
+
+The receipt that records this is the global `squad.receipt.json` under
+`~/.kyber-weave/squad/global/`, in an additive `homeFiles` array: one `relativePath` and the
+SHA-256 of the bytes Squad wrote. A file that cannot be read or written produces a warning and
+does not fail the deployment or change its exit code: the run continues, and the warning names the
+remedy — rerun `squad update --global` — for an I/O failure, a permission denial, a path form your
+platform cannot represent, or a security policy that refuses the write. If the build itself ships
+no readable default, nothing is written or recorded and the warning says to reinstall from a
+release that ships the guidance, because a rerun of the same build cannot fix it.
+
+**The D8 warning.** A rendered Squad content with no `<response-preferences>` block at all is treated
+as older content: nothing is injected and install or update prints
+`The rendered Squad content has no <response-preferences> block; response preferences were not injected.`
+once. It is not an error.
+
+**What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
+Squad agent answers, then run `squad update`. You do not edit a deployed skill, and no skill is
+loaded. Delete the file to return to the shipped default. The default wording is the canonical
+`products/kyber-squad/response-guidance.default.md`.
+
+**What the file may say.** The text is pasted verbatim into the entry files, with no size cap and no
+style-only guard line. This is an accepted risk: the operator owns the text, and whatever you write
+in it reaches the agent as instruction. Keep it to how answers are shaped, and review it before you
+commit a project-scope install.
+
+---
+
+## Intake assessment (opt-in, per repository)
+
+The intake assessment is the routing question the conductor asks when a request names neither a
+plan nor a specification. It is **off by default** and a repository opts in.
+
+**How to enable it.** In the repository's `.kyber-weave/kyber-weave.yml`, set the flag under
+`ontology`:
+
+```yaml
+ontology:
+  intake: true
+```
+
+Then run `kyber-weave docs init .` in that repository. The flag publishes an
+`<intake-assessment>` property into the generated Config Reg block of the repository root
+`AGENTS.md`, with the value `enabled`:
+
+```markdown
+- **<intake-assessment>**: `enabled`
+```
+
+The property is a *mode* entry rather than a path entry: `docs validate` does not try to resolve
+`enabled` as a file on disk, but it still fails the build when the rendered block no longer
+matches the configuration. See
+[mode properties](../docgraph/architecture.md#mode-properties-are-not-paths).
+
+**What changes when it is on.** The conductor reads the property from the repository root
+`AGENTS.md`. Present → for a request whose intent is unstated, the conductor asks `architect` for
+a read-only intake recommendation and takes the plan or specification path from it. Absent →
+the assessment is skipped and the path continues directly to the plan choice, and the conductor
+says so in one line and tells you that you can ask for a specification instead: taking the plan
+path is announced, never silent, so a request that never asked for a plan does not quietly become
+one. A concrete failure that has not been diagnosed still outranks the artifact-choice question:
+the diagnosis runs first either way.
+
+**How to turn it off.** Remove `intake: true` from `.kyber-weave/kyber-weave.yml` and re-run
+`kyber-weave docs init .`; the property leaves the block and the assessment stops running. A
+repository that never set the flag never publishes the property, so nothing to undo.
 
 ---
 
@@ -602,12 +1320,25 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 68 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 21 canonical
-agents with their 11 owned reference files; the Agent Plugins archive never contains agents or
+`squad pack` also composes the Kyber-Weave skills from `.apm/skills/` into both archives, beside the
+Squad skills. Before it writes anything, it loads the real Squad tree and then the composed tree: it
+packs the APM archive into a scratch folder, extracts it, and loads it. The scratch folder is removed
+on every path. Pack exits 1 and writes no archive when a companion skill's name equals a Squad skill
+or agent, ignoring letter case (the message names both paths), or when a symbolic link sits at `.apm`,
+`.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder inside that skill.
+A refused pack leaves the archive from the last successful pack in place, and so does a failed write:
+each archive is written to a temporary file beside its target and replaces it only when complete. Known
+gap, not introduced here: a symbolic link inside `products/kyber-squad/` that points outside the repository
+is still packed when no loaded file references it. See the
+[architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
+
+Both archive formats recurse through each skill directory. They contain all 28 canonical `SKILL.md`
+files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
+`.apm/skills/` and their three resource files: 34 skills and 125 skill-tree files in each archive.
+Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
+agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 122 files on Copilot today — with authored relative links resolving inside
+beside its principal — 149 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
@@ -617,12 +1348,11 @@ its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
-`squad pack` or the golden synchronization.
+`squad pack`.
 
-`products/kyber-squad/` is the canonical and package authority. The repository root
-`.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
-`.kyber-weave/squad.receipt.json` form an intentional stale self-deployment. This synchronization
-leaves them untouched; a human will refresh them after a fresh Kyber-Weave release candidate.
+`products/kyber-squad/` is the canonical and package authority. The repository no longer carries a
+project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
+`.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were removed.
 
 ---
 
@@ -631,14 +1361,17 @@ leaves them untouched; a human will refresh them after a fresh Kyber-Weave relea
 | Exit Code | Meaning |
 |---|---|
 | `0` | Success, healthy/clean status, or successful dry run. |
-| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. |
-| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. |
+| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. Also preset file syntax error (`file:line`), unknown profile category / harness key validation failure, unresolvable canonical profiles for `preset use/clear/show` (remedy: `squad update`), missing preset referenced by lock, harness executable missing on `PATH`, or filesystem link creation failure during `squad run`. |
+| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. Also `--projects` outside `squad update --global`, or a named project path that is neither registered nor holds importable in-repo state. Also unknown preset name, `squad run` with no preset selection for target, or attempting `squad run` against a harness with status `Unsupported` or `SpikePending`. |
 
 ---
 
 ## Related
 
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
+- [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
+- [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

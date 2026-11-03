@@ -19,8 +19,6 @@ use serde::Serialize;
 
 use crate::api::{self, ReportCache};
 use crate::cli::SetupState;
-use crate::receiver::ReceiverStatus;
-use crate::scheduler::RefreshStatus;
 use crate::settings::TraySettings;
 use crate::supervisor::ServerPhase;
 
@@ -49,9 +47,30 @@ pub struct ViewState {
     pub report: Option<serde_json::Value>,
     pub report_fetched_at: Option<String>,
     pub error: Option<String>,
-    pub refresh: RefreshStatus,
-    pub receiver: ReceiverStatus,
+    /// The server's job state (`GET /api/kyber/jobs`), carried verbatim. `None`
+    /// means the fetch failed: unknown must not be shown as a default.
+    pub jobs: Option<serde_json::Value>,
+    /// The server-owned settings (`GET /api/kyber/settings`), same rule.
+    pub shared_settings: Option<serde_json::Value>,
+    /// Shared coverage (`GET /api/kyber/coverage`), carried verbatim. The
+    /// native saber and the popover read only its `receiver` key; `None`
+    /// means the fetch failed and renders red/unknown, never a default.
+    pub coverage: Option<serde_json::Value>,
+    /// The running KyberDash version (`GET /api/kyber/version`), carried
+    /// verbatim as `kyberdashVersion`; `None` means the fetch failed.
+    pub kyberdash_version: Option<serde_json::Value>,
+    /// Tray-local display preferences only.
     pub settings: TraySettings,
+}
+
+/// The server documents the poll carries verbatim into [`ViewState`]. Each is
+/// `None` when its fetch failed: unknown must not be shown as a default.
+#[derive(Clone, Debug, Default)]
+pub struct ServerDocs {
+    pub jobs: Option<serde_json::Value>,
+    pub shared_settings: Option<serde_json::Value>,
+    pub coverage: Option<serde_json::Value>,
+    pub kyberdash_version: Option<serde_json::Value>,
 }
 
 /// Assembles the state the popover reads.
@@ -64,8 +83,7 @@ pub fn view_state(
     setup: Option<SetupState>,
     server: ServerPhase,
     cache: &ReportCache,
-    refresh: &RefreshStatus,
-    receiver: ReceiverStatus,
+    docs: ServerDocs,
     settings: &TraySettings,
 ) -> ViewState {
     let phase = match (&setup, server) {
@@ -82,8 +100,10 @@ pub fn view_state(
         report: cache.report.clone(),
         report_fetched_at: cache.report_fetched_at.clone(),
         error: cache.error.clone(),
-        refresh: refresh.clone(),
-        receiver,
+        jobs: docs.jobs,
+        shared_settings: docs.shared_settings,
+        coverage: docs.coverage,
+        kyberdash_version: docs.kyberdash_version,
         settings: settings.clone(),
     }
 }
@@ -193,7 +213,6 @@ pub fn open_view_url(server_url: &str, view: &str) -> Result<String> {
 mod tests {
     use super::*;
     use crate::cli::SetupReason;
-    use crate::scheduler::RefreshState;
     use serde_json::json;
     use std::time::{Duration, SystemTime};
 
@@ -211,8 +230,7 @@ mod tests {
             setup,
             server,
             cache,
-            &RefreshStatus::default(),
-            ReceiverStatus::Unknown,
+            ServerDocs::default(),
             &TraySettings::default(),
         )
     }
@@ -227,8 +245,20 @@ mod tests {
         assert_eq!(json["report"]["schemaVersion"], 1);
         assert_eq!(json["reportFetchedAt"], "2023-11-14T22:13:20.000Z");
         assert!(json["error"].is_null());
-        assert_eq!(json["refresh"]["state"], "idle");
-        assert_eq!(json["receiver"], "unknown");
+        assert!(
+            json["jobs"].is_null(),
+            "unknown jobs are null, not a default"
+        );
+        assert!(json["sharedSettings"].is_null());
+        assert!(
+            json["coverage"].is_null(),
+            "unknown coverage is null, not a default"
+        );
+        assert!(
+            json["kyberdashVersion"].is_null(),
+            "unknown version is null, not a default"
+        );
+        assert!(json.get("refresh").is_none() && json.get("receiver").is_none());
         assert_eq!(json["settings"]["harness"], "all");
         assert!(json.get("setup").is_none(), "absent unless in setup");
     }
@@ -279,30 +309,32 @@ mod tests {
         assert_eq!(state(None, ServerPhase::Stale, &cache).phase, Phase::Stale);
     }
 
+    /// The server's job and settings documents ride along untouched: the tray
+    /// does not interpret them.
     #[test]
-    fn a_failed_refresh_is_carried_verbatim() {
-        let refresh = RefreshStatus {
-            state: RefreshState::Failed,
-            last_success_at: Some("2023-11-14T22:13:20.000Z".to_string()),
-            last_failure: Some("canon.db is locked at 2023-11-14T22:23:20.000Z".to_string()),
-        };
+    fn jobs_and_shared_settings_are_carried_verbatim() {
+        let jobs = json!({ "refresh": { "state": "failed", "lastFailure": "canon.db is locked" } });
+        let shared = json!({ "refreshMinutes": 15, "hostReceiver": true });
+        let coverage = json!({ "receiver": { "healthy": true } });
+        let version = json!({ "version": "1.2.3", "apiVersion": 1 });
         let json = serde_json::to_value(view_state(
             None,
             ServerPhase::Ready,
             &cache_with_report(),
-            &refresh,
-            ReceiverStatus::Hosted,
+            ServerDocs {
+                jobs: Some(jobs.clone()),
+                shared_settings: Some(shared.clone()),
+                coverage: Some(coverage.clone()),
+                kyberdash_version: Some(version.clone()),
+            },
             &TraySettings::default(),
         ))
         .unwrap();
 
-        assert_eq!(json["refresh"]["state"], "failed");
-        assert_eq!(json["refresh"]["lastSuccessAt"], "2023-11-14T22:13:20.000Z");
-        assert!(json["refresh"]["lastFailure"]
-            .as_str()
-            .unwrap()
-            .contains("canon.db is locked"));
-        assert_eq!(json["receiver"], "hosted");
+        assert_eq!(json["jobs"], jobs);
+        assert_eq!(json["sharedSettings"], shared);
+        assert_eq!(json["coverage"], coverage);
+        assert_eq!(json["kyberdashVersion"], version);
     }
 
     /// The tray matches the same table the CLI and the web router match.

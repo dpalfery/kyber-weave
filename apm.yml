@@ -2,7 +2,7 @@ name: kyber-weave
 version: 0.1.1
 description: >-
   Governance for the artifacts that shape agent behaviour. Ships the
-  kyber-weave-docs skill, which authors and retrofits repository documentation
+  kyber-docs-authoring skill, which authors and retrofits repository documentation
   to the Kyber-Weave ontology.
 author: dpalfery
 

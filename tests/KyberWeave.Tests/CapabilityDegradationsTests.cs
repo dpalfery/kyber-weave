@@ -353,4 +353,34 @@ public sealed class CapabilityDegradationsTests
             };
         }
     }
+
+    /// <summary>
+    /// An absent or blank profile name answers "not entitled" instead of throwing.
+    /// </summary>
+    /// <remarks>
+    /// The predicate documents a fail-closed rule: an unresolvable profile allows nothing. A
+    /// dictionary lookup rejects a null key by throwing, which would turn that documented answer
+    /// into an exception on a renderer's path for a hand-built or partially deserialised agent
+    /// that carries no profile id. Whitespace is treated the same way, because no profile can be
+    /// named " " and a lookup would simply miss.
+    /// </remarks>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GrantsUniversalMcpServers_WhenProfileNameIsAbsent_ReturnsFalse(string? profileName)
+    {
+        Dictionary<string, SquadCapabilityProfile> profiles = new(StringComparer.Ordinal)
+        {
+            ["orchestrator"] = new SquadCapabilityProfile(
+                null,
+                new Dictionary<string, SquadPermissionDecision>(StringComparer.Ordinal)
+                {
+                    ["filesystem.read"] = SquadPermissionDecision.Allow,
+                }),
+        };
+
+        Assert.False(CapabilityDegradations.GrantsUniversalMcpServers(profileName!, profiles));
+        Assert.False(CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(profileName!, profiles));
+    }
 }

@@ -2,32 +2,23 @@ import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
-import { cn, usd, fmtTokens } from '../lib/utils.js'
-import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi.js'
-import type { KyberMessageLike, KyberTurnContentShadow } from '../lib/kyberApi.js'
-import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
+import { cn, usd, fmtNum, fmtTokens } from '../lib/utils.js'
+import { fetchKyberSessionContent, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
+import type {
+  KyberMessageLike,
+  KyberSkillRow,
+  KyberTurnContentBlock,
+  KyberTurnContentPart,
+  KyberTurnContentResult,
+  KyberTurnContentShadow,
+} from '../lib/kyberApi.js'
+import type { DrawerContent, SessionTimelineNode, ToolRow } from './AgentSessionDashboard.js'
+import { reasonOf, skillTurnLabel, unmeasured } from './SkillsPanel.js'
 import { Skeleton } from './ui/skeleton.js'
+import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
+import { CopyExactButton, SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
 
-/**
- * Harness XML tags folded into collapsible <details> elements.
- */
-export const XML_FOLD_TAGS = [
-  'environment_info',
-  'workspace_info',
-  'instructions',
-  'copilot_instructions',
-  'context',
-  'reminderInstructions',
-  'editor_context',
-  'tool_use_instructions',
-  'notebook_info',
-  'system_reminder',
-  'file_contents',
-  'attachment',
-  'environment_details',
-] as const
-
-export type XmlFoldTag = (typeof XML_FOLD_TAGS)[number]
+export { CopyExactButton }
 
 export interface XmlFoldChunk {
   type: 'text' | 'tag'
@@ -37,51 +28,272 @@ export interface XmlFoldChunk {
 }
 
 /**
- * Parses raw text into plain text chunks and recognized harness XML blocks.
+ * HTML-active tags are never treated as structural readable sections. They
+ * stay as escaped literal text so a payload like `<script>alert(1)</script>`
+ * keeps its delimiters visibly escaped and never becomes an executable
+ * element (React still escapes; no `dangerouslySetInnerHTML` anywhere).
  */
-export function parseXmlFoldChunks(raw: string): XmlFoldChunk[] {
-  if (!raw) return []
-  const tagsPattern = XML_FOLD_TAGS.join('|')
-  const regex = new RegExp(`<(${tagsPattern})(\\s[^>]*)?>([\\s\\S]*?)(?:<\\/\\1>|$)`, 'gi')
-  const chunks: XmlFoldChunk[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
+const READABLE_XML_LITERAL_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta'])
 
-  while ((match = regex.exec(raw)) !== null) {
-    if (match.index > lastIndex) {
-      const before = raw.slice(lastIndex, match.index)
-      if (before) {
-        chunks.push({ type: 'text', content: before })
+/**
+ * Known unclosed Copilot/harness wrapper sections. The generic parser below
+ * requires a matching open/close pair; only these names may also fold when
+ * the close tag never arrives (an unclosed `<name>` runs to end of text).
+ * Recovered from the pre-generic `XML_FOLD_TAGS` harness list (commit
+ * `ec90ac4^`): every name there folded unclosed via `(?:<\/\1>|$)`, so every
+ * name there stays unclosed-tolerant here. Any other unclosed name stays
+ * literal text so generics like `List<string>` never swallow what follows.
+ */
+const READABLE_XML_UNCLOSED_ALLOWLIST = new Set([
+  'environment_info',
+  'workspace_info',
+  'instructions',
+  'copilot_instructions',
+  'context',
+  'reminderinstructions',
+  'editor_context',
+  'tool_use_instructions',
+  'notebook_info',
+  'system_reminder',
+  'file_contents',
+  'attachment',
+  'environment_details',
+])
+
+const READABLE_XML_TAG_NAME = '[A-Za-z_][\\w:.-]*'
+const READABLE_XML_ATTR_VALUE = '(?:"[^"]*"|\'[^\']*\'|[^\\s<>\"\'=]+)'
+/**
+ * Attribute names must be syntactically plausible tag names. A permissive
+ * "any non-space run" here swallows operators: in `if (a<b && c>d)` the
+ * `&&` would parse as a valueless attribute of `<b ...>` and hide the whole
+ * comparison inside a folded section. Plausible names keep it literal.
+ */
+const READABLE_XML_ATTR = `(?:\\s+${READABLE_XML_TAG_NAME}(?:\\s*=\\s*${READABLE_XML_ATTR_VALUE})?)`
+const READABLE_XML_TOKEN_RE = new RegExp(
+  `<\\/\\s*(${READABLE_XML_TAG_NAME})\\s*>` +
+    `|<(${READABLE_XML_TAG_NAME})((?:${READABLE_XML_ATTR})*)\\s*(\\/?)>`,
+  'g',
+)
+
+interface ReadableXmlToken {
+  index: number
+  end: number
+  raw: string
+  kind: 'open' | 'close' | 'selfClosing'
+  tag: string
+  attributes?: string
+}
+
+function tokenizeReadableXml(raw: string): ReadableXmlToken[] {
+  const tokens: ReadableXmlToken[] = []
+  READABLE_XML_TOKEN_RE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = READABLE_XML_TOKEN_RE.exec(raw)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push({
+        index: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+        kind: 'close',
+        tag: match[1],
+      })
+    } else {
+      const tag = match[2] as string
+      const attributes = (match[3] ?? '').trim() || undefined
+      const selfClosing = match[4] === '/'
+      tokens.push({
+        index: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+        kind: selfClosing ? 'selfClosing' : 'open',
+        tag,
+        attributes,
+      })
+    }
+  }
+  return tokens
+}
+
+/**
+ * Parses any well-formed XML-like sections into ordered text/tag chunks.
+ * A generic name counts as structural only with a matching open/close pair
+ * (`<name ...>...</name>`) or as self-closing (`<name .../>`); stray `<`,
+ * `>`, `<>`, `< 3`, or `a < b` stay in text chunks so literal angle
+ * brackets are never silently removed. An unclosed open folds only for the
+ * known Copilot/harness wrappers in `READABLE_XML_UNCLOSED_ALLOWLIST` —
+ * any other unclosed name (a generic like `List<string>`, `<void>`, or an
+ * `if (a<b && c>d)` comparison, whose `&&` is not a plausible attribute
+ * name) stays literal so it can never swallow a later real section.
+ * Denylisted HTML-active tags stay literal too. Every occurrence is
+ * preserved in source order with its exact inner bytes; nothing is
+ * deduplicated or reordered.
+ */
+export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
+  if (!raw) return []
+  const tokens = tokenizeReadableXml(raw)
+  const chunks: XmlFoldChunk[] = []
+  let pos = 0
+
+  const pushText = (slice: string): void => {
+    if (slice) chunks.push({ type: 'text', content: slice })
+  }
+
+  /**
+   * Single-pass pairing index: one left-to-right scan pairs each close with
+   * the most recent unmatched open of the same lowercased name, so every
+   * open resolves in O(1) below and the whole parse stays O(number of
+   * tokens). A per-name stack is exactly the forward depth-counting the old
+   * repeated lookahead did (opens push, closes pop the same name; other
+   * names never disturb the depth), including nested same-name sections.
+   * Denylisted HTML-active tokens never enter the index, and self-closing
+   * same-name tokens are self-contained (neither pushed nor popped).
+   * Unmatched opens keep -1, as before.
+   */
+  const matchingClose = new Array<number>(tokens.length).fill(-1)
+  const openStacks = new Map<string, number[]>()
+  for (let j = 0; j < tokens.length; j++) {
+    const candidate = tokens[j] as ReadableXmlToken
+    if (READABLE_XML_LITERAL_TAGS.has(candidate.tag.toLowerCase())) continue
+    if (candidate.kind === 'selfClosing') continue
+    const name = candidate.tag.toLowerCase()
+    if (candidate.kind === 'open') {
+      let stack = openStacks.get(name)
+      if (!stack) {
+        stack = []
+        openStacks.set(name, stack)
+      }
+      stack.push(j)
+    } else if (candidate.kind === 'close') {
+      const stack = openStacks.get(name)
+      if (stack && stack.length > 0) {
+        const openIdx = stack.pop() as number
+        matchingClose[openIdx] = j
       }
     }
-    const tag = match[1]
-    const attributes = match[2]?.trim()
-    const inner = match[3] ?? ''
-    chunks.push({
-      type: 'tag',
-      tag,
-      attributes,
-      content: inner,
-    })
-    lastIndex = match.index + match[0].length
   }
 
-  if (lastIndex < raw.length) {
-    const after = raw.slice(lastIndex)
-    if (after) {
-      chunks.push({ type: 'text', content: after })
+  let i = 0
+  while (i < tokens.length) {
+    const token = tokens[i] as ReadableXmlToken
+    if (READABLE_XML_LITERAL_TAGS.has(token.tag.toLowerCase())) {
+      i++
+      continue
     }
+    if (token.kind === 'selfClosing') {
+      pushText(raw.slice(pos, token.index))
+      chunks.push({ type: 'tag', tag: token.tag, attributes: token.attributes, content: '' })
+      pos = token.end
+      i++
+      continue
+    }
+    if (token.kind === 'close') {
+      // Stray closes (no open claims them in the pairing index above) are
+      // literal text.
+      i++
+      continue
+    }
+    const closeIdx = matchingClose[i] as number
+    if (closeIdx !== -1) {
+      const close = tokens[closeIdx] as ReadableXmlToken
+      pushText(raw.slice(pos, token.index))
+      chunks.push({
+        type: 'tag',
+        tag: token.tag,
+        attributes: token.attributes,
+        content: raw.slice(token.end, close.index),
+      })
+      pos = close.end
+      // Skip every token the section consumed, including nested ones: nested
+      // sections stay inside the raw content slice and render recursively.
+      i = closeIdx + 1
+      continue
+    }
+    // Unclosed open. Only a known harness wrapper may fold unclosed (running
+    // to end of text); any other unclosed name stays literal so a generic
+    // like `List<string>` can never swallow a later real section — scanning
+    // simply continues past it.
+    if (READABLE_XML_UNCLOSED_ALLOWLIST.has(token.tag.toLowerCase())) {
+      pushText(raw.slice(pos, token.index))
+      chunks.push({
+        type: 'tag',
+        tag: token.tag,
+        attributes: token.attributes,
+        content: raw.slice(token.end),
+      })
+      return chunks
+    }
+    i++
   }
 
+  pushText(raw.slice(pos))
   return chunks
 }
 
 /**
- * Formats text containing harness XML blocks into collapsible <details> elements.
+ * Preview text for a folded section with structural delimiters removed but
+ * body words kept. Structural tag tokens become a space; anything else
+ * (including literal `<`/`>` that never parsed as a tag) stays verbatim.
  */
+function readablePreviewText(inner: string, maxLength = 80): { preview: string; hasMore: boolean } {
+  READABLE_XML_TOKEN_RE.lastIndex = 0
+  const stripped = inner.replace(READABLE_XML_TOKEN_RE, (match, closeName, openName) => {
+    const name = (closeName ?? openName ?? '') as string
+    if (name && READABLE_XML_LITERAL_TAGS.has(String(name).toLowerCase())) return match
+    return ' '
+  })
+  const collapsed = stripped.replace(/\s+/g, ' ').trim()
+  return { preview: collapsed.slice(0, maxLength), hasMore: collapsed.length > maxLength }
+}
+/**
+ * True when the formatted readable view would fold at least one structural
+ * XML section. Denylisted HTML-active tags and stray angle brackets never
+ * count, so literals route to plain text instead of folding.
+ */
+export function containsReadableXmlTag(value: string): boolean {
+  if (!value) return false
+  return parseReadableXmlChunks(value).some((chunk) => chunk.type === 'tag')
+}
+
+/**
+ * Human-readable formatted view for API context text. Structural XML-like
+ * sections become collapsible readable labels with no angle-bracket
+ * delimiters; every body character and occurrence stays in source order via
+ * recursive rendering. Literal `<`/`>` that never parsed as a tag stays as
+ * escaped literal text. Raw and copy paths elsewhere keep the exact source.
+ */
+/** The nearest ancestor that scrolls its content, or null when none does. */
+function nearestScrollContainer(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const overflowY = getComputedStyle(p).overflowY
+    if (overflowY === 'auto' || overflowY === 'scroll') return p
+  }
+  return null
+}
+
+/**
+ * Keeps an opened section's revealed body on screen. The body renders below
+ * its summary; inside a max-height scroll box a section lower down can reveal
+ * its text below the clipped area. The body is scrolled into view only when it
+ * overflows the nearest scroll container, with `nearest` alignment so the
+ * scroll moves no further than needed. Otherwise nothing moves.
+ */
+function revealOpenedSection(event: { currentTarget: HTMLDetailsElement }) {
+  const details = event.currentTarget
+  if (!details.open) return
+  const body = Array.from(details.children).find((child): child is HTMLElement => child instanceof HTMLElement && child.tagName === 'DIV')
+  if (!body) return
+  const container = nearestScrollContainer(details)
+  if (!container) return
+  const bodyRect = body.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  if (bodyRect.top < containerRect.top || bodyRect.bottom > containerRect.bottom) {
+    body.scrollIntoView?.({ block: 'nearest' })
+  }
+}
+
 export function XmlFoldedText({ text, className }: { text: string; className?: string }) {
   if (!text) return null
-  const chunks = parseXmlFoldChunks(text)
+  const chunks = parseReadableXmlChunks(text)
 
   if (chunks.length === 0) return null
 
@@ -93,8 +305,23 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
     <div className={cn('space-y-1 text-xs', className)} data-testid="xml-folded-content">
       {chunks.map((chunk, i) => {
         if (chunk.type === 'text') {
-          const trimmed = chunk.content.trim()
-          if (!trimmed) return null
+          if (chunk.content.trim() === '') {
+            // Whitespace-only separators stay in the DOM byte-for-byte, just
+            // as whitespace-only tag bodies do below: dropping them would
+            // rewrite section boundaries and lose original whitespace code
+            // points. The test id and accessible label identify the node;
+            // the text node itself keeps every original code point untrimmed.
+            return (
+              <div
+                key={i}
+                className="whitespace-pre-wrap break-words leading-none text-foreground/90 my-0 h-2 overflow-hidden"
+                data-testid="xml-folded-whitespace"
+                aria-label="whitespace-only separator between sections"
+              >
+                {chunk.content}
+              </div>
+            )
+          }
           return (
             <div key={i} className="whitespace-pre-wrap break-words leading-relaxed text-foreground/90 my-1">
               {chunk.content}
@@ -102,20 +329,62 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
           )
         }
 
-        const trimmedInner = chunk.content.trim()
-        const preview = trimmedInner.slice(0, 80).replace(/\s+/g, ' ')
-        const hasMore = trimmedInner.length > 80
+        const inner = chunk.content ?? ''
+        if (inner.trim() === '') {
+          const isWhitespaceOnly = inner.length > 0
+          return (
+            <div
+              key={i}
+              className="border border-border rounded my-1 bg-card/60 px-3 py-1.5 flex items-center gap-2"
+              data-testid={`folded-tag-${chunk.tag}`}
+              aria-label={
+                isWhitespaceOnly
+                  ? `${chunk.tag} section contains whitespace-only content`
+                  : `${chunk.tag} section is empty`
+              }
+            >
+              <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                {chunk.tag}
+              </span>
+              {chunk.attributes ? (
+                <span className="truncate font-mono text-[11px] text-tertiary-foreground flex-1">
+                  {chunk.attributes}
+                </span>
+              ) : null}
+              <span
+                className="shrink-0 font-mono text-[11px] italic text-tertiary-foreground"
+                data-testid={`folded-tag-${chunk.tag}-marker`}
+              >
+                {isWhitespaceOnly ? 'whitespace-only' : 'empty'}
+              </span>
+              <span
+                className="whitespace-pre-wrap break-words font-mono text-[11px] text-tertiary-foreground"
+                data-testid={`folded-tag-${chunk.tag}-whitespace`}
+              >
+                {inner}
+              </span>
+            </div>
+          )
+        }
+
+        const { preview, hasMore } = readablePreviewText(inner)
 
         return (
           <details
             key={i}
             className="group border border-border rounded my-1 bg-card/60 overflow-hidden"
             data-testid={`folded-tag-${chunk.tag}`}
+            onToggle={revealOpenedSection}
           >
             <summary className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-2 select-none hover:bg-interactive-secondary/50 transition-colors">
               <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                &lt;{chunk.tag}&gt;
+                {chunk.tag}
               </span>
+              {chunk.attributes ? (
+                <span className="truncate font-mono text-[10px] text-tertiary-foreground max-w-40">
+                  {chunk.attributes}
+                </span>
+              ) : null}
               <span className="truncate font-mono text-[11px] text-tertiary-foreground flex-1">
                 {preview}{hasMore ? '…' : ''}
               </span>
@@ -123,9 +392,9 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
                 ▶
               </span>
             </summary>
-            <pre className="text-xs font-mono p-2 overflow-x-auto whitespace-pre-wrap border-t border-border bg-muted/40 text-foreground">
-              {trimmedInner}
-            </pre>
+            <div className="border-t border-border bg-muted/40 p-2">
+              <XmlFoldedText text={inner} />
+            </div>
           </details>
         )
       })}
@@ -163,7 +432,7 @@ export function KeyValueList({ data, className }: { data: unknown; className?: s
   const parsed = tryParseJson(data)
 
   if (typeof parsed === 'string') {
-    if (XML_FOLD_TAGS.some(t => parsed.includes(`<${t}`))) {
+    if (containsReadableXmlTag(parsed)) {
       return <XmlFoldedText text={parsed} className={className} />
     }
     if (parsed.length > 120) {
@@ -220,6 +489,1172 @@ export function KeyValueList({ data, className }: { data: unknown; className?: s
 }
 
 /**
+ * Canonical turn-content buckets every harness shares (see
+ * `CANONICAL_CONTENT_KEYS` in dash/src/canon/types.ts), in stable display
+ * order. Copilot-shaped rows carry these flat strings on `turn.content`
+ * rather than in input/output messages, which is why the system prompt and
+ * its associated data previously stayed invisible in the turn view or
+ * surfaced elsewhere as one raw JSON wall.
+ */
+export const TURN_CONTENT_SECTION_ORDER = [
+  'system_prompt',
+  'instruction_context',
+  'tool_definitions',
+  'conversation_history',
+  'tool_result_content',
+] as const
+
+const TURN_CONTENT_SECTION_LABELS: Record<string, string> = {
+  system_prompt: 'System prompt',
+  instruction_context: 'Instruction context',
+  tool_definitions: 'Tool definitions',
+  conversation_history: 'Conversation history',
+  tool_result_content: 'Tool results',
+}
+
+const KNOWN_CONTENT_KEYS = new Set<string>(TURN_CONTENT_SECTION_ORDER)
+
+/** Message-shaped content keys TurnInspector already renders elsewhere. */
+const MESSAGE_CONTENT_KEYS = new Set([
+  'input_messages',
+  'output_messages',
+  'prompt_text',
+  'response_text',
+  'reasoning_text',
+  'thinking_text',
+])
+
+function humanizeContentKey(key: string): string {
+  const words = key.replace(/[-_]+/g, ' ').trim()
+  if (!words) return key
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * True for strings shaped like a JSON object or array. Only the cheap shape
+ * check — the parse gate in the formatters below decides validity.
+ */
+export function isJsonText(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 2) return false
+  const first = trimmed.charAt(0)
+  const last = trimmed.charAt(trimmed.length - 1)
+  return (first === '{' && last === '}') || (first === '[' && last === ']')
+}
+
+/**
+ * True for a JSON string literal whose decoded value is itself a JSON
+ * object or array (a root-encoded string such as
+ * `"[{\"type\":\"text\",\"text\":\"prompt\"}]"`). The outer quotes make
+ * `isJsonText` false, so without this check a root-encoded payload renders
+ * as one escaped line instead of reaching the structured view. Parsing here
+ * is only the shape gate; the original outer text is never re-encoded and
+ * stays the exact source for raw/copy.
+ */
+export function isRootEncodedJsonText(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 2 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return false
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(trimmed)
+  } catch {
+    return false
+  }
+  if (typeof decoded !== 'string') return false
+  const inner = decoded.trim()
+  if (!isJsonText(inner)) return false
+  try {
+    JSON.parse(inner)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Lossless JSON AST scoped to the nested-string expansion below. Numbers and
+ * literals keep their exact source slices so large integers, key order, and
+ * array order survive; strings keep both the raw literal and its decoded
+ * value so JSON-encoded strings can be detected without re-escaping.
+ */
+interface JsonLosslessObjectNode {
+  kind: 'object'
+  entries: Array<{ keyRaw: string; value: JsonLosslessNode }>
+}
+
+interface JsonLosslessArrayNode {
+  kind: 'array'
+  items: JsonLosslessNode[]
+}
+
+interface JsonLosslessStringNode {
+  kind: 'string'
+  raw: string
+  decoded: string
+}
+
+interface JsonLosslessNumberNode {
+  kind: 'number'
+  raw: string
+}
+
+interface JsonLosslessLiteralNode {
+  kind: 'literal'
+  raw: string
+}
+
+type JsonLosslessNode =
+  | JsonLosslessObjectNode
+  | JsonLosslessArrayNode
+  | JsonLosslessStringNode
+  | JsonLosslessNumberNode
+  | JsonLosslessLiteralNode
+
+/**
+ * Structural recursion cap for the lossless JSON AST below. Parsing and
+ * printing recurse once per object/array level, so unbounded OTLP content
+ * could otherwise exhaust the stack; past this depth the nested printer
+ * throws and `prettyPrintJsonNested` falls back to the iterative
+ * whitespace-only formatter, which keeps every byte visible.
+ */
+const MAX_JSON_LOSSLESS_STRUCTURE_DEPTH = 100
+
+/**
+ * Cap on JSON-encoded string layers unwrapped along one root-to-leaf path
+ * (a string whose decoded text is itself a JSON object/array, repeatedly).
+ * The budget advances only when a string layer is actually unwrapped, so
+ * wide values keep a full budget per branch while a hostile nesting chain
+ * stops expanding and stays visible as an escaped string literal.
+ */
+const MAX_NESTED_JSON_STRING_EXPANSIONS = 10
+
+function parseJsonLosslessNode(text: string, pos: { index: number }, depth: number): JsonLosslessNode {
+  if (depth > MAX_JSON_LOSSLESS_STRUCTURE_DEPTH) throw new Error('Max JSON depth exceeded')
+  skipJsonWs(text, pos)
+  const ch = text.charAt(pos.index)
+  if (ch === '{') return parseJsonLosslessObject(text, pos, depth)
+  if (ch === '[') return parseJsonLosslessArray(text, pos, depth)
+  if (ch === '"') return parseJsonLosslessString(text, pos)
+  if (ch === '-' || (ch >= '0' && ch <= '9')) return parseJsonLosslessNumber(text, pos)
+  return parseJsonLosslessLiteral(text, pos)
+}
+
+function skipJsonWs(text: string, pos: { index: number }): void {
+  while (pos.index < text.length && /\s/.test(text.charAt(pos.index))) pos.index++
+}
+
+function parseJsonLosslessObject(text: string, pos: { index: number }, depth: number): JsonLosslessObjectNode {
+  pos.index++
+  const entries: Array<{ keyRaw: string; value: JsonLosslessNode }> = []
+  skipJsonWs(text, pos)
+  if (text.charAt(pos.index) === '}') {
+    pos.index++
+    return { kind: 'object', entries }
+  }
+  for (;;) {
+    skipJsonWs(text, pos)
+    if (text.charAt(pos.index) !== '"') throw new Error('Expected object key')
+    const keyNode = parseJsonLosslessString(text, pos)
+    skipJsonWs(text, pos)
+    if (text.charAt(pos.index) !== ':') throw new Error('Expected colon')
+    pos.index++
+    const value = parseJsonLosslessNode(text, pos, depth + 1)
+    entries.push({ keyRaw: keyNode.raw, value })
+    skipJsonWs(text, pos)
+    const sep = text.charAt(pos.index)
+    if (sep === ',') {
+      pos.index++
+      continue
+    }
+    if (sep === '}') {
+      pos.index++
+      return { kind: 'object', entries }
+    }
+    throw new Error('Expected comma or closing brace')
+  }
+}
+
+function parseJsonLosslessArray(text: string, pos: { index: number }, depth: number): JsonLosslessArrayNode {
+  pos.index++
+  const items: JsonLosslessNode[] = []
+  skipJsonWs(text, pos)
+  if (text.charAt(pos.index) === ']') {
+    pos.index++
+    return { kind: 'array', items }
+  }
+  for (;;) {
+    const value = parseJsonLosslessNode(text, pos, depth + 1)
+    items.push(value)
+    skipJsonWs(text, pos)
+    const sep = text.charAt(pos.index)
+    if (sep === ',') {
+      pos.index++
+      continue
+    }
+    if (sep === ']') {
+      pos.index++
+      return { kind: 'array', items }
+    }
+    throw new Error('Expected comma or closing bracket')
+  }
+}
+
+function parseJsonLosslessString(text: string, pos: { index: number }): JsonLosslessStringNode {
+  const start = pos.index
+  pos.index++
+  let escaped = false
+  while (pos.index < text.length) {
+    const ch = text.charAt(pos.index)
+    pos.index++
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      const raw = text.slice(start, pos.index)
+      return { kind: 'string', raw, decoded: JSON.parse(raw) as string }
+    }
+  }
+  throw new Error('Unterminated string')
+}
+
+function parseJsonLosslessNumber(text: string, pos: { index: number }): JsonLosslessNumberNode {
+  const rest = text.slice(pos.index)
+  const match = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(rest)
+  if (!match) throw new Error('Invalid number')
+  pos.index += match[0].length
+  return { kind: 'number', raw: match[0] }
+}
+
+function parseJsonLosslessLiteral(text: string, pos: { index: number }): JsonLosslessLiteralNode {
+  const rest = text.slice(pos.index)
+  const match = /^(?:true|false|null)/.exec(rest)
+  if (!match) throw new Error('Invalid literal')
+  pos.index += match[0].length
+  return { kind: 'literal', raw: match[0] }
+}
+
+function parseJsonLosslessDocument(trimmed: string): JsonLosslessNode | null {
+  const pos = { index: 0 }
+  const node = parseJsonLosslessNode(trimmed, pos, 0)
+  skipJsonWs(trimmed, pos)
+  if (pos.index !== trimmed.length) return null
+  return node
+}
+
+function printJsonLosslessNode(node: JsonLosslessNode, depth: number, seen = 0): string {
+  if (depth > MAX_JSON_LOSSLESS_STRUCTURE_DEPTH) throw new Error('Max JSON depth exceeded')
+  const pad = '  '.repeat(depth)
+  const childPad = '  '.repeat(depth + 1)
+  if (node.kind === 'object') {
+    if (node.entries.length === 0) return '{}'
+    const parts = node.entries.map((entry) => {
+      const expanded = expandJsonLosslessStrings(entry.value, seen)
+      const childSeen = expanded !== entry.value ? seen + 1 : seen
+      return `${childPad}${entry.keyRaw}: ${printJsonLosslessNode(expanded, depth + 1, childSeen)}`
+    })
+    return `{\n${parts.join(',\n')}\n${pad}}`
+  }
+  if (node.kind === 'array') {
+    if (node.items.length === 0) return '[]'
+    const parts = node.items.map((item) => {
+      const expanded = expandJsonLosslessStrings(item, seen)
+      const childSeen = expanded !== item ? seen + 1 : seen
+      return `${childPad}${printJsonLosslessNode(expanded, depth + 1, childSeen)}`
+    })
+    return `[\n${parts.join(',\n')}\n${pad}]`
+  }
+  if (node.kind === 'string' || node.kind === 'number' || node.kind === 'literal') {
+    return node.raw
+  }
+  return ''
+}
+
+/**
+ * Resolves one string node whose decoded text is itself a JSON object or
+ * array. Non-string nodes pass through untouched; strings that are not JSON
+ * objects/arrays keep their exact raw literal. Callers thread `seen` along
+ * each root-to-leaf path and step it only when a layer is actually
+ * unwrapped, so the cap bounds hostile nesting while the unexpanded tail
+ * stays visible as an escaped string literal.
+ */
+function expandJsonLosslessStrings(node: JsonLosslessNode, seen: number): JsonLosslessNode {
+  if (node.kind !== 'string' || seen >= MAX_NESTED_JSON_STRING_EXPANSIONS) return node
+  const inner = node.decoded.trim()
+  if (!isJsonText(inner)) return node
+  try {
+    JSON.parse(inner)
+  } catch {
+    return node
+  }
+  const parsed = (() => {
+    try {
+      return parseJsonLosslessDocument(inner)
+    } catch {
+      return null
+    }
+  })()
+  if (!parsed || parsed.kind === 'string' || parsed.kind === 'number' || parsed.kind === 'literal') return node
+  return parsed
+}
+
+/**
+ * Pretty-prints valid JSON while recursing into JSON-encoded string values
+ * (an object/array serialized as a string inside another JSON value). Outer
+ * and inner numbers, literals, key order, and array order are copied from
+ * exact source slices — nothing is parsed into JS numbers for display — so
+ * large integers survive; only whitespace/indentation changes and nested
+ * strings render as their decoded structure. Returns null when the text is
+ * not valid JSON; callers fall back to plain text rendering.
+ */
+export function prettyPrintJsonNested(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  try {
+    JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+  try {
+    const node = parseJsonLosslessDocument(trimmed)
+    if (!node) return prettyPrintJson(raw)
+    // A root-encoded JSON string (a string literal whose decoded value is a
+    // JSON object/array) expands one layer so the formatted view is readable
+    // instead of a single escaped line. The expansion consumes one layer of
+    // the string-expansion budget, and the original outer text is untouched:
+    // raw/copy paths keep using the caller's exact input, never this output.
+    if (node.kind === 'string') {
+      const expanded = expandJsonLosslessStrings(node, 0)
+      if (expanded !== node) return printJsonLosslessNode(expanded, 0, 1)
+    }
+    return printJsonLosslessNode(node, 0)
+  } catch {
+    return prettyPrintJson(raw)
+  }
+}
+
+/**
+ * Pretty-prints raw JSON text with a whitespace-only transformation: the
+ * scan copies every string, number, and literal byte-for-byte and only adds
+ * newlines and indentation outside strings. Values are never parsed for
+ * display, so large-number precision, key order, and array order survive
+ * exactly as the harness sent them — `JSON.parse` here is only the validity
+ * gate and its result is discarded.
+ *
+ * Returns null when the text is not valid JSON; callers fall back to plain
+ * text rendering, which still shows everything.
+ */
+export function prettyPrintJson(raw: string): string | null {
+  try {
+    JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  let out = ''
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charAt(i)
+    if (inString) {
+      out += ch
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out += ch
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      let j = i + 1
+      while (j < trimmed.length && /\s/.test(trimmed.charAt(j))) j++
+      const close = ch === '{' ? '}' : ']'
+      if (trimmed.charAt(j) === close) {
+        out += ch + close
+        i = j
+        continue
+      }
+      depth++
+      out += ch + '\n' + '  '.repeat(depth)
+      continue
+    }
+    if (ch === '}' || ch === ']') {
+      depth--
+      if (depth < 0) return null
+      out += '\n' + '  '.repeat(depth) + ch
+      continue
+    }
+    if (ch === ',') {
+      out += ',\n' + '  '.repeat(depth)
+      continue
+    }
+    if (ch === ':') {
+      out += ': '
+      continue
+    }
+    if (/\s/.test(ch)) continue
+    out += ch
+  }
+  if (inString || depth !== 0) return null
+  return out
+}
+
+/**
+ * Pretty-prints newline-delimited JSON (one value per line, as a flattened
+ * conversation history arrives) by formatting each line on its own.
+ * Returns null unless at least two non-blank lines are present and every one
+ * is valid JSON — a single JSON line is the prettyPrintJson case, and mixed
+ * text stays plain text.
+ */
+export function prettyPrintJsonLines(raw: string): string | null {
+  const lines = raw.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  if (lines.length < 2) return null
+  const formatted: string[] = []
+  for (const line of lines) {
+    if (!isJsonText(line)) return null
+    const pretty = prettyPrintJson(line)
+    if (pretty === null) return null
+    formatted.push(pretty)
+  }
+  return formatted.join('\n')
+}
+
+/**
+ * Nested-aware JSON-lines formatter: each line recurses into JSON-encoded
+ * strings via prettyPrintJsonNested. Same shape contract as
+ * prettyPrintJsonLines — null unless at least two non-blank lines are all
+ * valid JSON.
+ */
+export function prettyPrintJsonLinesNested(raw: string): string | null {
+  const lines = raw.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  if (lines.length < 2) return null
+  const formatted: string[] = []
+  for (const line of lines) {
+    if (!isJsonText(line)) return null
+    const pretty = prettyPrintJsonNested(line) ?? prettyPrintJson(line)
+    if (pretty === null) return null
+    formatted.push(pretty)
+  }
+  return formatted.join('\n')
+}
+
+/**
+ * Splits a top-level JSON array into its exact item source slices, in order.
+ * Returns null when the text is not a top-level array, so callers can fall
+ * back to the single pretty block. Slices are trimmed source text — no value
+ * is parsed, so nothing is reordered or re-serialized.
+ */
+export function splitTopLevelArrayItems(raw: string): string[] | null {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null
+  try {
+    JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+  const items: string[] = []
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let itemStart = -1
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charAt(i)
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      if (depth === 1 && itemStart === -1) itemStart = i
+      inString = true
+      continue
+    }
+    if (ch === '[' || ch === '{') {
+      if (depth === 1 && itemStart === -1) itemStart = i
+      depth++
+      continue
+    }
+    if (ch === ']' || ch === '}') {
+      depth--
+      if (depth < 0) return null
+      if (depth === 0 && itemStart !== -1) {
+        const slice = trimmed.slice(itemStart, i).trim()
+        if (slice !== '') items.push(slice)
+        itemStart = -1
+      }
+      continue
+    }
+    if (depth === 1) {
+      if (ch === ',') {
+        if (itemStart === -1) return null
+        const slice = trimmed.slice(itemStart, i).trim()
+        if (slice === '') return null
+        items.push(slice)
+        itemStart = -1
+        continue
+      }
+      if (itemStart === -1 && !/\s/.test(ch)) itemStart = i
+    }
+  }
+  if (inString || depth !== 0 || itemStart !== -1) return null
+  return items
+}
+
+/**
+ * Typed text blocks (`[{"type":"text","content":"..."}]`, as captured system
+ * prompts arrive) read better as a heading per block over the full text than
+ * as bracketed JSON. Returns null for any other shape.
+ */
+function parseTypedTextBlocks(text: string): Array<{ type: string; body: string }> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null
+  const blocks: Array<{ type: string; body: string }> = []
+  for (const item of parsed) {
+    if (!isRecord(item) || typeof item.type !== 'string') return null
+    const body = typeof item.content === 'string' ? item.content : typeof item.text === 'string' ? item.text : null
+    if (body === null) return null
+    blocks.push({ type: item.type, body })
+  }
+  return blocks
+}
+
+function hasUnsafeNumber(value: unknown, depth = 0): boolean {
+  if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value)
+  // Past the render depth cap nothing is structured-rendered, so stop walking.
+  if (depth > MAX_STRUCTURED_DEPTH) return false
+  if (Array.isArray(value)) return value.some((v) => hasUnsafeNumber(v, depth + 1))
+  if (isRecord(value)) return Object.values(value).some((v) => hasUnsafeNumber(v, depth + 1))
+  return false
+}
+
+/**
+ * Field-by-field readable rendering of parsed JSON: each key becomes a label
+ * over its value, strings sit in wrapped text boxes (no quotes or escapes), and
+ * nested objects/arrays indent beneath their label. Display only — Raw and
+ * Copy keep the exact source text.
+ */
+const MAX_STRUCTURED_DEPTH = 8
+
+function StructuredValue({ value, label, depth = 0 }: { value: unknown; label?: string; depth?: number }) {
+  const heading = label ? (
+    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{humanizeContentKey(label)}</h4>
+  ) : null
+  if (typeof value === 'string') {
+    return (
+      <div className="space-y-1">
+        {heading}
+        <pre className="text-xs font-mono p-2 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[60vh]">
+          {value === '' ? '(empty string)' : value}
+        </pre>
+      </div>
+    )
+  }
+  if (depth >= MAX_STRUCTURED_DEPTH && (Array.isArray(value) || isRecord(value))) {
+    // Bound recursion and DOM size on deeply nested payloads.
+    return (
+      <div className="space-y-1">
+        {heading}
+        <pre className="text-xs font-mono p-2 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[60vh]">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+  if (Array.isArray(value) || isRecord(value)) {
+    const entries: Array<[string, unknown]> = Array.isArray(value)
+      ? value.map((v, i) => [String(i + 1), v])
+      : Object.entries(value)
+    return (
+      <div className="space-y-2">
+        {heading}
+        {entries.length === 0 ? (
+          <p className="text-xs font-mono text-tertiary-foreground">{Array.isArray(value) ? '(empty list)' : '(empty object)'}</p>
+        ) : (
+          <div className={cn('space-y-2', depth > 0 && 'pl-3 border-l border-border')}>
+            {entries.map(([k, v]) => (
+              <StructuredValue key={k} value={v} label={k} depth={depth + 1} />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      {heading}
+      <p className="text-xs font-mono text-foreground">{String(value)}</p>
+    </div>
+  )
+}
+
+/**
+ * Readable view for a string whose content is JSON (a tool-definitions blob,
+ * a JSON-encoded system prompt, JSON-lines history). The formatted view only
+ * re-indents the exact source text, so every literal — including integers
+ * outside JavaScript's safe range — renders byte-for-byte; the raw view shows
+ * the untouched original and the copy button copies it exactly. Nothing is
+ * parsed into values for display, summarized, or truncated: long blocks
+ * scroll instead of clipping.
+ */
+export function JsonStringView({
+  text,
+  label,
+  defaultView = 'formatted',
+  controls = 'full',
+}: {
+  text: string
+  label?: string
+  defaultView?: 'formatted' | 'raw'
+  /**
+   * `minimal` hides this view's own Formatted/Raw switch and Copy button
+   * for embeddings that already provide one outer toggle and exact Copy
+   * (whole-turn blocks). The formatted content and descriptor stay.
+   */
+  controls?: 'full' | 'minimal'
+}) {
+  const [viewMode, setViewMode] = useState<ContentViewMode>(defaultView)
+
+  // Everything derived from `text` is memoized: the parsers below are
+  // O(payload) and payloads can be megabytes, so toggling Raw/Formatted or
+  // clicking Copy must not re-run them. Recurse into JSON-encoded string
+  // values so nested Copilot context stays readable; the nested printer
+  // copies every literal byte-for-byte. Raw and copy use the exact `text`.
+  const derived = useMemo(() => {
+    const singleNested = prettyPrintJsonNested(text)
+    const single = singleNested ?? prettyPrintJson(text)
+    const lines = single === null ? prettyPrintJsonLinesNested(text) ?? prettyPrintJsonLines(text) : null
+    if (single === null && lines === null) return null
+
+    const typedBlocks = parseTypedTextBlocks(text)
+    const split = single !== null ? splitTopLevelArrayItems(text) : null
+    const multiItems = split !== null && split.length > 1 ? split : null
+    // One JSON.parse per item. Numbers outside the safe range would be rounded
+    // by JSON.parse; those items stay on the byte-exact pretty-printed text.
+    const structuredItems = multiItems !== null
+      ? multiItems.map((item) => {
+          try {
+            const v: unknown = JSON.parse(item)
+            return isRecord(v) && !hasUnsafeNumber(v) ? v : undefined
+          } catch {
+            return undefined
+          }
+        })
+      : null
+    // Pretty text is only needed for items without a structured view, but
+    // every item must still be printable for the multi-item view to apply.
+    const multiPretty = multiItems !== null && structuredItems !== null
+      ? multiItems.map((item, idx) =>
+          structuredItems[idx] !== undefined ? '' : prettyPrintJsonNested(item) ?? prettyPrintJson(item),
+        )
+      : null
+    const showItems = multiPretty !== null && multiPretty.every((part): part is string => part !== null)
+    return { single, lines, typedBlocks, multiItems, multiPretty, showItems, structuredItems: showItems ? structuredItems : null }
+  }, [text])
+
+  if (derived === null) {
+    // Shaped like JSON but not valid JSON — show the text as-is so nothing
+    // is dropped; the structured view simply has nothing to add.
+    return <XmlFoldedText text={text} />
+  }
+  const { single, lines, typedBlocks, multiItems, multiPretty, showItems, structuredItems } = derived
+
+  const nonBlankLines = text.split('\n').filter((line) => line.trim() !== '').length
+  const descriptor = typedBlocks !== null
+    ? `${typedBlocks.length} text ${typedBlocks.length === 1 ? 'block' : 'blocks'}`
+    : multiItems !== null
+    ? `Array · ${multiItems.length} items`
+    : lines !== null
+      ? `JSON lines · ${nonBlankLines} lines`
+      : text.trim().startsWith('{') ? 'Object' : 'Value'
+
+  const leading = (
+    <>
+      {label ? (
+        <span className="text-xs font-semibold text-foreground">{label}</span>
+      ) : null}
+      <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+        {descriptor}
+      </span>
+    </>
+  )
+
+  const formatted = typedBlocks !== null ? (
+          <div className="space-y-3" data-testid="json-text-blocks">
+            {typedBlocks.map((block, idx) => (
+              <div key={idx} className="space-y-1">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{block.type}</h4>
+                <pre
+                  className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[70vh]"
+                  data-testid={`json-text-block-${idx}`}
+                >
+                  {block.body}
+                </pre>
+              </div>
+            ))}
+          </div>
+        ) : showItems && multiItems !== null && multiPretty !== null ? (
+          <div className="space-y-2">
+            {multiPretty.map((pretty, idx) => (
+              <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden">
+                <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                  Item {idx + 1} of {multiItems.length}
+                </div>
+                {structuredItems?.[idx] !== undefined ? (
+                  <div className="p-2.5" data-testid={`json-item-${idx}`}>
+                    <StructuredValue value={structuredItems[idx]} />
+                  </div>
+                ) : (
+                  <pre
+                    className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words text-foreground max-h-[400px]"
+                    data-testid={`json-item-${idx}`}
+                  >
+                    {pretty}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <pre
+            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+            data-testid="json-formatted"
+          >
+            {single ?? lines ?? text}
+          </pre>
+        )
+
+  const raw = (
+    <pre
+      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+      data-testid="json-raw"
+    >
+      {text}
+    </pre>
+  )
+
+  return (
+    <div className="space-y-2" data-testid="json-string-view">
+      <SearchableContentView
+        view={viewMode}
+        onViewChange={setViewMode}
+        text={text}
+        label={label}
+        viewPrefix="json-string-view"
+        leading={leading}
+        controls={controls}
+        copy={{ text, testId: 'json-string-view-copy' }}
+        formatted={formatted}
+        raw={raw}
+      />
+    </div>
+  )
+}
+
+/**
+ * Readable rendering for a content string of unknown shape: JSON text (or a
+ * root-encoded JSON string) gets the structured view (with its exact-raw
+ * toggle), everything else keeps the XML-folding text view. Either way the
+ * complete text stays visible. An empty string is an explicit value, not
+ * absent data, so it renders a visible marker instead of nothing.
+ */
+export function ReadableContentText({ text, label, suppressJsonControls }: { text: string; label?: string; suppressJsonControls?: boolean }) {
+  if (text === '') {
+    return (
+      <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+        &quot;&quot; (empty string)
+      </p>
+    )
+  }
+  if (!text) return null
+  if (isJsonText(text) || isRootEncodedJsonText(text)) {
+    return <JsonStringView text={text} label={label} controls={suppressJsonControls === true ? 'minimal' : 'full'} />
+  }
+  return <XmlFoldedText text={text} />
+}
+
+/**
+ * Lossless plain-text view scoped to turn-content sections. Unlike the
+ * generic `XmlFoldedText`, nothing is trimmed, folded into a preview, or
+ * dropped: the exact string renders as literal text (React escapes XML
+ * markup) with whitespace preserved, inside a scrollable container so long
+ * content stays reachable without expanding anything.
+ */
+export function TurnLosslessText({ text }: { text: string }) {
+  return (
+    <pre
+      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+      data-testid="turn-lossless-text"
+    >
+      {text}
+    </pre>
+  )
+}
+
+/**
+ * Lossless recursive value renderer scoped to turn-content sections
+ * (including nested objects, arrays, and tool-definition cards). The
+ * generic `KeyValueList` collapses long strings behind a preview `<details>`
+ * and routes XML-bearing text through the trimming `XmlFoldedText`; this
+ * renderer instead shows every string in full and in order:
+ *
+ * - strings render byte-for-byte in a scrollable `<pre>` (whitespace and
+ *   XML markup preserved as literal content, no trimming, no preview);
+ * - JSON-shaped strings that parse keep the readable `JsonStringView`
+ *   (formatted view is a whitespace-only re-indent so large integer
+ *   literals, key order, and array order survive; raw/copy stay exact),
+ *   while JSON-shaped-but-invalid text falls back to the lossless `<pre>`
+ *   instead of the folding view so nothing is trimmed;
+ * - object key order (`Object.entries` insertion order) and array order
+ *   are never reordered;
+ * - null, undefined, empty string, empty object/list, false, and zero each
+ *   keep a visibly distinct rendering.
+ */
+export function TurnLosslessValue({ value, label }: { value: unknown; label?: string }) {
+  if (value === null) {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+        null
+      </span>
+    )
+  }
+  if (value === undefined) {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="explicit-undefined-value">
+        undefined
+      </span>
+    )
+  }
+  if (typeof value === 'string') {
+    if (value === '') {
+      return (
+        <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+          &quot;&quot; (empty string)
+        </p>
+      )
+    }
+    if (isJsonText(value) || isRootEncodedJsonText(value)) {
+      const single = prettyPrintJson(value)
+      const lines = single === null ? prettyPrintJsonLines(value) : null
+      if (single !== null || lines !== null) {
+        return <JsonStringView text={value} label={label} />
+      }
+      // Shaped like JSON but invalid: stay lossless instead of routing
+      // through the folding view, which would trim.
+    }
+    return <TurnLosslessText text={value} />
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="turn-lossless-scalar">
+        {String(value)}
+      </span>
+    )
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <p className="text-xs text-tertiary-foreground italic">empty list</p>
+    }
+    return (
+      <div className="space-y-2" data-testid="turn-lossless-array">
+        {value.map((item, idx) => (
+          <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden" data-testid={`turn-lossless-array-item-${idx}`}>
+            <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+              Item {idx + 1} of {value.length}
+            </div>
+            <div className="p-2.5">
+              <TurnLosslessValue value={item} />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (isRecord(value)) {
+    const entries = Object.entries(value)
+    if (entries.length === 0) {
+      return <p className="text-xs text-tertiary-foreground italic">empty object</p>
+    }
+    return (
+      <div className="divide-y divide-border/60 text-xs font-mono" data-testid="turn-lossless-object">
+        {entries.map(([key, val]) => (
+          <div key={key} className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3 py-1.5" data-testid={`turn-lossless-field-${key}`}>
+            <span className="shrink-0 font-medium text-muted-foreground w-28 sm:w-36 break-all">
+              {key}:
+            </span>
+            <div className="min-w-0 flex-1 text-foreground">
+              <TurnLosslessValue value={val} />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <span className="text-xs font-mono text-foreground" data-testid="turn-lossless-scalar">
+      {String(value)}
+    </span>
+  )
+}
+
+/**
+ * One labeled card per tool definition, in the order given. Names are read
+ * from the already-parsed objects (plain strings, safe to read); every
+ * field renders through the lossless turn-content value view so long
+ * descriptions, parameters, and nested strings survive in full with no
+ * preview collapse or whitespace trimming.
+ */
+function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
+  if (definitions.length === 0) {
+    return <p className="text-xs text-tertiary-foreground italic">empty list</p>
+  }
+  return (
+    <div className="space-y-2">
+      {definitions.map((def, idx) => {
+        const record = isRecord(def) ? def : null
+        let name = `Tool ${idx + 1}`
+        if (record) {
+          if (typeof record.name === 'string' && record.name !== '') {
+            name = record.name
+          } else if (isRecord(record.function) && typeof record.function.name === 'string' && record.function.name !== '') {
+            name = record.function.name
+          }
+        }
+        // An MCP catalogue entry offered but not resident is labeled as such in
+        // the header. Its `resident` flag is said by that label, so the field is
+        // not repeated in the body, where it would read as the opposite claim.
+        const offeredOnly = record !== null && record.resident === false
+        const shown = record !== null && offeredOnly ? withoutResidentFlag(record) : def
+        return (
+          <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden" data-testid={`tool-definition-${idx}`}>
+            <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 flex items-center gap-2 min-w-0">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                Tool {idx + 1} of {definitions.length}
+              </span>
+              <span className="font-mono text-xs font-semibold text-foreground break-words whitespace-pre-wrap min-w-0 flex-1">{name}</span>
+              {offeredOnly && (
+                <span
+                  className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                  data-testid="tool-definition-offered-label"
+                >
+                  offered (MCP catalogue)
+                </span>
+              )}
+            </div>
+            <div className="p-2.5">
+              <TurnLosslessValue value={shown} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function withoutResidentFlag(record: Record<string, unknown>): Record<string, unknown> {
+  const { resident: _resident, ...rest } = record
+  return rest
+}
+
+/**
+ * The arguments and result an invocation carried, shown beside the raw row.
+ * Each block is omitted when its preview is absent; the raw row keeps every
+ * field, so this view never stands in for the exact payload.
+ */
+function ToolInvocationPreview({ tool }: { tool: ToolRow }) {
+  const args = typeof tool.arguments_preview === 'string' ? tool.arguments_preview : null
+  const result = typeof tool.result_preview === 'string' ? tool.result_preview : null
+  if (args === null && result === null) return null
+  return (
+    <div className="space-y-3">
+      {args !== null && (
+        <section className="space-y-1.5" data-testid="tool-arguments-preview">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Arguments</h4>
+          <TurnLosslessText text={args} />
+        </section>
+      )}
+      {result !== null && (
+        <section className="space-y-1.5" data-testid="tool-result-preview">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Result</h4>
+          <TurnLosslessText text={result} />
+        </section>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Labeled sections for a turn's content object. Copilot-shaped rows carry the
+ * flat canonical buckets here — system prompt, instruction context, tool
+ * definitions, conversation history, tool results — which the message blocks
+ * above do not read, so without this they stay invisible (or surface
+ * elsewhere as one raw JSON wall). Every own bucket renders losslessly in
+ * full: JSON strings get the structured view (formatted re-indent plus an
+ * exact raw/copy path), every other string renders byte-for-byte in a
+ * scrollable block with whitespace and XML markup preserved as literal
+ * content, and nested objects/arrays render through the lossless value view
+ * in key/array order with no preview collapse. Only absent keys render nothing —
+ * an own key with null, an empty string, or undefined renders an explicit
+ * marker so missing data is never confused with an explicit empty value —
+ * and array order is never touched.
+ */
+export function TurnContentSections({ content }: { content: unknown }) {
+  // The serialized API cannot distinguish an own undefined from a missing
+  // key without a separate presence bit, so undefined counts as absent at
+  // this component boundary. Every other explicit top-level value renders
+  // visibly so missing data is never confused with an explicit value.
+  if (content === undefined) return null
+  if (content === null) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+              null
+            </span>
+          </div>
+        </section>
+      </div>
+    )
+  }
+  if (typeof content === 'string') {
+    if (content === '') {
+      return (
+        <div className="space-y-2" data-testid="turn-content-sections">
+          <section data-testid="turn-content-section-content">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Turn content
+            </h4>
+            <div className="rounded border border-border bg-card p-3 overflow-hidden">
+              <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+                &quot;&quot; (empty string)
+              </p>
+            </div>
+          </section>
+        </div>
+      )
+    }
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <TurnLosslessValue value={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
+  // Booleans, numbers, and arrays render through the lossless value view so the
+  // full value survives: scalars via their string form, arrays in order,
+  // and an empty array as the distinct "empty list" marker.
+  if (typeof content === 'boolean' || typeof content === 'number' || Array.isArray(content)) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <TurnLosslessValue value={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
+  if (!isRecord(content)) return null
+  // An explicitly empty object is a value, not absent data.
+  if (Object.keys(content).length === 0) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <TurnLosslessValue value={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
+  // Every own key counts as present: null, '', false, 0, and undefined
+  // are explicit values with visible markers below. Only a key that is not
+  // present at all is absent.
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(content, key)
+  const ordered = [
+    ...TURN_CONTENT_SECTION_ORDER.filter(hasOwn),
+    ...Object.keys(content).filter((key) => !KNOWN_CONTENT_KEYS.has(key) && !MESSAGE_CONTENT_KEYS.has(key)),
+  ]
+  if (ordered.length === 0) return null
+  return (
+    <div className="space-y-3" data-testid="turn-content-sections">
+      {ordered.map((key) => {
+        const value = content[key]
+        const label = TURN_CONTENT_SECTION_LABELS[key] ?? humanizeContentKey(key)
+        return (
+          <section key={key} data-testid={`turn-content-section-${key}`}>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              {label}
+            </h4>
+            <div className="rounded border border-border bg-card p-3 overflow-hidden">
+              {typeof value === 'string' ? (
+                value === '' ? (
+                  <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+                    &quot;&quot; (empty string)
+                  </p>
+                ) : (
+                  <TurnLosslessValue value={value} label={label} />
+                )
+              ) : value === null ? (
+                <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+                  null
+                </span>
+              ) : value === undefined ? (
+                <span className="text-xs font-mono text-foreground" data-testid="explicit-undefined-value">
+                  undefined
+                </span>
+              ) : key === 'tool_definitions' && Array.isArray(value) ? (
+                <ToolDefinitionCards definitions={value} />
+              ) : (
+                <TurnLosslessValue value={value} />
+              )}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
  * Tool call component: displays wrench icon, tool name, and parameters.
  */
 export function ToolCallView({ call, className }: { call: KyberMessageLike | null; className?: string }) {
@@ -270,7 +1705,7 @@ export function ToolResultView({ result, className }: { result: KyberMessageLike
         {isJson ? (
           <KeyValueList data={parsed} />
         ) : typeof src === 'string' ? (
-          XML_FOLD_TAGS.some(t => src.includes(`<${t}`)) ? (
+          containsReadableXmlTag(src) ? (
             <XmlFoldedText text={src} />
           ) : (
             <pre className="text-xs font-mono p-2 overflow-x-auto whitespace-pre-wrap border border-border rounded bg-muted/40 text-foreground">
@@ -572,6 +2007,12 @@ function TurnInspector({
         </div>
       ) : null}
 
+      {/* Canonical content buckets. Copilot-shaped rows carry system_prompt,
+          tool_definitions, conversation_history, and friends here rather than
+          in input/output messages, which the blocks above would otherwise
+          drop without a trace. */}
+      <TurnContentSections content={turn.content} />
+
       {/* Output Messages */}
       {Array.isArray(outMsgs) && outMsgs.length > 0 && (
         <div>
@@ -834,19 +2275,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function InspectorContent({
   data,
+  suppressJsonControls,
 }: {
   data: unknown
+  /**
+   * Hides nested JSON views' own toggle/copy controls for embeddings that
+   * already provide one outer toggle and exact Copy (whole-turn blocks).
+   */
+  suppressJsonControls?: boolean
 }) {
-  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
-  const [copied, setCopied] = useState(false)
+  const [viewMode, setViewMode] = useState<ContentViewMode>('formatted')
 
   if (data === null || data === undefined) {
     return <div className="text-xs text-tertiary-foreground italic py-4 text-center">No data to display.</div>
   }
 
-  // String handling
+  // String handling: Copilot-shaped rows carry whole buckets (system prompt,
+  // tool definitions, conversation history) as single strings, and JSON
+  // blobs render as an undifferentiated wall through plain text. Route them
+  // through the structured view; the exact original stays one toggle away.
   if (typeof data === 'string') {
-    return <XmlFoldedText text={data} />
+    return <ReadableContentText text={data} suppressJsonControls={suppressJsonControls} />
   }
 
   const record = isRecord(data) ? data : null
@@ -892,60 +2341,38 @@ export function InspectorContent({
     )
   }
 
-  // Handle generic object or array with formatted & raw tabs
-  const copyJson = () => {
-    try {
-      void navigator.clipboard.writeText(JSON.stringify(data, null, 2))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // ignore
-    }
+  // Handle generic object or array with formatted & raw views. The raw text is
+  // the pretty-printed JSON, which is also what Copy writes.
+  const json = safeJsonStringify(data)
+  if (json === null) {
+    return (
+      <p className="text-xs italic text-tertiary-foreground" data-testid="inspector-content-unserializable">
+        {UNSERIALIZABLE_NOTE}
+      </p>
+    )
   }
 
   return (
     <div className="space-y-3" data-testid="inspector-content">
-      <div className="flex items-center justify-between border-b border-border pb-2">
-        <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setViewMode('formatted')}
-            className={cn(
-              'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-              viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Formatted
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('raw')}
-            className={cn(
-              'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-              viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Raw JSON
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={copyJson}
-          className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
-        >
-          {copied ? 'Copied!' : 'Copy JSON'}
-        </button>
-      </div>
-
-      {viewMode === 'formatted' ? (
-        <div className="rounded border border-border bg-card p-3 overflow-hidden">
-          <KeyValueList data={data} />
-        </div>
-      ) : (
-        <pre className="text-xs font-mono p-3 overflow-auto rounded border border-border bg-muted/40 text-foreground max-h-[500px]">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
+      <SearchableContentView
+        view={viewMode}
+        onViewChange={setViewMode}
+        text={json}
+        label="JSON"
+        viewPrefix="inspector-content"
+        controls={suppressJsonControls === true ? 'minimal' : 'full'}
+        copy={{ text: json, testId: 'inspector-content-copy' }}
+        formatted={
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <KeyValueList data={data} />
+          </div>
+        }
+        raw={
+          <pre className="text-xs font-mono p-3 overflow-auto rounded border border-border bg-muted/40 text-foreground max-h-[500px]">
+            {json}
+          </pre>
+        }
+      />
     </div>
   )
 }
@@ -954,6 +2381,706 @@ export interface SessionContentRequest {
   sessionId: string
   span?: string
   part?: string
+  /** Narrow a `tool_definitions` blob to the one tool with this name. */
+  toolName?: string
+}
+
+/**
+ * Keep only the definition named `toolName` from a tool-definitions blob.
+ * Returns the original text when the blob is not a JSON array or nothing
+ * matches, so the panel never hides content it cannot attribute.
+ */
+export function narrowToolDefinitions(text: string, toolName: string | undefined): string {
+  if (!toolName) return text
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) return text
+    const matches = parsed.filter((d) => {
+      const def = d as { name?: unknown; function?: { name?: unknown } } | null
+      return def?.name === toolName || def?.function?.name === toolName
+    })
+    return matches.length > 0 ? JSON.stringify(matches.length === 1 ? matches[0] : matches, null, 2) : text
+  } catch {
+    return text
+  }
+}
+
+function NarrowedInspectorContent({
+  text,
+  toolName,
+  suppressJsonControls,
+}: {
+  text: string
+  toolName: string | undefined
+  /** Set when an outer toolbar already provides the Formatted/Raw switch, search and Copy. */
+  suppressJsonControls?: boolean
+}) {
+  const narrowed = React.useMemo(() => narrowToolDefinitions(text, toolName), [text, toolName])
+  return <InspectorContent data={narrowed} suppressJsonControls={suppressJsonControls} />
+}
+
+/**
+ * Whole-turn lossless request: the exact zero-based transport turn index the
+ * turn-content route resolves (issue #184), always via the explicit `full`
+ * path so the complete source text returns intact.
+ */
+export interface TurnFullContentRequest {
+  sessionId: string
+  turnIndex: number
+  full?: boolean
+}
+
+export type DrawerContentRequest = SessionContentRequest | TurnFullContentRequest
+
+/**
+ * Narrowing helper: a whole-turn request carries a numeric `turnIndex`; a
+ * span/bucket request never does.
+ */
+export function isTurnFullContentRequest(request: unknown): request is TurnFullContentRequest {
+  if (request === null || typeof request !== 'object') return false
+  return typeof (request as { turnIndex?: unknown }).turnIndex === 'number'
+}
+
+/**
+ * Measured per-turn aggregate token figures, read off the served turn row.
+ * Every field is a harness-measured counter; absent fields render honestly
+ * as not recorded — never estimated from text.
+ */
+export interface TurnFullContentTurn {
+  fresh?: number | null
+  fresh_input?: number | null
+  cache_read?: number | null
+  cache_creation?: number | null
+  tokens?: {
+    fresh?: number | null
+    fresh_input?: number | null
+    cache_read?: number | null
+    cache_creation?: number | null
+  } | null
+  model?: string | null
+}
+
+function readMeasuredFigure(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * Stable identity for matching a top-level part against block members.
+ * Block parts and top-level parts are separate objects after the JSON
+ * round-trip, so the server-assigned `id` matches them; the (kind, text) pair is
+ * the fallback. Callers count matches so repeated identical parts pair off
+ * instead of collapsing.
+ */
+export function turnPartKey(part: Pick<KyberTurnContentPart, 'id' | 'part' | 'text'>): string {
+  // `||`, not `??`: an empty-string id is no identity. JSON keeps (kind, text) pairs from
+  // colliding the way plain concatenation does ('ab'+'c' vs 'a'+'bc').
+  return part.id || JSON.stringify([part.part, part.text])
+}
+
+/**
+ * Top-level parts covered by no block (unknown part kinds the canonical
+ * block set does not name), in server order. Rendered explicitly so no
+ * returned part is silently dropped from the whole-turn view.
+ */
+export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentPart[] {
+  const remaining = new Map<string, number>()
+  for (const block of data.blocks) {
+    for (const p of block.parts) {
+      const key = turnPartKey(p)
+      remaining.set(key, (remaining.get(key) ?? 0) + 1)
+    }
+  }
+  const orphans: KyberTurnContentPart[] = []
+  for (const p of data.parts) {
+    const key = turnPartKey(p)
+    const count = remaining.get(key) ?? 0
+    if (count > 0) {
+      remaining.set(key, count - 1)
+    } else {
+      orphans.push(p)
+    }
+  }
+  return orphans
+}
+
+/**
+ * Shared session context entries to display for a turn, preserving every
+ * captured occurrence in server order.
+ *
+ * The server builds `sharedContext` as non-turn session `system_prompt`
+ * parts plus every turn-derived occurrence at or before the selected turn,
+ * each carrying its contributing `turnIndex`. The turn's own occurrences
+ * already render in their blocks, so showing them again under shared context
+ * would display and copy the exact same captured occurrence twice. Every
+ * other entry stays — an earlier-turn occurrence is a distinct API-seen
+ * occurrence even when it shares text and span id with the selected turn.
+ *
+ * Overlap is identified by source turn index with multiplicity, never by
+ * span id or text globally: a shared entry is skipped only when its
+ * `turnIndex` equals the selected turn's `turnIndex` and its exact text
+ * still has an unmatched own `system_prompt` occurrence. Counts pair off
+ * per occurrence, so repeated identical parts do not collapse. Entries
+ * without a `turnIndex` (session-scope parts) are never suppressed — absent
+ * is not a turn and must never be guessed as one. Empty-text entries carry
+ * no bytes and stay skipped.
+ */
+const VOLATILE_HEADER_PREFIX = 'x-anthropic-billing-header:'
+// Anchored test, so a large prompt is never copied just to look at its first line.
+const VOLATILE_HEADER_PATTERN = new RegExp(`^\\s*${VOLATILE_HEADER_PREFIX}`, 'i')
+
+export function resolveSharedDisplay(
+  data: KyberTurnContentResult,
+): { parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts']; seenBefore: boolean } | null {
+  const shared = data.sharedContext
+  if (!shared) return null
+  // Own occurrences are the turn's `system_prompt` parts only: shared
+  // context carries that kind alone, so matching any other kind's text
+  // would suppress a distinct occurrence. `data.parts` is authoritative
+  // (blocks are built from the same part objects server-side); when it is
+  // empty, fall back to the blocks' member parts so an unexpected shape
+  // still pairs off instead of double-displaying.
+  const ownSources: KyberTurnContentPart[] =
+    data.parts.length > 0 ? data.parts : data.blocks.flatMap((b) => b.parts)
+  const ownCounts = new Map<string, number>()
+  for (const p of ownSources) {
+    if (p.part === 'system_prompt' && p.text !== '') {
+      ownCounts.set(p.text, (ownCounts.get(p.text) ?? 0) + 1)
+    }
+  }
+  const parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts'] = []
+  // The billing header is a per-request line whose only change between turns is
+  // its request-id chain. Every turn's copy is folded into the latest one so a
+  // long session shows it once, labelled with the turns it covers, instead of
+  // once per turn. Real prompt text is never folded.
+  let billingIdx = -1
+  for (const sp of shared.parts) {
+    if (sp.text === '') continue
+    if (VOLATILE_HEADER_PATTERN.test(sp.text)) {
+      if (billingIdx === -1) {
+        billingIdx = parts.length
+        parts.push({ ...sp, collapsedTurns: sp.turnIndex !== undefined ? [sp.turnIndex] : [] })
+      } else {
+        const prev = parts[billingIdx]
+        parts[billingIdx] = {
+          ...sp,
+          collapsedTurns: [
+            ...new Set([...(prev.collapsedTurns ?? []), ...(sp.turnIndex !== undefined ? [sp.turnIndex] : [])]),
+          ].sort((a, b) => a - b),
+        }
+      }
+      continue
+    }
+    const isOwnOccurrence = sp.turnIndex !== undefined && sp.turnIndex === data.turnIndex
+    if (isOwnOccurrence) {
+      const remaining = ownCounts.get(sp.text) ?? 0
+      if (remaining > 0) {
+        ownCounts.set(sp.text, remaining - 1)
+        continue
+      }
+    }
+    // collapsedTurns is display state this function owns; never trust it off the wire.
+    const { collapsedTurns: _wire, ...plain } = sp
+    parts.push(plain)
+  }
+  if (parts.length === 0) return null
+  return { parts, seenBefore: shared.seenBefore }
+}
+
+/**
+ * Exact text for the whole-turn copy action: the shared session context
+ * (when shown), every block rebuilt from its member parts, then every
+ * additional part under its own header. Sections join with blank lines;
+ * within a section member texts join the same way — but no part text is
+ * ever trimmed, so leading/trailing and whitespace-only source bytes
+ * survive byte-exact (unlike `assembledText`, which trims and drops
+ * whitespace-only sections for display). Part texts are concatenated
+ * verbatim — never re-encoded — so the copy carries every returned byte
+ * exactly once. Shared context stays separately copyable per part; it is
+ * included here, clearly labeled, so a button called "Copy Turn" never
+ * silently omits it.
+ */
+export function buildWholeTurnCopyText(
+  data: KyberTurnContentResult,
+  sharedTexts: string[],
+): string {
+  const sections: string[] = []
+  const shared = sharedTexts.filter((t) => t !== '')
+  if (shared.length > 0) {
+    sections.push(`=== SHARED SESSION CONTEXT ===\n${shared.join('\n\n')}`)
+  }
+  for (const block of data.blocks) {
+    // A block with neither member parts nor text carries no bytes; anything
+    // else renders — including whitespace-only member text.
+    if (block.parts.length === 0 && block.text === '') continue
+    const body = block.parts.length > 0 ? block.parts.map((p) => p.text).join('\n\n') : block.text
+    sections.push(`=== ${block.label.toUpperCase()} ===\n${body}`)
+  }
+  const orphans = orphanTurnParts(data)
+  if (orphans.length > 0) {
+    sections.push(orphans.map((p) => `=== ${p.label.toUpperCase()} ===\n${p.text}`).join('\n\n'))
+  }
+  return sections.join('\n\n')
+}
+
+export type TurnContentViewMode = ContentViewMode
+
+/**
+ * Formatted-by-default content with exact raw one toggle away. Only one
+ * rendering prints at a time so large content is not duplicated in the DOM
+ * by default; the formatted view never trims (readable structure only) and
+ * the raw view is the exact source bytes with its own copy button. The
+ * toolbar and search come from the shared `SearchableContentView`.
+ */
+export function ToggleRawView({
+  text,
+  label,
+  rawTestId,
+  copyTestId,
+  viewPrefix,
+  defaultView = 'formatted',
+}: {
+  text: string
+  label?: string
+  rawTestId: string
+  copyTestId: string
+  viewPrefix: string
+  defaultView?: TurnContentViewMode
+}) {
+  const [view, setView] = useState<TurnContentViewMode>(defaultView)
+  return (
+    <SearchableContentView
+      view={view}
+      onViewChange={setView}
+      text={text}
+      label={label}
+      viewPrefix={viewPrefix}
+      copy={{ text, testId: copyTestId }}
+      formatted={<InspectorContent data={text} suppressJsonControls />}
+      raw={
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid={rawTestId}
+        >
+          {text}
+        </pre>
+      }
+    />
+  )
+}
+
+/**
+ * The one claim an MCP catalogue offer may carry. It says the session offered
+ * the definition without keeping it resident, so it must never read "resident".
+ */
+const OFFERED_MCP_CATALOGUE_LABEL = 'offered (MCP catalogue)'
+
+/** True for a `tool_definitions` part the session offered without keeping resident. */
+function isOfferedMcpDefinition(part: { part: string; resident?: boolean }): boolean {
+  return part.part === 'tool_definitions' && part.resident === false
+}
+
+/**
+ * One canonical turn-content block: measured tokens (or an honest absent
+ * marker — zero renders as an explicit zero), measurability and truncation
+ * notices, then the formatted/raw toggle. No per-block cache attribution.
+ */
+export function TurnContentBlockView({
+  block,
+  defaultView = 'formatted',
+}: {
+  block: KyberTurnContentBlock
+  defaultView?: TurnContentViewMode
+}) {
+  const prefix = `turn-block-${block.key}`
+  return (
+    <section data-testid={prefix}>
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+        {block.label}
+      </h4>
+      {/* Independent recurrence labels: either, neither, or both. Capture
+          only — never converted into a cache claim (see the cache note). */}
+      {block.recurrence?.newThisTurn || block.recurrence?.seenBefore ? (
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+          {block.recurrence?.newThisTurn ? (
+            <span
+              className="shrink-0 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+              data-testid={`${prefix}-recurrence-new`}
+            >
+              New this turn
+            </span>
+          ) : null}
+          {block.recurrence?.seenBefore ? (
+            <span
+              className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-600 dark:text-sky-400"
+              data-testid={`${prefix}-recurrence-seen`}
+            >
+              Also present in prior captured context
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {/* A block's text is one joined string, so the offered mark is per block:
+          it says some member is an MCP catalogue offer, not which definition. */}
+      {block.parts.some(isOfferedMcpDefinition) ? (
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+          <span
+            className="shrink-0 rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground"
+            data-testid={`${prefix}-tool-definition-offered-label`}
+          >
+            {OFFERED_MCP_CATALOGUE_LABEL}
+          </span>
+        </div>
+      ) : null}
+      <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
+        {typeof block.tokens === 'number' ? (
+          <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`${prefix}-tokens`}>
+            {fmtTokens(block.tokens)} tokens
+          </p>
+        ) : (
+          <p className="text-[11px] font-mono text-tertiary-foreground italic" data-testid={`${prefix}-tokens-absent`}>
+            token count not recorded
+          </p>
+        )}
+        {/* Separate dimension from recurrence: cache attribution is not
+            reported for individual blocks. Measured cache totals render once
+            per turn, above. */}
+        <p className="text-[11px] text-tertiary-foreground" data-testid={`${prefix}-cache-note`}>
+          Cache: attribution is not reported for individual blocks.
+        </p>
+        {block.notMeasurable ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`${prefix}-not-measurable`}
+          >
+            Not measurable: {block.notMeasurable.reason}
+          </p>
+        ) : null}
+        {block.truncated === true ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`${prefix}-truncated`}
+          >
+            {block.totalLength != null
+              ? `showing ${block.text.length} of ${block.totalLength} characters`
+              : `showing ${block.text.length} characters (total length not measurable)`}
+          </p>
+        ) : null}
+        {block.text !== '' ? (
+          <ToggleRawView
+            text={block.text}
+            label={block.label}
+            rawTestId={`${prefix}-raw`}
+            copyTestId={`copy-${prefix}`}
+            viewPrefix={prefix}
+            defaultView={defaultView}
+          />
+        ) : (
+          <p className="text-xs text-tertiary-foreground italic" data-testid={`${prefix}-empty`}>
+            No content recorded for this block.
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * One additional (non-block) turn part with the same formatted/raw/copy
+ * contract as canonical blocks.
+ */
+export function TurnContentPartView({
+  part,
+  index,
+  defaultView = 'formatted',
+}: {
+  part: KyberTurnContentPart
+  index: number
+  defaultView?: TurnContentViewMode
+}) {
+  const prefix = `turn-part-${part.part}-${index}`
+  return (
+    <div data-testid={prefix}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-foreground">{part.label}</span>
+        <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+          {part.part}
+        </span>
+        {isOfferedMcpDefinition(part) ? (
+          <span
+            className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground"
+            data-testid="tool-definition-offered-label"
+          >
+            {OFFERED_MCP_CATALOGUE_LABEL}
+          </span>
+        ) : null}
+        {part.server ? (
+          <span className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+            {part.server}
+          </span>
+        ) : null}
+        {typeof part.tokens === 'number' ? (
+          <span className="font-mono text-[10px] text-tertiary-foreground">{fmtTokens(part.tokens)} tokens</span>
+        ) : null}
+      </div>
+      {part.truncated === true ? (
+        <p
+          className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 mt-1.5"
+          data-testid={`${prefix}-truncated`}
+        >
+          {part.totalLength != null
+            ? `showing ${part.text.length} of ${part.totalLength} characters`
+            : `showing ${part.text.length} characters (total length not measurable)`}
+        </p>
+      ) : null}
+      <div className="mt-1.5">
+        <ToggleRawView
+          text={part.text}
+          label={part.label}
+          rawTestId={`${prefix}-raw`}
+          copyTestId={`copy-${prefix}`}
+          viewPrefix={prefix}
+          defaultView={defaultView}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Whole-turn inspector panel backed by the single lossless turn-content
+ * endpoint (one bounded request: the turn plus its preceding-turn
+ * recurrence, no browser fan-out).
+ *
+ * - Renders every returned block and part in server order, including unknown
+ *   part kinds (as an explicit "Additional parts" section) and zero-token
+ *   blocks; nothing is summarized, dropped, trimmed, or truncated for
+ *   display. When the API flags `truncated`, the exact limitation is stated
+ *   while all returned bytes still render.
+ * - Every captured `system_prompt` part in `sharedContext.parts`, in
+ *   capture order, renders as its own card under `Shared session context`,
+ *   each labeled with its source API turn index (`Turn 0`, …) or
+ *   `Session scope` when the server part has no `turnIndex`; only the
+ *   selected turn's own occurrence (same turn index, paired per occurrence)
+ *   is not shown twice, while identical text from distinct sources stays
+ *   visible. Each card carries its own exact-match recurrence badge,
+ *   independent of the source label.
+ * - Per-block `New this turn` / `Also present in prior captured context`
+ *   badges aggregate member-part recurrence (either, neither, or both).
+ *   Recurrence is capture-only: a separate per-block cache note states that
+ *   attribution is not reported for individual blocks, and measured
+ *   per-turn fresh/cache-read/cache-creation totals render separately above.
+ */
+export function TurnFullContentPanel({
+  request,
+  turn,
+  defaultView = 'formatted',
+}: {
+  request: TurnFullContentRequest
+  turn?: TurnFullContentTurn | null
+  defaultView?: TurnContentViewMode
+}) {
+  const turnQuery = useQuery({
+    queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
+    queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
+  })
+
+  const data: KyberTurnContentResult | undefined = turnQuery.data
+  const isTurnError = turnQuery.isError
+
+  const fresh = readMeasuredFigure(turn?.fresh ?? turn?.fresh_input ?? turn?.tokens?.fresh ?? turn?.tokens?.fresh_input)
+  const cacheRead = readMeasuredFigure(turn?.cache_read ?? turn?.tokens?.cache_read)
+  const cacheCreation = readMeasuredFigure(turn?.cache_creation ?? turn?.tokens?.cache_creation)
+  const hasTotals = fresh !== undefined || cacheRead !== undefined || cacheCreation !== undefined
+
+  const orphanParts: KyberTurnContentPart[] = useMemo(() => {
+    if (!data) return []
+    return orphanTurnParts(data)
+  }, [data])
+
+  // Shared session context arrives embedded in the single turn-content
+  // response (one bounded request, no N-query fan-out). Occurrence
+  // preserving: every entry renders except the selected turn's own
+  // occurrence(s), paired by turn index with multiplicity (see
+  // `resolveSharedDisplay`).
+  const sharedDisplay = useMemo(() => {
+    if (!data) return null
+    return resolveSharedDisplay(data)
+  }, [data])
+
+  // Copy Turn carries every returned byte exactly once (shared context
+  // labeled, blocks verbatim, additional parts under their own headers) so
+  // the action never silently omits content the view shows.
+  const wholeTurnCopyText = useMemo(() => {
+    if (!data) return ''
+    return buildWholeTurnCopyText(
+      data,
+      sharedDisplay ? sharedDisplay.parts.map((p) => p.text) : [],
+    )
+  }, [data, sharedDisplay])
+
+  const renderFigure = (label: string, value: number | undefined, testId: string) => (
+    <div className="flex justify-between py-0.5" data-testid={testId}>
+      <span className="text-muted-foreground">{label}</span>
+      {value !== undefined ? (
+        <span className="font-mono font-semibold text-foreground">{fmtTokens(value)}</span>
+      ) : (
+        <span className="font-mono text-tertiary-foreground italic">not recorded</span>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="space-y-3" data-testid="turn-content-full">
+      {hasTotals ? (
+        <div className="rounded border border-border bg-card p-3 space-y-1 text-xs" data-testid="turn-token-totals">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Measured turn totals
+          </h4>
+          {renderFigure('Fresh input', fresh, 'turn-total-fresh')}
+          {renderFigure('Cache read', cacheRead, 'turn-total-cache-read')}
+          {renderFigure('Cache creation', cacheCreation, 'turn-total-cache-creation')}
+          <p className="text-[11px] text-tertiary-foreground leading-relaxed pt-1">
+            Cache totals are measured for the whole turn; the collector does not map them to specific blocks.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded border border-border bg-card p-3 text-xs" data-testid="turn-token-totals-absent">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Measured turn totals</span>
+          <p className="text-tertiary-foreground italic mt-1">token counts not recorded</p>
+        </div>
+      )}
+
+      {!isTurnError && data === undefined ? (
+        <div className="space-y-2" data-testid="turn-content-loading">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-32 w-full" />
+          <p className="text-xs text-tertiary-foreground">Loading full turn content…</p>
+        </div>
+      ) : null}
+
+      {isTurnError ? (
+        <div
+          className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
+          data-testid="turn-content-error"
+        >
+          <p className="font-semibold">Unable to load full turn content.</p>
+          <p className="text-muted-foreground">
+            {turnQuery.error instanceof Error ? turnQuery.error.message : 'Turn content not found.'}
+          </p>
+        </div>
+      ) : null}
+
+      {data ? (
+        <div className="space-y-3">
+          {data.truncated === true ? (
+            <p
+              className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+              data-testid="turn-content-truncated"
+            >
+              {data.totalLength != null
+                ? `showing ${data.assembledText.length} of ${data.totalLength} characters`
+                : `showing ${data.assembledText.length} characters (total length not measurable)`}
+            </p>
+          ) : null}
+
+          {sharedDisplay ? (
+            <section data-testid="shared-session-context">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                Shared session context
+              </h4>
+              <p className="text-[11px] text-tertiary-foreground leading-relaxed mb-1.5">
+                Captured system prompts contributing to this turn, in capture order · each entry shows its source turn or session scope.
+              </p>
+              {/* Shared context carries its own exact-match recurrence,
+                  independent of the per-entry source label. A badge renders
+                  only with earlier-turn evidence — never "new", since first
+                  capture outside the turn spans is unverifiable. */}
+              {sharedDisplay.seenBefore ? (
+                <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                  <span
+                    className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-600 dark:text-sky-400"
+                    data-testid="shared-session-context-recurrence-seen"
+                  >
+                    Also present in prior captured context
+                  </span>
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                {sharedDisplay.parts.map((part, idx) => (
+                  <div key={`${part.spanId ?? 'session'}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
+                    {/* Provenance comes from the server's `turnIndex` alone:
+                        a prior-turn occurrence shows its API turn index and a
+                        part with no turnIndex is session scope. Never inferred
+                        from text or span id. */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className="shrink-0 rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
+                        data-testid={`shared-session-context-part-${idx}-source`}
+                      >
+                        {part.collapsedTurns !== undefined && part.collapsedTurns.length > 1
+                          ? `${part.collapsedTurns.length} turns (${part.collapsedTurns[0]}–${part.collapsedTurns[part.collapsedTurns.length - 1]}) · latest shown, varies per request`
+                          : part.turnIndex !== undefined ? `Turn ${part.turnIndex}` : 'Session scope'}
+                      </span>
+                    </div>
+                    {part.truncated === true ? (
+                      <p
+                        className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                        data-testid={`shared-session-context-part-${idx}-truncated`}
+                      >
+                        {part.totalLength != null
+                          ? `showing ${part.text.length} of ${part.totalLength} characters`
+                          : `showing ${part.text.length} characters (total length not measurable)`}
+                      </p>
+                    ) : null}
+                    <ToggleRawView
+                      text={part.text}
+                      label="Shared system prompt"
+                      rawTestId={`shared-session-context-part-${idx}-raw`}
+                      copyTestId={`copy-shared-session-context-${idx}`}
+                      viewPrefix={`shared-session-context-part-${idx}`}
+                      defaultView={defaultView}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-foreground">
+              Turn {data.turnIndex + 1}
+              {data.model ? <span className="ml-2 font-mono text-[11px] font-normal text-tertiary-foreground">{data.model}</span> : null}
+            </span>
+            <CopyExactButton text={wholeTurnCopyText} testId="copy-turn-button" label="Copy Turn" />
+          </div>
+
+          {data.blocks.map((block) => (
+            <TurnContentBlockView key={block.key} block={block} defaultView={defaultView} />
+          ))}
+
+          {orphanParts.length > 0 ? (
+            <section data-testid="turn-additional-parts">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                Additional parts
+              </h4>
+              <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-3">
+                {orphanParts.map((part, idx) => (
+                  <TurnContentPartView key={part.id ?? `${part.part}-${idx}`} part={part} index={idx} defaultView={defaultView} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {data.blocks.length === 0 && orphanParts.length === 0 ? (
+            <p className="text-xs text-tertiary-foreground italic" data-testid="turn-content-empty">
+              session {data.sessionId} · turn {data.turnIndex}
+              {data.spanId ? ` · span ${data.spanId}` : ''} — the harness captured no unclipped content parts here.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function FullContentPanel({
@@ -964,11 +3091,12 @@ function FullContentPanel({
   fallback: unknown
 }) {
   const { data, isError } = useQuery({
-    queryKey: ['kyber-session-content', request.sessionId, request.span, request.part],
+    queryKey: ['kyber-session-content', request.sessionId, request.span, request.part, 'full'],
     queryFn: () =>
       fetchKyberSessionContent(request.sessionId, {
         span: request.span,
         part: request.part,
+        full: true,
       }),
   })
 
@@ -993,24 +3121,26 @@ function FullContentPanel({
         >
           Showing truncated payload text — full content could not be loaded.
         </p>
-        {fallback != null && fallback !== '' && (
-          <div
-            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
-            data-testid="drawer-content-scroll"
-          >
-            <div className="p-3">
-              <InspectorContent data={fallback} />
-            </div>
-          </div>
-        )}
+        {fallback != null && fallback !== '' && <FallbackContentPanel fallback={fallback} />}
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
-      {data.parts.map((part, idx) => (
-        <div key={`${part.spanId}-${part.part}-${idx}`} className="space-y-2">
+      {groupIdenticalParts(data.parts).map(({ part, index, count }) => (
+        <div key={`${part.spanId}-${part.part}-${index}`} className="space-y-2">
+          {/* A definition the turn offered without keeping resident is labelled in its header; resident and unmarked parts carry no label. */}
+          {part.resident === false && (
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                data-testid="tool-definition-offered-label"
+              >
+                offered (MCP catalogue)
+              </span>
+            </div>
+          )}
           {part.truncated === true && (
             <p
               className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
@@ -1021,14 +3151,17 @@ function FullContentPanel({
                 : `showing ${part.text.length} characters (total length not measurable)`}
             </p>
           )}
-          <div
-            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
-            data-testid="drawer-content-scroll"
-          >
-            <div className="p-3">
-              <InspectorContent data={part.text} />
-            </div>
-          </div>
+          {count > 1 ? (
+            <p className="text-[11px] font-mono text-tertiary-foreground" data-testid="drawer-content-duplicate-note">
+              {`Identical in ${count} captured spans`}
+            </p>
+          ) : null}
+          {/* One toolbar per rendered block: a collapsed group shows its single text once. */}
+          <ScrollableContentPanel
+            viewPrefix={`drawer-content-${index}`}
+            text={part.text}
+            formattedContent={<NarrowedInspectorContent text={part.text} toolName={request.toolName} suppressJsonControls />}
+          />
         </div>
       ))}
     </div>
@@ -1036,10 +3169,305 @@ function FullContentPanel({
 }
 
 /**
+ * A bounded, scrollable block with the shared Formatted/Raw toolbar, search
+ * and exact Copy. Formatted is the caller's readable rendering; Raw and Copy
+ * are the exact `text`. Both views scroll inside the same bounded box.
+ */
+function ScrollableContentPanel({
+  viewPrefix,
+  text,
+  copyText,
+  formattedContent,
+}: {
+  viewPrefix: string
+  text: string
+  /** Lazy copy source; defaults to `text`. Read only when Copy is clicked. */
+  copyText?: () => string
+  formattedContent: React.ReactNode
+}) {
+  const [view, setView] = useState<ContentViewMode>('formatted')
+  const scrollClass = 'max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border'
+  return (
+    <SearchableContentView
+      view={view}
+      onViewChange={setView}
+      text={text}
+      label="Captured content"
+      viewPrefix={viewPrefix}
+      copy={{ text: copyText ?? text, testId: `copy-${viewPrefix}` }}
+      formatted={
+        <div className={scrollClass} data-testid="drawer-content-scroll">
+          <div className="p-3">{formattedContent}</div>
+        </div>
+      }
+      raw={
+        <div className={scrollClass} data-testid="drawer-content-scroll">
+          <pre className="p-3 text-xs font-mono whitespace-pre-wrap break-words text-foreground">{text}</pre>
+        </div>
+      }
+    />
+  )
+}
+
+/**
+ * Pretty JSON for display and copy, or null when the value cannot be
+ * serialized (a circular or otherwise unserializable payload).
+ */
+function safeJsonStringify(value: unknown): string | null {
+  try {
+    const out = JSON.stringify(value, null, 2)
+    return typeof out === 'string' ? out : null
+  } catch {
+    return null
+  }
+}
+
+const UNSERIALIZABLE_NOTE = 'content is not JSON-serializable'
+
+/**
+ * The clipped payload shown when full content could not load. The text is
+ * serialized once per fallback value; Copy reads that memo through a thunk.
+ */
+function FallbackContentPanel({ fallback }: { fallback: unknown }) {
+  const serialized = useMemo(
+    () => (typeof fallback === 'string' ? fallback : safeJsonStringify(fallback)),
+    [fallback],
+  )
+  if (serialized === null) {
+    return (
+      <p
+        className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        data-testid="drawer-content-unserializable"
+      >
+        {UNSERIALIZABLE_NOTE}
+      </p>
+    )
+  }
+  return (
+    <ScrollableContentPanel
+      viewPrefix="drawer-fallback"
+      text={serialized}
+      copyText={() => serialized}
+      formattedContent={<InspectorContent data={fallback} suppressJsonControls />}
+    />
+  )
+}
+
+/** The part fields that decide whether two captured parts render as one block. */
+interface IdentifiablePart {
+  spanId?: string
+  part?: string
+  text: string
+  truncated?: boolean
+  totalLength?: number
+  resident?: false
+}
+
+/**
+ * Collapses parts whose text is byte-identical into one group, kept at the
+ * position of its first occurrence and in capture order. Truncation state is
+ * part of the key, so a clipped copy never folds into a complete one; each
+ * group keeps its first part, which carries the truncation banner.
+ */
+function groupIdenticalParts<T extends IdentifiablePart>(
+  parts: readonly T[],
+  hash: (text: string) => string = fnv1aHash,
+): Array<{ part: T; index: number; count: number }> {
+  // Buckets are keyed on cheap fields plus a hash, never on the full text. A
+  // hash hit is only a candidate: the representative must match on every field
+  // and on the exact text, so a collision can never merge different content.
+  const buckets = new Map<string, Array<{ part: T; index: number; count: number }>>()
+  const groups: Array<{ part: T; index: number; count: number }> = []
+  parts.forEach((part, index) => {
+    const key = `${part.part ?? ''}|${part.truncated === true ? 1 : 0}|${part.totalLength ?? ''}|${part.text.length}|${hash(part.text)}`
+    const bucket = buckets.get(key) ?? []
+    const existing = bucket.find((group) => sameBlock(group.part, part))
+    if (existing) {
+      existing.count += 1
+      return
+    }
+    const group = { part, index, count: 1 }
+    bucket.push(group)
+    buckets.set(key, bucket)
+    groups.push(group)
+  })
+  return groups
+}
+
+/**
+ * True when two parts render as one block: same kind, truncation, residency,
+ * and exact text. Residency is part of the identity because the offered label
+ * is a claim about the part; identical text that one span kept resident and
+ * another did not must not fold into one labelled block.
+ */
+function sameBlock(a: IdentifiablePart, b: IdentifiablePart): boolean {
+  return (
+    a.part === b.part &&
+    (a.truncated === true) === (b.truncated === true) &&
+    (a.resident === false) === (b.resident === false) &&
+    a.totalLength === b.totalLength &&
+    a.text === b.text
+  )
+}
+
+/** FNV-1a over UTF-16 code units, as an unsigned 32-bit hex string. */
+function fnv1aHash(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+export { groupIdenticalParts }
+
+/**
  * The drawer's own content union, shared with the dashboard that assembles
  * it; the body only spreads it and probes a legacy `content` leaf.
  */
 export type { DrawerContent }
+
+/** A not-measurable verdict rendered as the harness's own reason, never as a value. */
+function NotMeasurableNote({ reason }: { reason: string }) {
+  return <p className="text-xs text-amber-700 dark:text-amber-300">{reason}</p>
+}
+
+/**
+ * The served listing element for `skillName`. Elements that are not objects,
+ * or that do not carry the name, are skipped rather than read.
+ */
+function listingNamed(listed: unknown[], skillName: string): { text?: unknown } | undefined {
+  for (const item of listed) {
+    if (typeof item === 'object' && item !== null && (item as { name?: unknown }).name === skillName) {
+      return item as { text?: unknown }
+    }
+  }
+  return undefined
+}
+
+/**
+ * The listing text for the skill in one turn, read from the turn-content
+ * `skills` entry. Uses the same query as the whole-turn panel so both share
+ * the cached response.
+ */
+function SkillListingSection({
+  skillName,
+  request,
+  description,
+}: {
+  skillName: string
+  request: TurnFullContentRequest
+  description?: string
+}) {
+  const turnQuery = useQuery({
+    queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
+    queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
+  })
+
+  if (turnQuery.isError) {
+    return <p className="text-xs text-tertiary-foreground">The listing text for this turn could not be loaded.</p>
+  }
+  const data = turnQuery.data
+  if (data === undefined) {
+    return <p className="text-xs text-tertiary-foreground">Loading the listing text for this turn…</p>
+  }
+
+  // The served entry is untrusted at runtime: either side may be missing or
+  // malformed. Only a real array is read; anything else is never coerced into
+  // "not listed" or "never invoked".
+  const entry: unknown = data.skills
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return <p className="text-xs text-tertiary-foreground">Listing text is not available for this turn.</p>
+  }
+  if (unmeasured(entry)) {
+    return <NotMeasurableNote reason={reasonOf(entry)} />
+  }
+
+  const listedSide: unknown = (entry as { listed?: unknown }).listed
+  const invokedSide: unknown = (entry as { invoked?: unknown }).invoked
+
+  let listingBody: React.ReactNode
+  if (unmeasured(listedSide)) {
+    listingBody = <NotMeasurableNote reason={reasonOf(listedSide)} />
+  } else if (!Array.isArray(listedSide)) {
+    listingBody = <p className="text-xs text-tertiary-foreground">Listing text is not available for this turn.</p>
+  } else {
+    const listing = listingNamed(listedSide, skillName)
+    if (listing === undefined) {
+      listingBody = <p className="text-xs text-tertiary-foreground">This turn&apos;s listing does not name {skillName}.</p>
+    } else if (typeof listing.text !== 'string' || listing.text.length === 0) {
+      listingBody =
+        typeof description === 'string' && description.length > 0 ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+            {description}
+          </pre>
+        ) : (
+          <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
+        )
+    } else {
+      listingBody = (
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+          {listing.text}
+        </pre>
+      )
+    }
+  }
+
+  let invokedBody: React.ReactNode = null
+  if (unmeasured(invokedSide)) {
+    invokedBody = <NotMeasurableNote reason={`Invocations in this turn: ${reasonOf(invokedSide)}`} />
+  } else if (Array.isArray(invokedSide) && invokedSide.includes(skillName)) {
+    invokedBody = <p className="text-xs text-foreground">Invoked in this turn.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Listing text</h4>
+      {listingBody}
+      {invokedBody}
+    </div>
+  )
+}
+
+/**
+ * The skill drawer pane (F2). Every value is the served row or the served
+ * turn-content entry. A not-measurable side shows its own reason, never
+ * "not listed" or "never invoked".
+ */
+function SkillDrawerPane({ row, request }: { row: KyberSkillRow; request: TurnFullContentRequest | null }) {
+  const listedReason = unmeasured(row.listed) ? reasonOf(row.listed) : null
+  const invocationsReason = unmeasured(row.invocations) ? reasonOf(row.invocations) : null
+  const hasTurns = row.turns_listed.length > 0
+
+  const listedState = row.listed === true ? 'Listed' : row.listed === false ? 'Not listed' : 'Listing not measurable'
+
+  return (
+    <div data-testid="skill-drawer-pane" className="space-y-4 text-sm">
+      <dl className="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Listed</dt>
+          <dd className="mt-1 font-semibold text-foreground">{listedState}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Invocations</dt>
+          <dd className="mt-1 font-semibold tabular-nums text-foreground">
+            {typeof row.invocations === 'number' ? fmtNum(row.invocations) : 'Not measurable'}
+          </dd>
+        </div>
+      </dl>
+
+      {listedReason !== null && <NotMeasurableNote reason={listedReason} />}
+      {invocationsReason !== null && <NotMeasurableNote reason={invocationsReason} />}
+      {hasTurns && <p className="text-xs text-muted-foreground">{skillTurnLabel(row.turns_listed)}</p>}
+
+      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} description={row.description} />}
+      {!hasTurns && row.listed === true && (
+        <p className="text-xs text-tertiary-foreground">No turn lists this skill, so there is no listing text to read.</p>
+      )}
+    </div>
+  )
+}
 
 export interface SessionInspectorDrawerProps {
   open: boolean
@@ -1048,13 +3476,17 @@ export interface SessionInspectorDrawerProps {
   subtitle?: string
   children?: React.ReactNode
   rawContent?: DrawerContent
-  contentRequest?: SessionContentRequest
+  contentRequest?: DrawerContentRequest
 }
 
 /**
  * Slide-out Inspector Drawer.
  * Slides in from right (z-50) with dark backdrop.
  * Closed via Escape key, close button ('✕'), or clicking backdrop.
+ *
+ * A thin wrapper over the shared SlideOutDrawer shell. `manageFocus` is left
+ * off: this drawer has never moved focus, and turning it on here would change
+ * behavior no test ever pinned.
  */
 export function SessionInspectorDrawer({
   open,
@@ -1065,93 +3497,76 @@ export function SessionInspectorDrawer({
   rawContent,
   contentRequest,
 }: SessionInspectorDrawerProps) {
-  useEffect(() => {
-    if (!open || typeof window === 'undefined') return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
   // Drop the clipped leaf while the unclipped route is in play, otherwise the
   // 2000-char stub renders next to (or instead of) the text this route exists for.
   const rawRecord =
     rawContent !== null && rawContent !== undefined && typeof rawContent === 'object' ? rawContent : null
-  const inspectorData = contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
+  // A skill row carries its own pane: the served row and the first listed
+  // turn's `skills` entry. It never shows the raw row or the whole-turn panel.
+  const skillRow = rawRecord !== null && 'skill' in rawRecord ? (rawRecord as { skill: KyberSkillRow }).skill : null
+  const turnRequest = skillRow === null && isTurnFullContentRequest(contentRequest) ? contentRequest : null
+  // A whole-turn request carries its own panel (with the turn row as the
+  // measured-totals source); the clipped payload row must not render
+  // alongside the lossless content.
+  const turnFallback =
+    turnRequest !== null && rawRecord !== null && 'turn' in rawRecord
+      ? (rawRecord as { turn?: TurnFullContentTurn }).turn ?? undefined
+      : undefined
+  const inspectorData =
+    skillRow !== null || turnRequest !== null
+      ? null
+      : contentRequest && rawRecord
+        ? { ...rawRecord, content: undefined }
+        : rawContent
   const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
+  // A tool invocation carries its own previews; the raw row alone shows them
+  // only as nested JSON, so they also get a labeled pane of their own.
+  const toolRow = rawRecord !== null && 'tool' in rawRecord ? (rawRecord as { tool?: ToolRow }).tool ?? null : null
 
-  return (
-    <div className="relative z-50">
-      {/* Dark backdrop */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-[1px] transition-opacity"
-        onClick={onClose}
-        aria-hidden="true"
-        data-testid="drawer-backdrop"
-      />
-
-      {/* Drawer panel sliding in from right */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cn(
-          'fixed top-0 right-0 bottom-0 z-50 flex flex-col',
-          'w-full max-w-full sm:max-w-xl md:max-w-2xl',
-          'bg-card border-l border-border shadow-2xl',
-          'animate-in slide-in-from-right duration-200 ease-in-out'
+  // Invoked as a function rather than returned as JSX on purpose: the
+  // characterization harnesses render this component directly — under a hook
+  // dispatcher that provides only useEffect/useState/useMemo — then walk the
+  // returned tree for test ids and run the last registered effect to assert
+  // the keydown listener. Returning <SlideOutDrawer/> would hand both an
+  // unexpanded child element. The shell's test-id derivation keeps every
+  // historical id (`drawer-backdrop`, `drawer-title`, `drawer-close-button`,
+  // `drawer-body`, …) exactly; only the panel id is not derivable from
+  // `drawer`, so it is pinned to `session-inspector-drawer`.
+  return SlideOutDrawer({
+    open,
+    onClose,
+    label: title,
+    title,
+    subtitle,
+    testIdPrefix: 'drawer',
+    panelTestId: 'session-inspector-drawer',
+    children: (
+      <>
+        {children}
+        {skillRow !== null && (
+          <SkillDrawerPane
+            row={skillRow}
+            request={isTurnFullContentRequest(contentRequest) ? contentRequest : null}
+          />
         )}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="session-inspector-drawer"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0 bg-card">
-          <div className="min-w-0 flex-1 pr-3">
-            <h2 className="text-sm font-semibold text-foreground truncate" data-testid="drawer-title">
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground truncate mt-0.5" data-testid="drawer-subtitle">
-                {subtitle}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-              data-testid="drawer-close-button"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs" data-testid="drawer-body">
-          {children}
-          {inspectorData !== undefined && inspectorData !== null && (
-            <InspectorContent data={inspectorData} />
-          )}
-          {contentRequest && (
-            <FullContentPanel request={contentRequest} fallback={fallbackContent} />
-          )}
-          {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
-            <p className="text-xs text-tertiary-foreground italic py-8 text-center">
-              No content to inspect.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+        {toolRow !== null && <ToolInvocationPreview tool={toolRow} />}
+        {inspectorData !== undefined && inspectorData !== null && (
+          <InspectorContent data={inspectorData} />
+        )}
+        {turnRequest !== null ? (
+          <TurnFullContentPanel request={turnRequest} turn={turnFallback} />
+        ) : null}
+        {skillRow === null && contentRequest && !isTurnFullContentRequest(contentRequest) && (
+          <FullContentPanel request={contentRequest} fallback={fallbackContent} />
+        )}
+        {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
+          <p className="text-xs text-tertiary-foreground italic py-8 text-center">
+            No content to inspect.
+          </p>
+        )}
+      </>
+    ),
+  })
 }
 
 export default SessionInspectorDrawer

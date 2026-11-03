@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -14,9 +15,40 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Skip the remaining gates once a blocking gate fails.")]
     public bool StopOnFailure { get; set; }
 
+    [CommandOption("--agent <NAME>")]
+    [Description("Run only this agent's task gates from review.task-gates, not the repository-wide gates.")]
+    public string? Agent { get; set; }
+
+    [CommandOption("--paths <PATH>")]
+    [Description("Changed file to gate, relative to the repository root. Repeat for several. " +
+                 "Defaults to the diff against --base plus untracked files.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Paths { get; set; } = [];
+
     [CommandOption("--base <REF>")]
-    [Description("Only gates applying to paths changed since <REF> run; the rest report KW-REVIEW-026. Without it every gate runs.")]
-    public string? Base { get; set; }
+    [Description("Git ref the working tree is diffed against when --paths is not given. Defaults to origin/HEAD " +
+                 "for repository gates and to HEAD with --agent.")]
+    public string? BaseRef { get; set; }
+
+    [CommandOption("--task <SLUG>")]
+    [Description("Task slug substituted for {task} in the agent's task gate commands. Requires --agent.")]
+    public string? TaskSlug { get; set; }
+
+    [CommandOption("--fix")]
+    [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
+    public bool Fix { get; set; }
+
+    [CommandOption("--all")]
+    [Description("Run all declared repository gates on the host OS without include path filtering.")]
+    public bool All { get; set; }
+
+    /// <summary>
+    ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
+    ///     scope the repository-wide council gates, so they are not agent-only.
+    /// </summary>
+    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
 }
 
 /// <summary>Settings for <c>review duplicates</c>.</summary>

@@ -465,7 +465,11 @@ public sealed class SquadPathSafetyTests : IDisposable
         Assert.Contains(successfulMutation, normalized, StringComparison.Ordinal);
         if (verb == "install")
         {
-            Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+            // Project state lives in the home store, so the project carries no in-repo squad state. The
+            // transaction journal may still sit beside the root, which is why only the squad state
+            // directory is asserted absent.
+            Assert.NotNull(stateStore.ReadLock(targetDir, SquadDeploymentScope.Project));
+            Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave", "squad")));
         }
     }
 
@@ -769,27 +773,17 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         return Capture(() =>
         {
-            using StringWriter writer = new();
-            ForwardingWriter.Current = writer;
-            AnsiConsole.Console = SharedRenderConsole.Console;
-            try
+            SquadAppRegistrar registrar = new();
+            CommandApp app = new(registrar);
+            app.Configure(config =>
             {
-                SquadAppRegistrar registrar = new();
-                CommandApp app = new(registrar);
-                app.Configure(config =>
-                {
-                    config.SetApplicationName("kyber-weave");
-                    config.UseStrictParsing();
-                    config.AddCommand<PathBindingStubCommand>("install");
-                });
+                config.SetApplicationName("kyber-weave");
+                config.UseStrictParsing();
+                config.AddCommand<PathBindingStubCommand>("install");
+            });
 
-                return (app.Run(arguments), writer.ToString());
-            }
-            finally
-            {
-                ForwardingWriter.Current = null;
-            }
-        }).Result;
+            return app.Run(arguments);
+        });
     }
 
     /// <summary>Runs <paramref name="execute"/> once with console output captured.</summary>
@@ -916,9 +910,14 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// <c>CLAUDE_CONFIG_DIR</c>, …) through <see cref="Environment.GetEnvironmentVariable(string)"/>
     /// at resolution time, so the environment is the one seam that decides where a real
     /// <c>--global</c> command run writes; every other test in the suite injects a resolver
-    /// or a getter and never observes the process environment. xUnit runs test classes in
-    /// parallel, so the window stays as short as one command execution and is restored even
-    /// when the body fails.
+    /// or a getter and never observes the process environment. That makes this the only
+    /// class in the assembly that writes these variables, which is what keeps the mutation
+    /// safe without serializing it against another class: xUnit parallelizes classes, not
+    /// the tests inside one, so the window stays as short as one command execution and is
+    /// restored even when the body fails. A second class that wrote the same variables would
+    /// reintroduce the race, and the fix there is to inject a resolver — not to add this class
+    /// to a disabling collection, which only serializes the classes that join it and so cannot
+    /// guard a writer that does not.
     /// </remarks>
     private static T RunWithEnvironment<T>(IReadOnlyDictionary<string, string> variables, [InstantHandle] Func<T> body)
     {
@@ -953,7 +952,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     private sealed class PathBindingStubCommand : Command<SquadInstallSettings>
     {
         internal static SquadInstallSettings? Captured { get; set; }
-        protected override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
+        public override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
         {
             Captured = settings;
             return 0;
@@ -961,55 +960,13 @@ public sealed class SquadPathSafetyTests : IDisposable
     }
 
     /// <summary>
-    /// Process-wide writer that forwards to whichever StringWriter the running capture
-    /// has installed. Spectre.Console.Cli binds the console used for command-app error
-    /// renders once per process — the first render wins and later renders keep writing
-    /// to that first console's writer, which earlier captures have by then disposed.
-    /// Rendering through one long-lived console whose target switches per capture is
-    /// what keeps every strict-parse assertion reading its own output.
-    /// </summary>
-    private sealed class ForwardingWriter : TextWriter
-    {
-        public static TextWriter? Current { get; set; }
-
-        public override Encoding Encoding => Encoding.UTF8;
-
-        public override void Write(char value) => Current?.Write(value);
-
-        public override void Write(string? value) => Current?.Write(value);
-    }
-
-    /// <summary>The single live console every strict-parse render is routed through.</summary>
-    private static class SharedRenderConsole
-    {
-        public static readonly ForwardingWriter Writer = new();
-
-        public static readonly IAnsiConsole Console = CreateConsole();
-
-        private static IAnsiConsole CreateConsole()
-        {
-            IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
-            {
-                Ansi = AnsiSupport.No,
-                ColorSystem = ColorSystemSupport.NoColors,
-                Interactive = InteractionSupport.No,
-                Out = new AnsiConsoleOutput(Writer)
-            });
-            ConsoleWidth.EnsureUsable(console);
-            return console;
-        }
-    }
-
-    /// <summary>
-    /// Registrar for the strict-parse app: pins the shared render console so no render
-    /// can land in a disposed capture, and resolves everything else the way the default
-    /// registrar does — instances directly, service/implementation pairs through
-    /// Activator, and IEnumerable&lt;T&gt; services as arrays of their registered
-    /// implementations.
+    /// Registrar for the strict-parse app: pins the active console so every render
+    /// routes through the active test capture, and resolves everything else the way
+    /// the default registrar does.
     /// </summary>
     private sealed class SquadAppRegistrar : ITypeRegistrar
     {
-        private readonly Dictionary<Type, object> _instances = new() { [typeof(IAnsiConsole)] = SharedRenderConsole.Console };
+        private readonly Dictionary<Type, object> _instances = new() { [typeof(IAnsiConsole)] = AnsiConsole.Console };
         private readonly Dictionary<Type, List<Type>> _implementations = [];
 
         public void Register(Type service, Type implementation)
@@ -1110,20 +1067,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     [ModuleInitializer]
     internal static void BindSharedRenderConsole()
     {
-        AnsiConsole.Console = SharedRenderConsole.Console;
-        ForwardingWriter.Current = new StringWriter();
-        try
-        {
-            RunThroughStrictApp(["install", "--__render-channel-binder__"]);
-        }
-        catch (Exception)
-        {
-            // Binding must never break test assembly load.
-        }
-        finally
-        {
-            ForwardingWriter.Current = null;
-        }
+        ProcessConsoleCapture.EnsureInstalled();
     }
 
     #endregion

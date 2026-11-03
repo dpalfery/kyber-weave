@@ -23,7 +23,7 @@ public sealed class LintSettings : AnalysisSettings
 public sealed class LintCommand : Command<LintSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);

@@ -42,7 +42,6 @@ const FILE_PROVIDERS: Record<string, string[]> = {
   // The ENV_DIR const (open-design.ts:10) resolves to KYBERDASH_OPEN_DESIGN_DIR.
   'open-design.ts': ['open-design'],
   'openclaude.ts': ['openclaude'],
-  'opencode.ts': ['opencode'],
   'goose.ts': ['goose'],
   'grok.ts': ['grok'],
   'crush.ts': ['crush'],
@@ -58,10 +57,10 @@ const FILE_PROVIDERS: Record<string, string[]> = {
   'quickdesk.ts': ['quickdesk'],
   'kimicode.ts': ['kimicode'],
   'zerostack.ts': ['zerostack'],
-  // Shared sqlite parser; its only importers in src/ are kilo-code.ts and
-  // opencode.ts. Its single read (KYBERDASH_VERBOSE) is allowlisted, so this
-  // entry is informational — but required, because the file has reads.
-  'sqlite-session-parser.ts': ['kilo-code', 'opencode'],
+  // Shared sqlite parser; its only importer in src/ is kilo-code.ts. Its single read
+  // (KYBERDASH_VERBOSE) is allowlisted, so this entry is informational — but required,
+  // because the file has reads.
+  'sqlite-session-parser.ts': ['kilo-code'],
   // Registered (lazy) network provider; its credential reads are declared in
   // PROVIDER_ENV_VARS (session-cache.ts) so a read-only refresh that serves
   // the cached report (parser.ts:2875/2888) cannot keep serving the previous
@@ -216,6 +215,10 @@ describe('provider env declarations (#920)', () => {
     }
 
     failWith(problems)
+  })
+
+  it('declares no env fingerprint for the removed OpenCode provider', () => {
+    expect(PROVIDER_ENV_VARS).not.toHaveProperty('opencode')
   })
 
   it('every PROVIDER_ENV_VARS key is a real provider name from the registry', async () => {

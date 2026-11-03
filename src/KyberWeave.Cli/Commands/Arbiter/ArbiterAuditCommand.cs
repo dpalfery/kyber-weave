@@ -34,7 +34,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     /// observed leaves no record, so <c>audit</c> cannot report it. Exits 1 on
     /// an unreadable filter or configuration; findings alone do not fail the run.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))

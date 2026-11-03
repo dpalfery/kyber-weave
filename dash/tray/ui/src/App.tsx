@@ -93,7 +93,15 @@ export function App() {
         openView: (view) => invokeAction('open_view', { view }),
         setSettings: (patch: Partial<TraySettings>) => invokeAction('set_settings', { patch }),
         quit: () => invokeAction('quit'),
-        cleanDatabase: (scope) => invokeAction('clean_database', { scope }),
+        cleanDatabase: (scope, importWeeks) =>
+          // importWeeks is omitted, not undefined, when unchecked: the Rust
+          // command distinguishes "no import" from a value.
+          invokeAction(
+            'clean_database',
+            importWeeks === undefined ? { scope } : { scope, importWeeks },
+          ),
+        importFolderHistory: (request) => invokeAction('import_folder_history', request),
+        setSharedSettings: (patch) => invokeAction('set_shared_settings', { patch }),
       }}
     />
   )

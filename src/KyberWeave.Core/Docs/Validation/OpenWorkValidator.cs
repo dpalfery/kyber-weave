@@ -57,7 +57,7 @@ public sealed class OpenWorkValidator
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
         IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
 
         foreach ((string property, string kind, string archiveFolder, DocType[] workTypes) in Inventories)
@@ -96,20 +96,14 @@ public sealed class OpenWorkValidator
         DocumentSet set,
         string folder,
         string indexPath,
-        DocType[] workTypes) =>
-        set.Documents
-            .Where(d => InventoryReachability.IsWithin(d.RelativePath, folder)
-                && !InventoryReachability.IsArchived(d.RelativePath)
-                && !DocsRootPath.PathComparer.Equals(d.RelativePath, indexPath))
-            .OrderBy(d => d.RelativePath, StringComparer.Ordinal)
-            .GroupBy(d => EntryBelow(d.RelativePath, folder), StringComparer.Ordinal)
-            .Where(entry => entry.Any(d => workTypes.Contains(d.DocType)));
-
-    /// <summary>The first path segment of <paramref name="relativePath"/> below <paramref name="folder"/>.</summary>
-    private static string EntryBelow(string relativePath, string folder)
+        DocType[] workTypes)
     {
-        string below = folder.Length == 0 ? relativePath : relativePath[(folder.Length + 1)..];
-        int slash = below.IndexOf('/', StringComparison.Ordinal);
-        return slash < 0 ? below : below[..slash];
+        return set.Documents
+            .Where(d => InventoryReachability.IsWithin(d.RelativePath, folder)
+                        && !InventoryReachability.IsArchived(d.RelativePath)
+                        && !DocsRootPath.PathComparer.Equals(d.RelativePath, indexPath))
+            .OrderBy(d => d.RelativePath, StringComparer.Ordinal)
+            .GroupBy(d => InventoryReachability.EntryBelow(d.RelativePath, folder), StringComparer.Ordinal)
+            .Where(entry => entry.Any(d => workTypes.Contains(d.DocType)));
     }
 }

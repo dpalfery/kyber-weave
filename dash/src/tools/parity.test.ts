@@ -432,8 +432,9 @@ describe('auditCachePrefixCoverage — Task E4 survey parity audit', () => {
     expect(report.surveyedCount).toBe(SURVEYED_HARNESSES.length)
     expect(Object.keys(report.harnesses)).toHaveLength(SURVEYED_HARNESSES.length)
     // Antigravity is surveyed separately from Gemini and shares its partial
-    // cache shape, so it adds one to both cache counts.
-    expect(report.supportedCacheCount).toBe(7) // copilot, claude-code, roo-code, cline, codex, gemini, antigravity (partial)
+    // cache shape, so it adds one to both cache counts. OpenCode now exports
+    // cache counters through the capture plugin, so it adds one more.
+    expect(report.supportedCacheCount).toBe(8) // copilot, claude-code, roo-code, cline, codex, opencode, gemini, antigravity (partial)
     expect(report.supportedPrefixCount).toBe(2) // copilot, codex
     expect(report.fallbackPrefixCount).toBe(6) // copilot, claude-code, roo-code, cline, gemini, antigravity
 
@@ -444,7 +445,7 @@ describe('auditCachePrefixCoverage — Task E4 survey parity audit', () => {
     expect(report.harnesses['claude-code'].prefix.fallback).toBe('detect-but-cannot-locate')
     expect(report.harnesses.cursor.cache.status).toBe('unsupported')
     expect(report.harnesses.gemini.cache.status).toBe('partial')
-    expect(report.harnesses.opencode.cache.status).toBe('not_measurable')
+    expect(report.harnesses.opencode.cache.status).toBe('supported')
   })
 
   it('audits a specific subset of harnesses', () => {

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -104,6 +105,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill Claude suppresses: those carried by a
+    /// subagent, whose file already holds the identical body. A primary shared identity reuses
+    /// its canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     public void Dispose()
     {
         // No disposable state: the suite only reads the checked-in corpus. IDisposable is
@@ -150,8 +160,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -162,20 +173,22 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
         // A primary agent with no-primary-agent: skill contributes an entry-point skill
-        // (1 + its resource closure) in addition to the agent file.
-        SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
-        int primaryAgentSkillContribution = 1 + primaryAgent.Resources.Count;
+        // (1 + its resource closure) in addition to the agent file — except a primary shared
+        // identity, whose canonical skill already IS the entry point and is counted with the
+        // skills.
+        int primaryAgentSkillContribution = source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
+            .Sum(agent => 1 + agent.Resources.Count);
 
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count)
             + primaryAgentSkillContribution;
         Assert.Equal(expectedFileCount, result.Files.Count);
@@ -273,18 +286,21 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 Assert.DoesNotContain(tools, tool => tool.StartsWith("Agent", StringComparison.Ordinal));
             }
 
-            // MCP wildcards are granted if filesystem.read is allowed AND the agent is not a pure orchestrator.
-            bool isPureOrchestrator = string.Equals(
-                agent.CapabilityProfile,
-                "orchestrator",
-                StringComparison.Ordinal);
-            bool hasRead = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                           readDecision == SquadPermissionDecision.Allow;
-            bool expectedMcp = hasRead && !isPureOrchestrator;
-            foreach (string mcpTool in new[] { "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*" })
+            // MCP is two rules. kyber-weave follows the file-read entitlement alone, the pure
+            // orchestrator included; codegraph and context7 keep the orchestrator carve-out.
+            bool grantsKyberWeave =
+                SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude);
+            Assert.True(
+                grantsKyberWeave == tools.Contains("mcp__kyber-weave__*", StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') should "
+                + $"{(grantsKyberWeave ? "carry" : "withhold")} 'mcp__kyber-weave__*'.");
+
+            bool grantsOrchestratorExcluded =
+                SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, SquadTarget.Claude);
+            foreach (string mcpTool in new[] { "mcp__codegraph__*", "mcp__context7__*" })
             {
                 Assert.True(
-                    expectedMcp == tools.Contains(mcpTool, StringComparer.Ordinal),
+                    grantsOrchestratorExcluded == tools.Contains(mcpTool, StringComparer.Ordinal),
                     $"Agent '{agent.Name}' mcpTool '{mcpTool}'.");
             }
 
@@ -304,12 +320,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
-        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
+        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
@@ -318,15 +335,24 @@ public sealed class ClaudeRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".claude/agents/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".claude/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".claude/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".claude/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -456,7 +482,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -643,6 +669,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
         {
             ".claude/agents/azure-reader.md",
+            ".claude/agents/bug-crusher.md",
             ".claude/agents/csharp-dev.md",
             ".claude/agents/docs-dev.md",
             ".claude/agents/maui-dev.md",
@@ -683,9 +710,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsSubagent()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -822,9 +849,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_GlobalScopePlacesTheEntryPointSkillUnderSkills()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -866,9 +893,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
 
@@ -951,9 +978,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {
@@ -1028,11 +1055,155 @@ public sealed class ClaudeRendererContractTests : IDisposable
             ".claude/skills");
     }
 
+    /// <summary>
+    /// An orchestrator whose own capability profile denies <c>filesystem.read</c> renders a note
+    /// that names <c>mcp__kyber-weave__*</c> among the withheld wildcards and gives the read denial
+    /// as the reason.
+    /// </summary>
+    /// <remarks>
+    /// The shipped corpus lets the orchestrator profile read, so
+    /// <see cref="RenderAsync_Claude_GrantsKyberWeaveToThePureOrchestratorAndWithholdsTheOtherTwo"/>
+    /// exercises the note's grant branch and the deny branch had no test at all: a receipt that
+    /// kept the two-server withholding list, or kept the routing-only reason, described a grant the
+    /// subagent file does not make — the false claim the note exists to prevent.
+    ///
+    /// The entitlement half is read from <see cref="SquadMcpGrantProjection"/> rather than from the
+    /// renderer, so the fixture is proven to reach the deny branch instead of agreeing with
+    /// whatever the renderer did. The wording is the contract under test and is therefore pinned
+    /// as a literal: a drifted reason is a changed claim in the one place a review or a
+    /// <c>squad doctor</c> run reads without re-deriving the rule.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Claude_WithholdsKyberWeaveFromAnOrchestratorThatCannotRead()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedOrchestrator();
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Claude),
+            "The fixture's orchestrator profile still allows filesystem.read, so the render reaches "
+            + "the granting branch and the denial this test pins is never exercised.");
+
+        SquadRenderResult result = await new SquadRendererRegistry([new ClaudeRenderer()])
+            .RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Claude],
+                SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The note states what the subagent file withholds, so the file has to withhold all three:
+        // a receipt naming a server the tools list still carries is the same falsehood reversed.
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.DoesNotContain("mcp__kyber-weave__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, conductor.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+
+        // The withholding list names kyber-weave beside the two carve-out servers: the grant branch
+        // omits the third wildcard, so its absence would recreate the defect this pins.
+        Assert.Contains(
+            "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*",
+            record.Details,
+            StringComparison.Ordinal);
+
+        // The reason follows the same branch: read denial is why the third server is lost, while
+        // the routing-only phrasing describes an orchestrator that still carries it.
+        Assert.Contains(
+            "because this agent's capability profile does not allow filesystem.read",
+            record.Details,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "because a role that only routes work has no use for code-graph or library lookups",
+            record.Details,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The pure orchestrator is granted <c>kyber-weave</c> and keeps its withholding on
+    /// <c>codegraph</c> and <c>context7</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>kyber-weave</c> carries <c>agent_coding_standards</c> — the tool that hands an agent the
+    /// standards it must follow — so withholding it from the role that assigns work withheld it
+    /// from the one role that decides which standards apply to whom. The other two servers keep
+    /// the carve-out: a role that only routes work has no use for code-graph or library lookups.
+    ///
+    /// The expectation comes from <see cref="SquadMcpGrantProjection"/>, never from the renderer,
+    /// so a re-added exclusion fails here rather than agreeing with itself.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Claude_GrantsKyberWeaveToThePureOrchestratorAndWithholdsTheOtherTwo()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Claude);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.Contains("mcp__kyber-weave__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
+
+        // Every other entitled agent keeps all three, so the change widened the orchestrator and
+        // silently narrowed nobody.
+        foreach (SquadAgent agent in source.Agents.Where(candidate => candidate.Name != conductor.Name))
+        {
+            IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
+            Assert.True(
+                SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude)
+                    == tools.Contains("mcp__kyber-weave__*", StringComparer.Ordinal),
+                $"Agent '{agent.Name}' kyber-weave wildcard does not follow the source-computed "
+                + "entitlement.");
+            foreach (string wildcard in new[] { "mcp__codegraph__*", "mcp__context7__*" })
+            {
+                Assert.True(
+                    SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(
+                        source,
+                        agent,
+                        SquadTarget.Claude) == tools.Contains(wildcard, StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' wildcard '{wildcard}' does not follow the "
+                    + "source-computed entitlement.");
+            }
+        }
+
+        // The receipt states what the subagent file is denied and nothing about what it carries:
+        // naming a granted server as withheld is a false claim in the one place a review or a
+        // `squad doctor` run reads without re-deriving the rule.
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, conductor.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("mcp__codegraph__", record.Details, StringComparison.Ordinal);
+        Assert.Contains("mcp__context7__", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcp__kyber-weave__", record.Details, StringComparison.Ordinal);
+    }
+
     private static bool IsDocumentedClaudeTool(string tool) =>
         DocumentedClaudeTools.Contains(tool, StringComparer.Ordinal) ||
         (tool.StartsWith("Agent(", StringComparison.Ordinal) && tool.EndsWith(')'));
 
     private static void AssertTools(SquadRenderResult result, string agentName, string[] expected)
+    {
+        Assert.Equal(expected, RenderedTools(result, agentName));
+    }
+
+    /// <summary>The <c>tools</c> sequence a rendered Claude subagent carries.</summary>
+    private static IReadOnlyList<string> RenderedTools(SquadRenderResult result, string agentName)
     {
         SquadDeploymentFile file = Assert.Single(
             result.Files,
@@ -1041,7 +1212,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             agentName);
-        Assert.Equal(expected, RequireSequence(frontmatter, "tools", agentName));
+        return RequireSequence(frontmatter, "tools", agentName);
     }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)

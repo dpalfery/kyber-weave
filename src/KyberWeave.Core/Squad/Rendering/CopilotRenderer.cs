@@ -1,8 +1,8 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -64,6 +64,9 @@ public sealed class CopilotRenderer : ISquadRenderer
     private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
 
+    /// <summary>The warning code for an agent body over the Copilot cap. Install and update show it only when the operator channel overlay was applied.</summary>
+    internal const string AgentBodyTooLongCode = "agent-body-too-long";
+
     private static readonly ISerializer YamlSerializer = new SerializerBuilder()
         .WithTypeConverter(new CopilotToolsFlowSequenceConverter())
         .WithTypeConverter(new CopilotAgentsFlowSequenceConverter())
@@ -89,6 +92,96 @@ public sealed class CopilotRenderer : ISquadRenderer
             : baseDirectory;
     }
 
+    /// <summary>
+    /// Returns the absolute <c>&lt;copilot-root&gt;/agents</c> directory (forward slashes) that
+    /// agent resource links resolve under at global scope, or null at project scope.
+    /// </summary>
+    /// <exception cref="SquadRenderValidationException">
+    /// Global scope without <see cref="SquadRenderRequest.GlobalRoots"/>: rendering relative
+    /// links anyway would ship the defect this rewrite exists to fix.
+    /// </exception>
+    private static string? ResolveGlobalAgentsRoot(string? copilotGlobalRoot)
+    {
+        if (copilotGlobalRoot is null)
+        {
+            return null;
+        }
+
+        string root = copilotGlobalRoot
+            .Replace('\\', '/')
+            .TrimEnd('/');
+        return $"{root}/{ResolvePrefixedDirectory(AgentsDirectory, SquadDeploymentScope.Global)}";
+    }
+
+    /// <summary>
+    /// Resolves the Copilot global root for this render, once. Every consumer, the agents root, the resource links,
+    /// and the operator channel probe, derives from this one answer, so they cannot disagree about where Copilot lives.
+    /// </summary>
+    /// <returns>The root at global scope, or null at project scope.</returns>
+    /// <exception cref="SquadRenderValidationException">
+    /// Global scope without <see cref="SquadRenderRequest.GlobalRoots"/>: rendering relative
+    /// links anyway would ship the defect this rewrite exists to fix.
+    /// </exception>
+    private static string? ResolveCopilotGlobalRoot(SquadRenderRequest request)
+    {
+        if (request.Scope != SquadDeploymentScope.Global)
+        {
+            return null;
+        }
+
+        if (request.GlobalRoots is null)
+        {
+            throw new SquadRenderValidationException(
+                "Rendering Copilot at global scope requires SquadRenderRequest.GlobalRoots: " +
+                "agent resource links are rewritten to absolute paths under the resolved " +
+                "Copilot global root, and without a resolver they would stay relative and " +
+                "fail to resolve from a foreign working directory.");
+        }
+
+        return request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
+    }
+
+    /// <summary>
+    /// Rewrites the agent's authored links to its declared resources into absolute paths and
+    /// records the deviation.
+    /// </summary>
+    private static string RewriteResourceLinks(
+        SquadAgent agent,
+        string globalAgentsRoot,
+        List<SquadDegradationRecord> degradations)
+    {
+        if (agent.Resources.Count == 0)
+        {
+            return agent.InstructionBody;
+        }
+
+        HashSet<string> resourcePaths = agent.Resources
+            .Select(resource => resource.RelativePath)
+            .ToHashSet(StringComparer.Ordinal);
+
+        string body = SquadResourceLinkRewriter.Rewrite(
+            agent.InstructionBody,
+            resourcePaths,
+            pathPart => $"{globalAgentsRoot}/{pathPart}",
+            out bool changed);
+
+        degradations.Add(new SquadDegradationRecord(
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "resource-links-rewritten",
+            agent.BodyDigest,
+            "Copilot does not reliably anchor a relative link in a user-level agent to " +
+            "the agent file, so the agent's " +
+            $"{agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} resource file(s) " +
+            "stay beside their principal and " +
+            (changed
+                ? "the agent's authored links were rewritten to absolute paths under the resolved Copilot global root."
+                : "no authored link required rewriting.")));
+
+        return body;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
 
@@ -112,10 +205,19 @@ public sealed class CopilotRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Copilot);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
+        string? copilotGlobalRoot = ResolveCopilotGlobalRoot(request);
+        string? globalAgentsRoot = ResolveGlobalAgentsRoot(copilotGlobalRoot);
 
         // A null Arbiter must render byte for byte as before the field existed, and
         // BuildHooks refuses a null wiring, so the guard lives here rather than in the
@@ -132,6 +234,39 @@ public sealed class CopilotRenderer : ISquadRenderer
         List<SquadDegradationRecord> degradations = [];
         List<SquadRenderWarning> warnings = [];
 
+        // The operator channel attaches only at global scope, and only when the user's Copilot config
+        // declares the server it calls. Without the server the conductor must stay exactly as it is,
+        // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
+        SquadOperatorChannel.Overlay? operatorChannelOverlay = null;
+        if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
+        {
+            SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName(request.EnvironmentReader);
+            if (server.Warning is { } nameWarning)
+            {
+                warnings.Add(nameWarning);
+            }
+            else if (server.Name is { } serverName)
+            {
+                if (CopilotMcpServerProbe.HasServer(copilotGlobalRoot, serverName))
+                {
+                    string overlaySourceDirectory = Directory.Exists(request.SourceDirectory)
+                        ? request.SourceDirectory
+                        : request.PreloadedSource?.RootPath ?? request.SourceDirectory;
+                    operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(overlaySourceDirectory, serverName);
+                    warnings.Add(SquadOperatorChannel.OverlayApplied());
+                }
+                else
+                {
+                    warnings.Add(new SquadRenderWarning(
+                        SquadOperatorChannel.ServerAbsentCode,
+                        $"The operator channel is enabled, but no '{serverName}' server is declared " +
+                        $"under mcpServers in {CopilotMcpServerProbe.McpConfigFileName} in '{copilotGlobalRoot}'. " +
+                        "The conductor was rendered without the operator channel.",
+                        "copilot"));
+                }
+            }
+        }
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile principal = RenderAgent(
@@ -140,7 +275,10 @@ public sealed class CopilotRenderer : ISquadRenderer
                 warnings,
                 request.Scope,
                 arbiterHooks,
-                dispatcherAgents);
+                dispatcherAgents,
+                globalAgentsRoot,
+                degradations,
+                agent.Name == SquadOperatorChannel.ConductorAgentName ? operatorChannelOverlay : null);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -155,8 +293,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -180,7 +319,10 @@ public sealed class CopilotRenderer : ISquadRenderer
         List<SquadRenderWarning> warnings,
         SquadDeploymentScope scope,
         IReadOnlyList<SquadArbiterHook> arbiterHooks,
-        IReadOnlySet<string> dispatcherAgents)
+        IReadOnlySet<string> dispatcherAgents,
+        string? globalAgentsRoot,
+        List<SquadDegradationRecord> degradations,
+        SquadOperatorChannel.Overlay? operatorChannelOverlay)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -194,7 +336,15 @@ public sealed class CopilotRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        frontmatter["tools"] = new CopilotToolsFlowSequence(CopilotToolCatalog.Normalize(agent.CopilotTools));
+        // The overlay's tool entry is added after normalisation, so the catalog order stays canonical
+        // and the entry sits at the end of the list. It is present only when the overlay is.
+        List<string> tools = [.. CopilotToolCatalog.Normalize(agent.CopilotTools)];
+        if (operatorChannelOverlay is not null)
+        {
+            tools.Add(operatorChannelOverlay.ToolEntry);
+        }
+
+        frontmatter["tools"] = new CopilotToolsFlowSequence(tools);
 
         // Every agent that delegates names its permitted roster in frontmatter:
         // the "agent" tool grants the mechanism, "agents" names who it may reach.
@@ -252,7 +402,16 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         builder.Append("---\n");
 
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string authoredBody = globalAgentsRoot is null
+            ? agent.InstructionBody
+            : RewriteResourceLinks(agent, globalAgentsRoot, degradations);
+        string normalizedBody = authoredBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (operatorChannelOverlay is not null)
+        {
+            // The overlay closes the conductor body, after every authored section.
+            normalizedBody = $"{normalizedBody.TrimEnd('\n')}\n\n{operatorChannelOverlay.Body}";
+        }
+
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {
@@ -263,7 +422,7 @@ public sealed class CopilotRenderer : ISquadRenderer
         if (content.Length > MaxAgentBodyCharacters)
         {
             warnings.Add(new SquadRenderWarning(
-                "agent-body-too-long",
+                AgentBodyTooLongCode,
                 $"Agent '{agent.Name}' is {content.Length} characters; Copilot caps custom agent files at {MaxAgentBodyCharacters}.",
                 "copilot"));
         }
@@ -355,15 +514,15 @@ public sealed class CopilotRenderer : ISquadRenderer
         }
 
         return new SquadDegradationRecord(
-            Target: "copilot",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "safety-narrowed",
-            InstructionDigest: agent.BodyDigest,
-            Details: $"Copilot capability profile '{profileName}' requires 'ask' for " +
-                $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
-                "cannot prompt for confirmation, so these narrow to 'deny' and the " +
-                "corresponding tools are withheld from the agent's 'tools' list.");
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "safety-narrowed",
+            agent.BodyDigest,
+            $"Copilot capability profile '{profileName}' requires 'ask' for " +
+            $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
+            "cannot prompt for confirmation, so these narrow to 'deny' and the " +
+            "corresponding tools are withheld from the agent's 'tools' list.");
     }
 
     /// <summary>Builds the <c>hooks</c> frontmatter mapping for one wired agent.</summary>
@@ -454,7 +613,10 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// </summary>
     private sealed class CopilotAgentsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CopilotAgentsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CopilotAgentsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -468,10 +630,10 @@ public sealed class CopilotRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string agent in agents)
             {
-                emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, agent, ScalarStyle.SingleQuoted, isPlainImplicit: true, isQuotedImplicit: true));
+                emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, agent, ScalarStyle.SingleQuoted, true, true));
             }
 
             emitter.Emit(new SequenceEnd());
@@ -484,7 +646,10 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// </summary>
     private sealed class CopilotToolsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CopilotToolsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CopilotToolsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -498,17 +663,18 @@ public sealed class CopilotRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string tool in tools)
             {
                 if (tool.Contains('*', StringComparison.Ordinal))
                 {
                     string unquoted = tool.Trim('\'');
-                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, unquoted, ScalarStyle.SingleQuoted, isPlainImplicit: true, isQuotedImplicit: true));
+                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, unquoted, ScalarStyle.SingleQuoted, true,
+                        true));
                 }
                 else
                 {
-                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, tool, ScalarStyle.Plain, isPlainImplicit: true, isQuotedImplicit: true));
+                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, tool, ScalarStyle.Plain, true, true));
                 }
             }
 

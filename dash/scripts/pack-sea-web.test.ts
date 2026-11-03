@@ -80,8 +80,12 @@ describe('packWebDirectory - embed web assets in kyberdash-web/1 format', () => 
     const result = spawnSync('node', ['scripts/pack-sea-web.mjs', sourceDir, join(tempDir, 'output.json')], {
       cwd: DASH_ROOT,
       encoding: 'utf8',
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
     })
 
+    // A timeout leaves status null, which would pass `not.toBe(0)`; assert it did not hang.
+    expect(result.error, 'the packer must exit on its own, not hit the 30 s bound').toBeUndefined()
     expect(result.status).not.toBe(0)
   })
 

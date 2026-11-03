@@ -2,13 +2,16 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { opencodeAdapter } from './adapters/opencode.js'
+import { rawSpan } from './adapters/testing.js'
+import { SPAN_NAMES } from '../capture/harnesses/opencode-plugin/contract.js'
 import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability, measurabilityFor } from './measurability.js'
 import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
 import type { AsadSessionPayload } from './sessions.js'
-import type { CanonicalRecord, SessionRow } from './types.js'
+import { notMeasurable, type CanonicalRecord, type ContentPart, type SessionRow } from './types.js'
 
 type SessionPayloadView = AsadSessionPayload & {
   context: AsadSessionPayload['context'] & {
@@ -188,6 +191,31 @@ describe('buildSessionRow', () => {
     expect(payload.summary.tools_offered).toEqual([])
   })
 
+  it('leaves side-agent calls out of the context series so the latest turn is the main agent', () => {
+    // Copilot's background todo tracker runs a tiny gpt-4o-mini request after
+    // the main agent's turn; it must not become the session's latest turn nor
+    // supply the system prompt carried forward.
+    const row = buildSessionRow(
+      'sess-1',
+      [
+        turn('main', [{ part: 'system_prompt', text: 'main agent prompt', tokens: 13000 }], {
+          tokens: tokens({ freshInput: 78000, reportedInput: 78000 }),
+          timestamp: '2026-10-17T19:02:14.115Z',
+          raw: { 'gen_ai.agent.name': 'panel/editAgent' },
+        }),
+        turn('side', [{ part: 'system_prompt', text: 'background tracker', tokens: 900 }], {
+          tokens: tokens({ freshInput: 1935, reportedInput: 1935 }),
+          timestamp: '2026-10-17T19:02:14.120Z',
+          raw: { 'gen_ai.agent.name': 'backgroundTodoAgent' },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const turns = sessionPayload(row).context.turns
+    expect(turns).toHaveLength(1)
+    expect(turns?.[0]?.buckets?.system_prompt).toBe(13000)
+  })
+
   it('prefers a harness-reported count over tokenizing the text', () => {
     const row = buildSessionRow(
       'sess-1',
@@ -273,10 +301,32 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
-  // Review re-review #2 (Kilo 7): OpenCode is catalogued `not_measurable`
-  // with documented confidence — a verified negative, not an uncatalogued
-  // gap — so its cache figures stay absent like any unsupported harness.
+  // Review re-review #2 (Kilo 7): Windsurf is catalogued as a documented
+  // negative (cache `unsupported`, prefix `not_measurable`, both documented) —
+  // a verified negative, not an uncatalogued gap — so its cache figures stay
+  // absent like any unsupported harness. OpenCode moved off this list when the
+  // capture plugin began exporting cache counters (see the next test).
   it('omits cache figures for a documented-unmeasurable harness', () => {
+    const row = buildSessionRow(
+      'sess-windsurf-cache',
+      [
+        turn('w1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'windsurf',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Rule 6 (OpenCode capture survey): the KyberDash capture plugin exports
+  // cache read and cache write counters, so an OpenCode session carries a
+  // cache ratio. A stored cache read of 0 is a measured 0%, not an absence.
+  it('emits the cache hit ratio for OpenCode, which exports cache counters', () => {
     const row = buildSessionRow(
       'sess-opencode-cache',
       [
@@ -289,8 +339,7 @@ describe('buildSessionRow', () => {
     )
     const summary = sessionPayload(row).summary as Record<string, unknown>
     expect(summary.total_input).toBe(1200)
-    expect('cache_hit_ratio' in summary).toBe(false)
-    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(summary.cache_hit_ratio).toBe(0)
   })
 
   // Review re-review (Kilo 1): Codex is `supported` yet exports no
@@ -351,6 +400,34 @@ describe('buildSessionRow', () => {
     expect(summary.total_input).toBe(1200)
     expect('cache_hit_ratio' in summary).toBe(false)
     expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review (Kilo 2/K3): the harness vocabulary says which counters CAN be
+  // exported; the record's declaration says which ones this turn DID export.
+  // Reading `totals.cacheRead` behind only the vocabulary check published a
+  // stored 0 as a 0% ratio, and counted "on 0 turns" coverage, for a turn whose
+  // adapter had already declared the counter not measurable.
+  it('omits cache figures when the record declares its cache counters unmeasurable', () => {
+    const absent = (reason: string) => ({ availability: 'not_measurable' as const, reason })
+    const row = buildSessionRow(
+      'sess-cache-declared-absent',
+      [
+        turn('cd1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+          measurability: {
+            cache_read: absent('The span exported no cache read counter.'),
+            cache_creation: absent('The span exported no cache creation counter.'),
+          },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
   // Issue #187: the engine's measured per-turn input never reached the wire —
@@ -557,6 +634,33 @@ describe('buildSessionRow', () => {
     expect(payload.context.last.buckets['tool_result_content']).toBe(40)
   })
 
+  it('keeps a Copilot CLI session system_prompt measured through the merge when its tool children state it not measurable (D29)', () => {
+    // A child's not-measurable system_prompt is a statement about the child, not the
+    // session: the carrier measured the prompt, so the session-level merge must still say so.
+    const copilotCliDeclared = measurabilityFor('copilot-cli')
+    const carrier = turn(
+      'cli-carrier',
+      [{ part: 'system_prompt', text: 'You are GitHub Copilot CLI.', tokens: 40 }],
+      {
+        source: 'copilot-cli',
+        harness: 'copilot-cli',
+        sessionId: 'sess-cli',
+        measurability: { ...copilotCliDeclared, system_prompt: 'measured' },
+      },
+    )
+    const child = toolInvoke('cli-carrier-tool', 'cli-carrier', 'view', {
+      source: 'copilot-cli',
+      harness: 'copilot-cli',
+      sessionId: 'sess-cli',
+      measurability: { ...copilotCliDeclared, duration: 'measured' },
+    })
+
+    expect(mergeMeasurability([carrier, child])?.['system_prompt']).toBe('measured')
+
+    const row = buildSessionRow('sess-cli', [carrier, child], approximateO200kBase)
+    expect(typeof sessionPayload(row).context.first.buckets['system_prompt']).toBe('number')
+  })
+
   it('populates tool metrics in session summary when tool invocations are present', () => {
     const parent = turn('turn-1', [{ part: 'system_prompt', text: 'help' }])
     const tool1 = toolInvoke('tool-1', 'turn-1', 'Bash', {
@@ -706,6 +810,39 @@ describe('buildSessionRow', () => {
     expect(session.payload.summary.tool_calls).toBeUndefined()
     expect(session.summary ?? {}).not.toHaveProperty('tools_invoked')
     expect(session.payload.summary).not.toHaveProperty('tools_invoked')
+  })
+
+  it('omits tool_calls when the derived count is a lower bound', () => {
+    // A derived count can be a floor: Pi's collector caps the conversation, so
+    // its tool records say `tool_calls` is not measurable. The dashboard reads a
+    // finite number as a measured one, so the summary must omit it rather than
+    // print the floor as an exact total.
+    const truncated = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-trunc',
+      measurability: { tool_calls: notMeasurable('pi truncated the exported conversation.') },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-trunc', [truncated], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBeUndefined()
+    expect(session.payload.summary.tool_calls).toBeUndefined()
+    // The names observed are an observation, not a count, so they stay.
+    expect(session.summary?.tools_invoked).toEqual(['read'])
+  })
+
+  it('keeps tool_calls when every tool record measures it', () => {
+    const measured = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-whole',
+      measurability: { tool_calls: 'measured' },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-whole', [measured], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBe(1)
   })
 
   it('preserves empty array tools_offered when empty tool definitions were observed (Thread 4)', () => {
@@ -931,6 +1068,134 @@ describe('what counts as a session', () => {
     expect((await buildSessions(store)).built).toBe(1)
     store.close()
   })
+
+  it('builds a session from a counter-less, content-less opencode model call rather than skipping it', async () => {
+    // The dash-managed opencode plugin observes request assembly, not
+    // completion usage: its `llm.invoke` spans name a session and a model but
+    // carry no token counters, and with consent off no content either. 1,390
+    // such records were ingested on the live store and none projected, so the
+    // dashboard showed no opencode data at all. A recognized model call is a
+    // session; what the record cannot say is published as not measurable,
+    // never as a silent skip.
+    // Normalize through the adapter, not a hand-built record: the absence of
+    // a counter is a fact the adapter reads from the span's vocabulary, and
+    // the projection must consume that declaration rather than the stored 0.
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'oc-1',
+        name: SPAN_NAMES.step,
+        source: 'opencode',
+        attributes: {
+          'opencode.contract_version': '3',
+          'opencode.span.kind': 'step',
+          'opencode.model.id': 'claude-opus-4-6',
+          'opencode.session.id': 'ses_t0_opencode',
+        },
+      }),
+    )
+    const store = new CanonStore(':memory:')
+    store.upsertMany([record])
+
+    const report = await buildSessions(store)
+
+    // Before the projection fix the evidence clause skipped the whole group.
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    const payload = sessionPayload({ payload: store.getSessionPayload('ses_t0_opencode') })
+    expect(payload.harness).toBe('opencode')
+    // No measured context: the record carried no parts or counters, so the
+    // analysis says so and states the one turn it could not chart.
+    expect(payload.context.measurable).toBe(false)
+    expect(payload.context.reason).toBe('no_message_structure')
+    expect(payload.context.unmeasuredTurns).toBe(1)
+    // The absent content is published as not measurable with a reason, not as
+    // an empty or zero-filled composition.
+    const firstBuckets = payload.context.first.buckets as Record<
+      string,
+      { availability?: string; reason?: string } | number
+    >
+    expect(firstBuckets.system_prompt).toMatchObject({ availability: 'not_measurable' })
+    expect((firstBuckets.system_prompt as { reason?: string }).reason).toContain(
+      'did not capture system_prompt',
+    )
+    // The absent counters are published the same way: every token dimension
+    // this span could not report is `not_measurable` with a reason, never the
+    // stored zero. The per-turn identity keeps its 0s; only the aggregate
+    // claims a measurement.
+    const tokenDimensions = [
+      payload.summary.total_input,
+      payload.summary.total_output,
+      payload.summary.total_cache_read,
+      payload.summary.total_cache_creation,
+      payload.context.first.reported_input,
+    ]
+    for (const value of tokenDimensions) {
+      expect(value).toMatchObject({ availability: 'not_measurable' })
+      expect((value as { reason?: unknown }).reason).toEqual(expect.any(String))
+      expect((value as { reason: string }).reason.length).toBeGreaterThan(0)
+    }
+    const serialized = JSON.stringify(payload)
+    for (const key of [
+      'total_input',
+      'total_output',
+      'total_cache_read',
+      'total_cache_creation',
+      'reported_input',
+    ]) {
+      expect(serialized, `${key} must not be published as a measured zero`).not.toContain(
+        `"${key}":0`,
+      )
+    }
+    store.close()
+  })
+
+  it('still builds an unattributed legacy turn that carries measured counters', async () => {
+    // The legacy collector stamped `llm.invoke` on spans no adapter claimed
+    // and labelled the group `unattributed`. Those with real counters are a
+    // session and must not disappear with the bare ambient spans.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('legacy-1', [], {
+        sessionId: 'sess-legacy',
+        harness: 'unattributed',
+        tokens: tokens({
+          freshInput: 1200,
+          output: 80,
+          reportedInput: 1200,
+          reportedOutput: 80,
+        }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    const payload = sessionPayload({ payload: store.getSessionPayload('sess-legacy') })
+    // Not merely "some payload exists": the legacy turn's own figures have to
+    // survive the evidence test that admitted it.
+    expect(payload.harness).toBe('unattributed')
+    expect(payload.summary.total_input).toBe(1200)
+    store.close()
+  })
+
+  // Review (Kilo 8): a parts ARRAY is not content. Counting `hasParts` admitted
+  // an unattributed record whose parts carried no text, which is ambient
+  // telemetry the evidence rule exists to keep out; only a bucket with
+  // non-empty text is evidence.
+  it('does not count empty parts as content evidence for an unattributed record', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('ambient-1', [{ part: 'system_prompt', text: '' }], {
+        sessionId: 'sess-ambient',
+        harness: 'unattributed',
+        tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 0, skipped: 1 })
+    store.close()
+  })
 })
 
 describe('buildSessions derived-table completeness', () => {
@@ -1083,7 +1348,7 @@ describe('buildSessions token cache', () => {
 describe('canonical harness on derived sessions', () => {
   // `run`, `execution` and `listHarnesses` are all keyed by the canonical
   // harness. Storing the raw provider entry on the session meant the rollup's
-  // `listSessions(harness)` never matched those sessions: on the measured
+  // per-harness session listing never matched those sessions: on the measured
   // corpus the claude-code scorecard computed context pressure, cache hit rate
   // and tool yield from 1 session while 58 more sat under `claude`, and still
   // reported 59 samples because that count comes from runs.
@@ -1139,8 +1404,9 @@ describe('canonical harness on derived sessions', () => {
 
     await buildSessions(store)
 
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['cursor'] ?? 0).toBe(1)
+    expect(sessionCounts['cursor-agent'] ?? 0).toBe(0)
     store.close()
   })
 
@@ -1156,8 +1422,9 @@ describe('canonical harness on derived sessions', () => {
 
     expect(report.built).toBe(1)
     expect(store.sessionCount()).toBe(1)
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['cursor'] ?? 0).toBe(1)
+    expect(sessionCounts['cursor-agent'] ?? 0).toBe(0)
     const runs = store.listRuns()
     expect(runs).toHaveLength(1)
     for (const run of runs) {
@@ -1221,11 +1488,14 @@ describe('canonical harness on derived sessions', () => {
     const report = await buildSessions(store)
     expect(report.built).toBe(1)
 
-    const sessions = store.listSessions('cursor')
-    expect(sessions).toHaveLength(1)
-    const payload = sessionPayload({ payload: store.getSessionPayload(sessions[0]!.sessionId) })
+    const sessionIds = store.builtSessionIds()
+    expect(sessionIds).toHaveLength(1)
+    const sessionId = sessionIds[0]!
+    // The one session is attributed to the canonical harness, not the alias.
+    expect(store.sessionHarness(sessionId)).toBe('cursor')
+    const payload = sessionPayload({ payload: store.getSessionPayload(sessionId) })
     expect(payload.summary.total_output).toBe(45)
-    expect(store.sessionTokenTotals(sessions[0]!.sessionId)?.output).toBe(45)
+    expect(store.sessionTokenTotals(sessionId)?.output).toBe(45)
     // Without the join the three raw rows would sum to 90; prove the store
     // still holds all three provenance rows while the derived total is once.
     expect(store.recordsForSession(sessionKey)).toHaveLength(3)
@@ -1379,5 +1649,397 @@ describe('session cost totals (issue #186)', () => {
     )
 
     expect(problemsOf(row).map((p) => p.code)).toContain('COST_BASIS_MISMATCH')
+  })
+})
+
+describe('buildSessionRow — Copilot invoke_agent roll-up', () => {
+  const copilotTurn = (
+    spanId: string,
+    op: string,
+    name: string,
+    input: number,
+    parts: ContentPart[],
+    parentSpanId: string | null,
+  ) =>
+    turn(spanId, parts, {
+      harness: 'github-copilot',
+      source: 'github-copilot',
+      op,
+      name,
+      parentSpanId,
+      raw: { 'gen_ai.operation.name': op === 'tool.invoke' ? 'execute_tool' : name.split(' ')[0] },
+      tokens: tokens({ freshInput: input, reportedInput: input, output: 10, reportedOutput: 10 }),
+    })
+
+  const system = (tokensCount: number): ContentPart => ({ part: 'system_prompt', text: 'sys', tokens: tokensCount })
+  const history = (tokensCount: number): ContentPart => ({
+    part: 'conversation_history',
+    text: 'h',
+    tokens: tokensCount,
+  })
+
+  it('charts the chat calls as turns, not the roll-up, and does not double count', () => {
+    const rollup = copilotTurn('root', 'agent.invoke', 'invoke_agent architect', 496_000, [history(1)], null)
+    const chats = [
+      copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000), history(100)], 'root'),
+      copilotTurn('c2', 'llm.invoke', 'chat gpt', 40_000, [history(200)], 'root'),
+      copilotTurn('c3', 'llm.invoke', 'chat gpt', 57_000, [history(300)], 'root'),
+    ]
+    const row = buildSessionRow('sess-1', [rollup, ...chats], approximateO200kBase)
+    const payload = sessionPayload(row)
+    const inputs = payload.context.turns?.map((t) => (t as { reported_input?: number }).reported_input)
+
+    expect(inputs).toEqual([35_000, 40_000, 57_000])
+    expect(payload.summary.turn_count ?? (row as unknown as { turnCount?: number }).turnCount).toBe(3)
+    expect(payload.summary.total_input).toBe(132_000)
+  })
+
+  it('also recognises a stored roll-up that still carries the old llm.invoke op', () => {
+    const rollup = copilotTurn('root', 'llm.invoke', 'invoke_agent architect', 496_000, [history(1)], null)
+    const chat = copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000)], 'root')
+    const payload = sessionPayload(buildSessionRow('sess-1', [rollup, chat], approximateO200kBase))
+
+    expect(payload.context.turns).toHaveLength(1)
+  })
+
+  it('carries the system prompt onto every later turn that omits it', () => {
+    const chats = [
+      copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000), history(100)], null),
+      copilotTurn('c2', 'llm.invoke', 'chat gpt', 40_000, [history(200)], null),
+    ]
+    const payload = sessionPayload(buildSessionRow('sess-1', chats, approximateO200kBase))
+
+    expect(payload.context.turns?.map((t) => t.buckets?.system_prompt)).toEqual([20_000, 20_000])
+  })
+
+  it('keeps a roll-up-only session as a turn rather than emptying it', () => {
+    const rollup = copilotTurn('root', 'agent.invoke', 'invoke_agent architect', 5_000, [history(100)], null)
+    const row = buildSessionRow('sess-1', [rollup], approximateO200kBase)
+
+    expect(sessionPayload(row).context.turns).toHaveLength(1)
+  })
+})
+
+// T10b (D7): a tool definition the turn offered without keeping resident must
+// reach the context analysis flagged, so it adds no resident tokens to the
+// turn's composition and is counted once as offered on the turn.
+describe('buildSessionRow — non-resident tool definitions (T10b, D7)', () => {
+  it('carries resident:false through to the composition so a non-resident definition adds no tool tokens', () => {
+    const row = buildSessionRow(
+      'sess-nonres',
+      [
+        turn('nr1', [
+          { part: 'tool_definitions', text: '{"name":"deferred_search"}', tokens: 900, server: 'github', resident: false },
+          { part: 'tool_definitions', text: '{"name":"read"}', tokens: 300 },
+          { part: 'system_prompt', text: 'you are a helpful assistant', tokens: 400 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const firstTurn = sessionPayload(row).context.turns?.[0] as
+      | { buckets: Record<string, number>; toolDefinitionsByServer: Record<string, number>; builtinToolDefinitionTokens: number }
+      | undefined
+
+    // Only the resident definition counts; the flagged one is excluded from
+    // the bucket, the per-server group and the built-in total.
+    expect(firstTurn?.buckets.tool_definitions).toBe(300)
+    expect(firstTurn?.toolDefinitionsByServer).toEqual({})
+    expect(firstTurn?.builtinToolDefinitionTokens).toBe(300)
+  })
+
+  it('reports the number of non-resident definitions offered on the turn', () => {
+    const row = buildSessionRow(
+      'sess-nonres-count',
+      [
+        turn('nr2', [
+          { part: 'tool_definitions', text: '{"name":"deferred_a"}', tokens: 900, server: 'github', resident: false },
+          { part: 'tool_definitions', text: '{"name":"deferred_b"}', tokens: 700, server: 'github', resident: false },
+          { part: 'tool_definitions', text: '{"name":"read"}', tokens: 300 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const firstTurn = sessionPayload(row).context.turns?.[0] as { nonResidentToolDefinitions?: number } | undefined
+
+    expect(firstTurn?.nonResidentToolDefinitions).toBe(2)
+  })
+
+  it('omits the non-resident count from a turn that offered none', () => {
+    const row = buildSessionRow(
+      'sess-all-resident',
+      [
+        turn('nr3', [
+          { part: 'tool_definitions', text: '{"name":"read"}', tokens: 300 },
+          { part: 'system_prompt', text: 'you are a helpful assistant', tokens: 400 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const firstTurn = sessionPayload(row).context.turns?.[0]
+
+    expect(firstTurn).not.toHaveProperty('nonResidentToolDefinitions')
+  })
+})
+
+// D30: an Antigravity turn states its invoked skills only where its record carries
+// `kyber.skills.invoked` (`[]` is a measured none). Turn 1 below carries no key, so the
+// session is partly covered: the skills view is measured over turns 2 and 3 and says so.
+type SkillsTurnView = { index: number; skills_invoked?: string[] }
+type SkillsPayloadView = {
+  measurable?: boolean
+  availability?: string
+  invocationsCoverage?: { measuredTurns: number; totalTurns: number }
+  rows?: Array<{ name: string; invocations: number | { availability: string; reason: string } }>
+}
+
+function skillsTurnsOf(row: SessionRow): SkillsTurnView[] {
+  return (row.payload as unknown as { turns: SkillsTurnView[] }).turns
+}
+
+function skillsViewOf(row: SessionRow): SkillsPayloadView {
+  return (row.payload as unknown as { skills: SkillsPayloadView }).skills
+}
+
+describe('buildSessionRow — Antigravity invoked skills on a partly covered session (D30)', () => {
+  const AGY_SESSION = 'sess-agy-coverage'
+  const AGY_TRACE = 'trace-agy-coverage'
+  const LISTING = { 'gen_ai.skills': 'Active Skills: alpha, beta' }
+
+  function agyTurn(spanId: string, timestamp: string, raw: Record<string, unknown>): CanonicalRecord {
+    return turn(spanId, [], {
+      harness: 'antigravity',
+      source: 'antigravity',
+      sessionId: AGY_SESSION,
+      traceId: AGY_TRACE,
+      timestamp,
+      raw,
+    })
+  }
+
+  const partlyCovered = (): CanonicalRecord[] => [
+    agyTurn('agy-t1', '2026-09-03T10:00:00.000Z', { ...LISTING }),
+    agyTurn('agy-t2', '2026-09-03T10:01:00.000Z', { ...LISTING, 'kyber.skills.invoked': [] }),
+    agyTurn('agy-t3', '2026-09-03T10:02:00.000Z', { ...LISTING, 'kyber.skills.invoked': ['alpha'] }),
+  ]
+
+  it('states a turn with no key as not measured, a covered turn with none as [], and a covered turn with a skill by name', () => {
+    const turns = skillsTurnsOf(buildSessionRow(AGY_SESSION, partlyCovered(), approximateO200kBase))
+
+    expect(turns[0]).not.toHaveProperty('skills_invoked')
+    expect(turns[1]?.skills_invoked).toEqual([])
+    expect(turns[2]?.skills_invoked).toEqual(['alpha'])
+  })
+
+  it('measures the skills view over the covered turns: alpha invoked once, beta measured none', () => {
+    const skills = skillsViewOf(buildSessionRow(AGY_SESSION, partlyCovered(), approximateO200kBase))
+
+    expect(skills).toMatchObject({ measurable: true })
+    const rows = skills.rows ?? []
+    expect(rows.find((row) => row.name === 'alpha')?.invocations).toBe(1)
+    expect(rows.find((row) => row.name === 'beta')?.invocations).toBe(0)
+  })
+
+  it('says how many turns the invocation figures cover, when only some are covered', () => {
+    const skills = skillsViewOf(buildSessionRow(AGY_SESSION, partlyCovered(), approximateO200kBase))
+
+    expect(skills.invocationsCoverage).toEqual({ measuredTurns: 2, totalTurns: 3 })
+  })
+
+  it('omits invocationsCoverage when every turn is covered', () => {
+    const fully = [
+      agyTurn('agy-f1', '2026-09-03T10:00:00.000Z', { ...LISTING, 'kyber.skills.invoked': [] }),
+      agyTurn('agy-f2', '2026-09-03T10:01:00.000Z', { ...LISTING, 'kyber.skills.invoked': ['alpha'] }),
+      agyTurn('agy-f3', '2026-09-03T10:02:00.000Z', { ...LISTING, 'kyber.skills.invoked': [] }),
+    ]
+    const skills = skillsViewOf(buildSessionRow(AGY_SESSION, fully, approximateO200kBase))
+
+    expect(skills).toMatchObject({ measurable: true })
+    expect(skills).not.toHaveProperty('invocationsCoverage')
+  })
+
+  it('keeps invocations not measurable, with no per-turn key, when no record carries the key', () => {
+    const none = [
+      agyTurn('agy-n1', '2026-09-03T10:00:00.000Z', { ...LISTING }),
+      agyTurn('agy-n2', '2026-09-03T10:01:00.000Z', { ...LISTING }),
+    ]
+    const row = buildSessionRow(AGY_SESSION, none, approximateO200kBase)
+    const skills = skillsViewOf(row)
+
+    for (const turnView of skillsTurnsOf(row)) expect(turnView).not.toHaveProperty('skills_invoked')
+    expect(skills).not.toHaveProperty('invocationsCoverage')
+    for (const skillRow of skills.rows ?? []) {
+      expect(skillRow.invocations).toMatchObject({ availability: 'not_measurable' })
+    }
+  })
+})
+
+describe('buildSessionRow — Claude Code and Copilot CLI skills are unchanged by D30', () => {
+  it('keeps a Claude Code session on its own rule: an invoked list on any turn measures every turn', () => {
+    const claude = [
+      turn('cc-t1', [], {
+        harness: 'claude-code',
+        source: 'claude-code',
+        sessionId: 'sess-cc',
+        timestamp: '2026-09-03T10:00:00.000Z',
+        raw: {
+          'kyber.skills.listed': { isInitial: true, skills: [{ name: 'alpha' }, { name: 'beta' }] },
+          'kyber.skills.invoked': ['alpha'],
+        },
+      }),
+      turn('cc-t2', [], { harness: 'claude-code', source: 'claude-code', sessionId: 'sess-cc', timestamp: '2026-09-03T10:01:00.000Z', raw: {} }),
+    ]
+    const row = buildSessionRow('sess-cc', claude, approximateO200kBase)
+
+    expect(skillsTurnsOf(row)[0]?.skills_invoked).toEqual(['alpha'])
+    expect(skillsTurnsOf(row)[1]?.skills_invoked).toEqual([])
+    expect(skillsViewOf(row)).not.toHaveProperty('invocationsCoverage')
+  })
+
+  it('leaves a Copilot CLI session without invocations and without invocationsCoverage', () => {
+    const cli = [
+      turn('cli-t1', [], { harness: 'copilot-cli', source: 'copilot-cli', sessionId: 'sess-cli', timestamp: '2026-09-03T10:00:00.000Z', raw: {} }),
+    ]
+    const row = buildSessionRow('sess-cli', cli, approximateO200kBase)
+
+    expect(skillsTurnsOf(row)[0]).not.toHaveProperty('skills_invoked')
+    expect(skillsViewOf(row)).not.toHaveProperty('invocationsCoverage')
+  })
+})
+
+// Numeric part text (refresh crash): untrusted payloads can carry a non-string
+// `text` despite the type, and the refresh must survive it rather than throw.
+// RED without the fix: the numeric text reached `countTokens`/`cacheKey`
+// (`createHash.update` throws on a non-string) and the tool-def catalogue
+// parse read `.trim()` off a number, so `buildSessionRow` threw instead of
+// building. The fix filters non-string text in `partsOf` and skips non-string
+// definitions before the catalogue parse, and `taskSummaryOf` skips
+// non-string history before `.trim()`.
+describe('buildSessionRow — numeric part text is dropped, never counted', () => {
+  it('drops a numeric tool_definitions part while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-tooldef',
+      [
+        turn('num-1', [
+          { part: 'tool_definitions', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+    const payload = sessionPayload(row)
+
+    // The build itself is the no-throw assertion; the outcomes pin the drop.
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    // The numeric blob is not a catalogue: no names, no offered catalogue.
+    expect(payload.summary.tools_offered).toBeUndefined()
+    expect(payload.tools.some((tool) => String(tool.name ?? '').includes('28'))).toBe(false)
+  })
+
+  it('drops numeric conversation_history while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-history',
+      [
+        turn('num-2', [
+          { part: 'conversation_history', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.conversation_history ?? 0).toBe(0)
+  })
+
+  it('keeps the measured count of a numeric-text part', () => {
+    // Kilo review: dropping the whole part discarded a count the harness did
+    // measure, so direct `analyzeContext` read 123 while `buildSessionRow` read
+    // 0 for the same payload. The text is dropped; the measurement is not.
+    const row = buildSessionRow(
+      'sess-numeric-measured',
+      [
+        turn('num-3', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: 123 },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions).toBe(123)
+    expect(context.observedParts).toContain('tool_definitions')
+  })
+
+  it('does not keep a numeric-text part whose measured count is not finite', () => {
+    const row = buildSessionRow(
+      'sess-numeric-nonfinite',
+      [
+        turn('num-4', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: Number.NaN },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    expect(context.observedParts ?? []).not.toContain('tool_definitions')
+  })
+})
+
+// T4 — one bad session must not fail the refresh (numeric-part-text crash):
+// the per-session try/catch in `buildSessions` isolates a derivation throw,
+// records it as a `derivation_failed` problem, and continues with the next
+// session. RED without the fix: the throw propagated out of `buildSessions`,
+// so the healthy sibling never built and the refresh failed outright.
+describe('buildSessions — a failing session degrades the build instead of failing it', () => {
+  it('builds the healthy session while the failed one is skipped, degraded, and recorded', async () => {
+    // The numeric-part-text refresh crash: one malformed session must not
+    // fail the refresh. RED without the per-session try/catch: the throw
+    // propagated out of `buildSessions`, so the healthy sibling never built.
+    // The failure is injected at the persistence seam rather than through
+    // malformed bytes because a genuinely malformed record (e.g. numeric
+    // part text) currently also throws later in the findings phase
+    // (`extractListedSkills` → `parseBodyListing`), outside the guarded
+    // region — tracked as a follow-up gap — while this test pins the
+    // isolation contract itself: skip, degrade, record, continue.
+    const store = new CanonStore(':memory:')
+    try {
+      const healthy = turn('good-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-healthy',
+        traceId: 'trace-healthy',
+      })
+      const failing = turn('bad-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-bad',
+        traceId: 'trace-bad',
+      })
+      store.upsertMany([healthy, failing])
+      const persisted = store.upsertSession.bind(store)
+      const upsert = vi.spyOn(store, 'upsertSession').mockImplementation((row) => {
+        if (row.sessionId === 'sess-bad') throw new Error('session derivation failed (fixture)')
+        persisted(row)
+      })
+      try {
+        const report = await buildSessions(store)
+
+        expect(report.built).toBe(1)
+        expect(report.skipped).toBe(1)
+        expect(report.derivationDegraded).toBe(1)
+        expect(store.getSessionPayload('sess-healthy')).toBeDefined()
+        expect(store.getSessionPayload('sess-bad')).toBeUndefined()
+        expect(store.getProblems('sess-bad').some((problem) => problem.code === 'derivation_failed')).toBe(true)
+      } finally {
+        upsert.mockRestore()
+      }
+    } finally {
+      store.close()
+    }
   })
 })

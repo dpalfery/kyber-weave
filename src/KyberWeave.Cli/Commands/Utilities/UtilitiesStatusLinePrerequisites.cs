@@ -50,6 +50,13 @@ internal static class UtilitiesStatusLinePrerequisites
                 new UtilitiesStatusLinePrerequisite("node",
                     "Install Node.js, the Pi extension runtime, for example 'brew install node' on macOS or 'apt-get install nodejs' on Debian/Ubuntu.")
             ],
+            StatusLineTarget.CommandCode =>
+            [
+                new UtilitiesStatusLinePrerequisite("node",
+                    "Install Node.js, the CommandCode mod runtime, for example 'brew install node' on macOS or 'apt-get install nodejs' on Debian/Ubuntu."),
+                new UtilitiesStatusLinePrerequisite("git",
+                    "Install git, for example 'brew install git' on macOS or 'apt-get install git' on Debian/Ubuntu.")
+            ],
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,
@@ -65,6 +72,7 @@ internal static class UtilitiesStatusLinePrerequisites
             StatusLineTarget.Claude => "claude",
             StatusLineTarget.Agy => "agy",
             StatusLineTarget.Pi => "pi",
+            StatusLineTarget.CommandCode => "cmd",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

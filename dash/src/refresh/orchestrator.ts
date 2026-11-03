@@ -140,8 +140,10 @@ export async function refreshHarnessSources(
     // Exactly one projection per refresh, and only after the writer drained —
     // projecting earlier would cache a store the writer was still committing to.
     let derivationFailed = false
+    let derivationDegraded = 0
     try {
-      await projectCanonicalStore(store)
+      const projectionReport = await projectCanonicalStore(store)
+      derivationDegraded = projectionReport.derivationDegraded
     } catch {
       derivationFailed = true
     }
@@ -166,10 +168,16 @@ export async function refreshHarnessSources(
 
     // Close the run the same way whether it worked or not: the footer needs the failure as
     // much as the success, and a run row left open would later read as one still going.
+    // A degraded projection still exits 0: the healthy sessions built and the
+    // skipped ones are recorded as `derivation_failed` problems, so the count
+    // belongs in the summary rather than in the exit code. Only a throw above
+    // (a projection-level failure) still fails the refresh.
+    const degradedSuffix =
+      derivationDegraded > 0 ? `; ${derivationDegraded} session(s) skipped: derivation failed` : ''
     const summary =
       exitCode === 0
-        ? `${rows.length} source job(s), ${report.derived.sessions} session(s)`
-        : `${failedJobs} of ${rows.length} source job(s) failed${derivationFailed ? '; derivation failed' : ''}`
+        ? `${rows.length} source job(s), ${report.derived.sessions} session(s)${degradedSuffix}`
+        : `${failedJobs} of ${rows.length} source job(s) failed${derivationFailed ? '; derivation failed' : ''}${degradedSuffix}`
     store.completeRefreshRun(
       runId,
       exitCode === 0 ? 'success' : 'failure',

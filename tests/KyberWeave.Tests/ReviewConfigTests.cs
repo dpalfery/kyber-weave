@@ -123,6 +123,82 @@ public class ReviewConfigTests
         Assert.Equal(new DateOnly(2026, 11, 18), Assert.Single(config.Policy.Suppressions).Expires);
     }
 
+    [Fact]
+    public void StrictnessDefaultsToBalancedWithTheProductThresholds()
+    {
+        ReviewPolicy policy = Load("review:\n  policy:\n    max-reviewable-lines: 5000\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Balanced, policy.Strictness);
+        Assert.Equal(7, policy.MinConfidence);
+        Assert.Equal(3, policy.MajorCountBlocks);
+    }
+
+    [Theory]
+    [InlineData("lenient", ReviewStrictness.Lenient, 8, 5)]
+    [InlineData("balanced", ReviewStrictness.Balanced, 7, 3)]
+    [InlineData("strict", ReviewStrictness.Strict, 5, 1)]
+    [InlineData("Strict", ReviewStrictness.Strict, 5, 1)]
+    public void StrictnessSelectsTheConfidenceFloorAndMajorThreshold(
+        string value, ReviewStrictness expected, int floor, int majors)
+    {
+        ReviewPolicy policy = Load($"review:\n  policy:\n    strictness: {value}\n").Policy;
+
+        Assert.Equal(expected, policy.Strictness);
+        Assert.Equal(floor, policy.MinConfidence);
+        Assert.Equal(majors, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnExplicitThresholdOverridesTheStrictnessPreset()
+    {
+        ReviewPolicy policy = Load(
+            "review:\n  policy:\n    strictness: strict\n    min-confidence: 8\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(8, policy.MinConfidence);
+        Assert.Equal(1, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnExplicitMajorThresholdOverridesTheStrictnessPreset()
+    {
+        ReviewPolicy policy = Load(
+            "review:\n  policy:\n    strictness: strict\n    major-count-blocks: 2\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(2, policy.MajorCountBlocks);
+        Assert.Equal(5, policy.MinConfidence);
+    }
+
+    [Fact]
+    public void ThePaddedStrictnessValueIsAcceptedAndAppliesItsPreset()
+    {
+        ReviewPolicy policy = Load("review:\n  policy:\n    strictness: \" strict \"\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(5, policy.MinConfidence);
+        Assert.Equal(1, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void TheBalancedPresetMatchesTheProductDefaults()
+    {
+        ReviewPolicy balanced = ReviewPolicy.ForStrictness(ReviewStrictness.Balanced);
+
+        Assert.Equal(ReviewPolicy.ProductDefaults.MinConfidence, balanced.MinConfidence);
+        Assert.Equal(ReviewPolicy.ProductDefaults.MajorCountBlocks, balanced.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnUnknownStrictnessIsRejectedAndNamesTheValidValues()
+    {
+        string message = Invalid("review:\n  policy:\n    strictness: paranoid\n").Message;
+
+        Assert.Contains("strictness", message, StringComparison.Ordinal);
+        Assert.Contains("lenient", message, StringComparison.Ordinal);
+        Assert.Contains("strict", message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("min-confidence: 0", "min-confidence")]
     [InlineData("min-confidence: 11", "min-confidence")]
@@ -137,6 +213,64 @@ public class ReviewConfigTests
             "between 0 and 100",
             Invalid("review:\n  coverage:\n    file-line-percent: 101\n").Message,
             StringComparison.Ordinal);
+
+    /// <summary>
+    /// The ready-queue dispatcher caps concurrent workers from this value, so an operator who
+    /// writes nothing still gets the product default rather than unbounded parallelism.
+    /// </summary>
+    [Fact]
+    public void AbsentMaxConcurrentWorkersDefaultsToFour()
+    {
+        ReviewConfig config = Load("ontology:\n  docs-root: docs\n");
+
+        object? workers = MaxConcurrentWorkersOrNull(config);
+
+        Assert.True(
+            workers is not null,
+            "T5 RED (issue #386 item E): ReviewConfig.MaxConcurrentWorkers does not exist yet; " +
+            "T5 GREEN adds review.max-concurrent-workers with default 4.");
+        Assert.Equal((object)4, workers);
+    }
+
+    /// <summary>
+    /// A host that names a cap gets that cap: the value is read where the operator wrote it,
+    /// not replaced by the default.
+    /// </summary>
+    [Fact]
+    public void SetMaxConcurrentWorkersIsHonored()
+    {
+        ReviewConfig config = Load("review:\n  max-concurrent-workers: 8\n");
+
+        object? workers = MaxConcurrentWorkersOrNull(config);
+
+        Assert.True(
+            workers is not null,
+            "T5 RED (issue #386 item E): review.max-concurrent-workers is not read yet; " +
+            "T5 GREEN binds it to ReviewConfig.MaxConcurrentWorkers.");
+        Assert.Equal((object)8, workers);
+    }
+
+    /// <summary>
+    /// Zero workers would run nothing and a negative count is meaningless, so either is refused
+    /// where the operator wrote it rather than stalling the ready queue at runtime.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void NonPositiveMaxConcurrentWorkersIsRejected(int workers) =>
+        Assert.Contains(
+            "max-concurrent-workers",
+            Invalid($"review:\n  max-concurrent-workers: {workers}\n").Message,
+            StringComparison.Ordinal);
+
+    /// <summary>
+    /// ASSUMED API (T5 RED, issue #386 item E): <c>review.max-concurrent-workers</c> reads as
+    /// <c>ReviewConfig.MaxConcurrentWorkers</c> (default 4). T5 GREEN provides the member; until
+    /// then the value is observed through reflection so the suite still builds and the RED is a
+    /// failing assertion rather than a broken assembly.
+    /// </summary>
+    private static object? MaxConcurrentWorkersOrNull(ReviewConfig config) =>
+        typeof(ReviewConfig).GetProperty("MaxConcurrentWorkers")?.GetValue(config);
 
     /// <summary>
     /// This repository runs its own review through this configuration, so the checked-in file

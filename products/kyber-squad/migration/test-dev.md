@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/test-dev.agent.md
 sources:
   .github/agents/test-dev.agent.md: b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-final-body-sha256: 370adc386a9cfe430bf28d887aa3fb44cc30c8631a50bde601a9c9c8eea6a053
+final-body-sha256: c223be1d95c23ed5d06b84c73688a262f727bc972e95cced48251458eeb2c6d0
 ---
 # test-dev migration
 
@@ -16,9 +16,10 @@ Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source f
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
 
-The body has since evolved: the completion digest carries a machine-readable `RED_EVIDENCE:`
-line the in-flight ledger parses for the `KW-ARB-MODE-001` fact `ledger.red-evidence` (packet 7.4).
-`final-body-sha256` covers that evolved body.
+The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
+exit gate, `path.agent_scratchpad` worktree isolation, and the completion digest carrying a
+machine-readable `RED_EVIDENCE:` line the in-flight ledger parses for the `KW-ARB-MODE-001`
+fact `ledger.red-evidence` (packet 7.4). `final-body-sha256` covers that evolved body.
 
 ## Canonical projection
 

@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -241,6 +242,38 @@ public sealed class HostConfigYamlTests
         string result = HostConfigYaml.WithTechnologies(yaml, ["csharp", "test"]);
 
         Assert.Equal(yaml, result);
+    }
+
+    /// <summary>
+    /// A byte-order mark is a character, not a line break, so one written ahead of the first line
+    /// must not hide the <c>ontology:</c> key that starts immediately after it. Read as "start of
+    /// line" alone, the key goes unfound and a second <c>ontology</c> block is appended — two
+    /// keys, which YAML refuses to load.
+    /// </summary>
+    [Fact]
+    public void AByteOrderMarkBeforeTheFirstLineDoesNotHideTheOntologyKey()
+    {
+        const string yaml = "\uFEFFontology:\n  docs-root: docs\n";
+
+        Assert.Equal(yaml, HostConfigYaml.WithDocsRoot(yaml, "docs"));
+    }
+
+    /// <summary>
+    /// The technologies edit reads the same line endings the configuration was written with. A
+    /// lone-CR file is one long line to a <c>'\n'</c> split, so the <c>ontology:</c> key goes
+    /// unfound and a second block is appended — two <c>ontology</c> keys, which YAML refuses to
+    /// load at all.
+    /// </summary>
+    [Fact]
+    public void AddsTechnologiesToALoneCrConfigurationWithoutASecondOntologyBlock()
+    {
+        const string yaml = "ontology:\r  docs-root: docs\r";
+
+        string result = HostConfigYaml.WithTechnologies(yaml, ["csharp"]);
+
+        Assert.Contains("csharp", KyberWeaveConfigLoader.LoadFromYaml(result).Ontology.Technologies);
+        Assert.DoesNotContain("\n", result, StringComparison.Ordinal);
+        Assert.Contains("  technologies:\r", result, StringComparison.Ordinal);
     }
 
     /// <summary>

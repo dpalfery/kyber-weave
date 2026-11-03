@@ -123,7 +123,8 @@ public sealed class SquadOwnedBlockStatusTests
     public void Doctor_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
     {
         using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
+        SquadStateStore store = new(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
@@ -139,7 +140,6 @@ public sealed class SquadOwnedBlockStatusTests
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(fixture.Path, "user-home"));
         SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
@@ -160,7 +160,8 @@ public sealed class SquadOwnedBlockStatusTests
     public void Doctor_ReportsMissingBlockFileAsDriftByFileAndContainer()
     {
         using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
+        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
+        SquadStateStore store = new(userPaths);
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
@@ -176,7 +177,6 @@ public sealed class SquadOwnedBlockStatusTests
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(fixture.Path, "user-home"));
         SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(

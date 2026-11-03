@@ -5,11 +5,17 @@ internal sealed class ReviewYamlSection
 {
     public List<ReviewGateYaml>? Gates { get; init; }
 
+    /// <summary>Agent slug to its ordered task gates, as the operator wrote them.</summary>
+    public Dictionary<string, List<ReviewTaskGateYaml>?>? TaskGates { get; init; }
+
     public ReviewCoverageYaml? Coverage { get; init; }
 
     public ReviewDuplicatesYaml? Duplicates { get; init; }
 
     public ReviewPolicyYaml? Policy { get; init; }
+
+    /// <summary>Maximum concurrent workers the ready-queue dispatcher may run.</summary>
+    public int? MaxConcurrentWorkers { get; init; }
 }
 
 /// <summary>The <c>review.duplicates</c> mapping.</summary>
@@ -23,6 +29,10 @@ internal sealed class ReviewGateYaml
 {
     public string? Id { get; init; }
 
+    public List<string>? Include { get; init; }
+
+    public string? Os { get; init; }
+
     public List<string>? Run { get; init; }
 
     public bool? Blocking { get; init; }
@@ -30,12 +40,38 @@ internal sealed class ReviewGateYaml
     public int? TimeoutSeconds { get; init; }
 
     public ReviewAppliesWhenYaml? AppliesWhen { get; init; }
+
+    public string? WorkingDirectory { get; init; }
+
+    public bool? FailOnOutput { get; init; }
 }
 
 /// <summary>One entry's <c>applies-when</c> mapping: the paths the gate applies to.</summary>
 internal sealed class ReviewAppliesWhenYaml
 {
     public List<string>? Paths { get; init; }
+}
+
+/// <summary>One entry of <c>review.task-gates.&lt;agent&gt;</c>.</summary>
+internal sealed class ReviewTaskGateYaml
+{
+    public string? Id { get; init; }
+
+    public List<string>? Include { get; init; }
+
+    public string? Os { get; init; }
+
+    public List<string>? Run { get; init; }
+
+    public List<string>? Fix { get; init; }
+
+    public bool? Blocking { get; init; }
+
+    public int? Timeout { get; init; }
+
+    public string? WorkingDirectory { get; init; }
+
+    public bool? FailOnOutput { get; init; }
 }
 
 /// <summary>The <c>review.coverage</c> mapping.</summary>
@@ -56,6 +92,8 @@ internal sealed class ReviewPolicyYaml
     public int? MajorCountBlocks { get; init; }
 
     public int? MinConfidence { get; init; }
+
+    public string? Strictness { get; init; }
 
     public List<ReviewSuppressionYaml>? Suppressions { get; init; }
 }

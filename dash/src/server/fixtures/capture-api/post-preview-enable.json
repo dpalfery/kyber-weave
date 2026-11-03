@@ -1,0 +1,141 @@
+{
+  "action": "enable",
+  "harness": "claude-code",
+  "dryRun": true,
+  "outcome": "previewed",
+  "events": [
+    {
+      "kind": "would-write",
+      "harness": "claude-code",
+      "fileId": "claude-settings",
+      "path": "/Users/example/.claude/settings.json",
+      "changes": [
+        {
+          "key": "env.OTEL_LOGS_EXPORTER",
+          "before": "console",
+          "after": "otlp"
+        },
+        {
+          "key": "env.OTEL_LOG_USER_PROMPTS",
+          "after": "1"
+        },
+        {
+          "key": "env.OTEL_LOG_ASSISTANT_RESPONSES",
+          "after": "1"
+        },
+        {
+          "key": "env.OTEL_LOG_TOOL_DETAILS",
+          "after": "1"
+        },
+        {
+          "key": "env.OTEL_LOG_TOOL_CONTENT",
+          "after": "1"
+        },
+        {
+          "key": "env.OTEL_LOG_RAW_API_BODIES",
+          "after": "1"
+        },
+        {
+          "key": "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+          "after": "1048576"
+        },
+        {
+          "key": "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+          "after": "1"
+        },
+        {
+          "key": "env.OTEL_TRACES_EXPORTER",
+          "after": "otlp"
+        },
+        {
+          "key": "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+          "after": "http/protobuf"
+        },
+        {
+          "key": "env.OTEL_EXPORTER_OTLP_ENDPOINT",
+          "after": "http://127.0.0.1:4318"
+        }
+      ]
+    }
+  ],
+  "harnessState": {
+    "id": "claude-code",
+    "displayName": "Claude Code",
+    "mode": "managed",
+    "installed": "detected",
+    "installEvidence": [
+      "config found at /Users/example/.claude/settings.json"
+    ],
+    "state": "partial",
+    "receipt": "absent",
+    "files": [
+      {
+        "id": "claude-settings",
+        "path": "/Users/example/.claude/settings.json",
+        "applicable": true,
+        "exists": true,
+        "expectedKeys": [
+          "env.OTEL_LOGS_EXPORTER",
+          "env.OTEL_LOG_USER_PROMPTS",
+          "env.OTEL_LOG_ASSISTANT_RESPONSES",
+          "env.OTEL_LOG_TOOL_DETAILS",
+          "env.OTEL_LOG_TOOL_CONTENT",
+          "env.OTEL_LOG_RAW_API_BODIES",
+          "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+          "env.CLAUDE_CODE_ENABLE_TELEMETRY",
+          "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+          "env.OTEL_TRACES_EXPORTER",
+          "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+          "env.OTEL_EXPORTER_OTLP_ENDPOINT"
+        ],
+        "presentKeys": [
+          "env.OTEL_LOGS_EXPORTER",
+          "env.CLAUDE_CODE_ENABLE_TELEMETRY"
+        ],
+        "missingKeys": [
+          "env.OTEL_LOG_USER_PROMPTS",
+          "env.OTEL_LOG_ASSISTANT_RESPONSES",
+          "env.OTEL_LOG_TOOL_DETAILS",
+          "env.OTEL_LOG_TOOL_CONTENT",
+          "env.OTEL_LOG_RAW_API_BODIES",
+          "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+          "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+          "env.OTEL_TRACES_EXPORTER",
+          "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+          "env.OTEL_EXPORTER_OTLP_ENDPOINT"
+        ],
+        "mismatchedKeys": [
+          "env.OTEL_LOGS_EXPORTER"
+        ],
+        "drift": null
+      }
+    ],
+    "warnings": [],
+    "manualSteps": [],
+    "statusLines": [],
+    "health": "attention",
+    "issues": [
+      {
+        "code": "missing-keys",
+        "severity": "blocking",
+        "text": "Missing env.OTEL_LOG_USER_PROMPTS, env.OTEL_LOG_ASSISTANT_RESPONSES, env.OTEL_LOG_TOOL_DETAILS, env.OTEL_LOG_TOOL_CONTENT, env.OTEL_LOG_RAW_API_BODIES, env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH, env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA, env.OTEL_TRACES_EXPORTER, env.OTEL_EXPORTER_OTLP_PROTOCOL, env.OTEL_EXPORTER_OTLP_ENDPOINT",
+        "path": "/Users/example/.claude/settings.json",
+        "remedy": "Use Enable to write the missing keys (previewed first)."
+      },
+      {
+        "code": "value-mismatch",
+        "severity": "warning",
+        "text": "env.OTEL_LOGS_EXPORTER holds a value other than KyberDash's",
+        "path": "/Users/example/.claude/settings.json",
+        "remedy": "Use Enable to reapply KyberDash's values (previewed first)."
+      }
+    ]
+  },
+  "receiver": {
+    "hosted": true,
+    "willEnable": true,
+    "enabled": false,
+    "enableFailed": false,
+    "lastManagedHarnessDisabled": false
+  }
+}

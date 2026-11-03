@@ -45,7 +45,26 @@ async function waitForFile(path: string, timeoutMs = 15_000): Promise<void> {
   }
 }
 
-const exited = (child: ChildProcess): Promise<unknown> => new Promise(resolve => child.once('exit', resolve))
+// Longer than the owner's longest hold (4000 ms) plus its lock waits; past this the fixture is hung.
+const OWNER_EXIT_DEADLINE_MS = 30_000
+
+/**
+ * Resolves when the fixture exits. A child still running at the deadline is killed and the wait rejects.
+ * An exit that already happened resolves at once: `once('exit')` alone would wait forever on it.
+ */
+function exited(child: ChildProcess, deadlineMs = OWNER_EXIT_DEADLINE_MS): Promise<unknown> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode)
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error(`fixture did not exit within ${deadlineMs} ms and was killed`))
+    }, deadlineMs)
+    child.once('exit', code => {
+      clearTimeout(timer)
+      resolve(code)
+    })
+  })
+}
 
 describe('warm refresh lock: a corrupt body never displaces a live owner', () => {
   it('leaves the zero-byte lock alone while its creator is still inside createExclusive', async () => {

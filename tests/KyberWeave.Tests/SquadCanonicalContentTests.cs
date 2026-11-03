@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -22,7 +24,7 @@ public sealed class SquadCanonicalContentTests
         "BLAST_RADIUS_EXCEEDED",
         "INVARIANT_CONTRADICTION",
         "ITERATION_CAP_EXCEEDED",
-        "THRASH_OSCILLATION_DETECTED",
+        "THRASH_OSCILLATION_DETECTED"
     ];
 
     private static readonly Regex CircuitBreakerTriggerEnumeration = new(
@@ -37,11 +39,125 @@ public sealed class SquadCanonicalContentTests
         @"[A-Z][A-Z0-9_]*",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>
+    /// The no-label rule: a negation, a labelling verb, and "format", all in one sentence on one line.
+    /// </summary>
+    /// <remarks>
+    /// The confinement is the assertion, not a convenience. With a line break inside the window a
+    /// negation in one bullet and the word "format" in the next match each other, so the pin would pass
+    /// on prose that forbids nothing. The windows are sized to the skill's own sentence — "A response
+    /// never labels, names, mentions, or refers to the format it follows." — rather than left wide
+    /// enough to reach a neighbouring one.
+    /// </remarks>
+    private static readonly Regex NoFormatLabelRule = new(
+        @"\b(?:never|must not|do not|does not)\b[^.!?\n]{0,60}\b(?:labels?|names?|mentions?|tags?|announces?|refers?)\b[^.!?\n]{0,30}\bformat\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The opening of the one bullet that tells an agent it may name a session, verbatim and including
+    /// the Markdown emphasis, so the guard below is read from the instruction it governs.
+    /// </summary>
+    private const string SessionTitleBulletLead = "- **Name the session after the work**";
+
+    /// <summary>The condition on naming a session: only a mechanism the harness really exposes.</summary>
+    private const string SessionTitleMechanismGuard = "only where the harness exposes a confirmed way to set it";
+
+    /// <summary>The second condition: an invented title is never acceptable.</summary>
+    private const string SessionTitleFabricationGuard = "never fabricate a title";
+
+    /// <summary>
+    /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
+    /// the rule that the format is never named. A surface that uses these words to say how an answer is
+    /// arranged has started a second copy of what the shipped default guidance owns.
+    /// </summary>
+    /// <remarks>
+    /// The gaps are <c>\s+</c> so a phrase wrapped across two lines is still seen, and the text is read
+    /// without Markdown emphasis so a phrase split by <c>**</c> or backticks is seen too.
+    /// </remarks>
+    private static readonly Regex RestatedShapeRule = new(
+        @"\btitle\s+line\b|\bbottom\s+line\b|\bat\s+most\s+(?:3|three)\s+sentences\b|\bmention\s+the\s+format\b|\bannouncing\s+which\s+shape\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// A specialist digest relayed to the human is presented in the response format. Either order
+    /// of the two clauses in a sentence satisfies it.
+    /// </summary>
+    private static readonly Regex RelayRule = new(
+        @"\brelay\w*\b[^.]{0,240}<response-preferences>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The plan path taken because the assessment is off is a routing decision the user is entitled
+    /// to see and to redirect. A conductor that routes silently leaves no room for the user to ask
+    /// for a specification instead.
+    /// </summary>
+    private const string PlanPathAnnouncementSentence =
+        "When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.";
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content: every
+    /// marker, id, path, count, gap and open question the specialist returned survives the relay.
+    /// </summary>
+    private const string VerbatimRelaySentence =
+        "Change the presentation only: keep every status marker, id, path, count, gap, open question and evidence value exactly as the specialist returned it, and never drop, merge or paraphrase an item.";
+
+    /// <summary>
+    /// A diagnosed defect with no stated artifact choice reaches the architect's intake recommendation
+    /// only when the repository opted in. The diagnosis route is a second door into the same assessment,
+    /// so it carries the same gate as the assessment itself.
+    /// </summary>
+    private const string GatedDiagnosisRecommendationSentence =
+        "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.";
+
+    /// <summary>Without the opt-in, the same request takes the plan path with its diagnosis attached.</summary>
+    private const string DefaultedDiagnosisRouteSentence =
+        "If choice is UNSTATED and that property is absent, skip the intake recommendation and proceed to Promotion with the plan choice and the diagnosis attached, saying so as the Assessment section directs.";
+
+    /// <summary>An absent intake property skips the assessment and takes the plan path directly.</summary>
+    private static readonly Regex IntakeAbsentRule = new(
+        @"\b(?:absent|not present|missing|omitted)\b[^.]{0,240}\b(?:skip|no assessment|without an assessment|plan path)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>A present intake property runs the assessment.</summary>
+    private static readonly Regex IntakePresentRule = new(
+        @"\b(?:present|enabled|published)\b[^.]{0,240}\b(?:run|perform|apply|execute|conduct)\w*\b[^.]{0,80}\bassessment\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The assessment is off by default: it runs only when the resolved registry publishes the
+    /// property, so a repository that never set the flag keeps the behaviour it had.
+    /// </summary>
+    private static readonly Regex DefaultOffRule = new(
+        @"(?:\bdefault[-\s]off\b)|(?:\bskipped\s+unless\b)|(?:\babsent\b[^.]{0,160}\bskip\w*\b)|(?:\bunless\b[^.]{0,160}\bpresent\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly string[] RetiredAgentIdentities =
     [
         "architect-v3",
         "conductor-v3",
+        "task-reviewer",
         "task-reviewer-v3"
+    ];
+
+    /// <summary>
+    /// Developer agents that run the deterministic <c>task-gate</c> exit gate and report its
+    /// <c>TASK_GATE:</c> digest. Every other canonical agent is non-developer and must never emit one.
+    /// </summary>
+    private static readonly string[] DeveloperGateAgents =
+    [
+        "csharp-dev",
+        "dal-dev",
+        "github-devops",
+        "go-dev",
+        "maui-dev",
+        "pulumi-dev",
+        "python-dev",
+        "react-dev",
+        "rust-dev",
+        "sql-database-architect",
+        "tauri-dev",
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -67,16 +183,17 @@ public sealed class SquadCanonicalContentTests
         "react-dev",
         "research-agent",
         "sql-database-architect",
-        "task-reviewer",
         "tauri-dev",
-        "test-dev",
+        "test-dev"
     ];
 
     /// <summary>
-    /// Review-council workers are canonical-only roles and are deliberately excluded from
-    /// Hotshot migration provenance.
+    /// Agents authored after the Hotshot migration — the review-council workers, `bug-crusher`,
+    /// and the Rust, Go, and TypeScript specialists — are canonical-only roles and are deliberately excluded
+    /// from Hotshot migration provenance.
     /// </summary>
-    private static readonly string[] ExpectedNewAgents = ["review-lens", "review-triage"];
+    private static readonly string[] ExpectedNewAgents =
+        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev", "typescript-dev"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
@@ -97,39 +214,64 @@ public sealed class SquadCanonicalContentTests
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
+        "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
         "resharper-clt",
-        "second-brain",
+        "rust-dev",
         "security-review",
         "setup-dev-environment",
-        "test-dev"
+        "task-gate",
+        "test-dev",
+        "typescript-dev"
     ];
 
+    /// <summary>
+    /// Every identity carried by both an agent and a canonical skill. `product-owner` and
+    /// `bug-crusher` are the primary shared identities (thin wrappers reusing the canonical
+    /// skill as their entry point); the rest are distinct-body collisions lowered to a
+    /// role-prefixed skill on a fallback target.
+    /// </summary>
     private static readonly string[] ExpectedAgentSkillIntersections =
     [
+        "bug-crusher",
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "product-owner",
         "python-dev",
-        "test-dev"
+        "rust-dev",
+        "test-dev",
+        "typescript-dev"
     ];
 
+    /// <summary>
+    /// The intersections whose agent and skill bodies differ AND are not declared shared
+    /// identities, so a fallback target must project the agent to <c>role-&lt;name&gt;</c>.
+    /// The two primary shared identities are excluded: their canonical skill is the entry point,
+    /// so no role-prefixed duplicate is generated.
+    /// </summary>
     private static readonly string[] DistinctBodyAgentSkillCollisions =
     [
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
-        "product-owner",
         "python-dev",
-        "test-dev"
+        "rust-dev",
+        "test-dev",
+        "typescript-dev"
     ];
+
+    /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
+    private static readonly string[] ExpectedSharedIdentities = ["bug-crusher", "product-owner"];
 
     private static readonly IReadOnlyDictionary<string, string> ExpectedBaselines =
         ExpectedMigratedAgents.ToDictionary(
@@ -170,6 +312,647 @@ public sealed class SquadCanonicalContentTests
         Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
     }
 
+    /// <summary>
+    /// The retired <c>second-brain</c> skill moves to Kyber-Docs. The Squad bundle file and
+    /// the loaded bundle roster must not name it, or pack and install keep shipping it.
+    /// </summary>
+    [Fact]
+    public void LoadFullProductTreeContainsNoSecondBrainInBundleOrRoster()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string bundleText = File.ReadAllText(Path.Combine(ProductRoot, "bundles", "full.yml"));
+
+        Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
+        Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
+        Assert.DoesNotContain("second-brain", bundleText, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "second-brain")));
+    }
+
+    /// <summary>
+    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
+    /// its canonical-skill counts, and it must state the count the tree actually holds: 28 once the retired
+    /// <c>response-format</c> skill is gone.
+    /// </summary>
+    [Fact]
+    public void ProductReadmeRosterLacksSecondBrain()
+    {
+        string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
+
+        Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
+        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The human-facing entry files carry the response preferences the shipped default owns, and they carry
+    /// them through one block the deployer replaces. Naming the skill is not the mechanism any more.
+    /// </summary>
+    /// <remarks>
+    /// A count of exactly one, not at least one: an entry with no block receives no guidance, and an entry with
+    /// two receives it twice. The injector's own tests pin the replacement; this pins the carrier in the source.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("agents/bug-crusher.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void EveryHumanFacingEntryCarriesExactlyOneResponsePreferencesBlock(string relativePath)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.True(File.Exists(path), $"Expected the canonical entry source at '{path}'.");
+        int blocks = Regex.Count(
+            File.ReadAllText(path),
+            "<response-preferences>.*?</response-preferences>",
+            RegexOptions.Singleline);
+        Assert.True(
+            blocks == 1,
+            $"'{relativePath}' must carry exactly one <response-preferences> block; it carries {blocks}.");
+    }
+
+    /// <summary>
+    /// The retired skill must not survive anywhere in the product tree: a name left behind routes an agent to a
+    /// skill that no longer deploys. The conductor's migration record keeps one historical note about it, so
+    /// that file is the only one exempt.
+    /// </summary>
+    [Fact]
+    public void NoProductFileNamesTheRetiredResponseFormatSkill()
+    {
+        string historicalNote = Path.GetFullPath(Path.Combine(ProductRoot, "migration", "conductor.md"));
+        string[] offenders = Directory
+            .EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFullPath(path), historicalNote, StringComparison.Ordinal))
+            .Where(path => File.ReadAllText(path).Contains("response-format", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "These product files still name the retired 'response-format' skill: " + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// The order of the three steps is the format. The shipped default owns it, so a default that opens with a
+    /// bottom line, or ends without its open decisions, is a different contract. The sequence is pinned rather
+    /// than the presence of the three steps anywhere in the file.
+    /// </summary>
+    /// <remarks>
+    /// Each step is asserted as the bold list item the default states. Verified by mutation: swapping the title
+    /// step and the open-decisions step must fail this test, and so must removing either.
+    /// </remarks>
+    [Fact]
+    public void ResponseGuidanceOrdersTitleThenBottomLineThenOpenDecisions()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+
+        const string TitleMarker = "**Title first.**";
+        const string BottomLineMarker = "**Then the bottom line, in at most three sentences**";
+        const string OpenDecisionsMarker = "**Then what needs a decision**";
+        int title = guidance.IndexOf(TitleMarker, StringComparison.Ordinal);
+        int bottomLine = guidance.IndexOf(BottomLineMarker, StringComparison.Ordinal);
+        int openDecisions = guidance.IndexOf(OpenDecisionsMarker, StringComparison.Ordinal);
+
+        Assert.True(
+            title >= 0,
+            $"The shipped default must open its ordered steps with '{TitleMarker}'.");
+        Assert.True(
+            bottomLine >= 0,
+            $"The shipped default must carry the '{BottomLineMarker}' step, which caps the bottom line at three sentences.");
+        Assert.True(
+            openDecisions >= 0,
+            $"The shipped default must end its ordered steps with '{OpenDecisionsMarker}'.");
+        Assert.True(
+            bottomLine > title,
+            $"The shipped default must order '{BottomLineMarker}' after '{TitleMarker}'.");
+        Assert.True(
+            openDecisions > bottomLine,
+            $"The shipped default must order '{OpenDecisionsMarker}' after '{BottomLineMarker}'.");
+    }
+
+    /// <summary>
+    /// The format is invisible: a reader should see a well-shaped answer, never an agent telling them which
+    /// format it is using. The shipped default states this rule, and every deployed entry receives it.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultForbidsLabellingAResponseWithItsFormat()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+
+        Assert.True(
+            NoFormatLabelRule.IsMatch(guidance),
+            "The shipped default must state, in one sentence, that a response never labels, names, or refers to " +
+            "the format it is following.");
+    }
+
+    /// <summary>
+    /// The no-label rule is only a rule if it stays inside one sentence. Prose that forbids nothing —
+    /// a negation in one bullet and the word "format" in the next — must not satisfy it, or the pin
+    /// passes on a skill whose guidance never says the format is invisible.
+    /// </summary>
+    /// <remarks>
+    /// Both controls below are ones a window that admits a line break or an exclamation mark accepts:
+    /// bullets need no full stop, and a sentence may end in "!". They are the shapes that made the
+    /// earlier rule match two unrelated statements.
+    /// </remarks>
+    [Fact]
+    public void NoFormatLabelRuleDoesNotCrossASentenceOrALineBreak()
+    {
+        Assert.False(
+            NoFormatLabelRule.IsMatch("- **Never label the answer**\n- **The format speaks for itself**\n"),
+            "A negation in one bullet and the word 'format' in the next must not satisfy the rule, " +
+            "even though neither bullet ends with a full stop.");
+        Assert.False(
+            NoFormatLabelRule.IsMatch("Never label the answer! The format speaks for itself.\n"),
+            "An exclamation mark ends the sentence as surely as a full stop, so the rule must not " +
+            "reach the next one.");
+        Assert.True(
+            NoFormatLabelRule.IsMatch(
+                "A response never labels, names, mentions, or refers to the format it follows.\n"),
+            "The rule must still match the skill's own sentence, which states it in one line.");
+    }
+
+    /// <summary>
+    /// A session title is a harness capability, not a response rule. The shipped default records the one target
+    /// whose title no agent can set, so the default never instructs an agent to claim a capability the harness
+    /// does not expose.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultRecordsThatFactoryTitlesAreNotAgentSettable()
+    {
+        string bullet = SessionTitleBullet(ReadResponseGuidanceDefault()) ?? string.Empty;
+
+        Assert.True(
+            bullet.Contains("Factory", StringComparison.Ordinal) &&
+            bullet.Contains("no agent can set", StringComparison.Ordinal),
+            "The session-title bullet in the shipped default must record that no agent can set a Factory session title.");
+    }
+
+    /// <summary>
+    /// The shipped default file exists at its product path and carries content. It is the one file
+    /// the build embeds and a global install deploys, so an empty or missing default leaves every
+    /// Squad answer without its shape.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultGuidanceFileExistsAndIsNonEmpty()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}'.");
+        Assert.False(
+            string.IsNullOrWhiteSpace(File.ReadAllText(defaultPath)),
+            $"The shipped response-guidance default at '{defaultPath}' must not be empty.");
+    }
+
+    /// <summary>
+    /// The default file is the owner the build reads from, not a copy that can drift. The drift guard
+    /// must name it as canonical, and the copy embedded as <c>Squad.response-guidance.md</c> must be
+    /// byte-identical to it. Otherwise the deployed default and the documented default can disagree
+    /// while both still build.
+    /// </summary>
+    [Fact]
+    public void TheBuildEmbedsTheDefaultGuidanceAsTheCanonicalProductFile()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
+        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
+        XDocument project = XDocument.Load(Path.Combine(corePath, "KyberWeave.Core.csproj"));
+
+        string? canonical = project
+            .Descendants("CanonicalResponseGuidance")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+        string? embedded = project
+            .Descendants("EmbeddedResource")
+            .Where(element => element.Attribute("LogicalName")?.Value == "Squad.response-guidance.md")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+
+        Assert.NotNull(canonical);
+        Assert.NotNull(embedded);
+        Assert.Equal(
+            defaultPath,
+            Path.GetFullPath(ResolveProjectPath(corePath, canonical)));
+        Assert.True(
+            File.ReadAllBytes(Path.GetFullPath(ResolveProjectPath(corePath, embedded)))
+                .AsSpan()
+                .SequenceEqual(File.ReadAllBytes(defaultPath)),
+            "The copy embedded as 'Squad.response-guidance.md' must be byte-identical to the shipped default " +
+            $"at '{defaultPath}'.");
+    }
+
+    /// <summary>
+    /// The shipped default states the session-title rule itself: name the session after the work,
+    /// and only where the harness exposes a confirmed mechanism, and never fabricate one. The rule
+    /// lives in the default now that the skill that used to carry it is being removed.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultStatesTheSessionTitleRule()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            $"The shipped default must state the session-title rule as the bullet '{SessionTitleBulletLead}'.");
+        Assert.True(
+            bullet.Contains("title", StringComparison.OrdinalIgnoreCase) &&
+            bullet.Contains("work", StringComparison.OrdinalIgnoreCase),
+            "The session-title bullet must say the title reflects the work.");
+        Assert.True(
+            CarriesSessionTitleGuard(guidance),
+            "The session-title rule in the shipped default must carry both its mechanism and fabrication guards.");
+    }
+
+    /// <summary>
+    /// The deployed default replaces the skill's wording wherever it exists, so it carries the
+    /// session-title guard the matrix states. Without the guard, the default tells an agent to
+    /// name a session on a target that exposes no way to set one.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultKeepsTheSessionTitleGuard()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            "The shipped default must carry the session-title bullet, " +
+            $"'{SessionTitleBulletLead}', on one line.");
+        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
+        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The guard is a condition on the session-title instruction, not a phrase anywhere in the file. A
+    /// default whose session-title bullet drops the condition must fail even when another bullet still
+    /// says "never fabricate", which is what the whole-file search this replaced could not tell apart.
+    /// </summary>
+    [Fact]
+    public void TheSessionTitleGuardMustSitOnTheSessionTitleBullet()
+    {
+        string unguarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} where it helps the reader.\n";
+        string guarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} {SessionTitleMechanismGuard}, and {SessionTitleFabricationGuard}.\n";
+
+        Assert.False(
+            CarriesSessionTitleGuard(unguarded),
+            "'never fabricate' in another bullet must not satisfy a session-title bullet that omits it.");
+        Assert.True(
+            CarriesSessionTitleGuard(guarded),
+            "A session-title bullet that carries both conditions must satisfy the pin.");
+        Assert.False(
+            CarriesSessionTitleGuard(
+                $"- Name the session after the work {SessionTitleMechanismGuard} and {SessionTitleFabricationGuard}.\n"),
+            "A line that is not the emphasised session-title bullet must not satisfy the pin.");
+    }
+
+    /// <summary>
+    /// A specialist digest relayed to the human is presented in the shape the response-preferences block sets.
+    /// Relay is the boundary where a worker's digest becomes a response, so the conductor contract has to say so.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsInTheResponsePreferences()
+    {
+        string contract = ReadAgentContract("conductor").Replace("`", string.Empty, StringComparison.Ordinal);
+
+        Assert.True(
+            RelayRule.IsMatch(contract),
+            "The conductor contract must state that a specialist digest surfaced to the human is presented in " +
+            "the shape set by '<response-preferences>'.");
+    }
+
+    /// <summary>
+    /// The intake assessment is opt-in. It runs when configuration publishes the
+    /// <c>&lt;intake-assessment&gt;</c> property; a repository that never set the flag keeps the plan
+    /// path it always had. Defect-first precedence is unchanged, because a concrete failure still
+    /// outranks the question of which artifact to write.
+    /// </summary>
+    [Fact]
+    public void ConductorResolvesTheIntakeAssessmentOnlyWhenConfigPublishesIt()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int intake = conductor.IndexOf("<intake-assessment>", StringComparison.Ordinal);
+        int defectFirst = conductor.IndexOf("**Defect first**", StringComparison.Ordinal);
+
+        Assert.True(
+            intake >= 0,
+            "'agents/conductor.md' must carry an '<intake-assessment>' resolution order.");
+        Assert.True(
+            defectFirst >= 0 && defectFirst < intake,
+            "'agents/conductor.md' must keep defect-first precedence ahead of the " +
+            "'<intake-assessment>' resolution.");
+        Assert.True(
+            IntakeAbsentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that an absent " +
+            "property skips the assessment and takes the plan path directly.");
+        Assert.True(
+            IntakePresentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that a present " +
+            "property runs the assessment.");
+    }
+
+    /// <summary>
+    /// The plan path taken because the assessment is off is still a routing decision, and the user
+    /// is entitled to see it and to redirect it. A conductor that routes silently leaves no room for
+    /// the user to ask for a specification instead.
+    /// </summary>
+    [Fact]
+    public void ConductorAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string resolution = BlockContaining(conductor, "skip the assessment and take the plan path directly");
+
+        Assert.True(
+            resolution.Length > 0,
+            "'agents/conductor.md' must resolve the absent '<intake-assessment>' property in one block, " +
+            "so the announcement can be pinned to the resolution that takes the plan path.");
+        Assert.True(
+            SentenceLine(resolution, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor.md' must announce, next to the intake resolution, that a plan path " +
+            "taken because the assessment is off is said out loud and offers a specification instead: " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path is where the plan path is defined, so the announcement belongs there too: two
+    /// files that describe the same default-off routing must not disagree about telling the user.
+    /// </summary>
+    [Fact]
+    public void IntakePathAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string assessment = BlockContaining(intakePath, "The assessment is default-off.");
+
+        Assert.True(
+            assessment.Length > 0,
+            "'agents/conductor/references/intake-path.md' must record the default-off assessment in one " +
+            "block, so the announcement can be pinned to the paragraph that states the default.");
+        Assert.True(
+            SentenceLine(assessment, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must announce a plan path taken because the " +
+            "assessment is off, so it does not disagree with 'agents/conductor.md': " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path states the default-off assessment twice: once as the rule, and once on the route
+    /// a diagnosed defect takes. The second must not send an unstated choice to the architect's intake
+    /// recommendation unconditionally, or a repository that never opted in gets the assessment anyway.
+    /// </summary>
+    [Fact]
+    public void DefectDiagnosisSendsAnUnstatedChoiceToTheAssessmentOnlyWhenTheRepositoryOptedIn()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string route = BlockContaining(intakePath, "Without existing Ready authority");
+
+        Assert.True(
+            route.Length > 0,
+            "'agents/conductor/references/intake-path.md' must state the route a diagnosed defect takes " +
+            "without Ready authority in one block, so the opt-in gate can be pinned to that route.");
+        Assert.True(
+            SentenceLine(route, GatedDiagnosisRecommendationSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must send an unstated choice to the architect's " +
+            "intake recommendation only when the repository publishes the property: " +
+            $"\"{GatedDiagnosisRecommendationSentence}\"");
+        Assert.True(
+            SentenceLine(route, DefaultedDiagnosisRouteSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must say what an unstated choice does when the " +
+            $"property is absent: \"{DefaultedDiagnosisRouteSentence}\"");
+        Assert.DoesNotContain(
+            "If choice is UNSTATED, send the diagnosis",
+            WithoutEmphasis(route),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The gate pins are worth having only if they can fail. The ungated route they replaced, a gate
+    /// sentence wrapped across two lines, and a gate sentence carried outside the route all have to
+    /// leave them red.
+    /// </summary>
+    [Fact]
+    public void TheDiagnosisRoutePinsRejectTheUngatedWrappedOrMisplacedRoute()
+    {
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "The route without the opt-in gate must not satisfy the gated pin.");
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect\n" +
+                "for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence wrapped across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + GatedDiagnosisRecommendationSentence + "\n",
+                    "Without existing Ready authority"),
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence outside the route a diagnosed defect takes must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(GatedDiagnosisRecommendationSentence + "\n", GatedDiagnosisRecommendationSentence) is not null,
+            "The pin must still accept the gate sentence exactly as the intake path states it.");
+        Assert.True(
+            SentenceLine(DefaultedDiagnosisRouteSentence + "\n", DefaultedDiagnosisRouteSentence) is not null,
+            "The pin must still accept the default sentence exactly as the intake path states it.");
+    }
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content. Every
+    /// marker, id, path, count, gap and open question the specialist returned has to survive the
+    /// relay to the human.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsWithoutChangingTheirContent()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string relay = BlockContaining(conductor, "Relay every specialist digest you surface to the human");
+
+        Assert.True(
+            relay.Length > 0,
+            "'agents/conductor.md' must state the digest relay rule in one block, so the verbatim " +
+            "constraint can be pinned to the rule that governs it.");
+        Assert.True(
+            SentenceLine(relay, VerbatimRelaySentence) is not null,
+            "'agents/conductor.md' must state, in the relay rule, that only the presentation changes " +
+            "and every relayed item survives: " +
+            $"\"{VerbatimRelaySentence}\"");
+    }
+
+    /// <summary>
+    /// The conductor pins are worth having only if they can fail. A sentence wrapped across two
+    /// lines, a sentence that dropped an item, and a sentence carried in a different part of the
+    /// file must each leave the pin red.
+    /// </summary>
+    [Fact]
+    public void TheConductorPinsRejectAWrappedRewordedOrMisplacedSentence()
+    {
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line and tell\n" +
+                "the user they can ask for a specification instead; never route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement split across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line; never " +
+                "route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement that dropped the specification offer must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                "Change the presentation only: keep every status marker, id, path and count exactly as " +
+                "the specialist returned it.\n",
+                VerbatimRelaySentence) is null,
+            "A relay rule that dropped the gap, open question and evidence clauses must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + VerbatimRelaySentence + "\n",
+                    "Relay every specialist digest you surface to the human"),
+                VerbatimRelaySentence) is null,
+            "A relay constraint outside the relay rule must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(VerbatimRelaySentence + "\n", VerbatimRelaySentence) is not null,
+            "The pin must still accept the sentence exactly as the conductor states it.");
+    }
+
+    /// <summary>
+    /// The default is recorded where the intake path is defined, so a reader cannot conclude the
+    /// assessment is something the conductor always performs.
+    /// </summary>
+    [Fact]
+    public void IntakePathRecordsThatTheAssessmentIsOffByDefault()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+
+        Assert.True(
+            intakePath.Contains("<intake-assessment>", StringComparison.Ordinal),
+            "'agents/conductor/references/intake-path.md' must record the '<intake-assessment>' gate " +
+            "the plan path depends on.");
+        Assert.True(
+            DefaultOffRule.IsMatch(intakePath),
+            "'agents/conductor/references/intake-path.md' must record the default-off semantics: the " +
+            "assessment is skipped unless the '<intake-assessment>' property is present.");
+    }
+
+    /// <summary>
+    /// The shape has one home (requirement R5). A surface that spells it out again carries a second copy
+    /// that the user's own guidance file cannot reach, so an operator who replaces the wording still gets
+    /// the old shape from whichever surface restated it. A surface binds the skill by name and says only
+    /// what each response has to contain; how it is arranged is the skill's, and the operator's, to say.
+    /// </summary>
+    [Fact]
+    public void NoAgentOrSkillRestatesTheResponseShapeOutsideTheDefaultGuidance()
+    {
+        string defaultGuidance = ReadResponseGuidanceDefault();
+        string[] surfaces = Directory
+            .EnumerateFiles(Path.Combine(ProductRoot, "agents"), "*.md", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(ProductRoot, "skills"),
+                "*.md",
+                SearchOption.AllDirectories))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] restatements = surfaces
+            .SelectMany(path => RestatedShapeHits(RelativeSourcePath(path), File.ReadAllText(path)))
+            .ToArray();
+
+        Assert.True(
+            RestatesTheShape(defaultGuidance),
+            "The shipped default guidance must be the one owner of the response shape, so it must carry the shape's vocabulary.");
+        Assert.NotEmpty(surfaces);
+        Assert.True(
+            restatements.Length == 0,
+            "These agent and skill bodies restate the response shape the shipped default guidance owns, so a " +
+            "user's own guidance file cannot change it there. Keep the response-preferences block and what the response " +
+            $"must contain, and leave the arrangement to the default guidance:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, restatements));
+    }
+
+    /// <summary>
+    /// The retired skill-copy path must not survive in source or test code. A build target or a
+    /// doc comment that still names it points at a file the skill removal deletes, so the build
+    /// and the tests would fail for a reason no reader can see from the code.
+    /// </summary>
+    [Fact]
+    public void NoSourceOrTestFileNamesTheRetiredResponseGuidancePath()
+    {
+        Regex retired = new(
+            @"skills[\\/]response-format[\\/]user-guidance\.md",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        string[] extensions = [".cs", ".csproj", ".props", ".targets"];
+        string[] offenders =
+        [
+            .. Directory
+                .EnumerateFiles(Path.Combine(KyberWeaveTestPaths.ToolRoot, "src"), "*", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(
+                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests"),
+                    "*",
+                    SearchOption.AllDirectories))
+                .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.Ordinal))
+                .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment =>
+                    segment is "bin" or "obj" or ".agent_scratchpad"))
+                .Where(path => retired.IsMatch(File.ReadAllText(path)))
+                .Order(StringComparer.Ordinal)
+        ];
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// The restatement pin is worth having only if it can fail. It has to see the shape in the skill that
+    /// owns it, in each way the bug-crusher skill once spelled it out, and across a line wrap, and it has
+    /// to let through a surface that only binds the skill by name.
+    /// </summary>
+    [Fact]
+    public void TheRestatedShapePinSeesEveryWayTheShapeIsSpelledOut()
+    {
+        Assert.True(
+            RestatesTheShape(ReadResponseGuidanceDefault()),
+            "The pin must see the shape in the shipped default that owns it; a detector blind to its owner is blind everywhere.");
+        Assert.True(
+            RestatesTheShape(
+                "Each opens with a title line naming the work, states the bottom line in at most 3 sentences."),
+            "The title line and the sentence cap are the shape and must be seen.");
+        Assert.True(
+            RestatesTheShape("Close with a bottom line of at most three sentences."),
+            "A cap spelled out in words must be seen as well as one written as a digit.");
+        Assert.True(
+            RestatesTheShape("The grouped questions are bullets, with the title and bottom\nline above them."),
+            "A phrase wrapped across two lines must still be seen.");
+        Assert.True(
+            RestatesTheShape("Never tag, header, or otherwise mention the **format** in the report."),
+            "The never-name-it rule is the skill's too, and emphasis inside it must not hide it.");
+        Assert.True(
+            RestatesTheShape(
+                "The reader should see a well-shaped answer, not an agent announcing which shape it chose."),
+            "The reason given for the never-name-it rule is a restatement of it.");
+        Assert.False(
+            RestatesTheShape(
+                "Each entry file carries the operator response preferences in a <response-preferences> block."),
+            "The response-preferences block is the binding and must not be flagged.");
+        Assert.False(
+            RestatesTheShape(
+                "The shape of an answer is the one thing this wrapper binds by name instead of restating."),
+            "A surface that says it does not restate the shape must not be flagged for saying so.");
+        Assert.False(
+            RestatesTheShape(
+                "- **Summary**: the problem and the outcome, in one to three sentences; why more than how."),
+            "The length of a pull request summary is another artifact's rule, not the shape of a response.");
+    }
+
     [Fact]
     public void LoadRoleSkillFallbackProfileDeclaresGlobalBodyAndIdentityProjection()
     {
@@ -182,14 +965,15 @@ public sealed class SquadCanonicalContentTests
         Assert.Equal("reuse-skill", profile.SharedIdentity);
         Assert.Equal("role-prefixed-agent-name", profile.CollisionIdentity);
         Assert.Equal("role-", profile.Prefix);
-        Assert.Empty(profile.SharedIdentities);
+        Assert.Equal(ExpectedSharedIdentities, profile.SharedIdentities.Order(StringComparer.Ordinal));
     }
 
     [Fact]
     public void LoadAgentSkillIntersectionHasPinnedSharedAndPrefixedFallbackIdentities()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        Dictionary<string, SquadSkill> skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadSkill> skillsByName =
+            source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
         string[] intersections = source.Agents
             .Where(agent => skillsByName.ContainsKey(agent.Name))
             .Select(agent => agent.Name)
@@ -219,7 +1003,11 @@ public sealed class SquadCanonicalContentTests
 
         Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "conductor");
-        Assert.Empty(source.FallbackProfiles.Profiles["role-skill"].SharedIdentities);
+        // conductor is unoccupied; the declared shared identities are the two root wrappers,
+        // each of which is a primary agent reusing its canonical skill as the entry point.
+        Assert.Equal(
+            ExpectedSharedIdentities,
+            source.FallbackProfiles.Profiles["role-skill"].SharedIdentities.Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -277,15 +1065,13 @@ public sealed class SquadCanonicalContentTests
             .ToArray();
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        SquadAgent taskReviewer = Assert.Single(source.Agents, agent => agent.Name == "task-reviewer");
 
         Assert.Equal(["conductor"], defaultAgents);
         Assert.Equal("orchestration", conductor.ModelProfile);
         Assert.Equal("architect", architect.ModelProfile);
-        Assert.Equal("reviewer", taskReviewer.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("product-owner", conductor.DelegatesTo);
-        Assert.Contains("task-reviewer", conductor.DelegatesTo);
+        Assert.DoesNotContain("task-reviewer", conductor.DelegatesTo);
         Assert.Contains("code-reviewer", conductor.DelegatesTo);
         Assert.Contains("docs-dev", conductor.DelegatesTo);
     }
@@ -351,6 +1137,144 @@ public sealed class SquadCanonicalContentTests
         AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
     }
 
+    [Theory]
+    [InlineData("architect")]
+    [InlineData("bug-crusher-investigator")]
+    [InlineData("code-reviewer")]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("docs-dev")]
+    [InlineData("github-devops")]
+    [InlineData("go-dev")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    [InlineData("rust-dev")]
+    [InlineData("sql-database-architect")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
+    public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        AssertDiscoveryContract(agent.InstructionBody, agentName);
+    }
+
+    /// <summary>
+    /// Task sessions are worker-only: the deterministic <c>task-gate</c> is not a session-bearing
+    /// agent, so the conductor records and resumes exactly one session per task.
+    /// </summary>
+    [Fact]
+    public void ConductorRetainsOnlyWorkerSessionsForTaskRework()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("original worker session", contract, StringComparison.Ordinal);
+        Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
+        Assert.Contains("Resuming a worker counts as a rework dispatch", contract, StringComparison.Ordinal);
+        Assert.Contains("unrelated task", contract, StringComparison.Ordinal);
+        Assert.Contains("continuation is unavailable", contract, StringComparison.Ordinal);
+        Assert.Contains("context is unreliable", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("reviewer-session-id", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Every worker invocation is cold", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("any available worker", contract, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A failing <c>TASK_GATE</c> digest is rejected back to the original worker as a rework item. The
+    /// retired per-task reviewer's three-pass audit must not survive as a second routing path.
+    /// </summary>
+    [Fact]
+    public void ConductorRejectsTaskGateFailuresBackToTheWorkerInsteadOfThreePassAudit()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("TASK_GATE", contract, StringComparison.Ordinal);
+        Assert.Contains("reject", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("task-gate/", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Three-pass task audit", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("task-reviewer", contract, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConductorDiagnosesDefectsBeforePromotingExplicitPlanOrSpecIntent()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        string contract = ReadAgentContract("conductor");
+        int defect = conductor.InstructionBody.IndexOf("**Defect first**", StringComparison.Ordinal);
+        int explicitChoice = conductor.InstructionBody.IndexOf("**Explicit plan or spec**", StringComparison.Ordinal);
+
+        Assert.True(defect >= 0 && explicitChoice > defect,
+            "Diagnose a concrete failure before routing an explicit artifact choice.");
+        Assert.Contains("conductor/references/intake-path.md", conductor.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Read **Defect diagnosis**", conductor.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("## Defect diagnosis", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: INTENT_STATED", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: DEFECT", contract, StringComparison.Ordinal);
+        Assert.Contains("CHOICE: PLAN | SPEC | UNSTATED", contract, StringComparison.Ordinal);
+        Assert.Contains("existing Ready", contract, StringComparison.Ordinal);
+        Assert.Contains("diagnosis is attached", contract, StringComparison.Ordinal);
+
+        string assessment =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+        Assert.Contains("STATUS: INTENT_STATED", assessment, StringComparison.Ordinal);
+        Assert.Contains("STATUS: DEFECT", assessment, StringComparison.Ordinal);
+        Assert.DoesNotContain("STATUS: BLOCKED", assessment, StringComparison.Ordinal);
+        Assert.Contains("CHOICE: PLAN | SPEC", assessment, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadyTaskDefectsRequiringArchitectureHaveAnExplicitAssessmentHandoff()
+    {
+        string intake =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string assessment =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+        int ready = intake.IndexOf("For a failure in an existing Ready", StringComparison.Ordinal);
+        int noAuthority = intake.IndexOf("Without existing Ready authority", ready, StringComparison.Ordinal);
+        string readyRoute = intake[ready..noAuthority];
+
+        Assert.Contains("NEEDS_ARCHITECT", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("read-only diagnosed-task assessment", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("TASK_ASSESSED", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("REVISION_REQUIRED", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("original worker", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("reopen the applicable approval gate", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("STATUS: TASK_ASSESSED", assessment, StringComparison.Ordinal);
+        Assert.Contains("CONTRACT: UNCHANGED | REVISION_REQUIRED", assessment, StringComparison.Ordinal);
+        Assert.Contains("Do not change the Ready artifact", assessment, StringComparison.Ordinal);
+        Assert.Contains("do not ask for a new plan/spec choice", assessment, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    public void DiscoveryContractRejectsDirectReadPermissionAfterTheNextRoleHeading(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string body = Assert.Single(source.Agents, agent => agent.Name == agentName).InstructionBody;
+        string directReadRule = Assert.Single(body.Split('\n'), line =>
+            line.Contains("Read or search a file directly", StringComparison.Ordinal));
+        string misplacedRule = body.Replace(directReadRule, string.Empty, StringComparison.Ordinal) + "\n" +
+                               directReadRule;
+
+        Assert.NotNull(Record.Exception(() => AssertDiscoveryContract(misplacedRule, agentName)));
+    }
+
+    [Fact]
+    public void ProductOwnerReportsDiscoveryInItsStructuredDigest()
+    {
+        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "product-owner", "SKILL.md"));
+        AssertDiscoveryContract(skill, "product-owner");
+        Assert.Contains("\nDiscovery: codegraph N, docs N, direct reads N\n", skill, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void LoadDocsDevDefinesCloseoutMappingTableAndWaiverConventions()
     {
@@ -388,11 +1312,11 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("Invoke the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains(
-            "initialize the file via shell (for example, `touch <file>`) before editing.",
-            productOwner.InstructionBody,
-            StringComparison.Ordinal);
+        // The root agent is a thin wrapper: the role contract lives in the canonical skill, and
+        // the agent body only points at it. Both facts are pinned so the wrapper cannot quietly
+        // grow a second copy of the role.
+        Assert.Contains("Load the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("STATUS: PHASE_APPROVED", productOwner.InstructionBody, StringComparison.Ordinal);
         Assert.Empty(productOwner.Resources);
         SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
         SquadResource specAuthoring = Assert.Single(
@@ -452,17 +1376,131 @@ public sealed class SquadCanonicalContentTests
             name => Assert.Contains(name, declaredTargets));
     }
 
-    [Fact]
-    public void LoadTaskReviewerDefinesThreePassesForBothDevelopmentModes()
+    /// <summary>
+    /// Developer agents close every task by reporting the <c>task-gate</c> digest. A developer body
+    /// that does not name the gate would silently skip the exit check.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("go-dev")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("rust-dev")]
+    [InlineData("sql-database-architect")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
+    public void DeveloperAgentBodyNamesTaskGateAndEmitsDigestLine(string agentName)
     {
-        string contract = ReadAgentContract("task-reviewer");
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
-        Assert.Contains("pass 3", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("test-first", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("standard", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("RED/GREEN", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("verification contract", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("code-reviewer", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE:", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The <c>TASK_GATE:</c> digest is a developer exit contract. A non-developer body that emits it
+    /// would claim a gate it never ran.
+    /// </summary>
+    [Fact]
+    public void NonDeveloperAgentBodiesNeverEmitTaskGateDigest()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] offenders = source.Agents
+            .Where(agent => !DeveloperGateAgents.Contains(agent.Name, StringComparer.Ordinal))
+            .Where(agent => agent.InstructionBody.Contains("TASK_GATE:", StringComparison.Ordinal))
+            .Select(agent => agent.Name)
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// The skill is the deterministic exit gate itself: it runs review gates through the CLI, applies
+    /// fixes, caps the cycle, and reports a closed <c>TASK_GATE:</c> digest.
+    /// </summary>
+    [Fact]
+    public void TaskGateSkillDefinesTheDeterministicReviewGateContract()
+    {
+        string path = Path.Combine(ProductRoot, "skills", "task-gate", "SKILL.md");
+        Assert.True(File.Exists(path), $"Canonical task-gate skill is missing: {path}");
+        string skill = File.ReadAllText(path);
+
+        Assert.Contains("review gates", skill, StringComparison.Ordinal);
+        Assert.Contains("--agent", skill, StringComparison.Ordinal);
+        Assert.Contains("--fix", skill, StringComparison.Ordinal);
+        Assert.Contains("2-cycle cap", skill, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", skill, StringComparison.Ordinal);
+        Assert.Contains("task-gate/<gate-id>", skill, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill,
+            StringComparison.Ordinal);
+        Assert.Contains("every declared gate was skipped", skill, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(skill);
+    }
+
+    /// <summary>
+    /// The per-task reviewer is retired outright. Its agent, its reference folder, and its migration
+    /// record must not survive in the squad source, or the orchestrator can still route to it.
+    /// </summary>
+    [Fact]
+    public void TaskReviewerAgentReferenceFolderAndMigrationRecordAreRemoved()
+    {
+        string agentsRoot = Path.Combine(ProductRoot, "agents");
+
+        Assert.False(
+            File.Exists(Path.Combine(agentsRoot, "task-reviewer.md")),
+            "The retired task-reviewer agent body must be deleted.");
+        Assert.False(
+            Directory.Exists(Path.Combine(agentsRoot, "task-reviewer")),
+            "The retired task-reviewer reference folder must be deleted.");
+        Assert.False(
+            File.Exists(Path.Combine(ProductRoot, "migration", "task-reviewer.md")),
+            "The retired task-reviewer migration record must be deleted.");
+    }
+
+    /// <summary>
+    /// Scans every squad source entry, by name and by content, so no surface (bundle, README,
+    /// sibling skill, or reviewer array) keeps routing to the retired reviewer.
+    /// </summary>
+    [Fact]
+    public void NoSquadSourceEntryNamesOrQuotesRetiredTaskReviewer()
+    {
+        string[] nameOffenders = Directory.EnumerateFileSystemEntries(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains("task-reviewer", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .ToArray();
+        string[] textOffenders = Directory.EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("task-reviewer", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .ToArray();
+
+        Assert.Empty(nameOffenders.Concat(textOffenders).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void CodeReviewerBodyAndArchitectPlanAuthoringDoNotNameRetiredTaskReviewer()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent codeReviewer = Assert.Single(source.Agents, agent => agent.Name == "code-reviewer");
+        string planAuthoring =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "plan-authoring.md"));
+
+        Assert.False(
+            codeReviewer.InstructionBody.Contains("task-reviewer", StringComparison.Ordinal),
+            "The code-reviewer body must not name the retired task-reviewer.");
+        Assert.False(
+            planAuthoring.Contains("task-reviewer", StringComparison.Ordinal),
+            "The architect plan-authoring reference must not name the retired task-reviewer.");
+    }
+
+    private static string RelativeSourcePath(string path)
+    {
+        return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
     }
 
     [Fact]
@@ -481,7 +1519,8 @@ public sealed class SquadCanonicalContentTests
         Assert.Equal(ExpectedMigratedAgents, reportNames);
 
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> expectedSources = ParseExpectedSourceHashes();
-        foreach (SquadAgent agent in source.Agents.Where(a => ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
+        foreach (SquadAgent agent in source.Agents.Where(a =>
+                     ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
         {
             string reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
             MigrationReport report = ReadMigrationReport(reportPath);
@@ -527,12 +1566,132 @@ public sealed class SquadCanonicalContentTests
                 $"'{name}' was authored after the migration and must not claim a migration baseline."));
     }
 
+    /// <summary>
+    /// <c>code-review</c> carries the pre-push self-review trigger and gate. Nothing else
+    /// pins this section, so deleting this test returns it to no coverage.
+    /// </summary>
+    [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Review-council and conductor instructions must not keep the retired delivery wording that
+    /// held a pushed change back until the council returned, or parked it unpushed. The scan covers
+    /// every surface that carried the wording, so a copy left behind in one file fails the build.
+    /// </summary>
+    [Fact]
+    public void ReviewInstructionsDropTheHoldUntilCouncilAndParkWording()
+    {
+        string[] reviewSurfaces =
+        [
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
+            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
+            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "reference", "autonomous-gates.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "code-review", "architecture.md")
+        ];
+        string[] retiredPhrases =
+        [
+            "Do not commit, push, publish, or open a pull request until the council returns",
+            "leave it unpushed",
+            "Do not mark the pull request ready",
+            "Park that change or task",
+            "parked NEEDS_HUMAN",
+            "at least one review"
+        ];
+
+        string[] offenders = reviewSurfaces
+            .SelectMany(path => retiredPhrases
+                .Where(phrase => File.ReadAllText(path).Contains(phrase, StringComparison.Ordinal))
+                .Select(phrase => $"{Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, path)}: \"{phrase}\""))
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// Both run-start surfaces carry the read-only doctor step, gated on the docs-enabled condition, with the
+    /// warn-and-continue rule. A later edit that drops any one of the three silently disables the check.
+    /// </summary>
+    /// <remarks>
+    /// The condition is the D14 predicate: the config file and its docs-root. The rule is D15: a failed doctor
+    /// is recorded and the run continues, so a missing index never blocks a fresh clone.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
+        Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
+        Assert.Contains("docs-root", text, StringComparison.Ordinal);
+        Assert.Contains("warn and continue", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The conductor's run-start step sits in <c>Shared lifecycle invariants</c>, the earliest section that applies to
+    /// every route (D17), so it runs before any routing decision rather than on one branch of it.
+    /// </summary>
+    [Fact]
+    public void ConductorRunStartDoctorStepIsInSharedLifecycleInvariants()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
+        int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
+        int doctor = conductor.IndexOf("kyber-weave doctor --check", StringComparison.Ordinal);
+
+        Assert.True(invariants >= 0, "'agents/conductor.md' must keep its 'Shared lifecycle invariants' section.");
+        Assert.True(
+            doctor > invariants && doctor < handoffs,
+            "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
+    }
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private static bool IsVersionedIdentity(string name) =>
-        name.EndsWith("-v2", StringComparison.Ordinal) ||
-        name.EndsWith("-v3", StringComparison.Ordinal);
+    /// <summary>The shipped default response guidance: the one owner of the response shape.</summary>
+    private static string ResponseGuidanceDefaultPath =>
+        Path.Combine(ProductRoot, "response-guidance.default.md");
+
+    /// <summary>
+    /// Reads the shipped default guidance, asserting its absence first so a missing file reports the
+    /// missing artifact rather than an I/O exception.
+    /// </summary>
+    private static string ReadResponseGuidanceDefault()
+    {
+        Assert.True(
+            File.Exists(ResponseGuidanceDefaultPath),
+            $"The shipped response-guidance default must live at '{ResponseGuidanceDefaultPath}'.");
+        return File.ReadAllText(ResponseGuidanceDefaultPath);
+    }
+
+    /// <summary>
+    /// Resolves an MSBuild item path relative to the project directory, expanding the
+    /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
+    /// </summary>
+    private static string ResolveProjectPath(string projectDirectory, string item) =>
+        Path.Combine(
+            projectDirectory,
+            item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
+                .Replace('\\', Path.DirectorySeparatorChar));
+
+    private static bool IsVersionedIdentity(string name)
+    {
+        return name.EndsWith("-v2", StringComparison.Ordinal) ||
+               name.EndsWith("-v3", StringComparison.Ordinal);
+    }
 
     private static void AssertClosedCircuitBreakerTriggerSet(string contract)
     {
@@ -546,6 +1705,32 @@ public sealed class SquadCanonicalContentTests
             .ToArray();
 
         Assert.Equal(CircuitBreakerTriggerTokens, harvested);
+    }
+
+    private static void AssertDiscoveryContract(string body, string agentName)
+    {
+        int heading = body.IndexOf("## Discovery order", StringComparison.Ordinal);
+        Assert.True(heading >= 0, $"{agentName}: missing Discovery order section.");
+        int nextHeading = body.IndexOf("\n#", heading + 1, StringComparison.Ordinal);
+        string discovery = nextHeading < 0 ? body[heading..] : body[heading..nextHeading];
+        int code = discovery.IndexOf("codegraph_explore", StringComparison.Ordinal);
+        int docs = discovery.IndexOf("docs_explore", StringComparison.Ordinal);
+        int directRead = discovery.IndexOf("Read or search a file directly", StringComparison.Ordinal);
+
+        Assert.True(code >= 0 && docs >= 0 && directRead > code && directRead > docs,
+            $"{agentName}: index discovery must precede direct-read authorization.");
+        Assert.Contains("docs_for_symbol", discovery, StringComparison.Ordinal);
+        Assert.Contains("docs_glossary", discovery, StringComparison.Ordinal);
+        if (agentName is "review-lens" or "review-triage")
+        {
+            Assert.Contains("Discovery reporting is exempt", discovery, StringComparison.Ordinal);
+            Assert.Contains("machine-consumed", discovery, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
+            Assert.Contains("reason for each direct read", discovery, StringComparison.Ordinal);
+        }
     }
 
     private static string ReadAgentContract(string name)
@@ -574,7 +1759,7 @@ public sealed class SquadCanonicalContentTests
     private static string[] ReadCapabilityProfileTargets()
     {
         string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(File.ReadAllText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
@@ -607,10 +1792,111 @@ public sealed class SquadCanonicalContentTests
                 .Select(File.ReadAllText));
     }
 
+    /// <summary>
+    /// The session-title bullet of a response-guidance document: the single line that opens with the
+    /// instruction to name the session after the work, or null when the document carries none.
+    /// </summary>
+    private static string? SessionTitleBullet(string guidance) =>
+        guidance
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .FirstOrDefault(line => line.TrimStart().StartsWith(SessionTitleBulletLead, StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when the session-title bullet carries both of its conditions. Scoped to that bullet because
+    /// the conditions are what constrain the instruction: a document that says "never fabricate" in
+    /// some other bullet, while its session-title instruction asks for a title unconditionally, has no
+    /// guard where the guard belongs.
+    /// </summary>
+    private static bool CarriesSessionTitleGuard(string guidance)
+    {
+        string? bullet = SessionTitleBullet(guidance);
+        return bullet is not null
+               && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
+               && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+    }
+
+    /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
+    private static bool RestatesTheShape(string text) =>
+        RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+
+    /// <summary>
+    /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
+    /// Emphasis markers are removed without touching a newline, so the line numbers still count the
+    /// lines of the file as written.
+    /// </summary>
+    private static IEnumerable<string> RestatedShapeHits(string relativePath, string text)
+    {
+        string plain = WithoutEmphasis(text);
+        foreach (Match match in RestatedShapeRule.Matches(plain))
+        {
+            int line = plain.AsSpan(0, match.Index).Count('\n') + 1;
+            yield return $"{relativePath}:{line}: \"{match.Value}\"";
+        }
+    }
+
+    /// <summary>
+    /// The line of <paramref name="text"/> that states <paramref name="sentence"/> in full, or null
+    /// when no single line does.
+    /// </summary>
+    /// <remarks>
+    /// One line is the assertion. A sentence wrapped across two lines is not the instruction, and a
+    /// check that tolerated the wrap would also tolerate a sentence cut in half by an edit. The
+    /// comparison is ordinal, so a lowercased or reworded sentence fails it too.
+    /// </remarks>
+    private static string? SentenceLine(string text, string sentence)
+    {
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.TrimEnd('\r').Trim();
+            string plain = WithoutEmphasis(line);
+            plain = Regex.Replace(plain, @"^\s*(?:[-*+]|\d+\.)\s+", string.Empty, RegexOptions.CultureInvariant);
+            if (plain.Equals(sentence, StringComparison.Ordinal))
+            {
+                return line;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The block of <paramref name="text"/> that states <paramref name="anchor"/>, or an empty string
+    /// when no block states it.
+    /// </summary>
+    /// <remarks>
+    /// Blocks are the paragraphs and list items a Markdown reader sees: runs of consecutive
+    /// non-blank lines. Scoping a pin to the block that owns the rule is what keeps a sentence that
+    /// merely repeats the rule elsewhere in the file from satisfying it.
+    /// </remarks>
+    private static string BlockContaining(string text, string anchor)
+    {
+        string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (string block in normalized.Split("\n\n", StringSplitOptions.None))
+        {
+            if (block.Replace("\n", " ", StringComparison.Ordinal).Contains(anchor, StringComparison.Ordinal))
+            {
+                return block;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> with Markdown emphasis markers removed, so a bold or inline-code rendering
+    /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
+    /// order, the case, and the closing full stop all still have to match.
+    /// </summary>
+    private static string WithoutEmphasis(string text) =>
+        text.Replace("*", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("`", string.Empty, StringComparison.Ordinal);
+
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
         string path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(File.ReadAllText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
@@ -671,7 +1957,6 @@ public sealed class SquadCanonicalContentTests
             "architect-v3" => "architect",
             "conductor-v3" => "conductor",
             "dotnet-dev" => "csharp-dev",
-            "task-reviewer-v3" => "task-reviewer",
             _ => name
         };
     }
@@ -690,7 +1975,7 @@ public sealed class SquadCanonicalContentTests
             throw new InvalidDataException($"Migration report '{path}' has unterminated YAML frontmatter.");
         }
 
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(content[4..end]));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "frontmatter", path);
         Dictionary<string, string> sources = RequireMapping(RequireNode(root, "sources", path), "sources", path)
@@ -723,21 +2008,29 @@ public sealed class SquadCanonicalContentTests
         throw new InvalidDataException($"YAML document '{path}' is missing '{key}'.");
     }
 
-    private static YamlMappingNode RequireMapping(YamlNode node, string field, string path) =>
-        node as YamlMappingNode ??
-        throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a mapping.");
+    private static YamlMappingNode RequireMapping(YamlNode node, string field, string path)
+    {
+        return node as YamlMappingNode ??
+               throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a mapping.");
+    }
 
-    private static YamlSequenceNode RequireSequence(YamlNode node, string field, string path) =>
-        node as YamlSequenceNode ??
-        throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a sequence.");
+    private static YamlSequenceNode RequireSequence(YamlNode node, string field, string path)
+    {
+        return node as YamlSequenceNode ??
+               throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a sequence.");
+    }
 
-    private static string RequireScalar(YamlMappingNode mapping, string key, string path) =>
-        RequireScalar(RequireNode(mapping, key, path), key, path);
+    private static string RequireScalar(YamlMappingNode mapping, string key, string path)
+    {
+        return RequireScalar(RequireNode(mapping, key, path), key, path);
+    }
 
-    private static string RequireScalar(YamlNode node, string field, string path) =>
-        node is YamlScalarNode { Value: not null } scalar
+    private static string RequireScalar(YamlNode node, string field, string path)
+    {
+        return node is YamlScalarNode { Value: not null } scalar
             ? scalar.Value
             : throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a scalar.");
+    }
 
     private sealed record RoleSkillProfile(
         string NoPrimaryAgent,
@@ -758,27 +2051,25 @@ public sealed class SquadCanonicalContentTests
         string FinalBodySha256);
 
     private const string ExpectedSourceHashManifest = """
-        .github/agents/architect.agent.md|16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
-        .github/agents/architect-v3.agent.md|5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
-        .github/agents/azure-reader.agent.md|f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
-        .github/agents/bug-crusher-investigator.agent.md|e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
-        .github/agents/code-reviewer.agent.md|98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-        .github/agents/conductor.agent.md|fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
-        .github/agents/conductor-v3.agent.md|0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-        .github/agents/csharp-dev.agent.md|09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-        .github/agents/dal-dev.agent.md|efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
-        .github/agents/docs-dev.agent.md|db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
-        .github/agents/github-devops.agent.md|52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
-        .github/agents/maui-dev.agent.md|d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
-        .github/agents/product-owner.agent.md|5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
-        .github/agents/pulumi-dev.agent.md|968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
-        .github/agents/python-dev.agent.md|f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
-        .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
-        .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
-        .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
-        .github/agents/task-reviewer.agent.md|e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c
-        .github/agents/task-reviewer-v3.agent.md|27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8
-        .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
-        .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-        """;
+                                                      .github/agents/architect.agent.md|16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
+                                                      .github/agents/architect-v3.agent.md|5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
+                                                      .github/agents/azure-reader.agent.md|f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
+                                                      .github/agents/bug-crusher-investigator.agent.md|e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
+                                                      .github/agents/code-reviewer.agent.md|98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
+                                                      .github/agents/conductor.agent.md|fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
+                                                      .github/agents/conductor-v3.agent.md|0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
+                                                      .github/agents/csharp-dev.agent.md|09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
+                                                      .github/agents/dal-dev.agent.md|efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
+                                                      .github/agents/docs-dev.agent.md|db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
+                                                      .github/agents/github-devops.agent.md|52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
+                                                      .github/agents/maui-dev.agent.md|d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
+                                                      .github/agents/product-owner.agent.md|5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
+                                                      .github/agents/pulumi-dev.agent.md|968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
+                                                      .github/agents/python-dev.agent.md|f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
+                                                      .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
+                                                      .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
+                                                      .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
+                                                      .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
+                                                      .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
+                                                      """;
 }

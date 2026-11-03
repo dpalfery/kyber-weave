@@ -125,8 +125,10 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     const report = await buildSessions(store)
     expect(report.built).toBe(1)
 
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    // The canonical harness owns the row; the front-end name never does.
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['cursor'] ?? 0).toBe(1)
+    expect(sessionCounts['cursor-agent'] ?? 0).toBe(0)
 
     const cursorRollup = buildHarnessRollup(store, 'cursor')
     expect((cursorRollup.payload as { sessionCount: number }).sessionCount).toBe(1)
@@ -142,9 +144,10 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     ])
     await buildSessions(store)
 
-    expect(store.listSessions('antigravity')).toHaveLength(1)
-    expect(store.listSessions('antigravity-cli')).toHaveLength(1)
-    expect(store.listSessions('antigravity-ide')).toHaveLength(1)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['antigravity'] ?? 0).toBe(1)
+    expect(sessionCounts['antigravity-cli'] ?? 0).toBe(1)
+    expect(sessionCounts['antigravity-ide'] ?? 0).toBe(1)
     expect(store.listRuns('antigravity').every((r) => r.harness === 'antigravity')).toBe(true)
     expect(store.listRuns('antigravity-cli').every((r) => r.harness === 'antigravity-cli')).toBe(true)
     expect(store.listRuns('antigravity-ide')).toHaveLength(1)
@@ -157,7 +160,7 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     const report = await buildSessions(store)
 
     expect(report.built).toBe(0)
-    expect(store.listSessions('gemini')).toHaveLength(0)
+    expect(store.countSessionsByHarness()['gemini'] ?? 0).toBe(0)
     expect(store.listRuns('gemini')).toHaveLength(0)
 
     const rollups = buildHarnessRollup(store)
@@ -177,8 +180,9 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     const report = await buildSessions(store)
 
     expect(report.built).toBe(1)
-    expect(store.listSessions('antigravity')).toHaveLength(1)
-    expect(store.listSessions('gemini')).toHaveLength(0)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['antigravity'] ?? 0).toBe(1)
+    expect(sessionCounts['gemini'] ?? 0).toBe(0)
 
     const rollups = buildHarnessRollup(store)
     expect(rollups.map((r) => r.harness)).toContain('antigravity')

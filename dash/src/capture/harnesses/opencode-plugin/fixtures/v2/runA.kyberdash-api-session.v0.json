@@ -1,0 +1,300 @@
+{
+  "id": "ses_e74c398c7ffeVajzhRWZNgfR2n",
+  "session_id": "ses_e74c398c7ffeVajzhRWZNgfR2n",
+  "harness": "opencode",
+  "label": "opencode.session.context",
+  "agent_name": null,
+  "repo": null,
+  "branch": null,
+  "span_count": 3,
+  "summary": {
+    "turn_count": 3,
+    "request_count": 3,
+    "total_input": {
+      "availability": "not_measurable",
+      "reason": "OpenCode telemetry did not report input token usage for this span."
+    },
+    "total_output": {
+      "availability": "not_measurable",
+      "reason": "OpenCode telemetry did not report output token usage for this span."
+    },
+    "total_cache_read": {
+      "availability": "not_measurable",
+      "reason": "OpenCode did not export a cache read counter."
+    },
+    "total_cache_creation": {
+      "availability": "not_measurable",
+      "reason": "OpenCode did not export a cache creation counter."
+    },
+    "duration_ms": 0,
+    "models": [
+      "muse-spark-1.3-contributor"
+    ],
+    "cost": {
+      "basis": "unknown",
+      "status": "no_rate"
+    }
+  },
+  "context": {
+    "measurable": false,
+    "reason": "no_message_structure",
+    "turns": 0,
+    "contextLimit": 200000,
+    "contextLimitSource": "default",
+    "first": {
+      "buckets": {
+        "system_prompt": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture system_prompt."
+        },
+        "conversation_history": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture conversation_history."
+        },
+        "tool_definitions": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_definitions."
+        },
+        "tool_result_content": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_result_content."
+        },
+        "response": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture response."
+        },
+        "tool_results": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_result_content."
+        }
+      },
+      "reported_input": {
+        "availability": "not_measurable",
+        "reason": "OpenCode telemetry did not report input token usage for this span."
+      }
+    },
+    "last": {
+      "buckets": {
+        "system_prompt": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture system_prompt."
+        },
+        "conversation_history": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture conversation_history."
+        },
+        "tool_definitions": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_definitions."
+        },
+        "tool_result_content": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_result_content."
+        },
+        "response": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture response."
+        },
+        "tool_results": {
+          "availability": "not_measurable",
+          "reason": "Session records for opencode did not capture tool_result_content."
+        }
+      },
+      "reported_input": {
+        "availability": "not_measurable",
+        "reason": "OpenCode telemetry did not report input token usage for this span."
+      }
+    },
+    "unmeasuredTurns": 3
+  },
+  "tools": [],
+  "schema": {
+    "measurable": true,
+    "byServer": {},
+    "neverInvoked": [],
+    "unusedRange": {
+      "tokenResidencies": 0,
+      "floor": 0,
+      "ceiling": 0
+    },
+    "turns": 3
+  },
+  "timeline": [
+    {
+      "spanId": "be186f796f60f6ed",
+      "parentId": null,
+      "children": [],
+      "startMs": 0,
+      "durationMs": 0,
+      "kind": "internal",
+      "name": "opencode.session.context",
+      "status": "unset",
+      "attributes": {},
+      "isSubagent": false,
+      "isAuxiliary": false,
+      "cost": {
+        "basis": "unknown",
+        "status": "no_rate"
+      }
+    },
+    {
+      "spanId": "9ec42cff69a95833",
+      "parentId": null,
+      "children": [],
+      "startMs": 8939,
+      "durationMs": 0,
+      "kind": "internal",
+      "name": "opencode.session.context",
+      "status": "unset",
+      "attributes": {},
+      "isSubagent": false,
+      "isAuxiliary": false,
+      "cost": {
+        "basis": "unknown",
+        "status": "no_rate"
+      }
+    },
+    {
+      "spanId": "2bc7b3c5bad95761",
+      "parentId": null,
+      "children": [],
+      "startMs": 11477,
+      "durationMs": 0,
+      "kind": "internal",
+      "name": "opencode.session.context",
+      "status": "unset",
+      "attributes": {},
+      "isSubagent": false,
+      "isAuxiliary": false,
+      "cost": {
+        "basis": "unknown",
+        "status": "no_rate"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "request": "be186f796f60f6ed",
+      "timestamp": "2026-10-30T05:15:54.081Z",
+      "turns": 1,
+      "model": "muse-spark-1.3-contributor"
+    },
+    {
+      "request": "9ec42cff69a95833",
+      "timestamp": "2026-10-30T05:16:03.020Z",
+      "turns": 1,
+      "model": "muse-spark-1.3-contributor"
+    },
+    {
+      "request": "2bc7b3c5bad95761",
+      "timestamp": "2026-10-30T05:16:05.558Z",
+      "turns": 1,
+      "model": "muse-spark-1.3-contributor"
+    }
+  ],
+  "servers": [],
+  "coverage": {
+    "schema": 1,
+    "context": 0
+  },
+  "problems": [],
+  "costBasisMismatch": null,
+  "reconciliation": [
+    {
+      "request": "be186f796f60f6ed",
+      "root_input": 0,
+      "sum_chat_input": 0,
+      "input_match": true,
+      "root_output": 0,
+      "sum_chat_output": 0,
+      "output_match": true
+    },
+    {
+      "request": "9ec42cff69a95833",
+      "root_input": 0,
+      "sum_chat_input": 0,
+      "input_match": true,
+      "root_output": 0,
+      "sum_chat_output": 0,
+      "output_match": true
+    },
+    {
+      "request": "2bc7b3c5bad95761",
+      "root_input": 0,
+      "sum_chat_input": 0,
+      "input_match": true,
+      "root_output": 0,
+      "sum_chat_output": 0,
+      "output_match": true
+    }
+  ],
+  "subagents": [],
+  "auxiliary": {
+    "basis": "unknown",
+    "status": "no_rate"
+  },
+  "skills": {
+    "availability": "not_measurable",
+    "reason": "No skill listing source is recorded for harness opencode: the record carries none of kyber.skills.listed, github.copilot.context.skills, gen_ai.skills or opencode.context.skills, so the skills listed are not measurable."
+  },
+  "measurability": {
+    "token_usage": {
+      "availability": "not_measurable",
+      "reason": "OpenCode telemetry did not report input token usage for this span."
+    },
+    "output": {
+      "availability": "not_measurable",
+      "reason": "OpenCode telemetry did not report output token usage for this span."
+    },
+    "cache_read": {
+      "availability": "not_measurable",
+      "reason": "OpenCode did not export a cache read counter."
+    },
+    "cache_creation": {
+      "availability": "not_measurable",
+      "reason": "OpenCode did not export a cache creation counter."
+    },
+    "skills": {
+      "availability": "not_measurable",
+      "reason": "No skill listing source is recorded for harness opencode: the record carries none of kyber.skills.listed, github.copilot.context.skills, gen_ai.skills or opencode.context.skills, so the skills listed are not measurable."
+    }
+  },
+  "turns": [
+    {
+      "index": 0,
+      "spanId": "be186f796f60f6ed",
+      "timestamp": "2026-10-30T05:15:54.081Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 0,
+      "output": 0,
+      "fresh": 0,
+      "cache_read": 0,
+      "cache_creation": 0,
+      "reasoning": null
+    },
+    {
+      "index": 1,
+      "spanId": "9ec42cff69a95833",
+      "timestamp": "2026-10-30T05:16:03.020Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 0,
+      "output": 0,
+      "fresh": 0,
+      "cache_read": 0,
+      "cache_creation": 0,
+      "reasoning": null
+    },
+    {
+      "index": 2,
+      "spanId": "2bc7b3c5bad95761",
+      "timestamp": "2026-10-30T05:16:05.558Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 0,
+      "output": 0,
+      "fresh": 0,
+      "cache_read": 0,
+      "cache_creation": 0,
+      "reasoning": null
+    }
+  ]
+}

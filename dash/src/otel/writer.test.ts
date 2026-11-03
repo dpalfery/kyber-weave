@@ -284,6 +284,29 @@ describe('IngestWriter batching and backpressure (R2.5)', () => {
     expect(sink.spans).toHaveLength(40)
   })
 
+  it('a failing persisted hook is logged, never failing or re-queuing the committed flush', async () => {
+    const sink = new SlowBatchSink(0)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const writer = new IngestWriter(sink, {
+        batchSize: 3,
+        onPersisted: () => {
+          throw new Error('hook exploded')
+        },
+      })
+      writer.write(makeSpans(3))
+      await writer.flush()
+
+      expect(sink.spans).toHaveLength(3)
+      expect(writer.pending).toBe(0)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('onPersisted')
+      expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(Error)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('a store failure re-queues the batch — nothing dropped — and surfaces through onError', async () => {
     const sink = new SlowBatchSink(0)
     sink.failNext = true

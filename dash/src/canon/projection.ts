@@ -12,8 +12,203 @@
 // surface consumes what `buildSessions()` cached, whichever adapter fed
 // the store.
 
+import { setImmediate as scheduleImmediate } from 'node:timers'
+
 import { buildSessions, type BuildSessionsReport } from './sessions.js'
-import type { CanonStore } from './store.js'
+import { DETECTOR_VERSION, SCHEMA_VERSION, type CanonStore } from './store.js'
+import {
+  readSharedProjectionStart,
+  releaseProjectionLease,
+  startLeaseHeartbeat,
+  tryClaimProjectionLease,
+  type ClaimedProjectionLease,
+} from './projection-lease.js'
+import { descriptorFor } from '../refresh/registry.js'
+import { getPricingGenerationKey } from '../pricing/models.js'
+
+/**
+ * Metadata key: the records-write marker the last projection observed.
+ *
+ * The gate compares the corpus's current marker against this one: a different
+ * value means the corpus moved since the last rebuild, so the derived tables
+ * are stale and must be rebuilt.
+ */
+const PROJECTION_RECORDS_MARKER_KEY = 'projection_records_marker'
+
+/**
+ * Metadata key: the parser-contract fingerprint the last projection observed.
+ *
+ * The fingerprint holds, per source checkpoint, the contract version the
+ * checkpoint was written under AND the version the registry asks for now. Both
+ * halves matter: the registry half catches a contract bump in the code (the
+ * stored checkpoints still name the old contract), and the stored half catches
+ * a checkpoint that was invalidated (its version was re-stamped under the new
+ * contract, and the corpus it covers is about to be re-read).
+ */
+const PROJECTION_PARSER_CONTRACTS_KEY = 'projection_parser_contracts'
+
+/**
+ * Metadata key: the pricing fingerprint the last projection observed.
+ *
+ * WHY the gate needs it: a session's derived cost is priced from the bundled
+ * pricing table, not from the corpus. A binary whose pricing table moved —
+ * a repriced model, a new pricing rule — therefore changes the money the
+ * dashboard shows while every record, every detector and every parser
+ * contract stays exactly as it was. The other gate inputs cannot see that,
+ * so a maintenance tick that skipped the projection would serve stale money
+ * figures until the next refresh.
+ */
+const PROJECTION_PRICING_KEY = 'projection_pricing'
+
+/**
+ * Metadata key: the store's schema version the last projection observed.
+ *
+ * WHY the gate needs it: the other four inputs describe the CORPUS and the
+ * RULES that read it -- the records that moved, the detectors that ran, the
+ * contracts that parsed, the prices that costed. None of them describes the
+ * store's SHAPE. A schema bump changes what a row means (which columns
+ * exist, what a payload holds) and changes none of the four, so a
+ * maintenance tick that ran after a store migrated saw "nothing changed" and
+ * skipped the projection -- leaving the derived tables describing a shape
+ * the store no longer has, for as long as the corpus itself stayed still.
+ *
+ * The version is compared as a string, exactly as the store stamps it.
+ */
+const PROJECTION_SCHEMA_VERSION_KEY = 'projection_schema_version'
+
+/**
+ * Metadata key: the store's own schema-version stamp.
+ *
+ * The store writes it when it is created and rewrites it on every migration
+ * step, so it names the shape the rows in that store have.
+ */
+const STORE_SCHEMA_VERSION_KEY = 'schema_version'
+
+/**
+ * The pricing state of this build, as one comparable string.
+ *
+ * `getPricingGenerationKey` is the pricing module's own signature of
+ * everything that can change a rendered cost with no session file changing:
+ * the pricing-behaviour version, the freshness of the live LiteLLM cache, and
+ * the content digest of the bundled snapshot and fallback tables. A build
+ * that ships a repriced model changes the digest; a live repricing changes
+ * the timestamp. Either must force one projection.
+ */
+function pricingFingerprint(): string {
+  return getPricingGenerationKey()
+}
+
+/**
+ * The parser-contract state of the corpus, as one comparable string.
+ *
+ * Empty when the store holds no checkpoints: a corpus that was never read
+ * from a source has no contract to have moved.
+ */
+function parserContractFingerprint(store: CanonStore): string {
+  return store
+    .listSourceCheckpoints()
+    .map((checkpoint) => {
+      const current = descriptorFor(checkpoint.harnessId)?.parserContractVersion
+      return `${checkpoint.harnessId}|${checkpoint.sourceKey}|${checkpoint.parserContractVersion}|${current ?? '-'}`
+    })
+    .sort()
+    .join(';')
+}
+
+/**
+ * Whether the derived tables still describe the corpus.
+ *
+ * Five inputs, and all five are required. The records-write marker says the
+ * corpus itself moved (an ingest, a wipe, a repricing write-back). The
+ * detector version says the rules that read the corpus moved. The parser
+ * contracts say the reading of the corpus moved. The pricing fingerprint says
+ * the rates the corpus is priced with moved. The schema version says the
+ * store's SHAPE moved -- a migration reshaped the rows the derived tables
+ * were built from. Any one of them can leave the derived tables describing a
+ * corpus that no longer exists, or money figures that are no longer the
+ * money, and a gate that watched only one of them would serve a stale view.
+ */
+export function projectionIsCurrent(store: CanonStore): boolean {
+  const recordedMarker = store.getMetadata(PROJECTION_RECORDS_MARKER_KEY)
+  if (recordedMarker === undefined) return false
+  if (recordedMarker !== String(store.recordsWriteMarker())) return false
+  // The store's own detector stamp against this build's: a stamp that names
+  // an older generation means the derived findings were produced by rules
+  // this build has replaced.
+  if (store.getDetectorVersion() !== DETECTOR_VERSION) return false
+  if (store.getMetadata(PROJECTION_PARSER_CONTRACTS_KEY) !== parserContractFingerprint(store)) return false
+  // The pricing table the derived costs came from, against this build's: a
+  // repriced model changes the money without changing the corpus.
+  if (store.getMetadata(PROJECTION_PRICING_KEY) !== pricingFingerprint()) return false
+  // The store's schema version against the one the last projection saw: a
+  // store that was migrated since then holds different columns, and the
+  // derived tables were built against the old ones. A record that names no
+  // version at all -- a projection made by a build that had no such input --
+  // is unknown, and unknown reads as stale rather than as current.
+  const recordedSchema = store.getMetadata(PROJECTION_SCHEMA_VERSION_KEY)
+  if (recordedSchema === undefined) return false
+  if (recordedSchema !== store.getMetadata(STORE_SCHEMA_VERSION_KEY)) return false
+  return true
+}
+
+/**
+ * Record what the projection just built saw, so the next pass can tell
+ * whether anything moved since.
+ *
+ * Read AFTER the projection: the projection's own repricing write-back bumps
+ * the records marker, and a marker read before the pass would make every
+ * later pass look like a change.
+ *
+ * Recorded by EVERY projection, not only by the maintenance pass: the refresh
+ * projects too, and a gate whose state only the maintenance pass refreshed
+ * would rebuild the corpus the refresh had just rebuilt.
+ */
+function recordProjectionState(store: CanonStore): void {
+  store.setMetadata(PROJECTION_RECORDS_MARKER_KEY, String(store.recordsWriteMarker()))
+  store.setMetadata(PROJECTION_PARSER_CONTRACTS_KEY, parserContractFingerprint(store))
+  // The costs the projection just derived came from this build's pricing
+  // table, so the store records which table that was — the same way it
+  // records the detector generation that produced the findings.
+  store.setMetadata(PROJECTION_PRICING_KEY, pricingFingerprint())
+  // The shape the projection just built against, so a later migration is
+  // visible to the gate: a store reshaped since then needs a new projection
+  // even when the corpus itself did not move. A store that carries no
+  // version stamp is recorded as this build's, so the state is never absent.
+  store.setMetadata(
+    PROJECTION_SCHEMA_VERSION_KEY,
+    store.getMetadata(STORE_SCHEMA_VERSION_KEY) ?? String(SCHEMA_VERSION),
+  )
+  // The derived findings were just produced by this build's detectors, so the
+  // store's stamp may name them. Stamping here is what makes the detector
+  // input converge instead of forcing a rebuild on every pass.
+  store.setDetectorVersion()
+}
+
+/**
+ * Hand the event loop back for one turn.
+ *
+ * WHY: a full projection over a real corpus is ~26 s of CPU. Run to
+ * completion on one thread, it starves every other caller of the loop — an
+ * HTTP handler answering `GET /api/kyber/meta` measured 23 s during a
+ * projection and 23 ms between them. A yield between units of work bounds a
+ * waiter's wait to one unit of work plus its own cost, however long the pass
+ * as a whole takes.
+ *
+ * `setImmediate`, not a resolved promise: a promise continuation is a
+ * microtask, and microtasks never reach the check phase where the loop
+ * processes I/O. Only a real turn lets a pending handler run.
+ *
+ * The `node:timers` setImmediate, not the global one: they are the same
+ * function in Node, but a test that fakes timers replaces the global with a
+ * fake that only fires when the test advances the clock. A projection that
+ * waits for a turn nobody will deliver never finishes, and a test that
+ * projects would hang rather than fail.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleImmediate(resolve)
+  })
+}
 
 /**
  * The sole full projection over the canonical store: rebuild every derived
@@ -26,7 +221,9 @@ import type { CanonStore } from './store.js'
  * write when already correct), and a re-ingest overwrite self-heals it.
  */
 export async function projectCanonicalStore(store: CanonStore): Promise<BuildSessionsReport> {
-  return buildSessions(store)
+  const report = await buildSessions(store, { yieldToLoop: yieldToEventLoop })
+  recordProjectionState(store)
+  return report
 }
 
 export type CanonicalProjectionSchedulerOptions = {
@@ -44,11 +241,40 @@ export type CanonicalProjectionSchedulerOptions = {
   maxWaitMs?: number
   /** No pass may start sooner than this after the previous pass started. */
   minIntervalMs?: number
+  /**
+   * Name stamped on the shared lease this scheduler's passes claim.
+   * Defaults to `'receiver'`; tests sharing one store pass distinct names
+   * so a contended lease reads back who held it.
+   */
+  leaseOwner?: string
+  /**
+   * How long `drain()`/`close()` wait out a live foreign leaseholder before
+   * giving up. Defaults to `SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS`; tests
+   * pass a small value to avoid advancing the full default under fake timers.
+   */
+  shutdownDeferredTimeoutMs?: number
 }
 
 export const DEFAULT_PROJECTION_IDLE_MS = 10_000
 export const DEFAULT_PROJECTION_MAX_WAIT_MS = 600_000
 export const DEFAULT_PROJECTION_MIN_INTERVAL_MS = 600_000
+/**
+ * How long `drain()`/`close()` wait before retrying a pass deferred by a
+ * live foreign leaseholder. A poll, not a spin: the holder's pass is
+ * seconds of work, and the staleness gate reclaims a dead holder's lease
+ * on the first retry.
+ */
+export const SCHEDULER_DEFERRED_RETRY_MS = 1_000
+/**
+ * How long `drain()`/`close()` wait out a live foreign leaseholder before
+ * giving up (F1 shutdown-liveness bound). A holder whose `project()` wedges
+ * while its heartbeat keeps ticking (10 s heartbeat < 90 s stale gate)
+ * never goes stale, so an unbounded poll couples shutdown liveness to
+ * foreign liveness. Past this deadline the waiter reports through `onError`,
+ * settles its waiters, retains the owed work for the next explicit
+ * request/drain, and returns — the same give-up posture as a failed pass.
+ */
+export const SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS = 30_000
 
 /**
  * Serialized, coalescing, DEBOUNCED runner for the live collector's
@@ -70,6 +296,15 @@ export const DEFAULT_PROJECTION_MIN_INTERVAL_MS = 600_000
  *     leaves the work dirty. It rolls nothing back — records already
  *     committed by the writer stay committed — and it does not retry by
  *     itself: the NEXT request runs the retained work again.
+ *   * The next pass is also delayed past the SHARED floor: every automatic
+ *     pass from every process stamps its start in the store, and this
+ *     scheduler applies its own spacing from that instant too — so a
+ *     maintenance tick's projection holds this scheduler off exactly as
+ *     its own last pass would.
+ *   * A pass starts only after winning the shared lease. Losing is routine
+ *     contention, not a failure: the work stays owed, no waiter settles,
+ *     and the retry is scheduled — competing processes serialize instead
+ *     of projecting over each other.
  *   * `drain()` and `close()` bypass the schedule and resolve only once
  *     quiescent — no pass in flight and no trailing pass still owed —
  *     which is what lets the collector close the SQLite store after them.
@@ -85,13 +320,15 @@ export class CanonicalProjectionScheduler {
   private readonly idleMs: number
   private readonly maxWaitMs: number
   private readonly minIntervalMs: number
+  private readonly leaseOwner: string
+  private readonly shutdownDeferredTimeoutMs: number
 
   /** Un-projected work exists: a pass is owed on the next opportunity. */
   private dirty = false
   /** Set once `close()` begins; no new pass starts after it. */
   private closed = false
   /** The run currently driving passes, if any. */
-  private currentRun: Promise<'quiescent' | 'trailing' | 'failed'> | null = null
+  private currentRun: Promise<'quiescent' | 'trailing' | 'failed' | 'deferred'> | null = null
   /** The pending scheduled pass start, if any. */
   private timer: ReturnType<typeof setTimeout> | null = null
   /** When the most recent dirty mark arrived. */
@@ -100,8 +337,13 @@ export class CanonicalProjectionScheduler {
   private oldestUnprojectedAt: number | null = null
   /** When the previous pass started; the floor is measured from it. */
   private lastPassStartAt: number | null = null
-  /** Promises to settle the next time the scheduler stops owing work. */
-  private waiters: Array<() => void> = []
+  /**
+   * The one completion promise owed to every requester of the current cycle
+   * (F7): all requests made before the next quiescence share it, so waiter
+   * state is O(1) however many requests arrive mid-pass. Created on first
+   * request, handed out until the scheduler next settles, then dropped.
+   */
+  private cycle: { promise: Promise<void>; settle: () => void } | null = null
 
   constructor(options: CanonicalProjectionSchedulerOptions) {
     this.store = options.store
@@ -109,6 +351,14 @@ export class CanonicalProjectionScheduler {
     this.idleMs = options.idleMs ?? DEFAULT_PROJECTION_IDLE_MS
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_PROJECTION_MAX_WAIT_MS
     this.minIntervalMs = options.minIntervalMs ?? DEFAULT_PROJECTION_MIN_INTERVAL_MS
+    this.leaseOwner = options.leaseOwner ?? 'receiver'
+    const configuredTimeout = options.shutdownDeferredTimeoutMs
+    this.shutdownDeferredTimeoutMs =
+      typeof configuredTimeout === 'number' &&
+      Number.isFinite(configuredTimeout) &&
+      configuredTimeout >= 0
+        ? configuredTimeout
+        : SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS
     const onError = options.onError
     this.report = (error: unknown) => {
       if (onError !== undefined) {
@@ -127,7 +377,8 @@ export class CanonicalProjectionScheduler {
   /**
    * Mark the work dirty and schedule its projection. Resolves — never
    * rejects — when the scheduler next reaches quiescence, including any
-   * trailing pass the requests that arrived mid-pass coalesced into.
+   * trailing pass the requests that arrived mid-pass coalesced into. Every
+   * requester of one cycle shares one promise (F7).
    */
   request(): Promise<void> {
     if (this.closed) return Promise.resolve()
@@ -136,18 +387,29 @@ export class CanonicalProjectionScheduler {
     this.lastRequestAt = now
     if (this.oldestUnprojectedAt === null) this.oldestUnprojectedAt = now
     this.schedule()
-    return new Promise<void>((resolve) => {
-      this.waiters.push(resolve)
-    })
+    this.cycle ??= (() => {
+      let settle!: () => void
+      const promise = new Promise<void>((resolve) => {
+        settle = resolve
+      })
+      return { promise, settle }
+    })()
+    return this.cycle.promise
   }
 
   /**
    * Wait the scheduler out: the pending timer is bypassed, any pass in
    * flight finishes, and owed work with no pass running runs now. A failed
    * pass settles its requests and retains the work — drain does not turn
-   * into a retry loop. Resolves only when quiescent or after a failure.
+   * into a retry loop. A live foreign leaseholder is waited out only up to
+   * `shutdownDeferredTimeoutMs`: past that the waiter reports, settles its
+   * requests, retains the owed work for the next explicit request/drain, and
+   * returns, so a heartbeat-live stuck holder cannot block shutdown forever.
+   * Resolves only when quiescent, after a failure, or after giving up on a
+   * live foreign lease.
    */
   async drain(): Promise<void> {
+    const startMs = Date.now()
     for (;;) {
       this.cancelTimer()
       if (this.currentRun !== null) {
@@ -155,9 +417,27 @@ export class CanonicalProjectionScheduler {
         continue
       }
       if (this.closed || !this.dirty) return
-      this.currentRun = this.runUntilQuiescent()
-      const outcome = await this.currentRun
+      const outcome = await this.startRun()
       if (outcome === 'failed') return
+      if (outcome === 'deferred') {
+        // A live foreign pass holds the lease: poll rather than spin. The
+        // holder's pass is seconds of work, and the staleness gate reclaims
+        // a dead holder's lease on the first retry — but a holder whose
+        // project wedged while its heartbeat keeps ticking never goes stale,
+        // so the poll is bounded by the shutdown deadline.
+        if (Date.now() - startMs >= this.shutdownDeferredTimeoutMs) {
+          this.cancelTimer()
+          this.report(
+            new Error(
+              `projection drain gave up waiting for a live foreign leaseholder after ${this.shutdownDeferredTimeoutMs}ms; retained work stays owed`,
+            ),
+          )
+          this.settleWaiters()
+          return
+        }
+        await new Promise<void>((resolve) => { setTimeout(resolve, SCHEDULER_DEFERRED_RETRY_MS) })
+        continue
+      }
       // 'trailing' means owed work is still scheduled out: run it now
       // rather than waiting for the debounce/floor it was assigned.
     }
@@ -166,10 +446,15 @@ export class CanonicalProjectionScheduler {
   /**
    * Seal the scheduler and drain it. Work still dirty — including work
    * retained by a failed pass — runs one last time; after this resolves no
-   * `request()` starts anything, so the store can be closed safely.
+   * `request()` starts anything, so the store can be closed safely. A live
+   * foreign leaseholder is waited out only up to
+   * `shutdownDeferredTimeoutMs`: past that the waiter reports, retains the
+   * owed work, and returns, so a heartbeat-live stuck holder cannot block
+   * shutdown forever.
    */
   async close(): Promise<void> {
     this.closed = true
+    const startMs = Date.now()
     for (;;) {
       this.cancelTimer()
       if (this.currentRun !== null) {
@@ -177,8 +462,25 @@ export class CanonicalProjectionScheduler {
         continue
       }
       if (!this.dirty) return
-      this.currentRun = this.runUntilQuiescent()
-      const outcome = await this.currentRun
+      const outcome = await this.startRun()
+      if (outcome === 'deferred') {
+        // Same poll as `drain()`: shutdown still rebuilds retained work, so
+        // it waits out a live foreign pass rather than racing or dropping
+        // it — but only up to the shutdown deadline, past which a stuck but
+        // heartbeating holder would otherwise block close forever.
+        if (Date.now() - startMs >= this.shutdownDeferredTimeoutMs) {
+          this.cancelTimer()
+          this.report(
+            new Error(
+              `projection close gave up waiting for a live foreign leaseholder after ${this.shutdownDeferredTimeoutMs}ms; retained work stays owed`,
+            ),
+          )
+          this.settleWaiters()
+          return
+        }
+        await new Promise<void>((resolve) => { setTimeout(resolve, SCHEDULER_DEFERRED_RETRY_MS) })
+        continue
+      }
       if (outcome === 'failed') {
         // Sealed with owed work retained: better than an unbounded failure
         // loop inside close, and records stay committed.
@@ -202,11 +504,30 @@ export class CanonicalProjectionScheduler {
     if (this.lastPassStartAt !== null) {
       at = Math.max(at, this.lastPassStartAt + this.minIntervalMs)
     }
+    // The shared floor (F1): another process may have projected since this
+    // scheduler's last pass — maintenance on its 30 s tick, a second
+    // receiver — and its start is stamped in the store. This scheduler's own
+    // spacing still applies; the shared stamp only ever pushes the next pass
+    // later, never earlier. An unreadable floor reads as absent: the local
+    // schedule still bounds this scheduler, and a store that cannot serve a
+    // metadata read will fail the pass itself with its error reported.
+    // `request()` is fire-and-forget from ingestion, so a staleness probe
+    // must never be what breaks an accepted batch.
+    let sharedStart: number | null = null
+    try {
+      sharedStart = readSharedProjectionStart(this.store)
+    } catch {
+      sharedStart = null
+    }
+    if (sharedStart !== null) {
+      const floor = Number.isFinite(this.minIntervalMs) && this.minIntervalMs > 0 ? this.minIntervalMs : 0
+      at = Math.max(at, sharedStart + floor)
+    }
     const delay = Math.max(0, at - Date.now())
     this.timer = setTimeout(() => {
       this.timer = null
       if (this.closed || !this.dirty || this.currentRun !== null) return
-      this.currentRun = this.runUntilQuiescent()
+      this.startRun()
     }, delay)
     this.timer.unref?.()
   }
@@ -219,6 +540,27 @@ export class CanonicalProjectionScheduler {
   }
 
   /**
+   * Drive the owed pass(es), parking the run in the slot.
+   *
+   * WHY the settle-clear: a run that returns synchronously — a deferred
+   * lease claim that never started a pass — runs its `finally` (which
+   * clears the slot) BEFORE the caller's assignment lands, so parking the
+   * raw promise would leave the settled outcome in the slot reading as a
+   * run still driving. Every later tick, drain and timer would join or drop
+   * it forever. Clearing again on settle keeps the slot honest however the
+   * run finished; a still-running pass cleared it in its own finally first,
+   * and this second clear is a no-op.
+   */
+  private startRun(): Promise<'quiescent' | 'trailing' | 'failed' | 'deferred'> {
+    const run = this.runUntilQuiescent()
+    const parked = run.finally(() => {
+      this.currentRun = null
+    })
+    this.currentRun = parked
+    return parked
+  }
+
+  /**
    * Run the owed pass(es) for THIS cycle. The dirty flag is consumed up
    * front so dirtiness that arrives while a pass runs is a NEW trailing
    * pass, not a re-run of the one in flight; a failure re-marks it so the
@@ -228,9 +570,12 @@ export class CanonicalProjectionScheduler {
    * drives the next cycle, which is what bounds pass frequency under a
    * sustained stream. Waiters settle only when no work is owed or a pass
    * failed (a failed pass leaves work owed, but its requests must still
-   * settle — the retry belongs to the NEXT explicit request/drain).
+   * settle — the retry belongs to the NEXT explicit request/drain). A
+   * pass that loses the shared lease is DEFERRED instead: the work stays
+   * owed with no waiter settled, and the retry is scheduled — the timer
+   * path retries on its timer, `drain()`/`close()` poll past it.
    */
-  private async runUntilQuiescent(): Promise<'quiescent' | 'trailing' | 'failed'> {
+  private async runUntilQuiescent(): Promise<'quiescent' | 'trailing' | 'failed' | 'deferred'> {
     try {
       if (!this.dirty) {
         this.settleWaiters()
@@ -238,9 +583,39 @@ export class CanonicalProjectionScheduler {
       }
       this.dirty = false
       const passStart = Date.now()
-      this.lastPassStartAt = passStart
+      // The oldest mark is kept across a deferral below, so the maxWait cap
+      // still measures from when the work first arrived rather than from
+      // the retry.
+      const owedSince = this.oldestUnprojectedAt
       this.lastRequestAt = null
       this.oldestUnprojectedAt = null
+      // The shared cross-process lease (F1): at most one automatic
+      // projection runs at a time, however many schedulers or maintenance
+      // ticks share this store. Losing here is routine contention, not a
+      // failure — the work stays owed and the retry is scheduled, so
+      // nothing reports and no waiter settles. A store failure while
+      // claiming reads as a failed pass instead: the work stays owed, the
+      // waiters settle, and the retry belongs to the next request or drain.
+      let claim: ClaimedProjectionLease | null
+      try {
+        claim = tryClaimProjectionLease(this.store, { owner: this.leaseOwner, nowMs: passStart })
+      } catch (error) {
+        this.dirty = true
+        this.report(error)
+        this.settleWaiters()
+        return 'failed'
+      }
+      if (claim === null) {
+        this.dirty = true
+        this.lastRequestAt = passStart
+        this.oldestUnprojectedAt = owedSince ?? passStart
+        // Clear the run slot first so schedule() arms the timer.
+        this.currentRun = null
+        this.schedule()
+        return 'deferred'
+      }
+      this.lastPassStartAt = passStart
+      const heartbeat = startLeaseHeartbeat(this.store, claim)
       try {
         await this.project(this.store)
       } catch (error) {
@@ -248,6 +623,16 @@ export class CanonicalProjectionScheduler {
         this.report(error)
         this.settleWaiters()
         return 'failed'
+      } finally {
+        heartbeat.stop()
+        try {
+          releaseProjectionLease(this.store, heartbeat.current())
+        } catch (error) {
+          // The pass itself determined the outcome above; a release failure
+          // only strands the lease until its staleness gate, so it reports
+          // rather than failing the pass retroactively.
+          this.report(error)
+        }
       }
       if (this.dirty) {
         // Mid-pass requests coalesced into one trailing pass, scheduled
@@ -265,8 +650,8 @@ export class CanonicalProjectionScheduler {
   }
 
   private settleWaiters(): void {
-    const settled = this.waiters
-    this.waiters = []
-    for (const resolve of settled) resolve()
+    const cycle = this.cycle
+    this.cycle = null
+    cycle?.settle()
   }
 }

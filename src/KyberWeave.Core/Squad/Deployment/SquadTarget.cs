@@ -14,7 +14,8 @@ public enum SquadTarget
     Factory,
     Pi,
     ZCode,
-    Devin
+    Devin,
+    CommandCode
 }
 
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
@@ -34,7 +35,8 @@ public static class SquadTargetCatalog
             SquadTarget.Factory,
             SquadTarget.Pi,
             SquadTarget.ZCode,
-            SquadTarget.Devin
+            SquadTarget.Devin,
+            SquadTarget.CommandCode
         ]);
 
     private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByToken =
@@ -53,7 +55,9 @@ public static class SquadTargetCatalog
             ["factory-droids"] = SquadTarget.Factory,
             ["pi"] = SquadTarget.Pi,
             ["zcode"] = SquadTarget.ZCode,
-            ["devin"] = SquadTarget.Devin
+            ["devin"] = SquadTarget.Devin,
+            ["commandcode"] = SquadTarget.CommandCode,
+            ["command-code"] = SquadTarget.CommandCode
         };
 
     /// <summary>The approved target roster in stable presentation order.</summary>
@@ -74,8 +78,29 @@ public static class SquadTargetCatalog
         SquadTarget.Pi => "pi",
         SquadTarget.ZCode => "zcode",
         SquadTarget.Devin => "devin",
+        SquadTarget.CommandCode => "commandcode",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
+
+    /// <summary>
+    /// Resolves one exact canonical token without throwing. Returns <see langword="false"/> for an
+    /// unknown or null token, so recovery paths can degrade instead of aborting.
+    /// </summary>
+    public static bool TryResolve(string? token, out SquadTarget target)
+    {
+        if (token is not null)
+        {
+            // Same normalization Parse applies to each comma-separated segment (TrimEntries):
+            // surrounding whitespace is not part of the token. Comma-containing input and "all"
+            // expand to zero or more than one target, so they never resolve to a single target.
+            string trimmed = token.Trim();
+            if (trimmed.Length != 0 && TargetsByToken.TryGetValue(trimmed, out target))
+                return true;
+        }
+
+        target = default;
+        return false;
+    }
 
     /// <summary>
     /// Parses repeated or comma-separated target arguments into a first-seen ordered set.

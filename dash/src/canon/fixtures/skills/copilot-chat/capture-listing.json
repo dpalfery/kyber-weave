@@ -1,0 +1,9 @@
+{
+  "name": "invoke_agent conductor",
+  "attributes": {
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.provider.name": "github",
+    "gen_ai.agent.name": "conductor",
+    "github.copilot.context.skills": "[\"app-docs-standard\",\"resharper-clt\",\"agent-customization\",\"create-pull-request\",\"architecture-decision-record\",\"azure-cli\"]"
+  }
+}

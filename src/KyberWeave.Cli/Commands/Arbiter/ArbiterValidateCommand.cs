@@ -14,7 +14,7 @@ public sealed class ArbiterValidateCommand : Command<ArbiterSettings>
     /// fail the run); exits 1 on any error, including hinted
     /// <c>KW-ARB-CONFIG-*</c> diagnostics for an invalid section.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath))

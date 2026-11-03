@@ -1,7 +1,11 @@
 using System.Globalization;
+using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -24,6 +28,22 @@ public sealed class DocSpecValidator
     /// that is not a coding standard, or naming a technology other than the folder it sits in.
     /// </summary>
     public const string MisplacedTechnology = "KW-DOC-SPEC-007";
+
+    /// <summary>
+    /// A Markdown link's <c>#fragment</c> names no heading in the resolved target document.
+    /// </summary>
+    public const string BrokenLinkFragment = "KW-DOC-LINK-001";
+
+    /// <summary>
+    /// A <c>lead</c> or <c>sections</c> key names a slug that does not exist in the document.
+    /// </summary>
+    public const string UnknownSectionSlug = "KW-DOC-SPEC-008";
+
+    /// <summary>The declared lead leaf exceeds the explore answer character ceiling.</summary>
+    public const string LeadExceedsAnswerCeiling = "KW-DOC-SPEC-009";
+
+    /// <summary>A section keyword shares no words with that section's headings or text.</summary>
+    public const string UngroundedSectionKeyword = "KW-DOC-SPEC-010";
 
     /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
@@ -59,9 +79,9 @@ public sealed class DocSpecValidator
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
 
-        Dictionary<string, List<string>> idOwners = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        Dictionary<string, List<string>> idOwners = new(StringComparer.Ordinal);
         foreach (DocumentModel doc in set.Documents)
         {
             string? id = doc.Frontmatter.Id;
@@ -71,15 +91,23 @@ public sealed class DocSpecValidator
                 paths = [];
                 idOwners[id] = paths;
             }
+
             paths.Add(doc.RelativePath);
         }
 
-        HashSet<string> knownIds = new HashSet<string>(idOwners.Keys, StringComparer.Ordinal);
+        HashSet<string> knownIds = new(idOwners.Keys, StringComparer.Ordinal);
+
+        Dictionary<string, DocumentModel> byPath = set.Documents.ToDictionary(
+            doc => doc.RelativePath,
+            DocsRootPath.PathComparer);
+        Dictionary<string, IReadOnlySet<string>> headingSlugsByPath = BuildHeadingSlugIndex(set);
 
         foreach (DocumentModel doc in set.Documents)
         {
             ValidateDocument(doc, set, knownIds, idOwners, report);
         }
+
+        ValidateLinkFragments(byPath, headingSlugsByPath, report);
 
         return report;
     }
@@ -113,12 +141,35 @@ public sealed class DocSpecValidator
 
         if (doc.ParseError is not null)
         {
+            // A sections shape error is valid YAML that the document deserializer also
+            // rejects. Report that shape once. A syntax error is the same failure in both
+            // parsers, so the frontmatter parse is the one finding.
+            if (doc.SectionFrontmatterError is not null
+                && doc.SectionFrontmatterError.Contains("must be", StringComparison.Ordinal))
+            {
+                report.Add(new Diagnostic(
+                    InvalidVocabulary, Severity.Error,
+                    $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
+                    doc.Subject, doc.RelativePath,
+                    "Use a mapping for sections and list values for keywords and code-refs."));
+                return;
+            }
+
             report.Add(new Diagnostic(
                 MissingFrontmatter, Severity.Error,
                 $"Frontmatter block could not be parsed: {doc.ParseError}",
                 doc.Subject, doc.RelativePath,
                 "Check YAML indentation and that list values use '- ' items."));
             return;
+        }
+
+        if (doc.SectionFrontmatterError is not null)
+        {
+            report.Add(new Diagnostic(
+                InvalidVocabulary, Severity.Error,
+                $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
+                doc.Subject, doc.RelativePath,
+                "Use a mapping for sections and list values for keywords and code-refs."));
         }
 
         DocumentFrontmatter fm = doc.Frontmatter;
@@ -283,6 +334,8 @@ public sealed class DocSpecValidator
                     Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
             }
         }
+
+        ValidateSectionFrontmatter(doc, report);
     }
 
     private void ValidateRequiredForType(DocumentModel doc, DiagnosticReport report)
@@ -309,6 +362,7 @@ public sealed class DocSpecValidator
                 {
                     RequireValue(fm.SourceRoot, "source-root", doc, report);
                 }
+
                 break;
 
             case DocType.Runbook:
@@ -317,6 +371,7 @@ public sealed class DocSpecValidator
                     RequireList(doc.CodeRefs, "code-refs", doc, report,
                         "A runbook with a source-root must name the symbols it operates, or drop source-root if it is process-only.");
                 }
+
                 break;
         }
     }
@@ -387,14 +442,19 @@ public sealed class DocSpecValidator
         return relativePath[(start + 1)..end];
     }
 
-    private bool IsKnownDocType(string value) =>
-        _config.DocTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    private bool IsKnownDocType(string value)
+    {
+        return _config.DocTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
 
-    private bool IsKnownStatus(string value) =>
-        _config.Statuses.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    private bool IsKnownStatus(string value)
+    {
+        return _config.Statuses.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
 
-    private static string? GetFrontmatterValue(DocumentFrontmatter fm, string key) =>
-        key switch
+    private static string? GetFrontmatterValue(DocumentFrontmatter fm, string key)
+    {
+        return key switch
         {
             "id" => fm.Id,
             "title" => fm.Title,
@@ -407,6 +467,7 @@ public sealed class DocSpecValidator
             "technology" => fm.Technology,
             _ => null
         };
+    }
 
     private static void RequireValue(string? value, string key, DocumentModel doc, DiagnosticReport report)
     {
@@ -427,6 +488,329 @@ public sealed class DocSpecValidator
             doc.Subject, doc.RelativePath, hint));
     }
 
+    private static void ValidateSectionFrontmatter(DocumentModel doc, DiagnosticReport report)
+    {
+        string docId = DocumentLoader.ResolveDocId(doc.Frontmatter, doc.RelativePath);
+        HashSet<string> slugs = CollectSectionSlugs(doc, docId);
+
+        string? lead = doc.Frontmatter.Lead?.Trim();
+        if (!string.IsNullOrEmpty(lead))
+        {
+            if (!slugs.Contains(lead))
+            {
+                report.Add(new Diagnostic(
+                    UnknownSectionSlug,
+                    Severity.Error,
+                    $"lead '{lead}' does not match any section slug in this document.",
+                    doc.Subject,
+                    doc.RelativePath,
+                    NearestSectionSlug(lead, slugs) is { } near ? $"Closest section slug: '{near}'." : null));
+            }
+            else
+            {
+                int length = LeadLeafBodyLength(doc, docId, lead);
+                if (length > ExploreAnswer.AnswerCharCap)
+                {
+                    report.Add(new Diagnostic(
+                        LeadExceedsAnswerCeiling,
+                        Severity.Error,
+                        $"lead '{lead}' is {length} characters; the answer ceiling is {ExploreAnswer.AnswerCharCap}.",
+                        doc.Subject,
+                        doc.RelativePath,
+                        $"Declare a shorter lead or split the section so the leaf is at most {ExploreAnswer.AnswerCharCap} characters."));
+                }
+            }
+        }
+
+        if (doc.Frontmatter.Sections is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<string, DocumentSectionVocabulary> entry in doc.Frontmatter.Sections)
+        {
+            string slug = entry.Key;
+            DocumentSectionVocabulary? section = entry.Value;
+            if (section is null)
+            {
+                report.Add(new Diagnostic(
+                    InvalidVocabulary,
+                    Severity.Error,
+                    $"sections entry '{slug}' is empty; declare keywords or code-refs.",
+                    doc.Subject,
+                    doc.RelativePath,
+                    "Remove the slug or add a mapping with keywords and/or code-refs."));
+                continue;
+            }
+
+            if (!slugs.Contains(slug))
+            {
+                report.Add(new Diagnostic(
+                    UnknownSectionSlug,
+                    Severity.Error,
+                    $"sections key '{slug}' does not match any section slug in this document.",
+                    doc.Subject,
+                    doc.RelativePath,
+                    NearestSectionSlug(slug, slugs) is { } near ? $"Closest section slug: '{near}'." : null));
+            }
+
+            if (section.Keywords is not null)
+            {
+                foreach (string keyword in section.Keywords)
+                {
+                    if (string.IsNullOrWhiteSpace(keyword))
+                    {
+                        report.Add(new Diagnostic(
+                            InvalidVocabulary,
+                            Severity.Error,
+                            $"section '{slug}': keyword '{keyword}' is empty or whitespace.",
+                            doc.Subject,
+                            doc.RelativePath,
+                            "Each keyword must be a non-empty string."));
+                        continue;
+                    }
+
+                    if (slugs.Contains(slug)
+                        && !SectionKeywordGrounded(keyword, SectionSearchText(doc, docId, slug)))
+                    {
+                        report.Add(new Diagnostic(
+                            UngroundedSectionKeyword,
+                            Severity.Warning,
+                            $"section '{slug}': keyword '{keyword}' shares no words with that section's headings or text.",
+                            doc.Subject,
+                            doc.RelativePath,
+                            "Use a synonym that appears in the section, or drop the keyword."));
+                    }
+                }
+            }
+
+            if (section.CodeRefs is not null)
+            {
+                foreach (string symbol in section.CodeRefs)
+                {
+                    if (string.IsNullOrWhiteSpace(symbol))
+                    {
+                        report.Add(new Diagnostic(
+                            InvalidVocabulary,
+                            Severity.Error,
+                            $"section '{slug}': code-refs entry '{symbol}' is empty or whitespace.",
+                            doc.Subject,
+                            doc.RelativePath,
+                            "Each code-refs entry must be a non-empty string."));
+                    }
+                }
+            }
+        }
+    }
+
+    private static HashSet<string> CollectSectionSlugs(DocumentModel doc, string docId)
+    {
+        HashSet<string> slugs = new(DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId),
+            StringComparer.Ordinal);
+        slugs.Add("#");
+        return slugs;
+    }
+
+    private static int LeadLeafBodyLength(DocumentModel doc, string docId, string leadSlug)
+    {
+        string leafId = string.Create(CultureInfo.InvariantCulture, $"{docId}#{leadSlug}");
+        foreach (DocumentLeaf leaf in doc.Leaves)
+        {
+            if (string.Equals(leaf.Id, leafId, StringComparison.Ordinal))
+            {
+                return leaf.Body.Length;
+            }
+        }
+
+        foreach (DocumentSection section in doc.Sections)
+        {
+            string slug = SlugFromSectionHeading(section.Heading);
+            if (string.Equals(slug, leadSlug, StringComparison.Ordinal))
+            {
+                return section.Body.Length;
+            }
+        }
+
+        return 0;
+    }
+
+    private static string SectionSearchText(DocumentModel doc, string docId, string slug)
+    {
+        if (string.Equals(slug, "#", StringComparison.Ordinal))
+        {
+            string preambleId = string.Create(CultureInfo.InvariantCulture, $"{docId}#");
+            foreach (DocumentLeaf leaf in doc.Leaves)
+            {
+                if (string.Equals(leaf.Id, preambleId, StringComparison.Ordinal))
+                {
+                    return leaf.Body;
+                }
+            }
+
+            return doc.Body;
+        }
+
+        string leafId = string.Create(CultureInfo.InvariantCulture, $"{docId}#{slug}");
+        foreach (DocumentLeaf leaf in doc.Leaves)
+        {
+            if (string.Equals(leaf.Id, leafId, StringComparison.Ordinal))
+            {
+                return $"{SlugToHeadingWords(slug)} {leaf.Body}";
+            }
+        }
+
+        foreach (DocumentSection section in doc.Sections)
+        {
+            if (string.Equals(SlugFromSectionHeading(section.Heading), slug, StringComparison.Ordinal))
+            {
+                return $"{section.Heading} {section.Body}";
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool SectionKeywordGrounded(string keyword, string sectionText)
+    {
+        List<string> keywordWords = ExtractWords(keyword);
+        if (keywordWords.Count == 0)
+        {
+            return true;
+        }
+
+        HashSet<string> sectionWords = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string word in ExtractWords(sectionText))
+        {
+            sectionWords.Add(word);
+        }
+
+        foreach (string word in keywordWords)
+        {
+            if (sectionWords.Contains(word))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<string> ExtractWords(string text)
+    {
+        List<string> words = new();
+        StringBuilder current = new();
+        foreach (char ch in text)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                current.Append(ch);
+            }
+            else if (current.Length > 0)
+            {
+                words.Add(current.ToString());
+                current.Clear();
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            words.Add(current.ToString());
+        }
+
+        return words;
+    }
+
+    private static string SlugFromSectionHeading(string heading)
+    {
+        if (string.IsNullOrEmpty(heading))
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new();
+        bool lastWasDash = false;
+        foreach (char ch in heading.Normalize(NormalizationForm.FormKD))
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+                lastWasDash = false;
+            }
+            else if (!lastWasDash)
+            {
+                builder.Append('-');
+                lastWasDash = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
+    }
+
+    private static string SlugToHeadingWords(string slug)
+    {
+        return slug.Replace('-', ' ');
+    }
+
+    private static Dictionary<string, IReadOnlySet<string>> BuildHeadingSlugIndex(DocumentSet set)
+    {
+        Dictionary<string, IReadOnlySet<string>> slugsByPath = new(DocsRootPath.PathComparer);
+        foreach (DocumentModel doc in set.Documents)
+        {
+            if (!doc.HasFrontmatter || doc.ParseError is not null)
+                continue;
+
+            string docId = DocumentLoader.ResolveDocId(doc.Frontmatter, doc.RelativePath);
+            slugsByPath[doc.RelativePath] =
+                DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId);
+        }
+
+        return slugsByPath;
+    }
+
+    private static void ValidateLinkFragments(
+        Dictionary<string, DocumentModel> byPath,
+        Dictionary<string, IReadOnlySet<string>> headingSlugsByPath,
+        DiagnosticReport report)
+    {
+        foreach (DocumentModel doc in byPath.Values)
+        {
+            if (!doc.HasFrontmatter || doc.ParseError is not null)
+                continue;
+
+            foreach (BodyLink link in doc.LinkTargets)
+            {
+                if (string.IsNullOrEmpty(link.Fragment))
+                    continue;
+
+                string? targetPath = string.IsNullOrEmpty(link.Path)
+                    ? doc.RelativePath
+                    : DocGraphProjection.ResolveLink(doc.RelativePath, link.Path);
+                if (targetPath is null
+                    || !byPath.TryGetValue(targetPath, out DocumentModel? target)
+                    || !headingSlugsByPath.TryGetValue(targetPath, out IReadOnlySet<string>? slugs))
+                {
+                    continue;
+                }
+
+                if (slugs.Contains(link.Fragment))
+                    continue;
+
+                string targetLabel = target.Subject;
+                report.Add(new Diagnostic(
+                    BrokenLinkFragment,
+                    Severity.Error,
+                    $"Link fragment '#{link.Fragment}' does not match any heading in '{targetLabel}'.",
+                    doc.Subject,
+                    doc.RelativePath,
+                    Nearest(link.Fragment, slugs) is { } near
+                        ? $"Closest heading anchor: '#{near}'."
+                        : null,
+                    doc.BodyStartLine + link.Line - 1,
+                    doc.BodyStartLine + link.Line - 1));
+            }
+        }
+    }
+
     /// <summary>Closest candidate by edit distance, when one is plausibly a typo.</summary>
     internal static string? Nearest(string value, IEnumerable<string> candidates)
     {
@@ -435,7 +819,7 @@ public sealed class DocSpecValidator
 
         foreach (string candidate in candidates)
         {
-            int distance = StringDistance.Levenshtein(value, candidate, ignoreCase: true);
+            int distance = StringDistance.Levenshtein(value, candidate, true);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -445,6 +829,54 @@ public sealed class DocSpecValidator
 
         if (best is null) return null;
         int threshold = Math.Max(3, value.Length / 2);
+        return bestDistance <= threshold ? best : null;
+    }
+
+    /// <summary>
+    /// Closest section slug for <see cref="UnknownSectionSlug"/> hints — suffix typos such as
+    /// <c>almost-detail</c> → <c>detail</c> must still resolve.
+    /// </summary>
+    private static string? NearestSectionSlug(string value, IEnumerable<string> candidates)
+    {
+        List<string> slugList = candidates.ToList();
+        foreach (string candidate in slugList)
+        {
+            if (candidate.Length == 0 || candidate == "#")
+            {
+                continue;
+            }
+
+            if (value.EndsWith(candidate, StringComparison.OrdinalIgnoreCase)
+                && (value.Length == candidate.Length
+                    || value[value.Length - candidate.Length - 1] == '-'))
+            {
+                return candidate;
+            }
+        }
+
+        string? best = null;
+        int bestDistance = int.MaxValue;
+        foreach (string candidate in slugList)
+        {
+            if (candidate == "#")
+            {
+                continue;
+            }
+
+            int distance = StringDistance.Levenshtein(value, candidate, true);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        if (best is null)
+        {
+            return null;
+        }
+
+        int threshold = Math.Max(3, value.Length);
         return bestDistance <= threshold ? best : null;
     }
 }

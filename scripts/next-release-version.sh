@@ -3,9 +3,17 @@
 #
 #   scripts/next-release-version.sh           # next RC (default)
 #   scripts/next-release-version.sh --prod    # next stable
+#   scripts/next-release-version.sh --notes-base --for <released-tag>
 #   scripts/next-release-version.sh --self-test
 #
 # Prints `VERSION=` and `TAG=` on stdout for `eval`. Diagnostics go to stderr.
+# --notes-base --for <tag> prints only `PREVIOUS_TAG=<tag>` (empty when there is no
+# base): the tag the release notes for <tag> compare against. <tag> is the tag being
+# released (the TAG this script printed), so the base is always lower than it. A
+# stable <tag> uses the highest lower stable tag (spanning every RC); an RC <tag>
+# uses the highest lower stable or RC tag. The major-version guard is not applied
+# to those lower candidates, so v1.0.0-rc.2 compares with v1.0.0-rc.1, while a
+# mistyped higher-major tag is above <tag> and can never be the base.
 #
 # Dispatch never asks for a version. Unchecked "make prod release" increments
 # only the RC number on the current candidate line (0.1.7-rc.9 → 0.1.7-rc.10;
@@ -217,6 +225,53 @@ EOF
     log "highest=${highest} prod=${prod} -> ${next}"
 }
 
+# Prints PREVIOUS_TAG=<tag> for the release tag $1, drawn from the tags in $2.. (or
+# origin / local tags when none are given).
+notes_base_for() {
+    target="$(normalize "$1")"
+    shift
+    if is_stable "$target"
+    then
+        want_stable=1
+    elif is_rc "$target"
+    then
+        want_stable=0
+    else
+        die "--for '${target}' is not a stable or -rc.N version"
+    fi
+
+    base=""
+    while IFS= read -r tag
+    do
+        [ -n "$tag" ] || continue
+        ver="$(normalize "$tag")"
+        if is_stable "$ver"
+        then
+            :
+        elif [ "$want_stable" = 0 ] && is_rc "$ver"
+        then
+            :
+        else
+            continue
+        fi
+        [ "$(semver_compare "$ver" "$target")" -lt 0 ] || continue
+        if [ -z "$base" ] || [ "$(semver_compare "$ver" "$base")" -gt 0 ]
+        then
+            base="$ver"
+        fi
+    done <<EOF
+$(collect_tags "$@")
+EOF
+
+    if [ -n "$base" ]
+    then
+        printf 'PREVIOUS_TAG=v%s\n' "$base"
+    else
+        printf 'PREVIOUS_TAG=\n'
+    fi
+    log "notes-base for=${target} -> ${base:-none}"
+}
+
 expect_next() {
     label="$1"
     prod="$2"
@@ -224,6 +279,15 @@ expect_next() {
     shift 3
     got="$(choose_next "$prod" "$@" | awk -F= '/^VERSION=/{print $2}')"
     [ "$got" = "$want" ] || die "${label}: expected ${want}, got ${got}"
+}
+
+expect_base() {
+    label="$1"
+    target="$2"
+    want="$3"
+    shift 3
+    got="$(notes_base_for "$target" "$@" | awk -F= '/^PREVIOUS_TAG=/{print $2}')"
+    [ "$got" = "$want" ] || die "${label}: expected base '${want}', got '${got}'"
 }
 
 self_test() {
@@ -235,16 +299,30 @@ self_test() {
     expect_next "rc.10 beats rc.9" 0 "0.1.7-rc.11" v0.1.7-rc.9 v0.1.7-rc.10
     expect_next "ignores mistyped major" 0 "0.1.7-rc.10" v0.1.6 v0.1.7-rc.9 v1.0.6-rc.6
     expect_next "ignores -dev" 0 "0.1.7-rc.10" v0.1.6 v0.1.7-rc.9 v0.1.8-dev.1
+    expect_base "rc after stable" v0.1.7-rc.1 "v0.1.6" v0.1.6
+    expect_base "later rc" v0.1.7-rc.3 "v0.1.7-rc.2" v0.1.6 v0.1.7-rc.1 v0.1.7-rc.2
+    expect_base "stable spans rcs" v0.1.7 "v0.1.6" v0.1.6 v0.1.7-rc.1 v0.1.7-rc.3
+    expect_base "stable without prior stable" v0.1.0 "" v0.1.0-rc.1
+    expect_base "ignores -dev" v0.1.7-rc.1 "v0.1.6" v0.1.6 v0.1.7-dev.3
+    expect_base "widened major" v1.0.0-rc.2 "v1.0.0-rc.1" v0.9.5 v1.0.0-rc.1
+    expect_base "mistyped major is never the base" v0.1.7-rc.10 "v0.1.7-rc.9" v0.1.6 v0.1.7-rc.9 v1.0.6-rc.6
+    expect_base "never its own tag" v0.1.7-rc.9 "v0.1.6" v0.1.6 v0.1.7-rc.9
     log "self-test passed"
 }
 
 PROD=0
+NOTES_BASE=0
+FOR_TAG=""
 MODE=run
 while [ $# -gt 0 ]; do
     case "$1" in
         --prod) PROD=1; shift ;;
+        --notes-base) NOTES_BASE=1; shift ;;
+        --for)
+            [ $# -ge 2 ] && [ -n "$2" ] || die "--for needs the tag being released"
+            FOR_TAG="$2"; shift 2 ;;
         --self-test) MODE=self-test; shift ;;
-        -h|--help) sed -n '2,22p' "$0" >&2; exit 0 ;;
+        -h|--help) sed -n '2,29p' "$0" >&2; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
 done
@@ -254,5 +332,13 @@ then
     self_test
     exit 0
 fi
+
+if [ "$NOTES_BASE" = 1 ]
+then
+    [ -n "$FOR_TAG" ] || die "--notes-base needs --for <released-tag>"
+    notes_base_for "$FOR_TAG"
+    exit 0
+fi
+[ -z "$FOR_TAG" ] || die "--for is only valid with --notes-base"
 
 choose_next "$PROD"

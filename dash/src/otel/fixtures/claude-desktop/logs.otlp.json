@@ -1,0 +1,599 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "claude-code-desktop"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "2.42304.2"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "com.anthropic.claude_code.events"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1792411200028000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system prompt]\"}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[sanitized user text]\"}]}],\"stream\":true}"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "193"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "094356ae-8b1e-5651-9450-9ad7408297e7"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                }
+              ],
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000001"
+            },
+            {
+              "timeUnixNano": "1792411211461000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system prompt]\"}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_sanitized_1\",\"content\":\"[sanitized tool output]\"},{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_sanitized_2\",\"content\":\"[sanitized tool output]\"}]},{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"[sanitized system-role note]\"}]}],\"stream\":true}"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "416"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "91c28e81-89ba-58d4-93bd-2d88fa134eb5"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                }
+              ],
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000001"
+            },
+            {
+              "timeUnixNano": "1792411211536000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system block 1]\"},{\"type\":\"text\",\"text\":\"[sanitized system block 2]\"},{\"type\":\"text\",\"text\":\"[sanitized system block 3]\"}],\"tools\":[{\"name\":\"sanitized_tool_1\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_2\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_3\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_4\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_5\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_6\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_7\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_8\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_9\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_10\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_11\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_12\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_13\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_14\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[sanitized user text 1]\"},{\"type\":\"text\",\"text\":\"[sanitized user text 2]\"}]},{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"The following skills are available for use with the Skill tool:\\n\\n- sanitized-skill-1: [sanitized description 1]\\n- sanitized-skill-2: [sanitized description 2]\\n- sanitized-skill-3: [sanitized description 3]\\n- sanitized-skill-4: [sanitized description 4]\\n- sanitized-skill-5: [sanitized description 5]\\n- sanitized-skill-6: [sanitized description 6]\\n- sanitized-skill-7: [sanitized description 7]\\n- sanitized-skill-8: [sanitized description 8]\\n- sanitized-skill-9: [sanitized description 9]\\n- sanitized-skill-10: [sanitized description 10]\\n- sanitized-skill-11: [sanitized description 11]\\n- sanitized-skill-12: [sanitized description 12]\"}]}],\"stream\":true}"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "2775"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom:sanitized-agent"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "aad20c74-8e64-59a2-8956-405c9ebe2436"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                }
+              ],
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000006"
+            },
+            {
+              "timeUnixNano": "1792411215736000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system prompt]\"}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_sanitized_3\",\"content\":\"[sanitized tool output]\"}]}],\"stream\":true}"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "239"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom:sanitized-agent"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "ca655c8e-675f-59bf-b434-3a01e186554d"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                }
+              ],
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000006"
+            },
+            {
+              "timeUnixNano": "1792411216000000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system prompt]\"}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[sanitized user text]\"}]}],\"stream\":true}"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "193"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "b38d607c-6199-56b4-8fc3-df5eaa59384f"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                }
+              ]
+            },
+            {
+              "timeUnixNano": "1792411220431000000",
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "body",
+                  "value": {
+                    "stringValue": "{\"model\":\"claude-sonnet-5-5\",\"system\":[{\"type\":\"text\",\"text\":\"[sanitized system block 1]\"},{\"type\":\"text\",\"text\":\"[sanitized system block 2]\"},{\"type\":\"text\",\"text\":\"[sanitized system block 3]\"}],\"tools\":[{\"name\":\"sanitized_tool_1\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_2\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_3\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_4\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_5\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_6\",\"description\":\"[sanitized tool description]\",\"input_schema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"sanitized_tool_7\",\"description\":\"[sanitized tool descr"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "1000"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-sonnet-5-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom:sanitized-agent"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000a1"
+                  }
+                },
+                {
+                  "key": "request_body_id",
+                  "value": {
+                    "stringValue": "f60a124a-df5a-5ed7-a356-2c9a2f5e3445"
+                  }
+                },
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "body_truncated",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                }
+              ],
+              "traceId": "5a1e0000000000000000000000000002",
+              "spanId": "000000000000000c"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

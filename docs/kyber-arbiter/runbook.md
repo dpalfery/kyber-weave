@@ -7,8 +7,8 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 status: current
 decided-by:
-  - adr/0033-kyber-arbiter-three-step-decision-gates
-  - adr/0034-squad-owned-blocks-in-shared-hook-files
+  - adr/0053-kyber-arbiter-three-step-decision-gates
+  - adr/0054-squad-owned-blocks-in-shared-hook-files
 ---
 
 # Kyber Arbiter runbook

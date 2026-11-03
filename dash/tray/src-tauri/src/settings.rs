@@ -1,9 +1,14 @@
 //! The tray's own settings, as JSON in the Tauri app-config directory.
 //!
+//! These are display preferences only: which harness and window the popover
+//! shows, the status-item thresholds, and launch at login. Anything that changes
+//! what the engine does (refresh cadence, receiver hosting) is server-owned and
+//! lives behind `/api/kyber/settings`; persisting it here would be a second copy
+//! that could disagree with the server's.
+//!
 //! The defaults are fixed by the spec rather than by taste: harness `all` and a
-//! 7-day window match `kyberdash report`'s own defaults, the 5-minute cadence is
-//! Requirement 10.1's, the 0.70 and 0.90 thresholds are 9.2's, and launch at
-//! login (6.8) and receiver hosting (10.7) are both off because each starts a
+//! 7-day window match `kyberdash report`'s own defaults, the 0.70 and 0.90
+//! thresholds are 9.2's, and launch at login (6.8) is off because it registers a
 //! process the user did not ask for.
 //!
 //! `set_settings` takes a partial document, as the design's IPC surface
@@ -22,7 +27,6 @@ use crate::status_item::Thresholds;
 /// literal next to it.
 pub const DEFAULT_HARNESS: &str = "all";
 pub const DEFAULT_WINDOW_DAYS: u32 = 7;
-pub const DEFAULT_REFRESH_MINUTES: u32 = 5;
 pub const DEFAULT_ATTENTION_THRESHOLD: f64 = 0.70;
 pub const DEFAULT_CRITICAL_THRESHOLD: f64 = 0.90;
 
@@ -33,11 +37,9 @@ pub struct TraySettings {
     /// A harness id, or `all`.
     pub harness: String,
     pub window_days: u32,
-    pub refresh_minutes: u32,
     pub attention_threshold: f64,
     pub critical_threshold: f64,
     pub launch_at_login: bool,
-    pub host_receiver: bool,
 }
 
 impl Default for TraySettings {
@@ -45,11 +47,9 @@ impl Default for TraySettings {
         TraySettings {
             harness: DEFAULT_HARNESS.to_string(),
             window_days: DEFAULT_WINDOW_DAYS,
-            refresh_minutes: DEFAULT_REFRESH_MINUTES,
             attention_threshold: DEFAULT_ATTENTION_THRESHOLD,
             critical_threshold: DEFAULT_CRITICAL_THRESHOLD,
             launch_at_login: false,
-            host_receiver: false,
         }
     }
 }
@@ -60,10 +60,6 @@ impl TraySettings {
             attention: self.attention_threshold,
             critical: self.critical_threshold,
         }
-    }
-
-    pub fn refresh_cadence(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(u64::from(self.refresh_minutes) * 60)
     }
 
     /// Merges a partial document, ignoring fields it does not carry.
@@ -83,11 +79,6 @@ impl TraySettings {
                 self.window_days = days as u32;
             }
         }
-        if let Some(minutes) = patch.get("refreshMinutes").and_then(|v| v.as_u64()) {
-            if (1..=1440).contains(&minutes) {
-                self.refresh_minutes = minutes as u32;
-            }
-        }
         if let Some(value) = patch.get("attentionThreshold").and_then(|v| v.as_f64()) {
             if is_fraction(value) {
                 self.attention_threshold = value;
@@ -100,9 +91,6 @@ impl TraySettings {
         }
         if let Some(value) = patch.get("launchAtLogin").and_then(|v| v.as_bool()) {
             self.launch_at_login = value;
-        }
-        if let Some(value) = patch.get("hostReceiver").and_then(|v| v.as_bool()) {
-            self.host_receiver = value;
         }
         // Applied after both, because either assignment can invert the pair.
         self.repair_thresholds();
@@ -199,22 +187,14 @@ mod tests {
 
         assert_eq!(settings.harness, "all");
         assert_eq!(settings.window_days, 7);
-        assert_eq!(settings.refresh_minutes, 5);
         assert_eq!(settings.attention_threshold, 0.70);
         assert_eq!(settings.critical_threshold, 0.90);
         assert!(!settings.launch_at_login, "6.8 defaults to off");
-        assert!(!settings.host_receiver, "10.7 defaults to off");
     }
 
     #[test]
-    fn the_defaults_feed_the_status_item_and_the_scheduler() {
-        let settings = TraySettings::default();
-
-        assert_eq!(settings.thresholds(), Thresholds::default());
-        assert_eq!(
-            settings.refresh_cadence(),
-            crate::scheduler::DEFAULT_CADENCE
-        );
+    fn the_defaults_feed_the_status_item() {
+        assert_eq!(TraySettings::default().thresholds(), Thresholds::default());
     }
 
     #[test]
@@ -223,11 +203,9 @@ mod tests {
         let settings = TraySettings {
             harness: "claude-code".to_string(),
             window_days: 30,
-            refresh_minutes: 15,
             attention_threshold: 0.6,
             critical_threshold: 0.85,
             launch_at_login: true,
-            host_receiver: true,
         };
 
         save(&scratch.root, &settings).unwrap();
@@ -241,11 +219,13 @@ mod tests {
 
         assert_eq!(json["harness"], "all");
         assert_eq!(json["windowDays"], 7);
-        assert_eq!(json["refreshMinutes"], 5);
+        assert!(
+            json.get("refreshMinutes").is_none() && json.get("hostReceiver").is_none(),
+            "server-owned knobs are not tray settings"
+        );
         assert_eq!(json["attentionThreshold"], 0.70);
         assert_eq!(json["criticalThreshold"], 0.90);
         assert_eq!(json["launchAtLogin"], false);
-        assert_eq!(json["hostReceiver"], false);
     }
 
     #[test]
@@ -287,7 +267,6 @@ mod tests {
 
         assert_eq!(settings.harness, "codex");
         assert_eq!(settings.window_days, DEFAULT_WINDOW_DAYS);
-        assert_eq!(settings.refresh_minutes, DEFAULT_REFRESH_MINUTES);
         assert!(!settings.launch_at_login);
     }
 
@@ -298,7 +277,6 @@ mod tests {
         let mut settings = TraySettings::default();
         settings.apply_partial(&json!({
             "windowDays": 0,
-            "refreshMinutes": 0,
             "attentionThreshold": 4.0,
             "criticalThreshold": -1.0,
             "harness": "   ",
@@ -324,6 +302,24 @@ mod tests {
         let mut one_sided = TraySettings::default();
         one_sided.apply_partial(&json!({ "attentionThreshold": 0.99 }));
         assert!(one_sided.attention_threshold <= one_sided.critical_threshold);
+    }
+
+    /// A file written by an older tray still carries the knobs that moved to the
+    /// server; they must be ignored, not resurrected.
+    #[test]
+    fn server_owned_knobs_in_an_older_file_are_ignored() {
+        let scratch = Scratch::new("legacy");
+        std::fs::write(
+            settings_path(&scratch.root),
+            r#"{"harness":"codex","refreshMinutes":15,"hostReceiver":true}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&scratch.root);
+        assert_eq!(loaded.harness, "codex");
+        save(&scratch.root, &loaded).unwrap();
+        let rewritten = std::fs::read_to_string(settings_path(&scratch.root)).unwrap();
+        assert!(!rewritten.contains("refreshMinutes") && !rewritten.contains("hostReceiver"));
     }
 
     #[test]

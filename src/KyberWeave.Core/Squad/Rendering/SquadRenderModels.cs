@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using JetBrains.Annotations;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -27,13 +28,72 @@ public interface ISquadRenderer
 }
 
 /// <summary>Parameters for a Squad render execution.</summary>
+/// <param name="SourceDirectory">The canonical Squad source tree to render.</param>
+/// <param name="Targets">The harness targets to render for.</param>
+/// <param name="Scope">Whether the output is project-relative or global.</param>
+/// <param name="UserScopeDirectory">The Kyber-Weave app-data directory, not a harness root.</param>
+/// <param name="TranslationMode">The translation mode for lossy targets.</param>
+/// <param name="GlobalRoots">
+/// Resolves each target's real per-user global root; required only by renderers whose
+/// global-scope output embeds that root.
+/// </param>
+/// <param name="ModelPresets">
+/// Optional model presets to apply per target during rendering.
+/// </param>
+/// <param name="PreloadedSource">
+/// Optional in-memory canonical source, avoiding disk reads when provided.
+/// </param>
+/// <param name="EnvironmentReader">
+/// Optional environment variable reader delegate, avoiding process-level environment mutation.
+/// </param>
+/// <param name="Arbiter">
+/// Optional Arbiter enforcement settings; hooks render only when enabled and project-scoped.
+/// </param>
+/// <remarks>
+/// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
+/// a renderer where a harness actually reads its global agents from (for Copilot that is
+/// <c>$COPILOT_HOME</c> or <c>~/.copilot</c>). <see cref="GlobalRoots"/> carries that
+/// resolver into the render so a target whose agent bodies cannot rely on file-relative link
+/// anchoring (Copilot, at global scope) can emit absolute resource links. Every site that
+/// renders for deployment or comparison (lifecycle install and update, and doctor's global
+/// collision scan) must supply the same resolver, or install, receipt, and doctor would see
+/// different bytes. It is null-tolerant for project scope and for targets that ignore it; a
+/// Copilot global render without it fails closed rather than shipping relative links.
+/// </remarks>
 public sealed record SquadRenderRequest(
     string SourceDirectory,
     IReadOnlyList<SquadTarget> Targets,
     SquadDeploymentScope Scope,
     string? UserScopeDirectory = null,
     string TranslationMode = "best-effort",
-    SquadArbiterWiring? Arbiter = null);
+    ISquadGlobalRootResolver? GlobalRoots = null,
+    IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null,
+    SquadSource? PreloadedSource = null,
+    Func<string, string?>? EnvironmentReader = null,
+    SquadArbiterWiring? Arbiter = null)
+{
+    /// <summary>
+    /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
+    /// </summary>
+    public SquadRenderRequest(
+        string SourceDirectory,
+        IReadOnlyList<SquadTarget> Targets,
+        SquadDeploymentScope Scope,
+        SquadModelPreset? ModelPresets)
+        : this(
+            SourceDirectory,
+            Targets,
+            Scope,
+            null,
+            "best-effort",
+            null,
+            ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets),
+            null,
+            null,
+            null)
+    {
+    }
+}
 
 /// <summary>The host's Arbiter enforcement settings carried into a render.</summary>
 /// <remarks>

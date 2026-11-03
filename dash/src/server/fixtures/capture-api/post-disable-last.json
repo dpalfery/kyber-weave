@@ -1,0 +1,41 @@
+{
+  "action": "disable",
+  "harness": "opencode",
+  "dryRun": false,
+  "outcome": "wrote",
+  "events": [
+    {
+      "kind": "restored",
+      "harness": "opencode",
+      "fileId": "plugin",
+      "path": "/Users/example/.config/opencode/plugins/kyberdash-opencode.js"
+    }
+  ],
+  "harnessState": {
+    "id": "opencode",
+    "displayName": "OpenCode",
+    "mode": "managed",
+    "installed": "detected",
+    "installEvidence": [
+      "config found at /Users/example/.config/opencode/opencode.jsonc"
+    ],
+    "state": "off",
+    "receipt": "absent",
+    "files": [],
+    "warnings": [],
+    "manualSteps": [],
+    "statusLines": [
+      "plugin: not installed",
+      "content consent: off (turn OpenCode capture on in KyberDash Settings to capture the system prompt, tool definitions and skills)"
+    ],
+    "health": "off",
+    "issues": []
+  },
+  "receiver": {
+    "hosted": true,
+    "willEnable": false,
+    "enabled": false,
+    "enableFailed": false,
+    "lastManagedHarnessDisabled": true
+  }
+}

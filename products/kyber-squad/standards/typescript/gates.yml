@@ -1,0 +1,74 @@
+# Gate catalogue, family typescript (technologies: typescript, react).
+# A root is a directory holding both tsconfig.json and package.json (pair: true).
+# Every Node gate declares os: unix, because npm and npx are .cmd shims on Windows (R1.7).
+# typecheck, lint, format and test are written only when the root's package.json defines the script,
+# except the typecheck fallback, which runs tsc directly when no typecheck script exists.
+schema: 1
+family: typescript
+technologies: [typescript, react]
+roots:
+  markers: ["tsconfig.json", "package.json"]
+  pair: true
+  nesting: each
+gates:
+  - id: typecheck
+    role: typecheck
+    when: {script: typecheck}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", typecheck]
+  - id: typecheck
+    role: typecheck
+    when: {script-absent: typecheck}
+    os: unix
+    working-directory: "{{root}}"
+    run: [npx, --no, tsc, --noEmit, --project, .]
+  - id: lint
+    role: lint
+    when: {script: lint}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", lint]
+  - id: format
+    role: format
+    when: {script: "format:check"}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", "format:check"]
+  - id: test
+    role: test
+    when: {script: test}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", test]
+task-gates:
+  - id: typecheck
+    role: typecheck
+    agents: [typescript-dev, react-dev]
+    include: ["{{root-glob}}**/*.ts", "{{root-glob}}**/*.tsx", "{{root-glob}}**/*.js", "{{root-glob}}**/*.jsx", "{{root-glob}}**/*.mjs", "{{root-glob}}**/*.cjs", "{{root-glob}}*.json"]
+    when: {script: typecheck}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", typecheck]
+  - id: typecheck
+    role: typecheck
+    agents: [typescript-dev, react-dev]
+    include: ["{{root-glob}}**/*.ts", "{{root-glob}}**/*.tsx", "{{root-glob}}**/*.js", "{{root-glob}}**/*.jsx", "{{root-glob}}**/*.mjs", "{{root-glob}}**/*.cjs", "{{root-glob}}*.json"]
+    when: {script-absent: typecheck}
+    os: unix
+    working-directory: "{{root}}"
+    run: [npx, --no, tsc, --noEmit, --project, .]
+  - id: lint
+    role: lint
+    agents: [typescript-dev, react-dev, test-dev]
+    include: ["{{root-glob}}**/*.ts", "{{root-glob}}**/*.tsx", "{{root-glob}}**/*.js", "{{root-glob}}**/*.jsx", "{{root-glob}}**/*.mjs", "{{root-glob}}**/*.cjs", "{{root-glob}}*.json"]
+    when: {script: lint}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", lint]
+  - id: format
+    role: format
+    agents: [typescript-dev, react-dev, test-dev]
+    include: ["{{root-glob}}**/*.ts", "{{root-glob}}**/*.tsx", "{{root-glob}}**/*.js", "{{root-glob}}**/*.jsx", "{{root-glob}}**/*.mjs", "{{root-glob}}**/*.cjs", "{{root-glob}}*.json"]
+    when: {script: "format:check"}
+    os: unix
+    run: [npm, run, --prefix, "{{root}}", "format:check"]
+sources:
+  typecheck: https://www.typescriptlang.org/docs/handbook/compiler-options.html
+  lint: https://docs.npmjs.com/cli/v10/commands/npm-run-script
+  format: https://docs.npmjs.com/cli/v10/commands/npm-run-script
+  test: https://docs.npmjs.com/cli/v10/commands/npm-run-script

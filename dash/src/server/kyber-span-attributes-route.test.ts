@@ -9,6 +9,9 @@ import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // Timeline nodes used to carry each span's attribute map inline, which made the
 // derived session payload a second, uncompressed copy of the whole corpus —

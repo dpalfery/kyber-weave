@@ -134,7 +134,7 @@ Otherwise use these sections:
 - **Changes**: a short list of what changed, summarized from the commits and the diff.
 - **Validation**: which suites ran, which tests were added, and any manual verification and its
   environment. Never write "tests pass" without naming them.
-- **Documentation impact**: what documentation changed, or why none was needed.
+- **Documentation impact**: the docs-dev outcome verbatim plus recommendations; what documentation changed, or why none was needed. When the host supplies no template, use the heading fallback `## Documentation impact`.
 - **Notes**: extra notes, follow-ups, and anything reviewers should know.
 
 Do not paste raw commit lists or file lists; the provider shows both. Write the description to a
@@ -177,7 +177,7 @@ When a check fails:
 
 ## After merge
 
-- **Plan-backed work**: the pull request is not the last step. A `docs-dev` closeout verifies the
+- **Plan-backed work**: the pull request is not the last step. Require closeout before delivery: a `docs-dev` closeout verifies the
   plan's acceptance criteria against what was built, updates the canonical documentation, and
   archives the plan through the index the **<plan-index>** declares.
 - **Other work**: confirm the description's documentation impact still matches what merged.

@@ -138,7 +138,7 @@ describe('routes pagination', () => {
 
       expect(handled).toBe(true)
       expect(status).toBe(200)
-      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 1)
+      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 1, undefined)
     })
 
     it('returns paginated data and total count in response JSON', () => {
@@ -165,7 +165,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/quarantine?offset=2&limit=1', bridge)
 
-      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2)
+      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2, undefined)
       expect(body.page).toBe(3)
       const items = (body.data ?? body.entries) as QuarantineRow[]
       expect(items).toHaveLength(1)
@@ -176,7 +176,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/quarantine?offset=2&limit=1&page=1', bridge)
 
-      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2)
+      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2, undefined)
       expect(body.page).toBe(3)
       const items = (body.data ?? body.entries) as QuarantineRow[]
       expect(items).toHaveLength(1)
@@ -187,7 +187,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/quarantine', bridge)
 
-      expect(bridge.getQuarantine).toHaveBeenCalledWith(200, 0)
+      expect(bridge.getQuarantine).toHaveBeenCalledWith(200, 0, undefined)
       expect(body.total).toBe(3)
       const items = (body.data ?? body.entries) as QuarantineRow[]
       expect(items).toHaveLength(3)
@@ -204,7 +204,7 @@ describe('routes pagination', () => {
 
       expect(handled).toBe(true)
       expect(status).toBe(200)
-      expect(bridge.getProblems).toHaveBeenCalledWith(1, 1)
+      expect(bridge.getProblems).toHaveBeenCalledWith(1, 1, undefined)
     })
 
     it('returns paginated data and total count in response JSON', () => {
@@ -231,7 +231,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/problems?offset=2&limit=1', bridge)
 
-      expect(bridge.getProblems).toHaveBeenCalledWith(1, 2)
+      expect(bridge.getProblems).toHaveBeenCalledWith(1, 2, undefined)
       expect(body.page).toBe(3)
       const items = (body.data ?? body.problems) as ProblemRow[]
       expect(items).toHaveLength(1)
@@ -242,7 +242,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/problems?offset=2&limit=1&page=1', bridge)
 
-      expect(bridge.getProblems).toHaveBeenCalledWith(1, 2)
+      expect(bridge.getProblems).toHaveBeenCalledWith(1, 2, undefined)
       expect(body.page).toBe(3)
       const items = (body.data ?? body.problems) as ProblemRow[]
       expect(items).toHaveLength(1)
@@ -253,7 +253,7 @@ describe('routes pagination', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/problems', bridge)
 
-      expect(bridge.getProblems).toHaveBeenCalledWith(200, 0)
+      expect(bridge.getProblems).toHaveBeenCalledWith(200, 0, undefined)
       expect(body.total).toBe(3)
       const items = (body.data ?? body.problems) as ProblemRow[]
       expect(items).toHaveLength(3)

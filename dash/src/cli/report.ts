@@ -8,8 +8,6 @@
 // the REST path can skip it.
 
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createRequire } from 'node:module'
 
 const requireForSqlite = createRequire(import.meta.url)
@@ -29,6 +27,7 @@ import {
 } from '../analysis/report/types.js'
 import { renderMarkdown } from '../analysis/report/render-markdown.js'
 import { renderText, shouldColorText } from '../analysis/report/render-text.js'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { collectDoctorReport } from './doctor.js'
 import { HARNESS_DESCRIPTORS, PROVIDER_DISPOSITIONS } from '../refresh/registry.js'
 import type { ProviderDisposition } from '../refresh/types.js'
@@ -62,8 +61,13 @@ export type ReportCliOptions = {
   db?: string
 }
 
+/**
+ * Delegates to the shared resolver so `report` diagnoses the same canon.db
+ * the refresh, the receiver and the dashboard server use — a report of a
+ * different file would be a report of nothing. See src/canon/paths.ts.
+ */
 function resolveDbPath(dbPath?: string): string {
-  return dbPath ?? join(homedir(), '.kyberdash', 'canon.db')
+  return resolveCanonDbPath(dbPath)
 }
 
 function parsePositiveInteger(flag: string): (value: string) => number {
@@ -151,7 +155,13 @@ async function detectionFromDoctor(): Promise<Array<{ harness: string; detected:
 
 function openStoreReadOnly(path: string): { bridge: KyberBridge; close: () => void } {
   if (!existsSync(path)) {
-    process.stderr.write(`kyberdash report: cannot open store ${path}\n`)
+    // The store is built by `dash refresh`, not by this read-only command. Name
+    // the command that fills it, the same way the empty-store report does, so a
+    // first run on a machine that has never refreshed is not a dead end.
+    process.stderr.write(
+      `kyberdash report: cannot open store ${path}\n` +
+        `Run \`kyberdash dash refresh\` to build it.\n`,
+    )
     process.exit(1)
   }
   let db: Database

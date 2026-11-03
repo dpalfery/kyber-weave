@@ -40,9 +40,21 @@ it is wrong — not the percentage.
 test itself computed the same way as the code. A comparison of something to itself. An
 exception assertion so broad that any failure satisfies it, including the wrong one.
 
+**Contract assertion rigor.** Enforce strict assertion rigor on contract and specification tests:
+- Flag bare single-word `Assert.Contains` checks that match common keywords, identifiers, or boilerplate instead of testing unique full-phrase semantic contracts.
+- Flag unguarded boolean `||` assertions where one branch matches unrelated text or masks missing invariant assertions.
+- Flag non-contiguous `foreach` field checks over multi-line schemas that loop across lines without verifying contiguous schema structure and ordering; require contiguous multi-line schema assertions.
+
 **Edge cases the change introduces.** New boundary, new branch, new failure mode — is each
 exercised? This is where uncovered-branch analysis and correctness analysis meet, and it is
 the most valuable thing this lens produces.
+
+**Changed `.ts`, `.cs`, `.rs` and `.go` files.** For every changed `.ts`, `.cs`, `.rs` or `.go` file that holds logic, find
+the test that exercises its behaviour and ask whether that test would fail if the change were
+reverted. A test that only calls the code and asserts it did not throw does not count. Require
+structural assertions: the returned value, the shape or fields of the result, the state left
+behind, or the exact error raised. A changed file with no test that asserts on its output is a
+finding, named by path.
 
 **Coverage floor.** Report the measured figures against the floor the host declares under
 `review.coverage`. State the gap; do not compute a verdict from it.

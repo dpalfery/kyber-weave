@@ -8,16 +8,37 @@ public static class ConfigRegConfigLoader
     /// <summary>Key name as an operator wrote it, so diagnostics name the real line.</summary>
     private const string SectionKey = "config-reg";
 
-    internal static ConfigRegConfig Merge(ConfigRegConfig defaults, Dictionary<string, string>? section)
+    internal static ConfigRegConfig Merge(
+        ConfigRegConfig defaults,
+        Dictionary<string, string>? section,
+        string? autonomy = null)
     {
         ArgumentNullException.ThrowIfNull(defaults);
+        string? setting = ParseAutonomy(autonomy) ?? defaults.Autonomy;
         if (section is null)
-            return defaults;
+        {
+            return setting == defaults.Autonomy
+                ? defaults
+                : new ConfigRegConfig { Additions = defaults.Additions, Autonomy = setting };
+        }
 
-        List<ConfigRegEntry> additions = new List<ConfigRegEntry>(section.Count);
+        List<ConfigRegEntry> additions = new(section.Count);
         foreach ((string name, string value) in section)
         {
             string property = name?.Trim() ?? string.Empty;
+            string? owningSetting = property switch
+            {
+                ConfigRegConfig.AutonomyProperty => "the top-level 'autonomy:' setting",
+                ConfigRegConfig.IntakeAssessmentProperty => "the 'ontology.intake:' setting",
+                _ => null
+            };
+            if (owningSetting is not null)
+            {
+                throw new YamlException(
+                    $"{SectionKey} property '{property}' is reserved: it is {owningSetting}, " +
+                    "a mode word rather than a path. Set it there, or choose another name.");
+            }
+
             if (!ConfigSlug.IsValid(property))
             {
                 throw new YamlException(
@@ -46,6 +67,21 @@ public static class ConfigRegConfigLoader
             additions.Add(new ConfigRegEntry(property, path));
         }
 
-        return new ConfigRegConfig { Additions = additions };
+        return new ConfigRegConfig { Additions = additions, Autonomy = setting };
+    }
+
+    private static string? ParseAutonomy(string? value)
+    {
+        if (value is null)
+            return null;
+
+        string setting = value.Trim();
+        if (setting is ConfigRegConfig.SupervisedAutonomy or ConfigRegConfig.AutonomousAutonomy)
+            return setting;
+
+        throw new YamlException(
+            $"{ConfigRegConfig.AutonomyProperty} '{value}' is not a known setting. Use " +
+            $"'{ConfigRegConfig.SupervisedAutonomy}' or '{ConfigRegConfig.AutonomousAutonomy}', " +
+            "or remove the key; agents treat an absent setting as supervised.");
     }
 }

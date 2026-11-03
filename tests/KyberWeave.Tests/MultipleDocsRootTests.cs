@@ -377,10 +377,11 @@ public class MultipleDocsRootTests : IDisposable
     /// <summary>
     /// Rewriting the key's value against a list would leave the '- item' lines orphaned
     /// below a scalar: the config would still parse, and would mean something the operator
-    /// never wrote.
+    /// never wrote. The scaffold appends the <c>mcp:</c> declaration it finds missing and
+    /// leaves the sequence, its comment, and its order exactly as they were.
     /// </summary>
     [Fact]
-    public void ScaffoldingLeavesAMultiRootConfigByteForByteIdentical()
+    public void ScaffoldingLeavesAMultiRootSequenceIntactAndAppendsOnlyTheDeclaration()
     {
         string configPath = WriteHostConfig("""
             ontology:
@@ -394,18 +395,18 @@ public class MultipleDocsRootTests : IDisposable
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
-        Assert.Equal(before, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     [Fact]
-    public void ScaffoldingIntoAListedRootLeavesTheConfigAlone()
+    public void ScaffoldingIntoAListedRootLeavesTheConfigOtherwiseAlone()
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
         string before = File.ReadAllText(configPath);
 
         DocsScaffolder.Scaffold(_temp.Path, "automation");
 
-        Assert.Equal(before, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     /// <summary>
@@ -461,7 +462,7 @@ public class MultipleDocsRootTests : IDisposable
 
         DocsScaffolder.Scaffold(_temp.Path, "docs");
 
-        Assert.Equal(before, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     [Fact]

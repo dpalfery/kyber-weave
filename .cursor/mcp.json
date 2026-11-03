@@ -37,7 +37,8 @@
       "env": {
         "AZURE_MCP_COLLECT_TELEMETRY": "false",
         "PATH": "${userHome}/.local/bin:${env:PATH}"
-      }
+      },
+      "disabled": true
     },
     "github": {
       "command": "${userHome}/.local/bin/github-mcp-server",

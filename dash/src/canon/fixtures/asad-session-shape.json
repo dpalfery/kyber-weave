@@ -11,9 +11,13 @@
   },
   "tools": [
     {
+      "name": "",
       "schema_tokens": 0,
       "invocations": 0,
-      "turns_resident": 0
+      "turns_resident": 0,
+      "errors": 0,
+      "total_schema_cost": 0,
+      "server": ""
     }
   ],
   "timeline": [],

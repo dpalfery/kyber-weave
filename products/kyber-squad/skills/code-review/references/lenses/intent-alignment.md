@@ -51,7 +51,11 @@ specification, verify that claimed canonical documentation updates actually land
 request diff. A completion summary claiming canonical documentation was updated when the diff
 contains no such change is a `critical` finding. Verify that the archived plan's durable decisions
 are mapped to canonical document sections or carry an explicit, valid documentation waiver. An
-archived plan stating "None" without a justified documentation waiver is a finding.
+archived plan stating "None" without a justified documentation waiver is a finding. The same bar
+holds for an archived specification: check its D22 documentation items — the documentation-impact
+mapping, the Design harvest migration, and the scale it was declared at — against the diff. A
+missing or false PR description Documentation impact section is a `critical` finding, as is an
+unjustified no doc change claim.
 
 ## What this lens must not report
 

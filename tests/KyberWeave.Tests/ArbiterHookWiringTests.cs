@@ -258,18 +258,22 @@ public sealed class ArbiterHookWiringTests : IDisposable
     [Fact]
     public void TargetDegradations_ProjectScope_ClassifiesEveryApprovedTarget()
     {
-        // After Phase 3 every approved target is either hooked (no record) or fallback-only,
-        // so a project-scope derivation over the whole roster yields exactly the two
-        // fallback-only records.
+        // Command Code joined the roster after the Arbiter phases and has no hook primitive,
+        // so a project-scope derivation over the whole roster yields the two fallback-only
+        // records plus one no-hook-support record for Command Code.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             SquadTargetCatalog.All,
             SquadDeploymentScope.Project).ToList();
 
-        Assert.Equal(2, records.Count);
+        Assert.Equal(3, records.Count);
         Assert.Equal(
             new HashSet<string>(FallbackTargetTokens, StringComparer.Ordinal),
-            records.Select(record => record.Target).ToHashSet());
-        Assert.All(records, record => Assert.Equal("fallback-only", record.Details));
+            records.Where(record => record.Details == "fallback-only")
+                .Select(record => record.Target)
+                .ToHashSet());
+        Assert.Contains(
+            records,
+            record => record.Target == "commandcode" && record.Details == "no-hook-support");
     }
 
     [Fact]

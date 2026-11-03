@@ -1,7 +1,11 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Mcp;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -30,47 +34,111 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class RetrievalRegressionTests
 {
-    private const int TopN = 3;
+    private const string IncompletePrefix =
+        "This answer is incomplete. Call docs_explore again with the same question and cursor";
 
-    /// <summary>Question a person would ask → the document id that answers it.</summary>
-    public static TheoryData<string, string> Cases() => new()
+    private static readonly Regex ConfidenceLine = new(
+        @"^confidence: (?<value>0\.\d{2}|1\.00)$",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+    /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>
+    public static TheoryData<string, string, string, double, string?> AnswerableCases() => new()
     {
-        // Novel / specialized terminology targeting dash/architecture.
-        { "dashboard dev environment tauri", "dash/architecture" },
-
-        // Governance and ontology questions.
-        { "what frontmatter keys does a document need", "documentation-ontology" },
-
-        // Component-shaped questions, asked the way people ask them.
-        { "multi-harness agent and skill deployment", "squad/architecture" },
-        { "parallel code review council specialist lenses", "code-review/architecture" },
-        { "diagnostic engine rule ids and sarif", "ci-pipelines/architecture" },
-        { "how does retrieval scoring work", "docgraph/retrieval" },
-
-        // Identity lookups: a doc-id is an exact handle and must win outright.
-        { "docgraph/architecture", "docgraph/architecture" },
-        { "dash/architecture", "dash/architecture" },
-        { "squad/architecture", "squad/architecture" },
-        { "code-review/architecture", "code-review/architecture" },
-        { "documentation-ontology", "documentation-ontology" },
+        {
+            "dashboard dev environment tauri",
+            "dash/architecture",
+            "The tray is a Tauri 2 app: a Rust shell",
+            0.60,
+            null
+        },
+        {
+            "what frontmatter keys does a document need",
+            "documentation-ontology",
+            "Keys are hyphenated and bind",
+            0.60,
+            null
+        },
+        {
+            "multi-harness agent and skill deployment",
+            "squad/architecture",
+            "multi-harness governance and deployment engine",
+            0.60,
+            null
+        },
+        {
+            "parallel code review council specialist lenses",
+            "code-review/architecture",
+            "Specialist lenses reading the diff in parallel",
+            0.60,
+            null
+        },
+        {
+            "diagnostic engine rule ids and sarif",
+            "ci-pipelines/architecture",
+            "comment, a SARIF baseline, and a code-scanning alert all key on",
+            0.60,
+            null
+        },
+        {
+            "how does retrieval scoring work",
+            "docgraph/retrieval",
+            "A document scoring below **0.25** is not returned at all",
+            0.60,
+            null
+        },
+        {
+            "how does the review council choose gates",
+            "code-review/architecture",
+            "`review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds`",
+            0.60,
+            "Configuration"
+        },
+        { "docgraph/architecture", "docgraph/architecture", "rebuilt from the Markdown on demand", 0.60, null },
+        { "dash/architecture", "dash/architecture", "The tray is a Tauri 2 app: a Rust shell", 0.60, null },
+        { "squad/architecture", "squad/architecture", "multi-harness governance and deployment engine", 0.60, null },
+        {
+            "code-review/architecture",
+            "code-review/architecture",
+            "Specialist lenses reading the diff in parallel",
+            0.60,
+            null
+        },
+        { "documentation-ontology", "documentation-ontology", "Keys are hyphenated and bind", 0.60, null },
     };
 
     [Theory]
-    [MemberData(nameof(Cases))]
-    public void APlainlyAskedQuestionFindsTheDocumentThatAnswersIt(string query, string expectedId)
+    [MemberData(nameof(AnswerableCases))]
+    public void APlainlyAskedQuestionReturnsOneAnswerBlob(
+        string query,
+        string expectedId,
+        string phrase,
+        double floor,
+        string? sourceHeading)
     {
         string? root = RepositoryRoot();
         if (root is null) return;
 
-        DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root, KyberWeaveConfigLoader.Load(root).Ontology).Load(),
-            CodeGraphResolverAdapter.ForRepository(root));
+        DocsTools tools = CreateTools(root);
+        string response = Explore(tools, query);
 
-        List<string> ids = index.Explore(query, maxDocs: TopN)
-            .Select(h => h.Document.Frontmatter.Id ?? h.Document.RelativePath)
-            .ToList();
+        Assert.Contains(phrase, response, StringComparison.Ordinal);
+        Assert.DoesNotContain(IncompletePrefix, response, StringComparison.Ordinal);
 
-        Assert.Contains(expectedId, ids, StringComparer.Ordinal);
+        double confidence = ParseConfidence(response);
+        Assert.True(
+            confidence >= floor,
+            $"expected confidence >= {floor:0.00}, got {confidence:0.00} for '{query}'; response excerpt: "
+            + Truncate(response, 400));
+
+        List<string> sources = SourceLines(response).ToList();
+        Assert.Single(sources);
+        Assert.Contains(expectedId, sources[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("plans/2026-10-30-docs-explore-answer", sources[0], StringComparison.Ordinal);
+
+        if (sourceHeading is not null)
+        {
+            Assert.Contains(sourceHeading, sources[0], StringComparison.Ordinal);
+        }
     }
 
     /// <summary>
@@ -92,16 +160,42 @@ public sealed class RetrievalRegressionTests
         string? root = RepositoryRoot();
         if (root is null) return;
 
-        DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root, KyberWeaveConfigLoader.Load(root).Ontology).Load(),
-            CodeGraphResolverAdapter.ForRepository(root));
+        DocsTools tools = CreateTools(root);
+        string response = Explore(tools, query);
 
-        IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs: TopN);
-
-        Assert.True(hits.Count == 0,
-            "expected no hits, got: " + string.Join(", ",
-                hits.Select(h => $"{h.Document.RelativePath} ({h.Score:0.00})")));
+        Assert.Contains("No document", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
+        Assert.Empty(SourceLines(response).ToList());
     }
+
+    private static DocsTools CreateTools(string root) =>
+        new(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+
+    private static DocumentIndexHost CreateHost(string root)
+    {
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        return new DocumentIndexHost(
+            root,
+            () => CodeGraphResolverAdapter.ForRepository(root),
+            () => new DocumentLoader(root, config.Ontology).Load(),
+            config.Ontology.DocsRoots,
+            config.Ontology.ResolvedCatalogPath);
+    }
+
+    private static string Explore(DocsTools tools, string query) => tools.Explore(query);
+
+    private static double ParseConfidence(string response)
+    {
+        Match match = ConfidenceLine.Match(response);
+        Assert.True(match.Success, $"expected a confidence line for an answerable query; response was: {Truncate(response, 400)}");
+        return double.Parse(match.Groups["value"].Value, CultureInfo.InvariantCulture);
+    }
+
+    private static IEnumerable<string> SourceLines(string response) =>
+        response.Split('\n').Where(line => line.StartsWith("source:", StringComparison.Ordinal));
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength] + "…";
 
     /// <summary>
     /// Walks up from the test assembly looking for the repository. Returns null when it
@@ -118,6 +212,7 @@ public sealed class RetrievalRegressionTests
             {
                 return directory.FullName;
             }
+
             directory = directory.Parent;
         }
 

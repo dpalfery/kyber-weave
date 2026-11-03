@@ -5,9 +5,14 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-09-08
+last-reviewed: 2026-10-31
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
+  - adr/0046-docs-explore-section-answer
+sections:
+  the-relevance-floor:
+    keywords:
+      - retrieval scoring
 code-refs:
   - DocumentIndex
   - DocumentCorpus
@@ -56,7 +61,7 @@ Optional `keywords` (and the internal `aliases` synonym) sit in that same identi
 they are claims, not body mentions, which is why an exact keyword match outranks title and
 prose.
 
-## Authority
+### Authority
 
 Term statistics measure wordiness, not standing. Asked what frontmatter keys a document
 needs, BM25 correctly preferred a plan that says "frontmatter" twenty-five times over the
@@ -77,7 +82,7 @@ The two multiply. A superseded plan lands at 0.22 of its raw relevance — prese
 never the first thing an agent reads. A demoted document still wins when it is named
 outright, because an exact id match scores far above the discount.
 
-## Compound names and prefix coverage
+### Compound names and prefix coverage
 
 Both queries and bodies are vectorised with **adjacent token pairs fused**, at half
 weight. Text writing "Web UI" therefore remains reachable from a query writing "WebUI",
@@ -98,7 +103,7 @@ stems are ignored so `it` cannot match `iteration`.
 These ranking weights and the prefix floor are the contract in
 [ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md).
 
-## The relevance floor
+### The relevance floor
 
 A document scoring below **0.25** is not returned at all, and a query where nothing clears
 the floor returns an explicit miss rather than a best-effort list.
@@ -132,14 +137,46 @@ coverage without dragging an otherwise matching document under the 0.25 floor. S
 such terms still accumulate in `askedFor`, so an off-topic question remains an explicit
 miss.
 
-## Budget, not truncation
+## One leaf answer (`docs_explore`)
 
-`charBudget` (default 12000, floor 1000, ceiling 120000) is a **total across all returned
-documents**, split between them with a 1500-character floor each. Narrowing `maxDocs`
-therefore deepens each result rather than merely shortening the list — asking for one
-document gets depth, asking for five gets breadth, from one knob.
+After documents clear the relevance floor, [`docs_explore`](mcp-runbook.md) scores **leaves**
+inside them and returns one answer blob. A leaf is the preamble, the prose before a `##`
+section's first `###`, or a `###` subsection. Deeper headings stay inside their parent
+`###`. Sibling leaves under one `##` compete for that topic's score; confidence compares
+topics, not every leaf.
 
-Within a document, `##` sections are ranked by rarity-weighted similarity, selected until
+The winning leaf comes back **whole**. **24,000 characters** is a ceiling, not a target —
+a shorter leaf returns a shorter answer with no padding. Past the ceiling the response is
+marked incomplete and a **stateless cursor** returns the next span of the **same** leaf. The
+same question without a cursor starts again at the first span.
+
+The tool accepts **`query`** and an optional **`cursor`** only. `maxDocs` and `charBudget`
+are not parameters on `docs_explore`.
+
+**Confidence** is `tanh((winning topic score − best other topic score) / 2)`, formatted
+`0.00`–`1.00`, and halved when the reply is incomplete. The raw relevance score is not
+returned. A caller should stop at **0.60 or higher** when the answer is not incomplete.
+
+The source line is `source: {path} — {## heading} › {### heading}`, or the path alone for
+the preamble.
+
+Optional frontmatter **`lead`** and **`sections`** declare which leaf an exact document-id
+query returns and attach keywords and code-refs to slugs; those claims roll up to the
+document for ranking and for `docs_for_symbol`. **Index sections** — plan inventories, the
+ADR inventory, the todo inventory, the policy-line ledger, the reference inventory — are
+not answer text: a query that matches an inventory row is answered from the linked
+document's leaf instead.
+
+The public contract is recorded in [ADR 0046](../adr/0046-docs-explore-section-answer.md) and
+the [MCP runbook](mcp-runbook.md) tool section.
+
+## Excerpt budgeting (`agent_coding_standards`)
+
+`charBudget` (default 12000, floor 1000, ceiling 120000) still governs
+**`agent_coding_standards`**, not `docs_explore`. It is a **total across every standard
+returned** for the technology, split with a 1500-character floor each.
+
+Within a standard, `##` sections are ranked by rarity-weighted similarity, selected until
 the budget runs out, then **emitted in document order** so the prose still reads. Short
 sections are damped, because a three-word stub can overlap a query almost perfectly while
 saying nothing.
@@ -147,7 +184,7 @@ saying nothing.
 Anything that did not fit is named in the response by heading. The caller learns what else
 the document holds without opening it, and can ask again deliberately — and is told
 whether a section was dropped for lack of budget or lack of relevance, since only the
-former makes asking again worthwhile.
+former makes asking again with a larger `charBudget` worthwhile.
 
 ## Retrieval is not analysis
 

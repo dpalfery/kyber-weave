@@ -21,7 +21,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         string resolved = Path.GetFullPath(settings.Path);

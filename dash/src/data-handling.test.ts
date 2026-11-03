@@ -363,9 +363,12 @@ describe('R12.1 + R12.2 — local-only data handling and pricing fallback', () =
 // R12.3 — tracked files carry no captured content
 // ---------------------------------------------------------------------------
 
+// Local git calls bounded at 30 s each: execSync blocks the event loop, so the test timeout cannot stop them.
+const GIT_TIMEOUT_MS = 30_000
+
 function repoRoot(): string {
   try {
-    return execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim()
+    return execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: GIT_TIMEOUT_MS }).trim()
   } catch {
     return process.cwd()
   }
@@ -373,7 +376,7 @@ function repoRoot(): string {
 
 function gitLsFilesCached(spec: string): string[] {
   const root = repoRoot()
-  const out = execSync(`git ls-files --cached ${JSON.stringify(spec)}`, { encoding: 'utf8', cwd: root })
+  const out = execSync(`git ls-files --cached ${JSON.stringify(spec)}`, { encoding: 'utf8', cwd: root, timeout: GIT_TIMEOUT_MS })
   return out.split('\n').filter(Boolean)
 }
 
@@ -420,7 +423,7 @@ describe('R12.3 — tracked files carry no captured content', () => {
     let tracked: string[]
     try {
       const root = repoRoot()
-      tracked = execSync('git ls-files --cached', { encoding: 'utf8', cwd: root }).split('\n').filter(Boolean)
+      tracked = execSync('git ls-files --cached', { encoding: 'utf8', cwd: root, timeout: GIT_TIMEOUT_MS }).split('\n').filter(Boolean)
     } catch {
       return
     }
@@ -476,7 +479,7 @@ describe('R12.3 — tracked files carry no captured content', () => {
       // is not tracked.
       const isIgnored = (() => {
         try {
-          execSync(`git check-ignore -q ${JSON.stringify(seededRel)}`, { stdio: 'ignore', cwd: root })
+          execSync(`git check-ignore -q ${JSON.stringify(seededRel)}`, { stdio: 'ignore', cwd: root, timeout: GIT_TIMEOUT_MS })
           return true
         } catch {
           return false
@@ -500,7 +503,7 @@ describe('R12.3 — tracked files carry no captured content', () => {
       const rel = `dash/src/${name}`
       let ignored = false
       try {
-        execSync(`git check-ignore -q ${JSON.stringify(rel)}`, { stdio: 'ignore', cwd: root })
+        execSync(`git check-ignore -q ${JSON.stringify(rel)}`, { stdio: 'ignore', cwd: root, timeout: GIT_TIMEOUT_MS })
         ignored = true
       } catch {
         ignored = false

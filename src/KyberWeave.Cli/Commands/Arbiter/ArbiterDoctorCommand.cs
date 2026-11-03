@@ -41,7 +41,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     /// still leaves the product defaults to diagnose, so one bad file never hides
     /// the remaining checks. Writes nothing. Exits 1 only on error findings.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();

@@ -15,4 +15,8 @@ public sealed class SquadUserPaths : ISquadUserPaths
     /// <inheritdoc />
     public string ApplicationDataDirectory =>
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+    /// <inheritdoc />
+    public string HomeDirectory =>
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 }

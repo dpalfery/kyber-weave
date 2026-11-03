@@ -8,6 +8,11 @@ namespace KyberWeave.Cli.Update;
 /// <summary>Extracts a Release archive and atomically replaces binaries in the install directory.</summary>
 internal static class BinaryInstaller
 {
+    /// <summary>
+    ///     The bound for clearing quarantine on one staged file. xattr returns at once, so a longer wait means it hung.
+    /// </summary>
+    private static readonly TimeSpan XattrTimeout = TimeSpan.FromSeconds(30);
+
     internal static string ArchiveName(string binaryBaseName, string rid)
     {
         string extension = PlatformRid.IsWindowsRid(rid) ? ".zip" : ".tar.gz";
@@ -115,11 +120,12 @@ internal static class BinaryInstaller
             startInfo.ArgumentList.Add("com.apple.quarantine");
             startInfo.ArgumentList.Add(path);
 
-            ProcessRunner.Run(startInfo, string.Empty);
+            ProcessRunner.Run(startInfo, string.Empty, XattrTimeout);
         }
         catch (Exception)
         {
-            // Best-effort: xattr is not required for the binaries to run.
+            // Best-effort: xattr is not required for the binaries to run. A hung xattr is stopped by the
+            // runner at XattrTimeout and lands here like any other failure to clear the attribute.
         }
     }
 

@@ -48,6 +48,8 @@ public sealed record SquadAgent(
     string CapabilityProfile,
     string? CopilotCapabilityProfile,
     IReadOnlyList<string> CopilotTools,
+    IReadOnlyList<string> PiExtensions,
+    IReadOnlyList<string> PiTools,
     string? DevinCapabilityProfile,
     IReadOnlyList<string> DelegatesTo,
     string Fallback,

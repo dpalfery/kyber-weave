@@ -27,8 +27,8 @@ internal static class InventoryReachability
         string folder,
         Dictionary<string, DocumentModel> byPath)
     {
-        HashSet<string> reached = new HashSet<string>(DocsRootPath.PathComparer) { start.RelativePath };
-        Queue<DocumentModel> pending = new Queue<DocumentModel>();
+        HashSet<string> reached = new(DocsRootPath.PathComparer) { start.RelativePath };
+        Queue<DocumentModel> pending = new();
         pending.Enqueue(start);
 
         while (pending.TryDequeue(out DocumentModel? current))
@@ -71,13 +71,28 @@ internal static class InventoryReachability
         return byPath.GetValueOrDefault($"{target}/{FolderIndexName}");
     }
 
-    public static bool IsWithin(string relativePath, string folder) =>
-        folder.Length == 0
-        || relativePath.StartsWith(
-            folder + "/",
-            DocsRootPath.PathComparer == StringComparer.OrdinalIgnoreCase
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+    public static bool IsWithin(string relativePath, string folder)
+    {
+        return folder.Length == 0
+               || relativePath.StartsWith(
+                   folder + "/",
+                   DocsRootPath.PathComparer == StringComparer.OrdinalIgnoreCase
+                       ? StringComparison.OrdinalIgnoreCase
+                       : StringComparison.Ordinal);
+    }
+
+    /// <summary>The first path segment of <paramref name="relativePath"/> below <paramref name="folder"/>.</summary>
+    /// <remarks>
+    /// Shared with the archive-closeout gate: an archived entry is the segment directly
+    /// below its archive container the same way open work is the segment below its
+    /// inventory folder, and two copies of that split would drift apart.
+    /// </remarks>
+    public static string EntryBelow(string relativePath, string folder)
+    {
+        string below = folder.Length == 0 ? relativePath : relativePath[(folder.Length + 1)..];
+        int slash = below.IndexOf('/', StringComparison.Ordinal);
+        return slash < 0 ? below : below[..slash];
+    }
 
     /// <summary>
     /// True when the document sits under the archive subtree, matched per segment the way
@@ -91,6 +106,8 @@ internal static class InventoryReachability
     /// makes the derived folder span the archive; without this check those closed documents
     /// would fail <c>docs validate</c> as unlisted live work.
     /// </remarks>
-    public static bool IsArchived(string relativePath) =>
-        relativePath.Split('/').Contains(OntologyConfig.ArchiveSegment, StringComparer.OrdinalIgnoreCase);
+    public static bool IsArchived(string relativePath)
+    {
+        return relativePath.Split('/').Contains(OntologyConfig.ArchiveSegment, StringComparer.OrdinalIgnoreCase);
+    }
 }

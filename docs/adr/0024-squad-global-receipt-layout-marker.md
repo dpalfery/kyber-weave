@@ -4,7 +4,7 @@ title: An Explicit Layout Marker on Global Squad Receipts, with Legacy Single-Ro
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-10-14
 component: KyberSquad
 ---
 
@@ -15,6 +15,12 @@ component: KyberSquad
 Accepted, 2026-09-26. Records decisions A3–A5 of the archived
 [receipt layout marker plan](../archive/plans/2026-09-26-squad-receipt-layout-marker.md),
 delivered for [issue 98](https://github.com/dpalfery/kyber-weave/issues/98).
+
+**Amended by [ADR 0037](0037-squad-state-in-user-home.md) (2026-10-14).** Decision 1's statement
+that project receipts stay byte-identical to every receipt written before no longer holds: a
+project receipt's `targetRoot` now records the canonical absolute physical root instead of `"."`,
+and project lock and receipt state lives under the user home rather than the repository. The
+v2 global layout marker and legacy single-root recovery in this record stand unchanged.
 
 ## Context
 

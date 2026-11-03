@@ -15,6 +15,10 @@ function getSqliteConfig(): SqliteProviderConfig {
     displayName: 'KiloCode',
     dbDir: join(base, 'kilo'),
     dbFilePrefix: 'kilo',
+    // kilo.db's durable pairing key is `message.id`: the reader emits one turn
+    // per token-bearing assistant message while this parser also yields
+    // zero-token assistant calls, so the two lists pair by id, not index.
+    pairingIdFromMessageId: true,
   }
 }
 

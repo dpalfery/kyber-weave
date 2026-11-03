@@ -5,7 +5,7 @@ The plan file is durable state. A live agent instance is disposable.
 ## Start or resume
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
-2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.
+2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
@@ -16,16 +16,17 @@ Open only active Draft, Ready, In progress, or Blocked plans. Draft supports pla
 
 Every plan contains:
 
-- governed frontmatter including `development-mode: test-first | standard`;
+- governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
 - problem and goal;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
+- the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
 - the mode-specific Test contract or verification contract;
 - dispatchable tasks with objective, exact files or symbols, acceptance criteria, dependencies, and required skills;
-- a dependency graph and `MAX_CONCURRENCY` audit;
+- a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers.
+Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. DAL, React, C#, and DevOps tasks can run at the same time. When C# changes span multiple projects, split them across `csharp-dev` workers only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 ## Decisions
 
@@ -34,6 +35,10 @@ The `## Decisions` section is permanent state, preserved intact across all lifec
 Record all decisions in a structured table:
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+## Documentation gates after plan writes
+
+After every plan save, obtain the two checks by calling `docs_validate` and `docs_drift` on the kyber-weave documentation server. Leave `mergeReady` false while the plan is in the active plans folder. Compare the provenance `root=` on each response to this checkout. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
 
 Persist each question with a stable id (for example, D1, D2 or Q1, Q2), the question or architectural choice, the selected answer or decision, mitigating and supporting context (alternatives considered, trade-offs, constraints), and status/approval provenance.
 
@@ -47,24 +52,25 @@ OPTIONS: <a> / <b> / ...
 RECOMMENDED: <option> — <reason>
 ```
 
+Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only hard-block escalations. An autonomous hard-block escalation uses this NEEDS_DECISION shape PLUS `ESCALATION: hard_block`, `SOURCES_SEARCHED`, `COST_OF_WRONG` (and `RECOMMENDED`); see [autonomy-decisions.md](autonomy-decisions.md) for the exact block.
+
 Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
 
 If no interactive questions were needed during planning, the plan must still carry the permanent `## Decisions` table documenting the baseline choices, assumptions, and constraints that govern the implementation, and `PLAN_READY` includes `NO_QUESTIONS` with the concrete reason the request was already decision-complete. `NO_QUESTIONS` does not bypass authoring the permanent `## Decisions` table.
 
 ## Ready and finalization
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, has a schedulable dependency graph, and both documentation checks pass:
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass:
 
 ```text
 STATUS: PLAN_READY
 PLAN_FILE: <saved path>
 OPEN_DECISIONS: none
-MAX_CONCURRENCY: <n>
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```
 
-The conductor presents **approve and execute**. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, rerun both documentation checks, and return:
+The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, rerun both documentation checks, and return:
 
 ```text
 STATUS: PLAN_FINALIZED

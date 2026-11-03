@@ -14,4 +14,6 @@ public sealed class FakeSquadUserPaths : ISquadUserPaths
     }
 
     public string ApplicationDataDirectory { get; }
+
+    public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
 }

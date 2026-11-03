@@ -246,13 +246,17 @@ describe('iterateNativeUnits', () => {
   })
 
   it('splits Copilot by sourceType', async () => {
+    // Fake paths must not exist on disk: expandNativeDirectorySource expands any
+    // real directory it can stat, silently dropping the unit. '/tmp/jb' exists on
+    // machines where ReSharper's jb tool has run (its assembly shadow-copy cache).
+    const root = tempRoot()
     const sources: SessionSource[] = [
-      { path: '/tmp/.copilot/a.jsonl', project: 'p', provider: 'copilot', sourceType: 'jsonl' },
-      { path: '/tmp/store.db', project: 'p', provider: 'copilot', sourceType: 'session-store' },
-      { path: '/tmp/x.chatSession', project: 'p', provider: 'copilot', sourceType: 'chatsession' },
-      { path: '/tmp/t.json', project: 'p', provider: 'copilot', sourceType: 'transcript' },
-      { path: '/tmp/jb', project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
-      { path: '/tmp/agent-traces.db', project: 'p', provider: 'copilot', sourceType: 'otel' },
+      { path: join(root, '.copilot', 'a.jsonl'), project: 'p', provider: 'copilot', sourceType: 'jsonl' },
+      { path: join(root, 'store.db'), project: 'p', provider: 'copilot', sourceType: 'session-store' },
+      { path: join(root, 'x.chatSession'), project: 'p', provider: 'copilot', sourceType: 'chatsession' },
+      { path: join(root, 't.json'), project: 'p', provider: 'copilot', sourceType: 'transcript' },
+      { path: join(root, 'jb'), project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
+      { path: join(root, 'agent-traces.db'), project: 'p', provider: 'copilot', sourceType: 'otel' },
     ]
     const parsed = new Map(sources.map(source => [source.path, [
       call({ provider: 'copilot', sessionId: source.path, timestamp: '2026-09-06T00:00:00.000Z' }),

@@ -91,11 +91,11 @@ describe('harnessDimensionAvailability & coverageFor (ADR 0009, ADR 0011, Task E
     }
     expect(coverageFor('aider')).toBe(0.0)
 
-    // OpenCode has experimental OpenTelemetry disabled
+    // OpenCode exports nothing until the capture plugin has recorded sessions
     const opencodeCache = harnessDimensionAvailability('opencode', 'cache_hit_rate')
     expect(isNotMeasurable(opencodeCache)).toBe(true)
     if (isNotMeasurable(opencodeCache)) {
-      expect(opencodeCache.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodeCache.reason).toContain('KyberDash capture plugin')
     }
     expect(coverageFor('opencode')).toBe(0.0)
 
@@ -115,13 +115,13 @@ describe('harnessDimensionAvailability & coverageFor (ADR 0009, ADR 0011, Task E
     const opencodePressureMedian = harnessDimensionAvailability('opencode', 'context_pressure_median')
     expect(isNotMeasurable(opencodePressureMedian)).toBe(true)
     if (isNotMeasurable(opencodePressureMedian)) {
-      expect(opencodePressureMedian.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodePressureMedian.reason).toContain('KyberDash capture plugin')
     }
 
     const opencodePressureP95 = harnessDimensionAvailability('opencode', 'context_pressure_p95')
     expect(isNotMeasurable(opencodePressureP95)).toBe(true)
     if (isNotMeasurable(opencodePressureP95)) {
-      expect(opencodePressureP95.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodePressureP95.reason).toContain('KyberDash capture plugin')
     }
   })
 
@@ -871,20 +871,23 @@ describe('CanonStore — session retrieval encapsulation (ADR 0008, Task E2)', (
       payload: { context: { measurable: true } },
     })
 
-    const allSessions = store.listSessions()
+    // The store lists sessions through its streaming seam: the same rows,
+    // newest first, yielded one at a time so a listing never materializes
+    // every payload at once.
+    const allSessions = [...store.iterateSessions()]
     expect(allSessions).toHaveLength(3)
     // Newest first
     expect(allSessions[0]?.sessionId).toBe('sess-copilot-2')
 
-    const copilotSessions = store.listSessions('copilot')
+    const copilotSessions = [...store.iterateSessions('copilot')]
     expect(copilotSessions).toHaveLength(2)
     expect(copilotSessions.map((s) => s.sessionId)).toEqual(['sess-copilot-2', 'sess-copilot-1'])
 
-    const cursorSessions = store.listSessions('cursor')
+    const cursorSessions = [...store.iterateSessions('cursor')]
     expect(cursorSessions).toHaveLength(1)
     expect(cursorSessions[0]?.sessionId).toBe('sess-cursor-1')
 
-    const absentSessions = store.listSessions('aider')
+    const absentSessions = [...store.iterateSessions('aider')]
     expect(absentSessions).toHaveLength(0)
 
     const session = store.getSession('sess-copilot-1')

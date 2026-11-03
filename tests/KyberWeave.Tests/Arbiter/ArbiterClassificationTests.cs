@@ -137,7 +137,7 @@ public sealed class ArbiterClassificationTests
         Assert.Equal("implementation", TriggerClassifier.TargetClassFor("test-dev"));
         Assert.Equal("planner", TriggerClassifier.TargetClassFor("architect"));
         Assert.Equal("planner", TriggerClassifier.TargetClassFor("product-owner"));
-        Assert.Equal("read-only", TriggerClassifier.TargetClassFor("task-reviewer"));
+        Assert.Equal("read-only", TriggerClassifier.TargetClassFor("review-triage"));
         Assert.Equal("read-only", TriggerClassifier.TargetClassFor("code-reviewer"));
         Assert.Equal("read-only", TriggerClassifier.TargetClassFor("review-lens"));
         Assert.Equal("not-squad", TriggerClassifier.TargetClassFor("some-fallback-target"));
@@ -259,8 +259,8 @@ public sealed class ArbiterClassificationTests
     {
         string prompt = Marked("Review.", "PLAN_FILE: docs/plans/plan.md\nTASK: T3");
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch(prompt, target: "task-reviewer", harness: "claude", harnessCaller: "conductor"),
-            "task-reviewer",
+            Dispatch(prompt, target: "review-triage", harness: "claude", harnessCaller: "conductor"),
+            "review-triage",
             prompt);
 
         Assert.Equal("investigate", plan.Trigger);

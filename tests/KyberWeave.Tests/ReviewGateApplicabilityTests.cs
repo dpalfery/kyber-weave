@@ -21,7 +21,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     private static ReviewGate DashGate(string[] run, bool blocking = true) =>
-        new("dash-gate", run, blocking, 900, new ReviewGateAppliesWhen(["dash/**"]));
+        new("dash-gate", run, blocking, 900, AppliesWhen: new ReviewGateAppliesWhen(["dash/**"]));
 
     private static ReviewConfig Config(params ReviewGate[] gates) => new() { Gates = gates };
 

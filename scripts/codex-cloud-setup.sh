@@ -96,8 +96,8 @@ if ! DOCS_OUTPUT="$("$CLI" docs init "$REPO_ROOT" --target codex 2>&1)"; then
     exit 1
 fi
 printf '%s\n' "$DOCS_OUTPUT"
-if [[ "$DOCS_OUTPUT" == *"skipped"* && "$DOCS_OUTPUT" == *"kyber-weave-docs skill"* ]]; then
-    echo "error: docs init did not deploy the kyber-weave-docs skill" >&2
+if [[ "$DOCS_OUTPUT" == *"skipped"* && "$DOCS_OUTPUT" == *"kyber-docs-authoring skill"* ]]; then
+    echo "error: docs init did not deploy the kyber-docs-authoring skill" >&2
     exit 1
 fi
 

@@ -50,6 +50,81 @@ describe('formatSessionTitle', () => {
   })
 })
 
+describe('formatSessionTitle, agent and session name', () => {
+  it('leads with the agent and trails the session name', () => {
+    expect(formatSessionTitle({ label: 'Fix the login form', agentName: 'architect', harness: 'copilot' })).toBe(
+      'architect · Fix the login form',
+    )
+  })
+
+  it('never shows a GenAI span name as the title', () => {
+    expect(formatSessionTitle({ label: 'invoke_agent architect', agentName: 'architect', harness: 'copilot' })).toBe(
+      'architect',
+    )
+    expect(formatSessionTitle({ label: 'chat gpt-4o-mini-2024-07-18', sessionId: 'fc98e860', harness: 'copilot' })).toBe(
+      'Copilot session',
+    )
+    expect(formatSessionTitle({ label: 'execute_tool manage_todo_list', harness: 'copilot' })).toBe('Copilot session')
+  })
+
+  it('uses a readable slug id as the session name and ignores an agent that is just the harness', () => {
+    expect(
+      formatSessionTitle({
+        label: 'chat Claude Sonnet 5.5 (Medium)',
+        sessionId: 'sessions-subagents-and-names',
+        agentName: 'antigravity',
+        harness: 'antigravity',
+      }),
+    ).toBe('sessions-subagents-and-names')
+  })
+})
+
+describe('formatSessionTitle, review edge cases', () => {
+  it('keeps a human title that merely starts with chat or embeddings', () => {
+    expect(formatSessionTitle({ label: 'Chat about the login form', harness: 'copilot' })).toBe('Chat about the login form')
+    expect(formatSessionTitle({ label: 'Embeddings cleanup plan', harness: 'copilot' })).toBe('Embeddings cleanup plan')
+  })
+
+  it('keeps human chat titles that carry a count or a hyphenated word', () => {
+    expect(formatSessionTitle({ label: 'Chat about 2 new features', harness: 'copilot' })).toBe('Chat about 2 new features')
+    expect(formatSessionTitle({ label: 'Chat kick-off meeting', harness: 'copilot' })).toBe('Chat kick-off meeting')
+  })
+
+  it('still treats model-shaped chat spans as machine labels', () => {
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
+    expect(isMachineLabel('chat Gemini 3.8 Flash (High)')).toBe(true)
+  })
+
+  it('accepts readable ids with digits or capitals, but not uuids or tool-call ids', () => {
+    expect(formatSessionTitle({ sessionId: 'session-2024-10-15', harness: 'antigravity' })).toBe('session-2024-10-15')
+    expect(formatSessionTitle({ sessionId: 'Sessions-Subagents', harness: 'antigravity' })).toBe('Sessions-Subagents')
+    expect(formatSessionTitle({ sessionId: '728380ff-c64a-4c31-8d9e-bdcf6a5c6ce6', harness: 'copilot' })).toBe('Copilot session')
+    expect(formatSessionTitle({ sessionId: 'toolu_01Fx1LciXhDzP3h8JRSudYb3', harness: 'copilot' })).toBe('Copilot session')
+  })
+
+  it('does not repeat the agent when the session name differs only by case', () => {
+    expect(formatSessionTitle({ label: 'Architect', agentName: 'architect', harness: 'copilot' })).toBe('architect')
+  })
+})
+
+describe('formatSessionTitle, labels the server already titled', () => {
+  it('does not prefix the agent a second time', () => {
+    expect(
+      formatSessionTitle({ label: 'explorer · explore workspace architecture', agentName: 'explorer', harness: 'claude-code' }),
+    ).toBe('explorer · explore workspace architecture')
+  })
+
+  it('still prefixes a plain task label with the agent', () => {
+    expect(
+      formatSessionTitle({ label: 'explore workspace architecture', agentName: 'explorer', harness: 'claude-code' }),
+    ).toBe('explorer · explore workspace architecture')
+  })
+})
+
 describe('formatModelLabel / formatSpanLabel', () => {
   it('replaces synthetic and unknown placeholders', () => {
     expect(formatModelLabel('claude:<synthetic>')).toBe('Claude (unspecified)')
@@ -62,6 +137,16 @@ describe('formatModelLabel / formatSpanLabel', () => {
       'synth:',
     )
     expect(formatSpanLabel('claude_code.llm_request')).toBe('LLM request')
+  })
+
+  it('keeps human labels that start with chat, and still filters model-shaped chat spans', () => {
+    expect(isMachineLabel('chat with team about launch')).toBe(false)
+    expect(isMachineLabel('Chat about 2 new features')).toBe(false)
+    expect(isMachineLabel('Chat kick-off meeting')).toBe(false)
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
   })
 
   it('treats those placeholders as machine labels', () => {
@@ -84,5 +169,18 @@ describe('percent and duration presentation', () => {
     expect(formatDuration(450)).toBe('450ms')
     expect(formatDuration(2500)).toBe('2.5s')
     expect(formatDuration(65000)).toBe('1m 5s')
+  })
+})
+
+describe('formatSessionId, scoped subagent ids', () => {
+  it('keeps a scoped subagent id distinguishable from its parent', () => {
+    const parent = '728380ff-c64a-4c31-8d9e-bdcf6a5c6ce6'
+    const claude = formatSessionId(`${parent}#agent-a4b10a0830747b668`)
+    const copilot = formatSessionId(`${parent}#invoke-agent-span-1`)
+    expect(claude).not.toBe(formatSessionId(parent))
+    expect(copilot).not.toBe(formatSessionId(parent))
+    expect(claude).toContain('#agent-a4b10a08')
+    expect(claude).toContain(formatSessionId(parent))
+    expect(claude).not.toBe(formatSessionId(`${parent}#agent-b9c20b1941858c779`))
   })
 })

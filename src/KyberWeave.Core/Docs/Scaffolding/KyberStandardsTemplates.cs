@@ -35,13 +35,16 @@ public static class KyberStandardsTemplates
         "csharp",
         "data-access-layer",
         "github-actions",
+        "go",
         "maui",
         "pulumi",
         "python",
         "react",
+        "rust",
         "sql",
         "tauri",
-        "test"
+        "test",
+        "typescript"
     ];
 
     private static readonly FrozenDictionary<string, string> Templates = LoadEmbeddedTemplates();

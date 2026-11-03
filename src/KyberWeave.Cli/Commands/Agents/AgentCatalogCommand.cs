@@ -11,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Agents;
 public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))

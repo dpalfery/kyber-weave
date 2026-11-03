@@ -22,6 +22,13 @@
       "runtime": "pi extension API (node >= 22.18 type-stripping)",
       "origin": "adapted by the repository owner from collectors/pi/src/statusbar.ts in the agent-session-analysis-dashboard project (same author)",
       "notes": "Standalone extension extracted from the collector package; zero imports, no OTLP, adapted to the T4-pinned ctx shape."
+    },
+    {
+      "file": "commandcode/statusbar.ts",
+      "harness": "commandcode",
+      "runtime": "CommandCode mod host (node type-stripping)",
+      "origin": "written for this slice, ported from products/kyber-utilities/statusline/pi/statusbar.ts (same author)",
+      "notes": "Same segments and separators as the Pi bar with a [CC] badge and no cost segment (the mod host exposes no cost API); data from onSessionStart/onTurnEnd via cmd.state, repo from cmd.cwd, branch from git via cmd.exec; zero imports, no network, no files."
     }
   ]
 }

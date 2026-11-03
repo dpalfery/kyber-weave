@@ -264,13 +264,13 @@ public static class VerdictEngine
         ReviewPolicy policy,
         List<Diagnostic> diagnostics)
     {
-        if (scope.ChangedLines <= policy.MaxReviewableLines)
+        if (scope.EffectiveChangedLines <= policy.MaxReviewableLines)
             return null;
 
         diagnostics.Add(new Diagnostic(
             ChangeTooLarge,
             Severity.Error,
-            $"{scope.ChangedLines} changed lines exceeds the reviewable ceiling of " +
+            $"{scope.EffectiveChangedLines} changed lines exceeds the reviewable ceiling of " +
             $"{policy.MaxReviewableLines}.",
             Subject,
             Hint: "This is an attention limit, not a risk grade. Split the change or have a " +

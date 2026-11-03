@@ -1,0 +1,18 @@
+{
+  "conversationId": "fixture-segments",
+  "layout": "SYNTHETIC. ~/.gemini/antigravity-cli/conversations/<conversation-id>.db with sibling brain/<conversation-id>/.system_generated/logs/transcript.jsonl. Rows carry chatModel #20 last_step_index.",
+  "rows": [
+    {
+      "idx": 0,
+      "hex": "0a3e220510e80718324a08220608e4cfdfd1069a011367656d696e692d332e312d70726f2d68696768a201140a0f6c6173745f737465705f696e646578120132"
+    },
+    {
+      "idx": 1,
+      "hex": "0a3e220510e80718324a082206088cd0dfd1069a011367656d696e692d332e312d70726f2d68696768a201140a0f6c6173745f737465705f696e646578120135"
+    },
+    {
+      "idx": 2,
+      "hex": "0a3e220510e80718324a08220608c8d0dfd1069a011367656d696e692d332e312d70726f2d68696768a201140a0f6c6173745f737465705f696e646578120138"
+    }
+  ]
+}

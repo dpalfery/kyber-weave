@@ -11,6 +11,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 describe('P2.8: /api/kyber/model-catalog', () => {
   let server: Server

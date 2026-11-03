@@ -11,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsDriftCommand : Command<DocsSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(settings, report, out DocumentLoader? loader))

@@ -20,10 +20,11 @@ public sealed class ArbiterSquadCatalogTests
 
         string[] expected =
         [
-            "architect", "azure-reader", "bug-crusher-investigator", "code-reviewer", "conductor",
-            "csharp-dev", "dal-dev", "docs-dev", "github-devops", "maui-dev", "product-owner",
-            "pulumi-dev", "python-dev", "react-dev", "research-agent", "review-lens",
-            "review-triage", "sql-database-architect", "task-reviewer", "tauri-dev", "test-dev",
+            "architect", "azure-reader", "bug-crusher", "bug-crusher-investigator", "code-reviewer",
+            "conductor", "csharp-dev", "dal-dev", "docs-dev", "github-devops", "go-dev", "maui-dev",
+            "product-owner", "pulumi-dev", "python-dev", "react-dev", "research-agent", "review-lens",
+            "review-triage", "rust-dev", "sql-database-architect", "tauri-dev", "test-dev",
+            "typescript-dev",
         ];
 
         Assert.Equal(expected.Order(StringComparer.Ordinal), catalog.Agents.Keys.Order(StringComparer.Ordinal));
@@ -77,9 +78,9 @@ public sealed class ArbiterSquadCatalogTests
         string[] expected =
         [
             "authz-tenancy", "blast-radius-revertibility", "correctness", "dependency-supply-chain",
-            "di-composition", "duplicate-implementation", "infra-workflow", "intent-alignment",
-            "model-placement", "performance", "prior-art", "security",
-            "static-analysis-triage", "supportability", "test-adequacy",
+            "di-composition", "documentation-accuracy", "duplicate-implementation", "infra-workflow",
+            "intent-alignment", "model-placement", "performance", "prior-art", "security",
+            "static-analysis-triage", "supportability", "test-adequacy", "test-infrastructure",
         ];
 
         Assert.Equal(expected.Order(StringComparer.Ordinal), catalog.Lenses.Keys.Order(StringComparer.Ordinal));

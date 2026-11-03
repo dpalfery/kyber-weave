@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
@@ -13,17 +14,53 @@ public sealed class SquadStateStore
     private const string LockFileName = "squad.lock.yml";
     private const string ReceiptFileName = "squad.receipt.json";
     private const string TransactionDirectoryName = ".squad-transaction";
-    private const string LockSchema = "kyber-squad.lock/v1";
+
+    /// <summary>Schema identifier for Squad lock v1 (unmodified portable locks without model presets).</summary>
+    internal const string LockSchemaV1 = "kyber-squad.lock/v1";
+
+    /// <summary>Schema identifier for Squad lock v2 (recording active model presets per target).</summary>
+    internal const string LockSchemaV2 = "kyber-squad.lock/v2";
 
     /// <summary>
-    /// The one receipt schema source (#91 / A3): project receipts stay on this schema forever,
-    /// and it is also what a legacy Global receipt written before #91 carries.
+    ///     The registry schema. Its entries are keyed by root key, so a registry rebuilt from
+    ///     per-project state and one written by this code agree on identity.
+    /// </summary>
+    internal const string RegistrySchema = "kyber-squad.registry/v1";
+
+    private const string RegistryFileName = "registry.json";
+    private const string RegistryProjectsProperty = "projects";
+
+    /// <summary>
+    ///     The home-level state directory relative to the home directory. It holds <c>global/</c>,
+    ///     <c>projects/&lt;root-key&gt;/</c> and <c>registry.json</c>.
+    /// </summary>
+    private const string HomeStateRelativeDirectory = ".kyber-weave/squad";
+
+    private const string GlobalStateRelativeDirectory = ".kyber-weave/squad/global";
+    private const string ProjectsRelativeDirectory = ".kyber-weave/squad/projects";
+
+    /// <summary>
+    ///     The journal for a project transaction sits beside its root, and the global journal sits
+    ///     beside the home. Both are <c>.kyber-weave/.squad-transaction</c> under their own anchor.
+    /// </summary>
+    private const string JournalRelativePath = ".kyber-weave/" + TransactionDirectoryName;
+
+    /// <summary>
+    ///     The receipt <c>targetRoot</c> a plan records before the transaction anchors it. Global
+    ///     receipts are anchored on the home, which only the store knows, so the planner writes this
+    ///     portable marker and the transaction replaces it at write time. Legacy receipts carry it too.
+    /// </summary>
+    internal const string UnanchoredTargetRoot = ".";
+
+    /// <summary>
+    ///     The one receipt schema source (#91 / A3): project receipts stay on this schema forever,
+    ///     and it is also what a legacy Global receipt written before #91 carries.
     /// </summary>
     internal const string ReceiptSchemaV1 = "kyber-squad.receipt/v1";
 
     /// <summary>
-    /// Written for Global receipts only, additive over v1 with a required <c>layout</c> field.
-    /// An older CLI that predates this schema refuses it outright rather than misreading it.
+    ///     Written for Global receipts only, additive over v1 with a required <c>layout</c> field.
+    ///     An older CLI that predates this schema refuses it outright rather than misreading it.
     /// </summary>
     internal const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
 
@@ -35,26 +72,55 @@ public sealed class SquadStateStore
     /// </summary>
     internal const string ReceiptSchemaV3 = "kyber-squad.receipt/v3";
 
-    private static readonly JsonWriterOptions ReceiptWriterOptions = new JsonWriterOptions
+    private static readonly JsonWriterOptions ReceiptWriterOptions = new()
     {
         Indented = true,
         NewLine = "\n"
     };
 
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
+
     private static readonly IReadOnlySet<string> CanonicalTargetTokens =
         SquadTargetCatalog.All
             .Select(SquadTargetCatalog.GetToken)
             .ToHashSet(StringComparer.Ordinal);
-    private readonly ISquadUserPaths _userPaths;
+
+    private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByCanonicalToken =
+        SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, t => t, StringComparer.Ordinal);
 
     public SquadStateStore(ISquadUserPaths userPaths)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
-        _userPaths = userPaths;
+        UserPaths = userPaths;
     }
 
-    internal ISquadUserPaths UserPaths => _userPaths;
+    /// <summary>
+    ///     The user paths this store was built over. Every Squad state read and migration takes its locations
+    ///     from here, so a store built over a fake home never reaches the real profile.
+    /// </summary>
+    public ISquadUserPaths UserPaths { get; }
+
+    private static bool TryGetTarget(string token, out SquadTarget target)
+    {
+        if (TargetsByCanonicalToken.TryGetValue(token, out target))
+            return true;
+
+        try
+        {
+            IReadOnlyList<SquadTarget> parsed = SquadTargetCatalog.Parse([token]);
+            if (parsed.Count == 1)
+            {
+                target = parsed[0];
+                return true;
+            }
+        }
+        catch (ArgumentException)
+        {
+        }
+
+        target = default;
+        return false;
+    }
 
     /// <summary>Returns the state directory for the requested deployment scope.</summary>
     public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope)
@@ -65,8 +131,161 @@ public sealed class SquadStateStore
         {
             SquadDeploymentScope.Project => ResolveProjectStateDirectory(targetRoot),
             SquadDeploymentScope.Global => ResolveGlobalStateDirectory(),
+            SquadDeploymentScope.Instance => ResolveInstanceStateDirectory(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
+    }
+
+    /// <summary>
+    ///     Returns the home-level Squad state directory, <c>&lt;HomeDirectory&gt;/.kyber-weave/squad</c>,
+    ///     which holds <c>global/</c>, <c>projects/&lt;root-key&gt;/</c> and <c>registry.json</c>.
+    /// </summary>
+    public string ResolveHomeStateDirectory()
+    {
+        return ResolveDirectoryUnder(ResolveHomeRoot(), HomeStateRelativeDirectory);
+    }
+
+    /// <summary>
+    ///     The root a global receipt's home-owned files are relative to,
+    ///     <c>&lt;HomeDirectory&gt;/.kyber-weave</c>: the parent of the <c>squad/</c> state
+    ///     directory, and the directory an operator opens to read or edit one of those files.
+    /// </summary>
+    /// <remarks>
+    ///     Derived from <see cref="ResolveHomeStateDirectory" /> rather than spelled out again, so a
+    ///     move of the state directory takes the home-owned files with it. Internal because it is a
+    ///     layout detail behind <see cref="SquadReceipt.HomeFiles" />: a host asks the receipt what
+    ///     Squad owns, not where the home happens to put it.
+    /// </remarks>
+    internal string ResolveHomeOwnedFilesRoot()
+    {
+        return Path.GetDirectoryName(ResolveHomeStateDirectory())
+               ?? throw new InvalidOperationException(
+                   "The Squad home state directory has no parent to anchor home-owned files on.");
+    }
+
+    /// <summary>
+    ///     Lists every project in the home-level registry, with a stale flag and reason for each entry
+    ///     that no longer matches the state on disk. A project whose receipt sits under
+    ///     <c>projects/&lt;key&gt;</c> but has no registry entry is rebuilt from that receipt, and the
+    ///     rebuilt registry is written back. A failed write surfaces to the caller rather than being hidden. A receipt
+    ///     that does not parse is left out of the listing, and the other projects are still listed.
+    /// </summary>
+    /// <remarks>
+    ///     The registry is an index, never the authority for ownership. A stale entry is reported rather
+    ///     than dropped, so an operator can see what was registered before choosing to unregister it.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The registry file exists but is not a valid registry.</exception>
+    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects()
+    {
+        return ListProjects(true);
+    }
+
+    /// <summary>
+    ///     Returns the registry entry for one project root, matched by the root's canonical identity, so an
+    ///     alias, a symbolic link, or a path whose directory has since been removed still finds its entry.
+    /// </summary>
+    /// <param name="root">The project root to look up. It may no longer exist.</param>
+    /// <returns>The entry, or <see langword="null" /> when the root is not registered.</returns>
+    /// <remarks>
+    ///     A lookup is a read. A registry that has lost this entry is answered from per-project state in memory, and the
+    ///     rebuilt registry is left for an explicit write path to persist.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The registry file exists but is not a valid registry.</exception>
+    public SquadProjectRegistryEntry? FindProject(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
+        return ListProjectsWithoutRebuild()
+            .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Lists the registry exactly as <see cref="ListProjects()" /> does, but never writes the rebuilt registry
+    ///     back. A read-only caller, such as a migration dry run, must not change the home to answer a question.
+    /// </summary>
+    internal IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild()
+    {
+        return ListProjects(false);
+    }
+
+    private IReadOnlyList<SquadProjectRegistryEntry> ListProjects(bool persistRebuild)
+    {
+        Dictionary<string, RegistryRecord> registry = ReadRegistry();
+        bool rebuilt = false;
+        foreach (string projectDirectory in EnumerateProjectStateDirectories())
+        {
+            string key = Path.GetFileName(projectDirectory);
+            if (registry.ContainsKey(key))
+                continue;
+
+            string receiptPath = Path.Combine(projectDirectory, ReceiptFileName);
+            if (!File.Exists(receiptPath))
+                continue;
+
+            SquadReceipt receipt;
+            try
+            {
+                receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+            }
+            catch (InvalidDataException)
+            {
+                // One corrupt receipt must not hide every other project. It has no readable path or target list
+                // to describe it by, so it is left out of the index and the rebuild carries on with the rest.
+                continue;
+            }
+
+            registry[key] = new RegistryRecord(
+                receipt.TargetRoot,
+                receipt.InstalledAtUtc,
+                DistinctTargets(receipt.Files));
+            rebuilt = true;
+        }
+
+        if (rebuilt && persistRebuild)
+            WriteRegistry(registry);
+
+        return registry
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => DescribeEntry(pair.Key, pair.Value))
+            .ToArray();
+    }
+
+    /// <summary>Registers, or refreshes, a project root in the home-level Squad registry.</summary>
+    /// <param name="root">The project root to register.</param>
+    /// <param name="targets">The harness targets deployed beneath that root.</param>
+    /// <param name="now">The instant recorded as the entry's last update.</param>
+    /// <exception cref="IOException">The registry could not be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The registry could not be written.</exception>
+    public void RegisterProject(string root, IReadOnlyList<string> targets, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(targets);
+
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root);
+        Dictionary<string, RegistryRecord> registry = ReadRegistry();
+        registry[identity.Key] = new RegistryRecord(
+            identity.PhysicalPath,
+            now.ToUniversalTime(),
+            targets.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
+        WriteRegistry(registry);
+    }
+
+    /// <summary>Removes a project root from the home-level Squad registry.</summary>
+    /// <param name="root">The project root to remove. It may no longer exist, so a stale entry can still be removed.</param>
+    /// <returns><see langword="true" /> when an entry was removed; <see langword="false" /> when none existed.</returns>
+    public bool UnregisterProject(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        string key = SquadPhysicalRootIdentity.KeyOf(
+            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
+        Dictionary<string, RegistryRecord> registry = ReadRegistry();
+        if (!registry.Remove(key))
+            return false;
+
+        WriteRegistry(registry);
+        return true;
     }
 
     /// <summary>Serializes a lock using stable, portable YAML field ordering.</summary>
@@ -75,7 +294,7 @@ public sealed class SquadStateStore
         ArgumentNullException.ThrowIfNull(squadLock);
         ValidateLock(squadLock);
 
-        StringBuilder yaml = new StringBuilder();
+        StringBuilder yaml = new();
         AppendScalar(yaml, "schema", squadLock.Schema);
         AppendScalar(yaml, "squad-version", squadLock.SquadVersion);
         AppendScalar(yaml, "cli-version", squadLock.CliVersion);
@@ -87,9 +306,25 @@ public sealed class SquadStateStore
         AppendScalar(yaml, "bundle-digest", squadLock.BundleDigest);
         AppendScalar(yaml, "asset-digest", squadLock.AssetDigest);
         yaml.Append("apm:\n");
-        AppendScalar(yaml, "version", squadLock.Apm.Version, indentation: 2);
-        AppendScalar(yaml, "tag-commit", squadLock.Apm.TagCommit, indentation: 2);
-        AppendScalar(yaml, "asset-sha256", squadLock.Apm.AssetSha256, indentation: 2);
+        AppendScalar(yaml, "version", squadLock.Apm.Version, 2);
+        AppendScalar(yaml, "tag-commit", squadLock.Apm.TagCommit, 2);
+        AppendScalar(yaml, "asset-sha256", squadLock.Apm.AssetSha256, 2);
+
+        if (squadLock.ModelPresets is { Count: > 0 })
+        {
+            yaml.Append("model-presets:\n");
+            foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets
+                         .OrderBy(kvp => SquadTargetCatalog.GetToken(kvp.Key), StringComparer.Ordinal))
+            {
+                string targetToken = SquadTargetCatalog.GetToken(entry.Key);
+                yaml.Append("  ");
+                yaml.Append(targetToken);
+                yaml.Append(":\n");
+                AppendScalar(yaml, "name", entry.Value.Name, 4);
+                AppendScalar(yaml, "digest", entry.Value.Digest, 4);
+            }
+        }
+
         return yaml.ToString();
     }
 
@@ -100,31 +335,81 @@ public sealed class SquadStateStore
         try
         {
             RejectYamlIndirection(yaml);
-            YamlStream stream = new YamlStream();
+            YamlStream stream = new();
             stream.Load(new StringReader(yaml));
             if (stream.Documents.Count != 1 ||
                 stream.Documents[0].RootNode is not YamlMappingNode root)
-            {
                 throw new InvalidDataException(
                     "Squad lock YAML must contain exactly one mapping document.");
-            }
 
-            RequireExactYamlFields(
-                root,
-                [
-                    "schema", "squad-version", "cli-version", "mcp-version", "bundle",
-                    "targets", "exclusions", "translation", "bundle-digest",
-                    "asset-digest", "apm"
-                ],
-                "lock");
+            string schema = RequireYamlScalar(root, "schema", "lock");
+            bool isV1 = string.Equals(schema, LockSchemaV1, StringComparison.Ordinal);
+            bool isV2 = string.Equals(schema, LockSchemaV2, StringComparison.Ordinal);
+            if (!isV1 && !isV2)
+                throw new InvalidDataException(
+                    $"Squad lock schema must be '{LockSchemaV1}' or '{LockSchemaV2}'.");
+
+            if (isV1)
+                RequireExactYamlFields(
+                    root,
+                    [
+                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
+                        "targets", "exclusions", "translation", "bundle-digest",
+                        "asset-digest", "apm"
+                    ],
+                    "lock");
+            else
+                RequireExactYamlFields(
+                    root,
+                    [
+                        "schema", "squad-version", "cli-version", "mcp-version", "bundle",
+                        "targets", "exclusions", "translation", "bundle-digest",
+                        "asset-digest", "apm", "model-presets"
+                    ],
+                    "lock");
+
             YamlMappingNode apm = RequireYamlMapping(root, "apm", "lock");
             RequireExactYamlFields(
                 apm,
                 ["version", "tag-commit", "asset-sha256"],
                 "lock apm identity");
 
-            SquadLock squadLock = new SquadLock(
-                RequireYamlScalar(root, "schema", "lock"),
+            Dictionary<SquadTarget, SquadAppliedPreset>? modelPresets = null;
+            if (isV2)
+            {
+                YamlMappingNode presetsNode = RequireYamlMapping(root, "model-presets", "lock");
+                modelPresets = new Dictionary<SquadTarget, SquadAppliedPreset>();
+                foreach (KeyValuePair<YamlNode, YamlNode> entry in presetsNode.Children)
+                {
+                    if (entry.Key is not YamlScalarNode { Value: not null } targetKey ||
+                        string.IsNullOrWhiteSpace(targetKey.Value))
+                        throw new InvalidDataException(
+                            "Squad lock model-presets contains a non-scalar or blank target key.");
+
+                    if (!TryGetTarget(targetKey.Value, out SquadTarget target))
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets contains unknown target '{targetKey.Value}'.");
+
+                    if (entry.Value is not YamlMappingNode presetNode)
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets for target '{targetKey.Value}' must be a mapping.");
+
+                    RequireExactYamlFields(
+                        presetNode,
+                        ["name", "digest"],
+                        $"lock model preset '{targetKey.Value}'");
+
+                    string presetName = RequireYamlScalar(presetNode, "name", "lock model preset");
+                    string presetDigest = RequireYamlScalar(presetNode, "digest", "lock model preset");
+
+                    if (!modelPresets.TryAdd(target, new SquadAppliedPreset(presetName, presetDigest)))
+                        throw new InvalidDataException(
+                            $"Squad lock model-presets contains duplicate target '{targetKey.Value}'.");
+                }
+            }
+
+            SquadLock squadLock = new(
+                schema,
                 RequireYamlScalar(root, "squad-version", "lock"),
                 RequireYamlScalar(root, "cli-version", "lock"),
                 RequireYamlScalar(root, "mcp-version", "lock"),
@@ -137,7 +422,8 @@ public sealed class SquadStateStore
                 new SquadApmIdentity(
                     RequireYamlScalar(apm, "version", "lock apm identity"),
                     RequireYamlScalar(apm, "tag-commit", "lock apm identity"),
-                    RequireYamlScalar(apm, "asset-sha256", "lock apm identity")));
+                    RequireYamlScalar(apm, "asset-sha256", "lock apm identity")),
+                modelPresets);
             ValidateLock(squadLock);
             return squadLock;
         }
@@ -176,18 +462,22 @@ public sealed class SquadStateStore
         bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
         bool isV3 = !isGlobal && receipt.Blocks.Count > 0;
 
-        using MemoryStream stream = new MemoryStream();
-        using (Utf8JsonWriter writer = new Utf8JsonWriter(stream, ReceiptWriterOptions))
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream, ReceiptWriterOptions))
         {
             writer.WriteStartObject();
             writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : isV3 ? ReceiptSchemaV3 : ReceiptSchemaV1);
-            writer.WriteString("scope", isGlobal ? "global" : "project");
-            if (isGlobal)
+            writer.WriteString("scope", receipt.Scope switch
             {
+                SquadDeploymentScope.Project => "project",
+                SquadDeploymentScope.Global => "global",
+                SquadDeploymentScope.Instance => "instance",
+                _ => throw new ArgumentOutOfRangeException(nameof(receipt), receipt.Scope, "Unknown Squad scope.")
+            });
+            if (isGlobal)
                 writer.WriteString(
                     "layout",
                     receipt.Layout == SquadReceiptLayout.SingleRoot ? "single-root" : "per-target-roots");
-            }
 
             writer.WriteString("targetRoot", receipt.TargetRoot);
             writer.WriteString(
@@ -213,6 +503,12 @@ public sealed class SquadStateStore
                 }
 
                 writer.WriteEndArray();
+            }
+
+            if (isGlobal && receipt.HomeFiles.Count > 0)
+            {
+                writer.WritePropertyName("homeFiles");
+                JsonSerializer.Serialize(writer, receipt.HomeFiles, JsonOptions);
             }
 
             writer.WriteEndObject();
@@ -247,16 +543,16 @@ public sealed class SquadStateStore
     }
 
     /// <summary>
-    /// Builds the in-memory receipt from an already shape-validated JSON document. A v1 Global
-    /// receipt carries no <c>layout</c> field, so its layout is classified from its own owned
-    /// files' paths (<see cref="SquadDeploymentPlan.ClassifyGlobalLayout"/>) — the only signal
-    /// #91 left behind. A v2 receipt is always Global (A3) regardless of whether its optional
-    /// <c>scope</c> field was present, and its explicit <c>layout</c> field is trusted as-is.
+    ///     Builds the in-memory receipt from an already shape-validated JSON document. A v1 Global
+    ///     receipt carries no <c>layout</c> field, so its layout is classified from its own owned
+    ///     files' paths (<see cref="SquadDeploymentPlan.ClassifyGlobalLayout" />) — the only signal
+    ///     #91 left behind. A v2 receipt is always Global (A3) regardless of whether its optional
+    ///     <c>scope</c> field was present, and its explicit <c>layout</c> field is trusted as-is.
     /// </summary>
     private static SquadReceipt BuildReceiptFromJson(JsonElement root)
     {
         string schema = root.GetProperty("schema").GetString()
-            ?? throw new InvalidDataException("Squad receipt schema must be a string.");
+                        ?? throw new InvalidDataException("Squad receipt schema must be a string.");
         bool isV2 = string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal);
         bool isV3 = string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal);
 
@@ -270,15 +566,16 @@ public sealed class SquadStateStore
                 $"scope '{scopeText ?? "null"}'."),
             (_, _, "project") => SquadDeploymentScope.Project,
             (_, _, "global") => SquadDeploymentScope.Global,
+            (_, _, "instance") => SquadDeploymentScope.Instance,
             _ => throw new InvalidDataException(
                 $"Squad receipt scope '{scopeText}' is not a recognized canonical scope.")
         };
 
         string targetRoot = root.GetProperty("targetRoot").GetString()
-            ?? throw new InvalidDataException("Squad receipt targetRoot must be a string.");
+                            ?? throw new InvalidDataException("Squad receipt targetRoot must be a string.");
         DateTimeOffset installedAtUtc = DateTimeOffset.Parse(
             root.GetProperty("installedAtUtc").GetString()
-                ?? throw new InvalidDataException("Squad receipt installedAtUtc must be a string."),
+            ?? throw new InvalidDataException("Squad receipt installedAtUtc must be a string."),
             CultureInfo.InvariantCulture,
             DateTimeStyles.RoundtripKind);
         IReadOnlyList<SquadDegradation> degradations =
@@ -287,6 +584,13 @@ public sealed class SquadStateStore
         IReadOnlyList<SquadOwnedFile> files =
             root.GetProperty("files").Deserialize<IReadOnlyList<SquadOwnedFile>>(JsonOptions)
             ?? [];
+
+        // Absent on every receipt written before the user-home response guidance existed, which is
+        // why it is read defensively rather than required by the shape check.
+        IReadOnlyList<SquadHomeFile> homeFiles =
+            root.TryGetProperty("homeFiles", out JsonElement homeFilesElement)
+                ? homeFilesElement.Deserialize<IReadOnlyList<SquadHomeFile>>(JsonOptions) ?? []
+                : [];
 
         SquadReceiptLayout layout;
         if (isV2)
@@ -336,11 +640,12 @@ public sealed class SquadStateStore
         return new SquadReceipt(schema, scope, targetRoot, installedAtUtc, degradations, files)
         {
             Layout = layout,
-            Blocks = blocks
+            Blocks = blocks,
+            HomeFiles = homeFiles
         };
     }
 
-    /// <summary>Reads the receipt for a deployment, or returns <see langword="null"/> when absent.</summary>
+    /// <summary>Reads the receipt for a deployment, or returns <see langword="null" /> when absent.</summary>
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope)
     {
         string path = ResolveStateFile(targetRoot, scope, ReceiptFileName);
@@ -349,36 +654,7 @@ public sealed class SquadStateStore
             : null;
     }
 
-    /// <summary>
-    /// Receipts for other project roots that share this machine's Global state directory.
-    /// Two <c>--global</c> installs must not both own one harness file.
-    /// </summary>
-    public IReadOnlyList<SquadReceipt> ListOtherGlobalReceipts(string targetRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
-
-        string currentBinding = GlobalRootBinding(targetRoot);
-        string rootsDirectory = Path.Combine(ResolveGlobalStateDirectory(), "roots");
-        if (!Directory.Exists(rootsDirectory))
-            return [];
-
-        List<SquadReceipt> receipts = [];
-        foreach (string rootDirectory in Directory.EnumerateDirectories(rootsDirectory))
-        {
-            if (string.Equals(Path.GetFileName(rootDirectory), currentBinding, StringComparison.Ordinal))
-                continue;
-
-            string receiptPath = Path.Combine(rootDirectory, ReceiptFileName);
-            if (!File.Exists(receiptPath))
-                continue;
-
-            receipts.Add(DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8)));
-        }
-
-        return receipts;
-    }
-
-    /// <summary>Reads the lock for a deployment, or returns <see langword="null"/> when absent.</summary>
+    /// <summary>Reads the lock for a deployment, or returns <see langword="null" /> when absent.</summary>
     public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope)
     {
         string path = ResolveStateFile(targetRoot, scope, LockFileName);
@@ -387,56 +663,215 @@ public sealed class SquadStateStore
             : null;
     }
 
-    internal string ResolveLockPath(string targetRoot, SquadDeploymentScope scope) =>
-        ResolveStateFile(targetRoot, scope, LockFileName);
+    internal string ResolveLockPath(string targetRoot, SquadDeploymentScope scope)
+    {
+        return ResolveStateFile(targetRoot, scope, LockFileName);
+    }
 
-    internal string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope) =>
-        ResolveStateFile(targetRoot, scope, ReceiptFileName);
+    internal string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope)
+    {
+        return ResolveStateFile(targetRoot, scope, ReceiptFileName);
+    }
 
-    internal string ResolveTransactionDirectory(string targetRoot, SquadDeploymentScope scope) =>
-        ResolveStateFile(targetRoot, scope, TransactionDirectoryName);
-
-    internal string ResolveTransactionWorkDirectory(
-        string targetRoot,
-        SquadDeploymentScope scope) =>
-        scope switch
+    /// <summary>
+    ///     The project journal lives beside its root and the global journal beside the home, so
+    ///     <paramref name="targetRoot" /> is ignored for global scope. Recovery and the lease both
+    ///     address the transaction through this directory, which is why it is independent of the
+    ///     state files' own location.
+    /// </summary>
+    internal string ResolveTransactionDirectory(string targetRoot, SquadDeploymentScope scope)
+    {
+        return scope switch
         {
-            SquadDeploymentScope.Project => ResolveTransactionDirectory(targetRoot, scope),
-            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
-                Path.GetFullPath(targetRoot),
-                ".kyber-weave/.squad-transaction"),
+            SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
+                SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+                JournalRelativePath),
+            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath),
+            SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
+                ResolveInstanceStateDirectory(targetRoot),
+                TransactionDirectoryName),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
+    }
 
+    /// <summary>
+    ///     The directory a transaction keeps its own lease-scoped work in. For both scopes it is the
+    ///     journal directory, which holds the intent, the staged bytes and the backups.
+    /// </summary>
+    /// <remarks>
+    ///     A global transaction keeps its staging and backups in the home journal rather than beside the
+    ///     target root, so one home has one transaction directory and the portable global state directory
+    ///     stays free of transaction evidence. The home journal may sit on another volume from the target
+    ///     root; a staged file is then moved across that boundary rather than renamed within it.
+    /// </remarks>
+    internal string ResolveTransactionWorkDirectory(
+        string targetRoot,
+        SquadDeploymentScope scope)
+    {
+        return ResolveTransactionDirectory(targetRoot, scope);
+    }
+
+    /// <summary>
+    ///     The directory that holds a transaction's staged and backed-up target files. Both scopes keep it in
+    ///     the journal, see <see cref="ResolveTransactionWorkDirectory" />.
+    /// </summary>
+    internal string ResolveFileWorkDirectory(
+        string targetRoot,
+        SquadDeploymentScope scope)
+    {
+        return ResolveTransactionDirectory(targetRoot, scope);
+    }
+
+    /// <summary>
+    ///     The state root against which a transaction's created directories are recorded and removed.
+    ///     A project's journal is beside its root, so the root is the authority. A global journal is
+    ///     beside the home, so the home is the authority.
+    /// </summary>
     internal string ResolveStateAuthorityRoot(
         string targetRoot,
-        SquadDeploymentScope scope) =>
-        scope switch
+        SquadDeploymentScope scope)
+    {
+        return scope switch
         {
             SquadDeploymentScope.Project =>
                 SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
-            SquadDeploymentScope.Global => Path.GetDirectoryName(
-                    Path.TrimEndingDirectorySeparator(
-                        Path.GetFullPath(_userPaths.ApplicationDataDirectory)))
-                ?? Path.GetFullPath(_userPaths.ApplicationDataDirectory),
+            SquadDeploymentScope.Global => ResolveHomeCreationBoundary(),
+            SquadDeploymentScope.Instance =>
+                ResolveInstanceAuthorityRoot(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
+    }
+
+    /// <summary>
+    ///     The identity a transaction's lease is keyed by: the physical key of the root a project is
+    ///     installed at, or of the home for global state. Both use the same key space on purpose. A project
+    ///     is leased per physical root, so projects at distinct roots proceed independently and aliases of one
+    ///     root contend. A global transaction is leased on the home, which is also the global journal's
+    ///     anchor, so a project installed at the home root contends with global state and any other root does not.
+    /// </summary>
+    internal string ResolveLeaseIdentity(string targetRoot, SquadDeploymentScope scope)
+    {
+        return scope switch
+        {
+            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot).Key,
+            SquadDeploymentScope.Global => SquadPhysicalRootIdentity.KeyOf(ResolveHomeRoot()),
+            SquadDeploymentScope.Instance => ResolveInstanceLeaseIdentity(targetRoot),
+            _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
+        };
+    }
+
+    /// <summary>
+    ///     The canonical physical home directory, which may not exist yet. It keys the global lease and is
+    ///     the value a global receipt records, so two spellings of one home never diverge on identity.
+    /// </summary>
+    internal string ResolveHomeRoot()
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
+        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory);
+    }
+
+    /// <summary>
+    ///     The home as the operator configured it, made absolute but not resolved through symlinks. Global
+    ///     state and its journal are placed beneath this spelling, so they read back as they were given.
+    ///     Project state is addressed by its root's physical identity and so stays canonical; the two
+    ///     spellings name the same directories, and every relative path is taken between canonical forms.
+    /// </summary>
+    private string ResolveHomeStateRoot()
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(UserPaths.HomeDirectory));
+    }
+
+    /// <summary>
+    ///     The directory beneath which a transaction records the home directories it creates. It is the
+    ///     home's parent rather than the home, so a home that did not exist before the transaction is
+    ///     created and then removed on rollback. Nothing above the home is ever recorded or removed.
+    /// </summary>
+    internal string ResolveHomeCreationBoundary()
+    {
+        return Path.GetDirectoryName(ResolveHomeRoot())
+               ?? throw new InvalidOperationException("The Squad home directory has no parent to anchor state on.");
+    }
 
     private string ResolveProjectStateDirectory(string targetRoot)
     {
-        string root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
-        string sentinel = SquadPathPolicy.ResolveFile(root, ".kyber-weave/.state-sentinel");
-        return Path.GetDirectoryName(sentinel)
-            ?? throw new InvalidOperationException("Could not resolve the project Squad state directory.");
+        string key = SquadPhysicalRootIdentity.Resolve(targetRoot).Key;
+        return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
     private string ResolveGlobalStateDirectory()
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(_userPaths.ApplicationDataDirectory);
-        string root = Path.GetFullPath(_userPaths.ApplicationDataDirectory);
-        string sentinel = SquadPathPolicy.ResolveFile(root, "KyberWeave/squad/.state-sentinel");
+        return ResolveDirectoryUnder(ResolveHomeStateRoot(), GlobalStateRelativeDirectory);
+    }
+
+    private string ResolveInstanceStateDirectory(string targetRoot)
+    {
+        (string target, string preset) = ValidateInstanceRoot(targetRoot);
+        return Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instance-state", target, preset);
+    }
+
+    private (string Target, string Preset) ValidateInstanceRoot(string targetRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+
+        if (!Path.IsPathFullyQualified(targetRoot))
+            throw new ArgumentException(
+                $"Instance root '{targetRoot}' must be a fully qualified path.",
+                nameof(targetRoot));
+
+        string normalizedTargetRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot));
+        string instancesBase = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instances")));
+
+        string relative = Path.GetRelativePath(instancesBase, normalizedTargetRoot);
+        if (relative.StartsWith("..", StringComparison.Ordinal) ||
+            string.Equals(relative, ".", StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(relative))
+        {
+            string canonicalInstancesBase = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(Path.Combine(ResolveHomeRoot(), ".kyber-weave", "squad", "instances")));
+            if (!string.Equals(canonicalInstancesBase, instancesBase, StringComparison.Ordinal))
+                relative = Path.GetRelativePath(canonicalInstancesBase, normalizedTargetRoot);
+        }
+
+        if (relative.StartsWith("..", StringComparison.Ordinal) ||
+            string.Equals(relative, ".", StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(relative))
+            throw new ArgumentException(
+                $"Instance root '{targetRoot}' must be beneath '{instancesBase}'.",
+                nameof(targetRoot));
+
+        string[] segments = relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 2)
+            throw new ArgumentException(
+                $"Instance root '{targetRoot}' must have exactly target and preset segments beneath instances directory (found '{relative}').",
+                nameof(targetRoot));
+
+        return (segments[0], segments[1]);
+    }
+
+    private string ResolveInstanceAuthorityRoot(string targetRoot)
+    {
+        ValidateInstanceRoot(targetRoot);
+        return Directory.Exists(targetRoot)
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot);
+    }
+
+    private string ResolveInstanceLeaseIdentity(string targetRoot)
+    {
+        ValidateInstanceRoot(targetRoot);
+        string canonical = Directory.Exists(targetRoot)
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot);
+        return SquadPhysicalRootIdentity.KeyOf(canonical);
+    }
+
+    private static string ResolveDirectoryUnder(string root, string relativeDirectory)
+    {
+        string sentinel = SquadPathPolicy.ResolveFile(root, $"{relativeDirectory}/.state-sentinel");
         return Path.GetDirectoryName(sentinel)
-            ?? throw new InvalidOperationException("Could not resolve the global Squad state directory.");
+               ?? throw new InvalidOperationException("Could not resolve a Squad state directory.");
     }
 
     private string ResolveStateFile(
@@ -447,13 +882,198 @@ public sealed class SquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
-                SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
-                $".kyber-weave/{fileName}"),
+                ResolveProjectStateDirectory(targetRoot),
+                fileName),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
                 ResolveGlobalStateDirectory(),
-                $"roots/{GlobalRootBinding(targetRoot)}/{fileName}"),
+                fileName),
+            SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
+                ResolveInstanceStateDirectory(targetRoot),
+                fileName),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
+    }
+
+    private static IReadOnlyList<string> DistinctTargets(IEnumerable<SquadOwnedFile> files)
+    {
+        return files.Select(file => file.Target).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    /// <summary>
+    ///     Enumerates the per-project state directories one level deep. Symbolic links are skipped and
+    ///     never followed, because the walk runs over a directory a user can influence.
+    /// </summary>
+    private IEnumerable<string> EnumerateProjectStateDirectories()
+    {
+        string projectsDirectory = ResolveDirectoryUnder(ResolveHomeRoot(), ProjectsRelativeDirectory);
+        if (!Directory.Exists(projectsDirectory))
+            return [];
+
+        return new DirectoryInfo(projectsDirectory)
+            .EnumerateFileSystemInfos("*",
+                new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 })
+            .OfType<DirectoryInfo>()
+            .Where(entry => entry.LinkTarget is null && IsRootKey(entry.Name))
+            .Select(entry => entry.FullName)
+            .ToArray();
+    }
+
+    private static bool IsRootKey(string value)
+    {
+        return value.Length == 64 && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    private SquadProjectRegistryEntry DescribeEntry(string key, RegistryRecord record)
+    {
+        List<string> reasons = [];
+        if (!IsRootKey(key))
+            reasons.Add("registered root key is malformed");
+        else if (string.IsNullOrEmpty(record.Path) || !Path.IsPathFullyQualified(record.Path))
+            reasons.Add("registered project path is not recorded");
+        else if (!Directory.Exists(record.Path))
+            reasons.Add("registered project path no longer exists");
+        else if (!RegisteredKeyMatchesPath(key, record.Path))
+            reasons.Add("registered root key no longer matches the physical key of its path");
+
+        if (IsRootKey(key) &&
+            !File.Exists(Path.Combine(ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}"),
+                ReceiptFileName)))
+            reasons.Add("project receipt is missing");
+
+        return new SquadProjectRegistryEntry(
+            key,
+            record.Path,
+            record.LastUpdatedUtc,
+            record.Targets,
+            reasons.Count > 0,
+            reasons.Count > 0 ? string.Join("; ", reasons) : null);
+    }
+
+    private static bool RegisteredKeyMatchesPath(string key, string path)
+    {
+        try
+        {
+            return string.Equals(SquadPhysicalRootIdentity.Resolve(path).Key, key, StringComparison.Ordinal);
+        }
+        catch (SquadDeploymentConflictException)
+        {
+            return false;
+        }
+    }
+
+    private string RegistryPath()
+    {
+        return Path.Combine(ResolveHomeStateDirectory(), RegistryFileName);
+    }
+
+    /// <summary>
+    ///     Reads the registry. A missing file is an empty registry, because the registry is rebuildable
+    ///     from per-project state. A file that exists but does not parse is an error the operator must see.
+    /// </summary>
+    private Dictionary<string, RegistryRecord> ReadRegistry()
+    {
+        Dictionary<string, RegistryRecord> registry = new(StringComparer.Ordinal);
+        string path = RegistryPath();
+        if (!File.Exists(path))
+            return registry;
+
+        try
+        {
+            JsonNode document = JsonNode.Parse(File.ReadAllText(path, Encoding.UTF8))
+                                ?? throw new InvalidDataException("Squad registry is empty.");
+            if (document is not JsonObject root ||
+                !string.Equals(root["schema"]?.GetValue<string>(), RegistrySchema, StringComparison.Ordinal) ||
+                root[RegistryProjectsProperty] is not JsonObject projects)
+                throw new InvalidDataException(
+                    $"Squad registry must be an object on schema '{RegistrySchema}' with a projects map.");
+
+            foreach (KeyValuePair<string, JsonNode?> entry in projects)
+            {
+                if (entry.Value is not JsonObject project)
+                    throw new InvalidDataException($"Squad registry entry '{entry.Key}' must be an object.");
+
+                string registeredPath = project["path"]?.GetValue<string>()
+                                        ?? throw new InvalidDataException(
+                                            $"Squad registry entry '{entry.Key}' has no path.");
+                DateTimeOffset lastUpdated = ParseRegistryTimestamp(
+                    entry.Key,
+                    project["lastUpdatedUtc"]?.GetValue<string>()
+                    ?? throw new InvalidDataException($"Squad registry entry '{entry.Key}' has no lastUpdatedUtc."));
+                IReadOnlyList<string> targets = project["targets"] is JsonArray targetArray
+                    ? targetArray.Select(node => node?.GetValue<string>() ?? throw new InvalidDataException(
+                        $"Squad registry entry '{entry.Key}' has a null target.")).ToArray()
+                    : throw new InvalidDataException($"Squad registry entry '{entry.Key}' has no targets array.");
+                registry[entry.Key] = new RegistryRecord(registeredPath, lastUpdated, targets);
+            }
+        }
+        catch (Exception exception) when (
+            exception is JsonException or FormatException or InvalidOperationException or ArgumentException)
+        {
+            throw new InvalidDataException($"Squad registry is not valid JSON: {exception.Message}", exception);
+        }
+
+        return registry;
+    }
+
+    /// <summary>
+    ///     Parses a registry timestamp as <see cref="WriteRegistry" /> writes it: an ISO 8601 round-trip string. Invariant
+    ///     culture keeps the reading independent of the machine's locale, and round-trip kind keeps the UTC offset. A value
+    ///     that is not a timestamp is reported against its entry, rather than leaking a parser message.
+    /// </summary>
+    private static DateTimeOffset ParseRegistryTimestamp(string key, string text)
+    {
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
+                out DateTimeOffset value))
+            throw new InvalidDataException($"Squad registry entry '{key}' has an invalid lastUpdatedUtc '{text}'.");
+
+        return value;
+    }
+
+    /// <summary>
+    ///     Writes the registry to a temporary file beside it and renames that file into place, so a
+    ///     reader sees either the prior registry or the new one, never a partial file.
+    /// </summary>
+    private void WriteRegistry(IReadOnlyDictionary<string, RegistryRecord> registry)
+    {
+        string squadDirectory = ResolveHomeStateDirectory();
+        Directory.CreateDirectory(squadDirectory);
+
+        JsonObject projects = new();
+        foreach (KeyValuePair<string, RegistryRecord> entry in registry.OrderBy(pair => pair.Key,
+                     StringComparer.Ordinal))
+            projects[entry.Key] = new JsonObject
+            {
+                ["path"] = entry.Value.Path,
+                ["lastUpdatedUtc"] = entry.Value.LastUpdatedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+                ["targets"] = new JsonArray(entry.Value.Targets.Select(target => (JsonNode)JsonValue.Create(target))
+                    .ToArray())
+            };
+
+        JsonObject document = new()
+        {
+            ["schema"] = RegistrySchema,
+            [RegistryProjectsProperty] = projects
+        };
+        string text = document.ToJsonString(JsonOptions) + "\n";
+
+        string temporaryPath = Path.Combine(squadDirectory, $"{RegistryFileName}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+                stream.Write(bytes);
+                stream.Flush(SquadTransaction.SyncToDisk);
+            }
+
+            File.Move(temporaryPath, Path.Combine(squadDirectory, RegistryFileName), true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
     }
 
     private static void AppendScalar(
@@ -497,18 +1117,16 @@ public sealed class SquadStateStore
         if (value.Length > 0 &&
             value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or '/') &&
             value is not "null" and not "Null" and not "NULL" and
-            not "true" and not "True" and not "TRUE" and
-            not "false" and not "False" and not "FALSE" and not "~")
-        {
+                not "true" and not "True" and not "TRUE" and
+                not "false" and not "False" and not "FALSE" and not "~")
             return value;
-        }
 
         return JsonSerializer.Serialize(value);
     }
 
     private static JsonSerializerOptions CreateJsonOptions()
     {
-        JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        JsonSerializerOptions options = new(JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
             NewLine = "\n",
@@ -517,17 +1135,25 @@ public sealed class SquadStateStore
         options.Converters.Add(new UtcDateTimeOffsetConverter());
         options.Converters.Add(new JsonStringEnumConverter(
             JsonNamingPolicy.CamelCase,
-            allowIntegerValues: false));
+            false));
         return options;
     }
 
     private static void ValidateLock(SquadLock squadLock)
     {
-        if (!string.Equals(squadLock.Schema, LockSchema, StringComparison.Ordinal))
-        {
+        bool isV1 = string.Equals(squadLock.Schema, LockSchemaV1, StringComparison.Ordinal);
+        bool isV2 = string.Equals(squadLock.Schema, LockSchemaV2, StringComparison.Ordinal);
+        if (!isV1 && !isV2)
             throw new InvalidDataException(
-                $"Squad lock schema must be '{LockSchema}'.");
-        }
+                $"Squad lock schema must be '{LockSchemaV1}' or '{LockSchemaV2}'.");
+
+        if (isV1 && squadLock.ModelPresets is { Count: > 0 })
+            throw new InvalidDataException(
+                $"Squad lock schema '{LockSchemaV1}' cannot contain model presets.");
+
+        if (isV2 && (squadLock.ModelPresets is null || squadLock.ModelPresets.Count == 0))
+            throw new InvalidDataException(
+                $"Squad lock schema '{LockSchemaV2}' must contain at least one model preset.");
 
         if (squadLock.Targets is null || squadLock.Exclusions is null)
             throw new InvalidDataException("Squad lock target and exclusion lists are required.");
@@ -558,15 +1184,24 @@ public sealed class SquadStateStore
         // install produces. Requiring 64 hex here rejected every such install outright.
         if (!string.Equals(squadLock.Apm.AssetSha256, SquadApmIdentity.Unverified, StringComparison.Ordinal))
             ValidateDigest(squadLock.Apm.AssetSha256, "apm digest");
+
+        if (squadLock.ModelPresets is not null)
+            foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
+            {
+                if (entry.Value is null)
+                    throw new InvalidDataException(
+                        $"Squad lock model preset for target '{SquadTargetCatalog.GetToken(entry.Key)}' cannot be null.");
+
+                ValidateRequiredLockValue(entry.Value.Name, "model preset name");
+                ValidateDigest(entry.Value.Digest, "model preset digest");
+            }
     }
 
     private static void ValidateRequiredLockValue(string? value, string fieldName)
     {
         if (string.IsNullOrWhiteSpace(value))
-        {
             throw new InvalidDataException(
                 $"Squad lock {fieldName} must be a non-blank value.");
-        }
     }
 
     private static void ValidateReceipt(SquadReceipt receipt)
@@ -576,10 +1211,8 @@ public sealed class SquadStateStore
             string.Equals(receipt.Schema, ReceiptSchemaV2, StringComparison.Ordinal) ||
             string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
         if (!isKnownSchema)
-        {
             throw new InvalidDataException(
                 $"Squad receipt schema must be '{ReceiptSchemaV1}', '{ReceiptSchemaV2}' or '{ReceiptSchemaV3}'.");
-        }
 
         bool isV3 = string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
         if (isV3 && receipt.Scope != SquadDeploymentScope.Project)
@@ -601,11 +1234,14 @@ public sealed class SquadStateStore
                 $"'{ReceiptSchemaV3}' only; a '{receipt.Schema}' receipt must carry no blocks.");
         }
 
-        if (!string.Equals(receipt.TargetRoot, ".", StringComparison.Ordinal))
-        {
+        // A receipt records the canonical absolute physical root it was written against. The
+        // relative "." marker is still accepted: every receipt written before the home-level state
+        // carries it, and rejecting it would strand those projects on upgrade.
+        if (!string.Equals(receipt.TargetRoot, UnanchoredTargetRoot, StringComparison.Ordinal) &&
+            !Path.IsPathFullyQualified(receipt.TargetRoot))
             throw new InvalidDataException(
-                "Squad receipt target root must be the portable relative marker '.'.");
-        }
+                "Squad receipt target root must be the canonical absolute physical root, " +
+                "or the legacy relative marker '.'.");
 
         if (receipt.Files is null)
             throw new InvalidDataException("Squad receipt files are required.");
@@ -615,10 +1251,8 @@ public sealed class SquadStateStore
         foreach (SquadDegradation? degradation in receipt.Degradations)
         {
             if (degradation is null)
-            {
                 throw new InvalidDataException(
                     "Squad receipt contains an empty degradation entry.");
-            }
 
             ValidateCanonicalTarget(degradation.Target, "degradation target");
             ValidateRequiredReceiptValue(degradation.Subject, "degradation subject");
@@ -631,7 +1265,7 @@ public sealed class SquadStateStore
         // scope writes beneath each target's own root, so the same relative path legitimately
         // appears once per target and only (target, path) must be unique — mirroring
         // SquadDeploymentPlan's deployment identity.
-        HashSet<string> deployedIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> deployedIdentities = new(StringComparer.OrdinalIgnoreCase);
         foreach (SquadOwnedFile? file in receipt.Files)
         {
             if (file is null)
@@ -654,23 +1288,62 @@ public sealed class SquadStateStore
 
             if (!string.Equals(normalizedPath, file.RelativePath, StringComparison.Ordinal) ||
                 !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
-            {
                 throw new InvalidDataException(
                     $"Squad receipt file path '{file.RelativePath}' is not a portable canonical path.");
-            }
 
             ValidateDigest(file.Sha256, "file digest");
             ValidateCanonicalTarget(file.Target, "file target");
 
-            string deploymentIdentity = receipt.Scope == SquadDeploymentScope.Project
+            string deploymentIdentity = receipt.Scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
                 ? portableIdentity
                 : SquadDeploymentPlan.DeployedFileIdentity(file.Target, portableIdentity);
             if (!deployedIdentities.Add(deploymentIdentity))
-            {
                 throw new InvalidDataException(
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
                     "is not a unique portable deployment path.");
+        }
+
+        // Home-owned files live under one root for every harness, so their paths are unique on the
+        // path alone — there is no target to scope the identity by, and only a global receipt has a
+        // home to own anything in.
+        if (receipt.HomeFiles is null)
+            throw new InvalidDataException("Squad receipt home files are required.");
+        if (receipt.HomeFiles.Count > 0 && receipt.Scope != SquadDeploymentScope.Global)
+            throw new InvalidDataException(
+                "Squad receipt home files are recorded only on a global receipt, because only global " +
+                "state lives in the user's home.");
+
+        HashSet<string> homeIdentities = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadHomeFile? homeFile in receipt.HomeFiles)
+        {
+            if (homeFile is null)
+                throw new InvalidDataException("Squad receipt contains an empty home file entry.");
+
+            string normalizedPath;
+            string portableIdentity;
+            try
+            {
+                normalizedPath = SquadPathPolicy.NormalizeRelativePath(homeFile.RelativePath);
+                portableIdentity = SquadPathPolicy.GetPortableIdentity(normalizedPath);
             }
+            catch (Exception exception) when (
+                exception is SquadPathContainmentException or SquadDeploymentConflictException)
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not portable.",
+                    exception);
+            }
+
+            if (!string.Equals(normalizedPath, homeFile.RelativePath, StringComparison.Ordinal) ||
+                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not a portable canonical path.");
+
+            ValidateDigest(homeFile.Sha256, "home file digest");
+
+            if (!homeIdentities.Add(portableIdentity))
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not a unique portable path.");
         }
 
         ValidateReceiptBlocks(receipt);
@@ -748,19 +1421,15 @@ public sealed class SquadStateStore
     private static void ValidateCanonicalTarget(string? value, string fieldName)
     {
         if (value is null || !CanonicalTargetTokens.Contains(value))
-        {
             throw new InvalidDataException(
                 $"Squad receipt {fieldName} must be an exact canonical Squad target token.");
-        }
     }
 
     private static void ValidateRequiredReceiptValue(string? value, string fieldName)
     {
         if (string.IsNullOrWhiteSpace(value))
-        {
             throw new InvalidDataException(
                 $"Squad receipt {fieldName} must be a non-blank value.");
-        }
     }
 
     private static void ValidateDigest(string? digest, string fieldName)
@@ -769,10 +1438,8 @@ public sealed class SquadStateStore
             digest.Length != 64 ||
             digest.Any(character =>
                 character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
-        {
             throw new InvalidDataException(
                 $"Squad {fieldName} must be a lowercase SHA-256 digest.");
-        }
     }
 
     private static void RejectYamlIndirection(string yaml)
@@ -781,10 +1448,8 @@ public sealed class SquadStateStore
             yaml.Contains('*', StringComparison.Ordinal) ||
             yaml.Contains("<<:", StringComparison.Ordinal) ||
             yaml.Contains("!!", StringComparison.Ordinal))
-        {
             throw new InvalidDataException(
                 "Squad lock YAML does not allow anchors, aliases, merge keys, or custom tags.");
-        }
     }
 
     private static void RequireExactYamlFields(
@@ -792,25 +1457,19 @@ public sealed class SquadStateStore
         IReadOnlyCollection<string> expected,
         string subject)
     {
-        HashSet<string> actual = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> actual = new(StringComparer.Ordinal);
         foreach (YamlNode keyNode in mapping.Children.Keys)
-        {
             if (keyNode is not YamlScalarNode { Value: not null } key ||
                 !actual.Add(key.Value))
-            {
                 throw new InvalidDataException(
                     $"Squad {subject} contains a duplicate or non-scalar field.");
-            }
-        }
 
         string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
         string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
         if (missing.Length > 0 || unknown.Length > 0)
-        {
             throw new InvalidDataException(
                 $"Squad {subject} has missing or unknown fields. " +
                 $"Missing: {string.Join(", ", missing)}; unknown: {string.Join(", ", unknown)}.");
-        }
     }
 
     private static YamlNode RequireYamlNode(
@@ -832,10 +1491,8 @@ public sealed class SquadStateStore
         if (node is not YamlScalarNode { Value: not null } scalar ||
             string.IsNullOrWhiteSpace(scalar.Value) ||
             scalar.Value is "null" or "Null" or "NULL" or "~")
-        {
             throw new InvalidDataException(
                 $"Squad {subject} field '{field}' must be a non-null string.");
-        }
 
         return scalar.Value;
     }
@@ -843,10 +1500,12 @@ public sealed class SquadStateStore
     private static YamlMappingNode RequireYamlMapping(
         YamlMappingNode mapping,
         string field,
-        string subject) =>
-        RequireYamlNode(mapping, field, subject) as YamlMappingNode ??
-        throw new InvalidDataException(
-            $"Squad {subject} field '{field}' must be a mapping.");
+        string subject)
+    {
+        return RequireYamlNode(mapping, field, subject) as YamlMappingNode ??
+               throw new InvalidDataException(
+                   $"Squad {subject} field '{field}' must be a mapping.");
+    }
 
     private static IReadOnlyList<string> RequireYamlSequence(
         YamlMappingNode mapping,
@@ -854,19 +1513,15 @@ public sealed class SquadStateStore
         string subject)
     {
         if (RequireYamlNode(mapping, field, subject) is not YamlSequenceNode sequence)
-        {
             throw new InvalidDataException(
                 $"Squad {subject} field '{field}' must be a sequence.");
-        }
 
         return sequence.Children.Select(node =>
         {
             if (node is not YamlScalarNode { Value: not null } scalar ||
                 string.IsNullOrWhiteSpace(scalar.Value))
-            {
                 throw new InvalidDataException(
                     $"Squad {subject} field '{field}' must contain only non-null strings.");
-            }
 
             return scalar.Value;
         }).ToArray();
@@ -887,43 +1542,47 @@ public sealed class SquadStateStore
             throw new InvalidDataException("Squad receipt must be an object.");
 
         string? schema = root.TryGetProperty("schema", out JsonElement schemaElement) &&
-            schemaElement.ValueKind == JsonValueKind.String
+                         schemaElement.ValueKind == JsonValueKind.String
             ? schemaElement.GetString()
             : null;
 
         if (string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal))
-        {
             ValidateReceiptJsonShapeV2(root);
-        }
         else if (string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal))
-        {
             ValidateReceiptJsonShapeV3(root);
-        }
         else
-        {
             ValidateReceiptJsonShapeV1(root);
-        }
 
         JsonElement degradations = root.GetProperty("degradations");
         if (degradations.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt degradations must be an array.");
         foreach (JsonElement degradation in degradations.EnumerateArray())
-        {
             RequireExactJsonFields(
                 degradation,
                 ["target", "subject", "code"],
                 "receipt degradation");
-        }
 
         JsonElement files = root.GetProperty("files");
         if (files.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt files must be an array.");
         foreach (JsonElement file in files.EnumerateArray())
-        {
             RequireExactJsonFields(
                 file,
                 ["relativePath", "sha256", "target", "adopted"],
                 "receipt file");
+
+        // Only a v2 (global) receipt carries home-owned files; a v1 receipt with the field is a
+        // hand-edit of state this schema never wrote, so the shape check refuses it outright
+        // rather than silently ignoring an ownership claim.
+        if (root.TryGetProperty("homeFiles", out JsonElement homeFiles))
+        {
+            if (homeFiles.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad receipt homeFiles must be an array.");
+            foreach (JsonElement homeFile in homeFiles.EnumerateArray())
+                RequireExactJsonFields(
+                    homeFile,
+                    ["relativePath", "sha256"],
+                    "receipt home file");
         }
 
         if (string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal))
@@ -958,7 +1617,7 @@ public sealed class SquadStateStore
             root,
             ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files"],
             "receipt");
-        RequireCanonicalJsonEnum(root, "scope", ["project", "global"], "receipt");
+        RequireCanonicalJsonEnum(root, "scope", ["project", "global", "instance"], "receipt");
     }
 
     private static void ValidateReceiptJsonShapeV3(JsonElement root)
@@ -976,27 +1635,23 @@ public sealed class SquadStateStore
             root,
             ["schema", "layout", "targetRoot", "installedAtUtc", "degradations", "files"],
             "receipt",
-            optional: ["scope"]);
+            ["scope", "homeFiles"]);
 
         JsonElement layout = root.GetProperty("layout");
         string? layoutToken = layout.ValueKind == JsonValueKind.String ? layout.GetString() : null;
         if (layoutToken is not ("single-root" or "per-target-roots"))
-        {
             throw new InvalidDataException(
                 "Squad receipt field 'layout' must be 'single-root' or 'per-target-roots', " +
                 $"but found '{layoutToken ?? "null"}'.");
-        }
 
         if (root.TryGetProperty("scope", out JsonElement scopeElement))
         {
             string? scopeToken = scopeElement.ValueKind == JsonValueKind.String ? scopeElement.GetString() : null;
             if (!string.Equals(scopeToken, "global", StringComparison.Ordinal))
-            {
                 throw new InvalidDataException(
                     $"Squad receipt schema '{ReceiptSchemaV2}' is for global scope only, but found " +
                     $"scope '{scopeToken ?? "null"}'. Write a project receipt on schema " +
                     $"'{ReceiptSchemaV1}' instead.");
-            }
         }
     }
 
@@ -1009,7 +1664,7 @@ public sealed class SquadStateStore
         if (element.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException($"Squad {subject} must be an object.");
 
-        HashSet<string> actual = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> actual = new(StringComparer.Ordinal);
         foreach (JsonProperty property in element.EnumerateObject())
         {
             if (!actual.Add(property.Name))
@@ -1018,18 +1673,16 @@ public sealed class SquadStateStore
                 throw new InvalidDataException($"Squad {subject} field '{property.Name}' cannot be null.");
         }
 
-        HashSet<string> allowed = new HashSet<string>(expected, StringComparer.Ordinal);
+        HashSet<string> allowed = new(expected, StringComparer.Ordinal);
         if (optional is not null)
             allowed.UnionWith(optional);
 
         string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
         string[] unknown = actual.Where(field => !allowed.Contains(field)).ToArray();
         if (missing.Length > 0 || unknown.Length > 0)
-        {
             throw new InvalidDataException(
                 $"Squad {subject} has missing or unknown fields. " +
                 $"Missing: {string.Join(", ", missing)}; unknown: {string.Join(", ", unknown)}.");
-        }
     }
 
     private static void RequireCanonicalJsonEnum(
@@ -1042,16 +1695,15 @@ public sealed class SquadStateStore
         if (value.ValueKind != JsonValueKind.String ||
             value.GetString() is not { } token ||
             !allowedValues.Contains(token))
-        {
             throw new InvalidDataException(
                 $"Squad {subject} field '{propertyName}' must use its canonical enum token.");
-        }
     }
 
-    private static string GlobalRootBinding(string targetRoot)
-    {
-        return SquadPhysicalRootIdentity.Resolve(targetRoot).Key;
-    }
+    /// <summary>One registry entry as stored on disk, before stale checks are applied.</summary>
+    private sealed record RegistryRecord(
+        string Path,
+        DateTimeOffset LastUpdatedUtc,
+        IReadOnlyList<string> Targets);
 
     private sealed class UtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
     {
@@ -1061,7 +1713,7 @@ public sealed class SquadStateStore
             JsonSerializerOptions options)
         {
             string value = reader.GetString()
-                ?? throw new JsonException("Expected a UTC timestamp string.");
+                           ?? throw new JsonException("Expected a UTC timestamp string.");
             return DateTimeOffset.Parse(
                 value,
                 CultureInfo.InvariantCulture,
@@ -1071,8 +1723,9 @@ public sealed class SquadStateStore
         public override void Write(
             Utf8JsonWriter writer,
             DateTimeOffset value,
-            JsonSerializerOptions options) =>
+            JsonSerializerOptions options)
+        {
             writer.WriteStringValue(value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+        }
     }
-
 }

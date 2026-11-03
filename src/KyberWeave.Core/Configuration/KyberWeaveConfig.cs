@@ -19,6 +19,8 @@ public sealed class KyberWeaveConfig
 
     public ArbiterConfig Arbiter { get; init; } = ArbiterConfig.ProductDefaults;
 
+    public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -64,7 +66,8 @@ public sealed class KyberWeaveConfig
         SquadConfig? squad = null,
         ConfigRegConfig? configReg = null,
         ReviewConfig? review = null,
-        ArbiterConfig? arbiter = null) =>
+        ArbiterConfig? arbiter = null,
+        McpConfig? mcp = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
@@ -73,6 +76,7 @@ public sealed class KyberWeaveConfig
             Squad = squad ?? Squad,
             ConfigReg = configReg ?? ConfigReg,
             Review = review ?? Review,
-            Arbiter = arbiter ?? Arbiter
+            Arbiter = arbiter ?? Arbiter,
+            Mcp = mcp ?? Mcp
         };
 }

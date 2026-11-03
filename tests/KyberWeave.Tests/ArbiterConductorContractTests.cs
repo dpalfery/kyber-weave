@@ -27,7 +27,7 @@ public sealed class ArbiterConductorContractTests
 
         Assert.Contains("PLAN_FILE:", contract, StringComparison.Ordinal);
         Assert.Contains("TASK:", contract, StringComparison.Ordinal);
-        Assert.Contains("task-reviewer", contract, StringComparison.Ordinal);
+        Assert.Contains("review-triage", contract, StringComparison.Ordinal);
         Assert.Contains("docs-dev", contract, StringComparison.Ordinal);
     }
 

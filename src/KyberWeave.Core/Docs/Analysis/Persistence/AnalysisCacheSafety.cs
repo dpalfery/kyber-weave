@@ -11,6 +11,11 @@ public static class AnalysisCacheSafety
     private const string CacheIgnoreEntry = "cache/";
 
     /// <summary>
+    ///     The bound for <c>git ls-files</c> on the cache path. A healthy index answers in well under a second.
+    /// </summary>
+    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Returns true only when the repository-owned state ignore file contains the narrow
     /// cache-directory entry used by Kyber-Weave.
     /// </summary>
@@ -111,12 +116,12 @@ public static class AnalysisCacheSafety
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
             return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or TimeoutException)
         {
-            // Without git, persistence cannot prove that the cache is outside the index.
+            // Without git, or without an answer from it, persistence cannot prove that the cache is outside the index.
             return true;
         }
     }

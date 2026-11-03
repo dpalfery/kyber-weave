@@ -20,6 +20,8 @@ returns a default and logs nothing. A retry that exhausts silently. If this code
 three in the morning, what exists in the record to say it did? "Nothing" is a finding, and it
 is usually a `major` one.
 
+**Operational lifecycle state-machine walk.** Trace the operational lifecycle of concurrency primitives, worktree allocations, locks, and temp-paths from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, including `conflict` and `rollback` failure states. A lifecycle failure that leaves an unpruned worktree, an orphaned temp-path, or an unreleased lock without a diagnosable error message, log event, and cleanup path is a major supportability defect.
+
 **Logs without correlation.** Structured events carrying enough identity to reconstruct one
 request or one operation across components. A message with no correlating identifier is
 unjoinable to anything else and is close to useless during an incident.

@@ -225,9 +225,18 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: scope,
+            GlobalRoots: new FixedGlobalRoots(_fixture.Path),
             Arbiter: arbiter));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
+    }
+
+    private sealed class FixedGlobalRoots(string root) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            return Path.Combine(root, SquadTargetCatalog.GetToken(target));
+        }
     }
 
     private static SquadDeploymentFile AgentFile(SquadRenderResult result, string agentName, SquadDeploymentScope scope)

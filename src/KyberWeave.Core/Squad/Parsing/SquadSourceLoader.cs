@@ -19,17 +19,20 @@ public static class SquadSourceLoader
     private const string BundleSchema = "kyber-squad.bundle/v1";
     private const string AgentSchema = "kyber-squad.agent/v1";
     private const string ModelProfilesSchema = "kyber-squad.model-profiles/v1";
+    private const string ModelPresetSchema = "kyber-squad.model-preset/v1";
     private const string CapabilityProfilesSchema = "kyber-squad.capability-profiles/v1";
     private const string FallbackProfilesSchema = "kyber-squad.fallback-profiles/v1";
     private const string FallbackProfilesSchemaDocument = "schemas/fallback-profiles.schema.json";
+
     private const string FallbackProfilesSchemaId =
         "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1";
+
     private const string ToolchainSchema = "kyber-squad.toolchain/v1";
     private const string AssemblyVersionSource = "kyber-weave-assembly";
 
     private static readonly UTF8Encoding StrictUtf8 = new(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
+        false,
+        true);
 
     private static readonly string[] RequiredSchemaFiles =
     [
@@ -41,10 +44,10 @@ public static class SquadSourceLoader
         FallbackProfilesSchemaDocument
     ];
 
-    private static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
     {
         "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
-        "antigravity", "warp", "factory", "pi", "zcode", "devin"
+        "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"
     };
 
     /// <remarks>
@@ -168,7 +171,7 @@ public static class SquadSourceLoader
             versionSourceNode,
             "version-source",
             file.RelativePath,
-            nodeIsValue: true);
+            true);
         if (!string.Equals(versionSource, AssemblyVersionSource, StringComparison.Ordinal))
         {
             SquadSourceValidator.Throw(
@@ -183,7 +186,7 @@ public static class SquadSourceLoader
         IReadOnlyDictionary<string, string> bundles = RequireStringMap(root, "bundles", file.RelativePath);
         YamlMappingNode profileNode = RequireMapping(root, "profiles", file.RelativePath);
         EnsureOnlyFields(profileNode, ["models", "capabilities", "fallbacks"], file.RelativePath);
-        SquadProfilePaths profiles = new SquadProfilePaths(
+        SquadProfilePaths profiles = new(
             RequireScalar(profileNode, "models", file.RelativePath),
             RequireScalar(profileNode, "capabilities", file.RelativePath),
             RequireScalar(profileNode, "fallbacks", file.RelativePath));
@@ -218,7 +221,7 @@ public static class SquadSourceLoader
         EnsureOnlyFields(root, ["schema", "profiles"], file.RelativePath);
         string schema = RequireSchema(root, "schema", ModelProfilesSchema, file.RelativePath);
         YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        SortedDictionary<string, SquadModelProfile> profiles = new SortedDictionary<string, SquadModelProfile>(StringComparer.Ordinal);
+        SortedDictionary<string, SquadModelProfile> profiles = new(StringComparer.Ordinal);
 
         foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
@@ -227,15 +230,15 @@ public static class SquadSourceLoader
                 ThrowDuplicateKey(name, file.RelativePath);
             }
 
-            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, true);
             EnsureOnlyFields(profile, ModelProfileFields, file.RelativePath);
             string defaultModel = RequireScalar(profile, "default", file.RelativePath);
-            SortedDictionary<string, string> harnessModels = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            SortedDictionary<string, string> harnessModels = new(StringComparer.Ordinal);
             foreach ((string? key, YamlNode? value) in MappingEntries(profile, file.RelativePath))
             {
                 if (!string.Equals(key, "default", StringComparison.Ordinal))
                 {
-                    harnessModels.Add(key, RequireScalar(value, key, file.RelativePath, nodeIsValue: true));
+                    harnessModels.Add(key, RequireScalar(value, key, file.RelativePath, true));
                 }
             }
 
@@ -243,6 +246,157 @@ public static class SquadSourceLoader
         }
 
         return new SquadModelProfiles(schema, profiles, file.RelativePath);
+    }
+
+    /// <summary>Parses and validates a Squad model preset.</summary>
+    internal static SquadModelPreset ParseModelPreset(string path, ReadOnlyMemory<byte> bytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        if (bytes.Length >= 3 &&
+            bytes.Span[0] == 0xEF &&
+            bytes.Span[1] == 0xBB &&
+            bytes.Span[2] == 0xBF)
+        {
+            bytes = bytes[3..];
+        }
+
+        string digest = Convert.ToHexStringLower(SHA256.HashData(bytes.Span));
+        string content;
+        try
+        {
+            content = StrictUtf8.GetString(bytes.Span);
+        }
+        catch (DecoderFallbackException)
+        {
+            SquadSourceValidator.Throw(
+                "Source file is not valid UTF-8.",
+                path,
+                path,
+                "Save the file using UTF-8 encoding without a byte order mark.");
+            throw new InvalidOperationException("Unreachable after validation failure.");
+        }
+
+        if (content.Length > 0 && content[0] == '﻿')
+        {
+            content = content[1..];
+        }
+
+        SourceFile file = new(path, content);
+        YamlMappingNode root = ParseYamlMapping(file);
+        EnsureOnlyFields(root, ["schema", "profiles"], file.RelativePath);
+        RequireSchema(root, "schema", ModelPresetSchema, file.RelativePath);
+
+        YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
+        SortedDictionary<string, SquadModelProfile> profiles = new(StringComparer.Ordinal);
+        HashSet<string> seenCategories = new(StringComparer.Ordinal);
+
+        foreach (KeyValuePair<YamlNode, YamlNode> pair in profilesNode.Children)
+        {
+            if (pair.Key is not YamlScalarNode keyNode)
+            {
+                SquadSourceValidator.Throw(
+                    "YAML mapping keys must be non-empty strings.",
+                    file.RelativePath,
+                    file.RelativePath,
+                    "Replace the mapping key with a non-empty string.",
+                    StartLine(pair.Key));
+                throw new InvalidOperationException("Unreachable after validation failure.");
+            }
+
+            if (string.IsNullOrWhiteSpace(keyNode.Value))
+            {
+                SquadSourceValidator.Throw(
+                    "YAML mapping keys must be non-empty strings.",
+                    file.RelativePath,
+                    file.RelativePath,
+                    "Replace the mapping key with a non-empty string.",
+                    StartLine(keyNode));
+                throw new InvalidOperationException("Unreachable after validation failure.");
+            }
+
+            string categoryName = keyNode.Value;
+            if (!seenCategories.Add(categoryName))
+            {
+                ThrowDuplicateKey(categoryName, file.RelativePath, StartLine(pair.Key));
+            }
+
+            YamlMappingNode categoryMapping = RequireMapping(pair.Value, categoryName, file.RelativePath, true);
+            EnsureOnlyFields(categoryMapping, ModelProfileFields, file.RelativePath);
+
+            HashSet<string> seenHarnesses = new(StringComparer.Ordinal);
+            string? defaultModel = null;
+            SortedDictionary<string, string> harnessModels = new(StringComparer.Ordinal);
+
+            foreach (KeyValuePair<YamlNode, YamlNode> harnessPair in categoryMapping.Children)
+            {
+                if (harnessPair.Key is not YamlScalarNode harnessKeyNode)
+                {
+                    SquadSourceValidator.Throw(
+                        "YAML mapping keys must be non-empty strings.",
+                        file.RelativePath,
+                        file.RelativePath,
+                        "Replace the mapping key with a non-empty string.",
+                        StartLine(harnessPair.Key));
+                    throw new InvalidOperationException("Unreachable after validation failure.");
+                }
+
+                if (string.IsNullOrWhiteSpace(harnessKeyNode.Value))
+                {
+                    SquadSourceValidator.Throw(
+                        "YAML mapping keys must be non-empty strings.",
+                        file.RelativePath,
+                        file.RelativePath,
+                        "Replace the mapping key with a non-empty string.",
+                        StartLine(harnessKeyNode));
+                    throw new InvalidOperationException("Unreachable after validation failure.");
+                }
+
+                string key = harnessKeyNode.Value;
+                if (!seenHarnesses.Add(key))
+                {
+                    ThrowDuplicateKey(key, file.RelativePath, StartLine(harnessPair.Key));
+                }
+
+                string value = RequireScalar(harnessPair.Value, key, file.RelativePath, true);
+                if (string.Equals(key, "default", StringComparison.Ordinal))
+                {
+                    defaultModel = value;
+                }
+                else
+                {
+                    harnessModels.Add(key, value);
+                }
+            }
+
+            if (defaultModel is null && harnessModels.Count == 0)
+            {
+                SquadSourceValidator.Throw(
+                    $"Profile category '{categoryName}' must specify a 'default' model or at least one harness model override.",
+                    categoryName,
+                    file.RelativePath,
+                    $"Specify a 'default' model or harness models under '{categoryName}'.",
+                    StartLine(pair.Key));
+                throw new InvalidOperationException("Unreachable after validation failure.");
+            }
+
+            profiles.Add(categoryName, new SquadModelProfile(defaultModel!, harnessModels));
+        }
+
+        string name = Path.GetFileNameWithoutExtension(path);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = path;
+        }
+
+        return new SquadModelPreset(name, path, digest, profiles);
+    }
+
+    /// <summary>Parses and validates a Squad model preset from raw byte array.</summary>
+    internal static SquadModelPreset ParseModelPreset(string path, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        return ParseModelPreset(path, (ReadOnlyMemory<byte>)bytes);
     }
 
     private static SquadCapabilityProfiles ParseCapabilityProfiles(SourceFile file)
@@ -254,11 +408,11 @@ public static class SquadSourceLoader
         EnsureDistinct(vocabulary, "capability", file.RelativePath);
         HashSet<string> known = vocabulary.ToHashSet(StringComparer.Ordinal);
         YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        SortedDictionary<string, SquadCapabilityProfile> profiles = new SortedDictionary<string, SquadCapabilityProfile>(StringComparer.Ordinal);
+        SortedDictionary<string, SquadCapabilityProfile> profiles = new(StringComparer.Ordinal);
 
         foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
-            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, true);
             EnsureOnlyFields(profile, ["target", "permissions"], file.RelativePath);
             string? target = TryGetScalar(profile, "target", file.RelativePath);
             if (target is not null &&
@@ -275,7 +429,7 @@ public static class SquadSourceLoader
             }
 
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
-            SortedDictionary<string, SquadPermissionDecision> permissions = new SortedDictionary<string, SquadPermissionDecision>(StringComparer.Ordinal);
+            SortedDictionary<string, SquadPermissionDecision> permissions = new(StringComparer.Ordinal);
 
             foreach ((string? capability, YamlNode? decisionNode) in MappingEntries(permissionsNode, file.RelativePath))
             {
@@ -293,7 +447,7 @@ public static class SquadSourceLoader
                     decisionNode,
                     capability,
                     file.RelativePath,
-                    nodeIsValue: true);
+                    true);
                 SquadPermissionDecision decision = decisionText switch
                 {
                     "deny" => SquadPermissionDecision.Deny,
@@ -327,11 +481,11 @@ public static class SquadSourceLoader
         EnsureOnlyFields(root, ["schema", "profiles"], file.RelativePath);
         string schema = RequireSchema(root, "schema", FallbackProfilesSchema, file.RelativePath);
         YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        SortedDictionary<string, SquadFallbackProfile> profiles = new SortedDictionary<string, SquadFallbackProfile>(StringComparer.Ordinal);
+        SortedDictionary<string, SquadFallbackProfile> profiles = new(StringComparer.Ordinal);
 
         foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
-            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, true);
             EnsureOnlyFields(
                 profile,
                 ["no-primary-agent", "no-agent-primitive", "body-source", "output-identity", "shared-identities"],
@@ -366,7 +520,7 @@ public static class SquadSourceLoader
         string sourcePath)
     {
         EnsureOnlyFields(mapping, ["unoccupied", "shared", "collision", "prefix"], sourcePath);
-        SquadFallbackOutputIdentity identity = new SquadFallbackOutputIdentity(
+        SquadFallbackOutputIdentity identity = new(
             RequireScalar(mapping, "unoccupied", sourcePath),
             RequireScalar(mapping, "shared", sourcePath),
             RequireScalar(mapping, "collision", sourcePath),
@@ -433,7 +587,7 @@ public static class SquadSourceLoader
             return new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         }
 
-        YamlMappingNode mapping = RequireMapping(node, "required-mcp-tools", sourcePath, nodeIsValue: true);
+        YamlMappingNode mapping = RequireMapping(node, "required-mcp-tools", sourcePath, true);
         SortedDictionary<string, IReadOnlyList<string>> result = new(StringComparer.Ordinal);
         foreach ((string? server, YamlNode? toolsNode) in MappingEntries(mapping, sourcePath))
         {
@@ -490,10 +644,12 @@ public static class SquadSourceLoader
     /// sanitizes other characters would rewrite the name, and an allow-list that matches by
     /// exact name would then never match what it rewrote.
     /// </summary>
-    private static bool IsPortableMcpNamePart(string value) =>
-        !string.IsNullOrEmpty(value) &&
-        value.All(character =>
-            char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+    private static bool IsPortableMcpNamePart(string value)
+    {
+        return !string.IsNullOrEmpty(value) &&
+               value.All(character =>
+                   char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+    }
 
     private static JsonElement ParseMcp(SourceFile file)
     {
@@ -550,7 +706,7 @@ public static class SquadSourceLoader
             return [];
         }
 
-        EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, isDirectory: true);
+        EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, true);
         return Directory.EnumerateFiles(logicalDirectory, "*.md", SearchOption.TopDirectoryOnly)
             .Select(path => ToRelativePath(logicalRoot, path))
             .Order(StringComparer.Ordinal)
@@ -564,7 +720,7 @@ public static class SquadSourceLoader
                     relativePath,
                     relativePath)))
             .OrderBy(agent => agent.Name, StringComparer.Ordinal)
-            .ThenByDescending(agent => SourceIdentityMatches(agent.Name, agent.SourcePath, isSkill: false))
+            .ThenByDescending(agent => SourceIdentityMatches(agent.Name, agent.SourcePath, false))
             .ThenBy(agent => agent.SourcePath, StringComparer.Ordinal)
             .ToArray();
     }
@@ -575,7 +731,11 @@ public static class SquadSourceLoader
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "devin-capability-profile", "delegates-to", "fallback", "aliases"],
+            [
+                "schema", "name", "description", "invocation", "model-profile", "capability-profile",
+                "copilot-capability-profile", "copilot-tools", "pi-extensions", "pi-tools", "devin-capability-profile",
+                "delegates-to", "fallback", "aliases"
+            ],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -586,12 +746,17 @@ public static class SquadSourceLoader
             "subagent" => SquadInvocation.Subagent,
             _ => ThrowInvalidInvocation(invocationText, file.RelativePath)
         };
-        IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath, frontmatter.LineOffset);
-        IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath, frontmatter.LineOffset);
-        IReadOnlyList<string> copilotTools = RequireStringSequence(root, "copilot-tools", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> delegates =
+            RequireStringSequence(root, "delegates-to", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> aliases =
+            RequireStringSequence(root, "aliases", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> copilotTools =
+            RequireStringSequence(root, "copilot-tools", file.RelativePath, frontmatter.LineOffset);
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
         EnsureDistinct(copilotTools, "Copilot tool", file.RelativePath);
+        IReadOnlyList<string> piExtensions = ParseOptionalPiExtensions(root, file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> piTools = ParseOptionalPiTools(root, file.RelativePath, frontmatter.LineOffset);
 
         if (copilotTools.Count == 0)
         {
@@ -632,6 +797,8 @@ public static class SquadSourceLoader
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,
+            piExtensions,
+            piTools,
             TryGetScalar(root, "devin-capability-profile", file.RelativePath, frontmatter.LineOffset),
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
@@ -640,6 +807,113 @@ public static class SquadSourceLoader
             Sha256(frontmatter.Body),
             file.RelativePath,
             LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
+    }
+
+    /// <summary>
+    /// Parses the optional <c>pi-extensions</c> overlay key: the Pi extension ids whose
+    /// tools an agent may carry. When present it must be a non-empty sequence of distinct,
+    /// portable ids. The id charset reuses <see cref="IsPortableMcpNamePart"/>: <c>/</c>
+    /// is the <c>ext:</c> separator, so it can never appear inside an id.
+    /// </summary>
+    private static IReadOnlyList<string> ParseOptionalPiExtensions(
+        YamlMappingNode root,
+        string sourcePath,
+        int lineOffset)
+    {
+        if (!root.Children.ContainsKey(new YamlScalarNode("pi-extensions")))
+        {
+            return [];
+        }
+
+        IReadOnlyList<string> extensions = RequireStringSequence(root, "pi-extensions", sourcePath, lineOffset);
+        if (extensions.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'pi-extensions' must declare at least one extension id.",
+                "pi-extensions",
+                sourcePath,
+                "Add the Pi extension ids this agent loads, or remove 'pi-extensions'.");
+        }
+
+        EnsureDistinct(extensions, "pi-extensions entry", sourcePath);
+        foreach (string extension in extensions)
+        {
+            if (!IsPortableMcpNamePart(extension))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi extension id '{extension}' in 'pi-extensions' is not portable: use only " +
+                    "letters, digits, underscore, and hyphen ('/' is the 'ext:' separator).",
+                    "pi-extensions",
+                    sourcePath,
+                    "Rename the extension id to the portable charset or remove it.");
+            }
+        }
+
+        return extensions;
+    }
+
+    /// <summary>
+    /// Parses the optional <c>pi-tools</c> overlay key: additional Pi tool names appended
+    /// after the capability-derived <c>tools</c> CSV. Entries are restricted to the
+    /// <c>ext:&lt;extension&gt;/&lt;tool&gt;</c> form so a canonical file cannot smuggle a
+    /// built-in past the capability lattice (least-privilege by construction). The tool part
+    /// reuses the <see cref="IsPortableMcpNamePart"/> charset a qualified
+    /// <c>mcp__server__tool</c> name survives. Membership of the extension in
+    /// <c>pi-extensions</c> is enforced by <c>SquadSourceValidator</c>, next to the
+    /// Copilot tool cross-checks.
+    /// </summary>
+    private static IReadOnlyList<string> ParseOptionalPiTools(
+        YamlMappingNode root,
+        string sourcePath,
+        int lineOffset)
+    {
+        if (!root.Children.ContainsKey(new YamlScalarNode("pi-tools")))
+        {
+            return [];
+        }
+
+        IReadOnlyList<string> tools = RequireStringSequence(root, "pi-tools", sourcePath, lineOffset);
+        if (tools.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'pi-tools' must declare at least one tool.",
+                "pi-tools",
+                sourcePath,
+                "Add the 'ext:<extension>/<tool>' entries this agent carries, or remove 'pi-tools'.");
+        }
+
+        EnsureDistinct(tools, "pi-tools entry", sourcePath);
+        foreach (string tool in tools)
+        {
+            if (!tool.StartsWith("ext:", StringComparison.Ordinal))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi tool '{tool}' in 'pi-tools' must use the 'ext:<extension>/<tool>' form: " +
+                    "bare built-in names derive solely from the capability lattice.",
+                    "pi-tools",
+                    sourcePath,
+                    "Rewrite the entry as 'ext:<extension>/<tool>' naming an extension from 'pi-extensions'.");
+            }
+
+            string remainder = tool["ext:".Length..];
+            int separator = remainder.IndexOf('/', StringComparison.Ordinal);
+            string extension = separator < 0 ? string.Empty : remainder[..separator];
+            string toolPart = separator < 0 ? string.Empty : remainder[(separator + 1)..];
+            if (string.IsNullOrEmpty(extension) ||
+                string.IsNullOrEmpty(toolPart) ||
+                !IsPortableMcpNamePart(extension) ||
+                !IsPortableMcpNamePart(toolPart))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi tool '{tool}' in 'pi-tools' is not a well-formed 'ext:<extension>/<tool>' " +
+                    "reference with portable name parts.",
+                    "pi-tools",
+                    sourcePath,
+                    "Use 'ext:<extension>/<tool>' with letters, digits, underscore, and hyphen only.");
+            }
+        }
+
+        return tools;
     }
 
     private static IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)
@@ -651,12 +925,13 @@ public static class SquadSourceLoader
             return [];
         }
 
-        EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, isDirectory: true);
-        List<SquadSkill> skills = new List<SquadSkill>();
-        foreach (string skillDirectory in Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
+        EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, true);
+        List<SquadSkill> skills = new();
+        foreach (string skillDirectory in
+                 Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
         {
             string relativeDirectory = ToRelativePath(logicalRoot, skillDirectory);
-            EnsureDiscoveredPath(logicalRoot, resolvedRoot, relativeDirectory, isDirectory: true);
+            EnsureDiscoveredPath(logicalRoot, resolvedRoot, relativeDirectory, true);
             string skillPath = Path.Combine(skillDirectory, "SKILL.md");
             if (!File.Exists(skillPath))
             {
@@ -677,7 +952,7 @@ public static class SquadSourceLoader
 
         return skills
             .OrderBy(skill => skill.Name, StringComparer.Ordinal)
-            .ThenByDescending(skill => SourceIdentityMatches(skill.Name, skill.SourcePath, isSkill: true))
+            .ThenByDescending(skill => SourceIdentityMatches(skill.Name, skill.SourcePath, true))
             .ThenBy(skill => skill.SourcePath, StringComparer.Ordinal)
             .ToArray();
     }
@@ -709,7 +984,7 @@ public static class SquadSourceLoader
         string ownerRelativePath = Path.GetDirectoryName(platformPrincipalPath) ?? string.Empty;
         string logicalOwnerRoot = Path.GetFullPath(Path.Combine(logicalRoot, ownerRelativePath));
         string resolvedOwnerRoot = ResolveExistingPath(logicalOwnerRoot).FullPath;
-        ResourceClosureBuilder builder = new ResourceClosureBuilder(
+        ResourceClosureBuilder builder = new(
             logicalRoot,
             resolvedRoot,
             logicalOwnerRoot,
@@ -878,11 +1153,12 @@ public static class SquadSourceLoader
     {
         string fullPath = Path.GetFullPath(path);
         string root = Path.GetPathRoot(fullPath)
-                   ?? throw new InvalidOperationException($"Path '{path}' has no filesystem root.");
+                      ?? throw new InvalidOperationException($"Path '{path}' has no filesystem root.");
         string current = root;
         bool encounteredLink = false;
         string[] segments = fullPath[root.Length..]
-            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
 
         foreach (string segment in segments)
         {
@@ -895,7 +1171,7 @@ public static class SquadSourceLoader
                 continue;
             }
 
-            FileSystemInfo? target = info.ResolveLinkTarget(returnFinalTarget: true);
+            FileSystemInfo? target = info.ResolveLinkTarget(true);
             if (target is not null)
             {
                 encounteredLink = true;
@@ -930,14 +1206,14 @@ public static class SquadSourceLoader
         return new Frontmatter(
             file.Content[4..closingDelimiter],
             file.Content[(closingDelimiter + 5)..],
-            LineOffset: 1);
+            1);
     }
 
     private static YamlMappingNode ParseYamlMapping(SourceFile file, int lineOffset = 0)
     {
         try
         {
-            YamlStream stream = new YamlStream();
+            YamlStream stream = new();
             stream.Load(new StringReader(file.Content));
             if (stream.Documents.Count != 1 || stream.Documents[0].RootNode is not YamlMappingNode)
             {
@@ -969,14 +1245,16 @@ public static class SquadSourceLoader
         string sourcePath,
         int lineOffset = 0)
     {
-        string actual = RequireScalar(mapping, field, sourcePath, lineOffset);
+        YamlNode node = RequireNode(mapping, field, sourcePath);
+        string actual = RequireScalar(node, field, sourcePath, true, lineOffset);
         if (!string.Equals(actual, expected, StringComparison.Ordinal))
         {
             SquadSourceValidator.Throw(
                 $"Unsupported schema '{actual}'.",
                 field,
                 sourcePath,
-                $"Use the supported schema '{expected}'.");
+                $"Use the supported schema '{expected}'.",
+                StartLine(node, lineOffset));
         }
 
         return actual;
@@ -986,8 +1264,10 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string sourcePath,
-        int lineOffset = 0) =>
-        RequireScalar(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true, lineOffset);
+        int lineOffset = 0)
+    {
+        return RequireScalar(RequireNode(mapping, field, sourcePath), field, sourcePath, true, lineOffset);
+    }
 
     private static string RequireScalar(
         YamlNode node,
@@ -1014,8 +1294,10 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string sourcePath,
-        int lineOffset = 0) =>
-        RequireMapping(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true, lineOffset);
+        int lineOffset = 0)
+    {
+        return RequireMapping(RequireNode(mapping, field, sourcePath), field, sourcePath, true, lineOffset);
+    }
 
     private static YamlMappingNode RequireMapping(
         YamlNode node,
@@ -1040,7 +1322,7 @@ public static class SquadSourceLoader
 
     private static YamlNode RequireNode(YamlMappingNode mapping, string field, string sourcePath)
     {
-        YamlScalarNode key = new YamlScalarNode(field);
+        YamlScalarNode key = new(field);
         if (!mapping.Children.TryGetValue(key, out YamlNode? node))
         {
             SquadSourceValidator.Throw(
@@ -1057,19 +1339,23 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string sourcePath,
-        int lineOffset = 0) =>
-        mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
-            ? RequireScalar(node, field, sourcePath, nodeIsValue: true, lineOffset)
+        int lineOffset = 0)
+    {
+        return mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
+            ? RequireScalar(node, field, sourcePath, true, lineOffset)
             : null;
+    }
 
     private static YamlMappingNode? TryGetMapping(
         YamlMappingNode mapping,
         string field,
         string sourcePath,
-        int lineOffset = 0) =>
-        mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
-            ? RequireMapping(node, field, sourcePath, nodeIsValue: true, lineOffset)
+        int lineOffset = 0)
+    {
+        return mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
+            ? RequireMapping(node, field, sourcePath, true, lineOffset)
             : null;
+    }
 
     private static IReadOnlyList<string>? TryGetStringSequence(
         YamlMappingNode mapping,
@@ -1093,7 +1379,7 @@ public static class SquadSourceLoader
         }
 
         string[] values = ((YamlSequenceNode)node).Children
-            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true, lineOffset))
+            .Select(item => RequireScalar(item, field, sourcePath, true, lineOffset))
             .ToArray();
         EnsureDistinct(values, field, sourcePath);
         return values;
@@ -1117,7 +1403,7 @@ public static class SquadSourceLoader
         }
 
         return ((YamlSequenceNode)node).Children
-            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true, lineOffset))
+            .Select(item => RequireScalar(item, field, sourcePath, true, lineOffset))
             .ToArray();
     }
 
@@ -1128,10 +1414,10 @@ public static class SquadSourceLoader
         int lineOffset = 0)
     {
         YamlMappingNode child = RequireMapping(mapping, field, sourcePath, lineOffset);
-        SortedDictionary<string, string> result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        SortedDictionary<string, string> result = new(StringComparer.Ordinal);
         foreach ((string key, YamlNode node) in MappingEntries(child, sourcePath, lineOffset))
         {
-            result.Add(key, RequireScalar(node, key, sourcePath, nodeIsValue: true, lineOffset));
+            result.Add(key, RequireScalar(node, key, sourcePath, true, lineOffset));
         }
 
         return result;
@@ -1184,7 +1470,7 @@ public static class SquadSourceLoader
         string kind,
         string sourcePath)
     {
-        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> seen = new(StringComparer.Ordinal);
         foreach (string value in values)
         {
             if (!seen.Add(value))
@@ -1258,19 +1544,24 @@ public static class SquadSourceLoader
         throw new InvalidOperationException("Unreachable after validation failure.");
     }
 
-    private static void ThrowDuplicateKey(string key, string sourcePath) =>
+    private static void ThrowDuplicateKey(string key, string sourcePath, int? line = null)
+    {
         SquadSourceValidator.Throw(
             $"Duplicate mapping key '{key}' is not allowed.",
             key,
             sourcePath,
-            "Remove the duplicate mapping key.");
+            "Remove the duplicate mapping key.",
+            line);
+    }
 
-    private static void ThrowJson(string sourcePath, string message) =>
+    private static void ThrowJson(string sourcePath, string message)
+    {
         SquadSourceValidator.Throw(
             message,
             "mcp",
             sourcePath,
             "Use the documented MCP JSON fields and value types.");
+    }
 
     private static void ValidateMcpServer(JsonProperty server, string sourcePath)
     {
@@ -1302,28 +1593,37 @@ public static class SquadSourceLoader
         }
     }
 
-    private static object? ToPlainValue(YamlNode node) => node switch
+    private static object? ToPlainValue(YamlNode node)
     {
-        YamlScalarNode scalar when IsYamlNull(scalar) => null,
-        YamlScalarNode scalar => scalar.Value,
-        YamlSequenceNode sequence => sequence.Children.Select(ToPlainValue).ToArray(),
-        YamlMappingNode mapping => MappingEntries(mapping, "toolchain.yml")
-            .ToDictionary(pair => pair.Key, pair => ToPlainValue(pair.Value), StringComparer.Ordinal),
-        _ => throw new InvalidOperationException($"Unsupported YAML node type {node.GetType().Name}.")
-    };
+        return node switch
+        {
+            YamlScalarNode scalar when IsYamlNull(scalar) => null,
+            YamlScalarNode scalar => scalar.Value,
+            YamlSequenceNode sequence => sequence.Children.Select(ToPlainValue).ToArray(),
+            YamlMappingNode mapping => MappingEntries(mapping, "toolchain.yml")
+                .ToDictionary(pair => pair.Key, pair => ToPlainValue(pair.Value), StringComparer.Ordinal),
+            _ => throw new InvalidOperationException($"Unsupported YAML node type {node.GetType().Name}.")
+        };
+    }
 
-    private static bool IsYamlNull(YamlNode node) =>
-        node is YamlScalarNode scalar &&
-        (scalar.Value is null || scalar.Value is "~" ||
-         string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
+    private static bool IsYamlNull(YamlNode node)
+    {
+        return node is YamlScalarNode scalar &&
+               (scalar.Value is null || scalar.Value is "~" ||
+                string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
+    }
 
-    private static int? StartLine(YamlNode node, int lineOffset = 0) =>
-        node.Start.Line > 0 ? checked((int)node.Start.Line + lineOffset) : null;
+    private static int? StartLine(YamlNode node, int lineOffset = 0)
+    {
+        return node.Start.Line > 0 ? checked((int)node.Start.Line + lineOffset) : null;
+    }
 
-    private static bool HasTraversal(string relativePath) =>
-        relativePath.Replace('\\', '/')
+    private static bool HasTraversal(string relativePath)
+    {
+        return relativePath.Replace('\\', '/')
             .Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Any(segment => string.Equals(segment, "..", StringComparison.Ordinal));
+    }
 
     private static bool IsWithin(string root, string candidate)
     {
@@ -1334,18 +1634,26 @@ public static class SquadSourceLoader
                !relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
     }
 
-    private static string NormalizeNewlines(string value) =>
-        value.Replace("\r\n", "\n", StringComparison.Ordinal)
+    private static string NormalizeNewlines(string value)
+    {
+        return value.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
+    }
 
-    private static string Sha256(string value) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static string Sha256(string value)
+    {
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
 
-    private static string ToRelativePath(string root, string path) =>
-        ToPortablePath(Path.GetRelativePath(root, path));
+    private static string ToRelativePath(string root, string path)
+    {
+        return ToPortablePath(Path.GetRelativePath(root, path));
+    }
 
-    private static string ToPortablePath(string path) =>
-        path.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+    private static string ToPortablePath(string path)
+    {
+        return path.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+    }
 
     private static bool SourceIdentityMatches(string identity, string sourcePath, bool isSkill)
     {
@@ -1362,12 +1670,10 @@ public static class SquadSourceLoader
         private readonly string _resolvedRoot;
         private readonly string _logicalOwnerRoot;
         private readonly string _resolvedOwnerRoot;
-        private readonly SortedDictionary<string, SquadResource> _resources =
-            new SortedDictionary<string, SquadResource>(StringComparer.Ordinal);
-        private readonly Dictionary<string, string> _portablePaths =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _active = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _complete = new HashSet<string>(StringComparer.Ordinal);
+        private readonly SortedDictionary<string, SquadResource> _resources = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _portablePaths = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _active = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _complete = new(StringComparer.Ordinal);
 
         public ResourceClosureBuilder(
             string logicalRoot,
@@ -1522,7 +1828,9 @@ public static class SquadSourceLoader
             int queryIndex = target.IndexOf('?', StringComparison.Ordinal);
             int suffixIndex = fragmentIndex < 0
                 ? queryIndex
-                : queryIndex < 0 ? fragmentIndex : Math.Min(fragmentIndex, queryIndex);
+                : queryIndex < 0
+                    ? fragmentIndex
+                    : Math.Min(fragmentIndex, queryIndex);
             if (suffixIndex >= 0)
             {
                 target = target[..suffixIndex];
@@ -1543,11 +1851,15 @@ public static class SquadSourceLoader
                 char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.');
         }
 
-        private static bool IsWindowsDrivePath(string target) =>
-            target.Length >= 2 && char.IsAsciiLetter(target[0]) && target[1] == ':';
+        private static bool IsWindowsDrivePath(string target)
+        {
+            return target.Length >= 2 && char.IsAsciiLetter(target[0]) && target[1] == ':';
+        }
 
-        private static bool IsRootedResourcePath(string target) =>
-            Path.IsPathRooted(target) || target[0] is '/' or '\\' || IsWindowsDrivePath(target);
+        private static bool IsRootedResourcePath(string target)
+        {
+            return Path.IsPathRooted(target) || target[0] is '/' or '\\' || IsWindowsDrivePath(target);
+        }
 
         private static bool IsMarkdown(string relativePath)
         {
@@ -1556,28 +1868,36 @@ public static class SquadSourceLoader
                    string.Equals(extension, ".markdown", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string GetPortableAliasIdentity(string relativePath) =>
-            string.Join(
-                '/',
-                relativePath.Split('/').Select(segment => segment.TrimEnd(' ', '.')))
+        private static string GetPortableAliasIdentity(string relativePath)
+        {
+            return string.Join(
+                    '/',
+                    relativePath.Split('/').Select(segment => segment.TrimEnd(' ', '.')))
                 .Normalize(NormalizationForm.FormC);
+        }
 
-        private static void ThrowOutsideOwner(string target, string declaringPath) =>
+        private static void ThrowOutsideOwner(string target, string declaringPath)
+        {
             SquadSourceValidator.Throw(
                 $"Referenced resource '{target}' escapes its owning artifact directory.",
                 target,
                 declaringPath,
                 "Use a relative link whose resolved file stays inside the owning agent or skill directory.");
+        }
 
-        private static void ThrowNonPortable(string relativePath, string target, string declaringPath) =>
+        private static void ThrowNonPortable(string relativePath, string target, string declaringPath)
+        {
             SquadSourceValidator.Throw(
                 $"Resource path '{relativePath}' is not a normalized portable path.",
                 target,
                 declaringPath,
                 "Use NFC Unicode, forward slashes, and names valid on Windows filesystems.");
+        }
     }
 
     private sealed record SourceFile(string RelativePath, string Content);
+
     private sealed record Frontmatter(string Yaml, string Body, int LineOffset = 1);
+
     private readonly record struct ResolvedPath(string FullPath, bool EncounteredSymbolicLink);
 }

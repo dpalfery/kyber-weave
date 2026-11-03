@@ -16,6 +16,7 @@ namespace KyberWeave.Tests.Fakes;
 /// targets needs the genuine corpus tree, not the two-file manifest fixture, so this fake copies
 /// the repository's own <c>products/kyber-squad</c> directory byte-for-byte instead of
 /// fabricating one.
+/// Pre-caches file contents in memory to avoid repeated filesystem walks and cold file reads.
 /// </remarks>
 public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
 {
@@ -23,6 +24,8 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
 
     private static readonly string CorpusRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    private static readonly Lazy<List<(string RelativePath, byte[] Content)>> PreloadedCorpus = new(LoadCorpus);
 
     /// <summary>
     /// Copies the checked-in Squad corpus into the request's destination, standing in for a
@@ -35,20 +38,20 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        List<string> extractedFiles = CopyCorpus(CorpusRoot, request.DestinationPath);
+        List<string> extractedFiles = CopyCorpus(request.DestinationPath);
 
         string assetName = $"kyber-squad-{request.Version}.zip";
         SquadReleaseResult result = new(
-            Version: request.Version,
-            Asset: new SquadReleaseAsset(
-                Name: assetName,
-                DownloadUri: new Uri($"https://github.com/{request.Repository}/releases/download/v{request.Version}/{assetName}"),
-                Size: 1024),
-            Checksum: new SquadReleaseChecksum(
-                AssetName: assetName,
-                Sha256: AssetSha256),
-            ExtractionRoot: Path.GetFullPath(request.DestinationPath),
-            ExtractedFiles: extractedFiles);
+            request.Version,
+            new SquadReleaseAsset(
+                assetName,
+                new Uri($"https://github.com/{request.Repository}/releases/download/v{request.Version}/{assetName}"),
+                1024),
+            new SquadReleaseChecksum(
+                assetName,
+                AssetSha256),
+            Path.GetFullPath(request.DestinationPath),
+            extractedFiles);
 
         return Task.FromResult(result);
     }
@@ -58,14 +61,27 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
         // No unmanaged resources.
     }
 
-    private static List<string> CopyCorpus(string sourceRoot, string destinationRoot)
+    private static List<(string RelativePath, byte[] Content)> LoadCorpus()
+    {
+        List<(string RelativePath, byte[] Content)> files = [];
+        foreach (string sourceFilePath in Directory.EnumerateFiles(CorpusRoot, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(CorpusRoot, sourceFilePath).Replace(Path.DirectorySeparatorChar, '/');
+            files.Add((relativePath, File.ReadAllBytes(sourceFilePath)));
+        }
+
+        files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
+        return files;
+    }
+
+    private static List<string> CopyCorpus(string destinationRoot)
     {
         Directory.CreateDirectory(destinationRoot);
-        List<string> extractedFiles = [];
+        List<(string RelativePath, byte[] Content)> preloaded = PreloadedCorpus.Value;
+        List<string> extractedFiles = new(preloaded.Count);
 
-        foreach (string sourceFilePath in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        foreach ((string relativePath, byte[] content) in preloaded)
         {
-            string relativePath = Path.GetRelativePath(sourceRoot, sourceFilePath);
             string destinationFilePath = Path.Combine(destinationRoot, relativePath);
             string? destinationFileDirectory = Path.GetDirectoryName(destinationFilePath);
             if (destinationFileDirectory is not null)
@@ -73,11 +89,10 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
                 Directory.CreateDirectory(destinationFileDirectory);
             }
 
-            File.Copy(sourceFilePath, destinationFilePath);
-            extractedFiles.Add(relativePath.Replace(Path.DirectorySeparatorChar, '/'));
+            File.WriteAllBytes(destinationFilePath, content);
+            extractedFiles.Add(relativePath);
         }
 
-        extractedFiles.Sort(StringComparer.Ordinal);
         return extractedFiles;
     }
 }

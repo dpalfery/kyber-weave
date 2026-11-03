@@ -8,9 +8,17 @@ import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../
 const [cacheDir, barrierDir, id, sourcePath, bypass = 'false', exitViaCleanup = 'false'] = process.argv.slice(2)
 if (!cacheDir || !barrierDir || !id || !sourcePath) throw new Error('missing worker argument')
 
+// A barrier the test never releases must not leave this worker running forever. The parent's waits are
+// 5 s and it releases each barrier promptly, so 20 s is far past any legitimate wait.
+const BARRIER_DEADLINE_MS = 20_000
+
 async function waitFor(name: string): Promise<void> {
   const path = join(barrierDir!, name)
-  while (!existsSync(path)) await new Promise(resolve => { setTimeout(resolve, 5) })
+  const deadline = Date.now() + BARRIER_DEADLINE_MS
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`barrier ${name} was never released`)
+    await new Promise(resolve => { setTimeout(resolve, 5) })
+  }
 }
 
 process.env['KYBERDASH_CACHE_DIR'] = cacheDir

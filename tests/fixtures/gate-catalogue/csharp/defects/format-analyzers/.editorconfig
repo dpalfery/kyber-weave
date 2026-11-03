@@ -1,0 +1,19 @@
+# Fixture EditorConfig for the csharp gate-catalogue family. root = true stops the
+# repository's own .editorconfig from applying to this fixture.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.cs]
+# style gate: IDE0161 (namespace declaration style) is raised to warning.
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_diagnostic.IDE0161.severity = warning
+
+# analyzers gate: CA1822 (member can be static) is raised to warning, in product code only.
+[src/**.cs]
+dotnet_diagnostic.CA1822.severity = warning

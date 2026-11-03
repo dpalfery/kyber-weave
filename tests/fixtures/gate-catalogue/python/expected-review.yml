@@ -1,0 +1,47 @@
+review:
+# Gates written by Kyber-Weave 0.1.0+f1fd593576a52d04c679b82a9001a47a0256a4cf 'docs init' from its shipped catalogue.
+# This block is yours: edit, remove or add gates freely; re-running 'docs init' never changes it.
+# 'kyber-weave review catalogue' prints the catalogue for newer releases, to copy in by hand.
+# CI: copy templates/github-actions/kyber-weave-review-gate.yml from
+# https://github.com/dpalfery/kyber-weave into .github/workflows/.
+# python: pytest exit 5 (no tests collected) fails the gate on purpose.
+  gates:
+    # python: format (.)
+    - id: python-format
+      run: ['ruff', 'format', '--check', '.']
+    # python: lint (.)
+    - id: python-lint
+      run: ['ruff', 'check', '.']
+    # python: typecheck (.)
+    - id: python-typecheck
+      run: ['mypy', '.']
+    # python: test (.)
+    - id: python-test
+      run: ['pytest']
+  task-gates:
+    python-dev:
+      # python: format (.)
+      - id: python-format
+        include: ['**/*.py', '**/*.pyi']
+        run: ['ruff', 'format', '--check', '{changed}']
+        fix: ['ruff', 'format', '{changed}']
+      # python: lint (.)
+      - id: python-lint
+        include: ['**/*.py', '**/*.pyi']
+        run: ['ruff', 'check', '{changed}']
+        fix: ['ruff', 'check', '--fix', '{changed}']
+      # python: typecheck (.)
+      - id: python-typecheck
+        include: ['**/*.py', '**/*.pyi']
+        run: ['mypy', '.']
+    test-dev:
+      # python: format (test-dev copy)
+      - id: python-format
+        include: ['**/*.py', '**/*.pyi']
+        run: ['ruff', 'format', '--check', '{changed}']
+        fix: ['ruff', 'format', '{changed}']
+      # python: lint (test-dev copy)
+      - id: python-lint
+        include: ['**/*.py', '**/*.pyi']
+        run: ['ruff', 'check', '{changed}']
+        fix: ['ruff', 'check', '--fix', '{changed}']

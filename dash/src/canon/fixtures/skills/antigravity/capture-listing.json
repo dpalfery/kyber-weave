@@ -1,0 +1,14 @@
+{
+  "name": "chat model",
+  "attributes": {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.system": "gemini",
+    "gen_ai.provider.name": "google",
+    "gen_ai.request.model": "Gemini 3.8 Flash (High)",
+    "gen_ai.response.model": "Gemini 3.8 Flash (High)",
+    "gen_ai.agent.name": "antigravity",
+    "gen_ai.skills": "Active Skills: agy-customizations, antigravity-guide, chrome-extensions, modern-web-guidance",
+    "github.copilot.tool.parameters.skill_name": "Active Skills: agy-customizations, antigravity-guide, chrome-extensions, modern-web-guidance",
+    "gen_ai.usage.skill_tokens": 1040
+  }
+}

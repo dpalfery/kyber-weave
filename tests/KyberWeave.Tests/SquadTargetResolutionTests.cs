@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] TwelveTargets =
+    private static readonly SquadTarget[] ThirteenTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -22,7 +22,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Factory,
         SquadTarget.Pi,
         SquadTarget.ZCode,
-        SquadTarget.Devin
+        SquadTarget.Devin,
+        SquadTarget.CommandCode
     ];
 
     private readonly TempDirectory _temp = new();
@@ -42,19 +43,20 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".warp", true, SquadTarget.Warp },
         { ".factory", true, SquadTarget.Factory },
         { ".zcode", true, SquadTarget.ZCode },
-        { ".devin", true, SquadTarget.Devin }
+        { ".devin", true, SquadTarget.Devin },
+        { ".commandcode", true, SquadTarget.CommandCode }
     };
 
     /// <summary>
     /// Receipts persist target tokens, so existing members keep their positions and a new
-    /// target is appended: Pi follows Factory, ZCode follows Pi, and Devin follows ZCode.
+    /// target is appended: Pi follows Factory, ZCode follows Pi, Devin follows ZCode, and Command Code follows Devin.
     /// </summary>
     [Fact]
-    public void CatalogContainsExactlyTwelveTargetsInStableOrder()
+    public void CatalogContainsExactlyThirteenTargetsInStableOrder()
     {
-        Assert.Equal(TwelveTargets, SquadTargetCatalog.All);
+        Assert.Equal(ThirteenTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode", "devin"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -70,11 +72,11 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedTwelveTargetRoster()
+    public void ParseAllExpandsToTheApprovedThirteenTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(TwelveTargets, targets);
+        Assert.Equal(ThirteenTargets, targets);
     }
 
     [Theory]
@@ -118,6 +120,36 @@ public sealed class SquadTargetResolutionTests : IDisposable
         // Whole word: "copilot" already contains "pi", so a substring check passes vacuously.
         Assert.Matches(@"\bpi\b", exception.Message);
         Assert.Contains("all", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     TryResolve is the single-token recovery path; it must apply the same trimming Parse
+    ///     applies to each comma-separated segment, so a token Parse accepts is never rejected here.
+    /// </summary>
+    [Theory]
+    [InlineData("codex")]
+    [InlineData(" codex")]
+    [InlineData("codex ")]
+    [InlineData("  CODEX  ")]
+    [InlineData("github-copilot")]
+    [InlineData(" github-copilot ")]
+    public void TryResolveAcceptsPaddedTokensThatParseAccepts(string token)
+    {
+        Assert.True(SquadTargetCatalog.TryResolve(token, out SquadTarget target));
+        Assert.Equal(SquadTargetCatalog.Parse([token]).Single(), target);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-a-harness")]
+    [InlineData("codex,claude")]
+    [InlineData("all")]
+    [InlineData(" ALL ")]
+    public void TryResolveRejectsNullBlankUnknownMultiAndAllTokens(string? token)
+    {
+        Assert.False(SquadTargetCatalog.TryResolve(token, out _));
     }
 
     [Fact]
@@ -176,7 +208,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Factory,
             SquadTarget.Pi,
             SquadTarget.ZCode,
-            SquadTarget.Devin);
+            SquadTarget.Devin,
+            SquadTarget.CommandCode);
     }
 
     [Theory]

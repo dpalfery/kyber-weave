@@ -5,11 +5,12 @@
 // not a zero-valued measurement.
 
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import type { ParsedProviderCall } from '../../providers/types.js'
+import { readSessionFile } from '../../ingest/fs-utils.js'
 import { openDatabase } from '../../ingest/sqlite.js'
-import type { ContentReader } from './types.js'
+import type { ContentReader, ReaderTurn } from './types.js'
 
 const CONTEXT_FIELDS = [
   'context_system_tokens',
@@ -105,14 +106,69 @@ export function loadCopilotCliCalls(
   }
 }
 
+function eventAgentId(event: Record<string, unknown>): string {
+  return typeof event['agentId'] === 'string' ? event['agentId'] : ''
+}
+
 /**
- * Copilot CLI's collectable source is its SQLite context table, not a
- * transcript content format. The reader stays empty rather than inventing
- * content parts from counter rows.
+ * Read a Copilot CLI `events.jsonl` journal into one turn per `assistant.message`.
+ * Each turn carries the `system.message` last recorded for the same agent
+ * (root events have no `agentId`, subagent events name theirs), so a subagent's
+ * call never inherits the root prompt. Turns are keyed by `messageId`, which the
+ * provider parser stamps on its calls as `pairingId`. Root turns are yielded
+ * before subagent turns, see below. Tool definitions are not
+ * measured: the journal holds no tool schemas, and the prompt's `<tools>`
+ * section is usage guidance for a subset of tools, not the offered tool set.
+ */
+async function* readEventsJournal(filePath: string): AsyncGenerator<ReaderTurn> {
+  const root: ReaderTurn[] = []
+  const subagent: ReaderTurn[] = []
+  const sessionId = basename(dirname(filePath))
+  const promptByAgent = new Map<string, string>()
+  const text = await readSessionFile(filePath)
+  if (text === null) return
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue
+    let event: unknown
+    try {
+      event = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (!isRecord(event) || !isRecord(event['data'])) continue
+    const data = event['data']
+    if (event['type'] === 'system.message') {
+      const content = data['content']
+      if (typeof content === 'string' && content !== '') promptByAgent.set(eventAgentId(event), content)
+      continue
+    }
+    if (event['type'] !== 'assistant.message') continue
+    const messageId = data['messageId']
+    if (typeof messageId !== 'string' || messageId === '') continue
+    const prompt = promptByAgent.get(eventAgentId(event))
+    const turn: ReaderTurn = {
+      sessionId,
+      nativeRecordId: messageId,
+      parts: prompt === undefined ? [] : [{ part: 'system_prompt', text: prompt, order: 0 }],
+    }
+    ;(eventAgentId(event) === '' ? root : subagent).push(turn)
+  }
+  // Root turns lead so any positional fallback (calls with no messageId, such as
+  // the shutdown rollup legs) stays within the root agent's turns; a call beyond
+  // the turn list pairs to nothing and carries counters only.
+  yield* root
+  yield* subagent
+}
+
+/**
+ * Copilot CLI's counters live in SQLite (parsed above); its transcript content
+ * lives in `<session>/events.jsonl`. Only the journal yields turns — a database
+ * path yields nothing rather than inventing content from counter rows.
  */
 export const copilotCliReader: ContentReader = {
-  async *read(): AsyncGenerator<never> {
-    // Context counter rows are parsed through parseCopilotCliContextRow.
+  async *read(filePath: string): AsyncGenerator<ReaderTurn> {
+    if (!filePath.endsWith('.jsonl')) return
+    yield* readEventsJournal(filePath)
   },
 }
 

@@ -600,9 +600,6 @@ export function CompareRuns({
           <h1 className="text-xl font-bold tracking-tight text-heading">
             Run Comparison Workspace
           </h1>
-          <p className="text-xs text-tertiary-foreground">
-            Semantic comparison aligned on task phases with outcome guards and sufficiency validation.
-          </p>
         </div>
         <div className="flex items-center gap-2">
           {taskFamily ? (

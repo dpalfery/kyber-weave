@@ -18,6 +18,22 @@ The portable design identity is `<active-spec-directory>/{feature-name}/design.m
 4. Explain consequential decisions and viable alternatives. Do not invent missing requirements to make the design appear complete.
 5. Persist `Phase status: Draft` until the conductor supplies explicit approval. Revisions reopen this phase and tasks.
 
+## Decisions
+
+The design carries a permanent `## Decisions` section, preserved intact across all lifecycle transitions. Record all decisions in a structured table:
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+## Scale
+
+Declare the design scale at authoring time: `documentation-impact: new-component | extends-component | no-design-change` with `impact-components` naming the affected catalog components (required and non-empty for the first two scales).
+
+## Design harvest
+
+Maintain a `Design harvest` table with one row per design section and one row per requirement-group, keyed by target component and doc type:
+
+| ID | Design item (section) | Target component | Target doc type |
+
 ## Gap handling
 
 When approved requirements are contradictory or incomplete enough to block responsible design, persist what is valid and return:

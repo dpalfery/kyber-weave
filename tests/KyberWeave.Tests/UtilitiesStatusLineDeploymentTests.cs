@@ -15,8 +15,8 @@ namespace KyberWeave.Tests;
 /// overwritten, that a redeploy refuses a Kyber-owned file the user edited rather than replacing
 /// it, that the receipt records every owned file with its SHA-256, that remove deletes only
 /// receipt-owned unmodified files, that no harness settings file is ever created or modified, and
-/// that the deployment target set is exactly the three harnesses D9 keeps — Claude Code, <c>agy</c>,
-/// and Pi — with no OpenCode target anywhere on the surface.
+/// that the deployment target set is exactly the four harnesses — Claude Code, <c>agy</c>,
+/// Pi, and Command Code — with no OpenCode target anywhere on the surface.
 /// </summary>
 /// <remarks>
 /// Authored before <see cref="StatusLineTargetRoots"/>, <see cref="StatusLineDeploymentPlan"/>, and
@@ -25,8 +25,8 @@ namespace KyberWeave.Tests;
 ///
 /// <para>
 /// Every expectation is a literal this suite owns — the harness roots, the staging segment
-/// <c>kyber/statusline</c>, the three confirmed settings files, the one auto-load directory, and
-/// the three-member target set — rather than a value read back from
+/// <c>kyber/statusline</c>, the four confirmed settings files, the two auto-load directories, and
+/// the four-member target set — rather than a value read back from
 /// <see cref="StatusLineTargetRoots"/>. A test that asked the type under test where it puts things
 /// and then asserted that it put them there would pass against any implementation, including one
 /// that plans nothing. Arranging and asserting against literal paths also keeps every contract row
@@ -76,7 +76,8 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     [
         ".claude/settings.json",
         ".gemini/antigravity-cli/settings.json",
-        ".pi/agent/settings.json"
+        ".pi/agent/settings.json",
+        ".commandcode/config.json"
     ];
 
     /// <summary>
@@ -85,7 +86,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     /// <see cref="Enum.GetNames{T}"/> says nothing if the expectation is read back from the type
     /// under test, and OpenCode is the member this slice dropped (D9).
     /// </summary>
-    private static readonly string[] PinnedTargetNames = ["Claude", "Agy", "Pi"];
+    private static readonly string[] PinnedTargetNames = ["Claude", "Agy", "Pi", "CommandCode"];
 
     private readonly TempDirectory _temp = new();
 
@@ -98,7 +99,8 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     {
         StatusLineTarget.Claude,
         StatusLineTarget.Agy,
-        StatusLineTarget.Pi
+        StatusLineTarget.Pi,
+        StatusLineTarget.CommandCode
     };
 
     /// <summary>
@@ -114,6 +116,23 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     };
 
     /// <summary>
+    /// The harness the deployment suite pins as override-less. Command Code publishes no root
+    /// override (its CLI reads HOME, then USERPROFILE), so no environment variable moves it.
+    /// </summary>
+    [Fact]
+    public void CommandCodeStagingRootIgnoresEveryOverrideVariable()
+    {
+        StatusLineTargetRoots roots = Roots(name => Path.Combine(_temp.Path, "decoy-" + name));
+
+        string stagingRoot = roots.ResolveStagingRoot(StatusLineTarget.CommandCode);
+
+        Assert.True(
+            IsSame(PinnedStagingRoot(StatusLineTarget.CommandCode), stagingRoot),
+            $"An override lookup moved the CommandCode staging root to '{stagingRoot}'; " +
+            "it honours no override and must stay at its home default.");
+    }
+
+    /// <summary>
     /// A plausible-looking variable per harness that nothing consults, so an override lookup that
     /// read the wrong name would be caught rather than silently ignored.
     /// </summary>
@@ -124,10 +143,13 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         { StatusLineTarget.Pi, "PI_AGENT_DIR" }
     };
 
-    /// <summary>The one harness that loads a status-line file from a directory by itself.</summary>
+    /// <summary>
+    /// The two harnesses that load a status-line file from a directory by themselves.
+    /// </summary>
     public static TheoryData<StatusLineTarget, string> AutoLoadingHarnesses => new()
     {
-        { StatusLineTarget.Pi, ".pi/agent/extensions" }
+        { StatusLineTarget.Pi, ".pi/agent/extensions" },
+        { StatusLineTarget.CommandCode, ".commandcode/mods" }
     };
 
     /// <summary>The confirmed settings file per harness, as the literal path beneath the home.</summary>
@@ -135,21 +157,22 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     {
         { StatusLineTarget.Claude, ".claude/settings.json" },
         { StatusLineTarget.Agy, ".gemini/antigravity-cli/settings.json" },
-        { StatusLineTarget.Pi, ".pi/agent/settings.json" }
+        { StatusLineTarget.Pi, ".pi/agent/settings.json" },
+        { StatusLineTarget.CommandCode, ".commandcode/config.json" }
     };
 
     // -----------------------------------------------------------------------------------------
-    // Target surface: exactly the three harnesses D9 keeps, and no OpenCode member.
+    // Target surface: exactly the four harnesses this slice keeps, and no OpenCode member.
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void TheDeploymentTargetSetIsExactlyClaudeAgyAndPiAndDeclaresNoOpenCodeTarget()
+    public void TheDeploymentTargetSetIsExactlyClaudeAgyPiAndCommandCodeAndDeclaresNoOpenCodeTarget()
     {
         string[] declaredTargetNames = [.. Enum.GetNames<StatusLineTarget>()];
 
         Assert.True(
             PinnedTargetNames.SequenceEqual(declaredTargetNames, StringComparer.Ordinal),
-            $"StatusLineTarget declares [{Join(declaredTargetNames)}], not the pinned three-target " +
+            $"StatusLineTarget declares [{Join(declaredTargetNames)}], not the pinned four-target " +
             $"scope [{Join(PinnedTargetNames)}]. OpenCode is deferred to a follow-up issue (D9), so " +
             "no OpenCode target may exist in this slice.");
         // The list comparison above already fails on an OpenCode member, but only as an unexplained
@@ -683,6 +706,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
             StatusLineTarget.Claude => ".claude",
             StatusLineTarget.Agy => ".gemini/antigravity-cli",
             StatusLineTarget.Pi => ".pi/agent",
+            StatusLineTarget.CommandCode => ".commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

@@ -84,6 +84,8 @@ describe('renormalizeRecords — retained raw evidence', () => {
       source: 'historical-export',
       name: 'GlobalHttpApi.health',
       timestamp: '2026-01-01T00:00:00.000Z',
+      // Reclassification stores the incoming span JSON as quarantine evidence (v18).
+      rawPayload: expect.any(String),
     })
     // Noise is gone, and the retained span is now attributed from its Copilot
     // evidence. The copilot-misattributed session built before reclassify is
@@ -360,7 +362,7 @@ describe('renormalizeRecords — retained raw evidence', () => {
     // And rebuilding projections cleanly re-projects the remaining Claude record without Gemini
     await buildSessions(store)
     expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
-    expect(store.listSessions().some((s) => s.harness === 'gemini')).toBe(false)
+    expect(store.countSessionsByHarness()['gemini'] ?? 0).toBe(0)
     store.close()
   })
 })

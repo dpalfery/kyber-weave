@@ -14,7 +14,7 @@ function fakeProvider(name: string, discover: Provider['discoverSessions']): Pro
 
 describe('provider registry', () => {
   it('has core providers registered synchronously', () => {
-    expect(providers.map(p => p.name)).toEqual(['claude', 'cline', 'cline-cli', 'codewhale', 'codebuff', 'codex', 'copilot', 'devin', 'droid', 'dsh', 'gemini', 'hermes', 'ibm-bob', 'kilo-code', 'kiro', 'kimi', 'kimicode', 'lingtai-tui', 'mistral-vibe', 'mux', 'openclaw', 'openclaude', 'open-design', 'pi', 'omp', 'qwen', 'quickdesk', 'roo-code', 'zerostack', 'grok'])
+    expect(providers.map(p => p.name)).toEqual(['claude', 'cline', 'cline-cli', 'codewhale', 'codebuff', 'codex', 'commandcode', 'copilot', 'devin', 'droid', 'dsh', 'gemini', 'hermes', 'ibm-bob', 'kilo-code', 'kiro', 'kimi', 'kimicode', 'lingtai-tui', 'mistral-vibe', 'mux', 'openclaw', 'openclaude', 'open-design', 'pi', 'omp', 'qwen', 'quickdesk', 'roo-code', 'zerostack', 'grok'])
   })
 
   it('codebuff tool display names normalize codebuff-native names to canonical set', () => {
@@ -59,22 +59,9 @@ describe('provider registry', () => {
     expect(warp!.toolDisplayName('run_command')).toBe('Bash')
   })
 
-  it('opencode model display names strip provider prefix', async () => {
+  it('registers no OpenCode provider, so no OpenCode display names are produced here', async () => {
     const all = await getAllProviders()
-    const oc = all.find(p => p.name === 'opencode')
-    if (!oc) return
-    expect(oc.modelDisplayName('anthropic/claude-opus-4-6-20260205')).toBe('Opus 4.6')
-    expect(oc.modelDisplayName('google/gemini-2.5-pro')).toBe('Gemini 2.5 Pro')
-  })
-
-  it('opencode tool display names normalize builtins', async () => {
-    const all = await getAllProviders()
-    const oc = all.find(p => p.name === 'opencode')
-    if (!oc) return
-    expect(oc.toolDisplayName('bash')).toBe('Bash')
-    expect(oc.toolDisplayName('edit')).toBe('Edit')
-    expect(oc.toolDisplayName('task')).toBe('Agent')
-    expect(oc.toolDisplayName('unknown_tool')).toBe('unknown_tool')
+    expect(all.find(p => p.name === 'opencode')).toBeUndefined()
   })
 
   it('claude tool display names are identity', () => {

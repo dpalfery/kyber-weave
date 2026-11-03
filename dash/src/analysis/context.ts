@@ -45,6 +45,7 @@
 
 import { contextCompositionAvailability } from '../canon/measurability.js'
 import type { ContextLimitSource } from '../canon/context-window.js'
+import { measuredCount } from '../canon/measured.js'
 import { CANONICAL_CONTENT_KEYS, type CanonicalContentKey, type Measurability } from '../canon/types.js'
 import { approximateO200kBase } from '../canon/tokens.js'
 import {
@@ -80,7 +81,15 @@ export {
 export type ContextPart = {
   /** The part type; one of the five R7.1 bucket names. */
   part: CanonicalContentKey
-  /** The part's text, as the normalization layer reconstructed it. */
+  /**
+   * The part's text, as the normalization layer reconstructed it.
+   *
+   * A REDUCED part — one whose text was already counted and released, so the
+   * projection's working set is the counts rather than the text — carries an
+   * empty text and its count in `tokens` instead. The counts it leaves behind
+   * are the ones the composition is derived from, so a reduced part and the
+   * part it came from bucket identically.
+   */
   text: string
   /**
    * The part's token count when a counter measured it. Absent means the
@@ -95,6 +104,33 @@ export type ContextPart = {
    * are reported separately rather than grouped by a guess.
    */
   server?: string
+  /**
+   * Whether `tokens` was derived by tokenization rather than measured.
+   *
+   * A raw part carries no count at all when the harness measured none, and
+   * the analysis derives one from the text — the residual's attribution
+   * depends on knowing that (R7.3). A reduced part carries the derived count
+   * in `tokens`, so this flag is what keeps that attribution.
+   */
+  derived?: boolean
+  /**
+   * The tokens of the instruction blocks stripped out of this part's text.
+   *
+   * Present only on a reduced part whose text carried them: the split
+   * between the carrier bucket and the instruction bucket is made once, where
+   * the text was in hand, and the two halves are counted here.
+   */
+  instructionTokens?: number
+  /**
+   * How many instruction blocks were stripped out of this part's text.
+   */
+  strippedCount?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * It adds no tokens to any bucket, server group, or the residual; it is
+   * counted once as offered (`TurnPressure.nonResidentToolDefinitions`).
+   */
+  resident?: false
 }
 
 /** One turn of a session, as the analysis consumes it. */
@@ -225,6 +261,14 @@ export type TurnPressure = {
   /** Present only on turns whose fresh-input rise was flagged (R7.5). */
   freshInputJump?: { previous: number; factor: number }
   /**
+   * Tool definitions the turn offered but did not keep resident (D7). Present
+   * only when there were some, so a turn with none reads as before. It is a
+   * count, not tokens: the offered schemas were never counted into the turn,
+   * so no token figure for them is reported: they are excluded from every
+   * token total, and a count is the only fact this turn keeps about them.
+   */
+  nonResidentToolDefinitions?: number
+  /**
    * Optional evidence-of-use classification per Decision D15 (strong / weak / none / unobserved),
    * present when requested or when telemetry is provided.
    */
@@ -241,6 +285,13 @@ export type ContextAnalysis =
       contextLimitSource?: ContextLimitSource
       /** Composition and pressure per turn, session order (R7.1, R7.4). */
       turns: TurnPressure[]
+      /**
+       * The part types some turn actually supplied (resident, with text or a
+       * count). A bucket total of 0 for a type absent from this list is "never
+       * observed", not "observed empty": the report reads this to tell the two
+       * apart (D8, ADR 0033).
+       */
+      observedParts: CanonicalContentKey[]
       /** Summed residual over the session, as explicit as per turn (R7.3). */
       residualTotal: number
       /** True when any bucket count was derived; present totals as bounds. */
@@ -304,6 +355,102 @@ function stripInstructionBlocks(
 }
 
 /**
+ * The options the reduction counts with.
+ */
+export type ContextReductionOptions = {
+  /**
+   * The tokenizer used to count a part that carries no measured count.
+   * Defaults to the `o200k_base` approximation (R4.6), the same default the
+   * analysis itself uses.
+   */
+  countTokens?: (text: string) => number
+  /** Instruction-block delimiters; defaults to system-reminder fences. */
+  instructionMarkers?: InstructionBlockMarkers
+}
+
+/**
+ * Read a part's text for counting: the normalization boundary can hand this
+ * module a non-string `text` at runtime despite the type (untrusted JSON and
+ * SQLite rows), and a refresh must survive that rather than throw. Non-string
+ * reads as `''` — so marker checks and `countTokens` never see the raw value —
+ * while a measured `tokens` count is still honored by the callers below.
+ */
+function partText(part: ContextPart): string {
+  return typeof part.text === 'string' ? part.text : ''
+}
+
+/**
+ * The parts' contribution to the composition, with their text released.
+ *
+ * WHY: a session's turns carry tens of kilobytes of text each, and the
+ * projection read every one of them at once — the decompressed parts were the
+ * session's working set, and the record that held them lived as long as the
+ * session. The composition needs the parts' COUNTS, not their text: the
+ * bucket each part falls into, how many tokens it contributed, how many
+ * instruction blocks were stripped out of it, and which server a tool
+ * definition arrived under. Those are derived here, where the text is in
+ * hand, and the text is dropped.
+ *
+ * A reduced part buckets exactly as the part it came from: the carrier bucket
+ * keeps the remainder of a stripped part and the instruction bucket keeps the
+ * blocks, the count is the measured one where the harness measured it and the
+ * counted one where it did not, and `derived` says which — so the residual's
+ * attribution (R7.3) is unchanged.
+ */
+export function reduceContextParts(
+  parts: readonly ContextPart[],
+  options: ContextReductionOptions = {},
+): ContextPart[] {
+  const markers = options.instructionMarkers ?? SYSTEM_REMINDER_MARKERS
+  const countTokens = options.countTokens ?? approximateO200kBase
+  return parts.map((part) => {
+    const text = partText(part)
+    // Instruction fences ride inside history and tool results; stripping them
+    // anywhere else would miscount a system prompt that happens to quote a
+    // fence, so the strip applies to the carrier buckets only.
+    const strippable = part.part === 'conversation_history' || part.part === 'tool_result_content'
+    const containsMarkers =
+      strippable && text.includes(markers.open) && text.includes(markers.close)
+    if (containsMarkers) {
+      // A measured whole-part count cannot be split without deriving the
+      // pieces, so the split is always derived — and that derivation is
+      // precisely what a tokenizer-drift attribution of the turn's residual
+      // would be claiming (R7.3).
+      const { blocks, remainder } = stripInstructionBlocks(text, markers)
+      const remainderTokens = countTokens(remainder)
+      let instructionTokens = 0
+      for (const block of blocks) instructionTokens += countTokens(block)
+      return {
+        part: part.part,
+        text: '',
+        tokens: remainderTokens,
+        derived: true,
+        instructionTokens,
+        strippedCount: blocks.length,
+        ...(part.server !== undefined ? { server: part.server } : {}),
+        ...(part.resident === false ? { resident: false } : {}),
+      }
+    }
+    // A part with no text and no usable measured count contributes nothing and
+    // carries no structure: its count stays absent, so the composition reads
+    // it exactly as it read the part. A non-finite or non-numeric count is not
+    // usable, so it is derived from the text instead of poisoning a total.
+    const measured = measuredCount(part.tokens)
+    const structure = text !== '' || measured !== undefined
+    return {
+      part: part.part,
+      text: '',
+      ...(structure ? { tokens: measured ?? countTokens(text) } : {}),
+      ...(measured === undefined ? { derived: true } : {}),
+      ...(part.server !== undefined ? { server: part.server } : {}),
+      // Reduction keeps residency: dropping the flag here would make a
+      // non-resident definition count again once the text is released (D7).
+      ...(part.resident === false ? { resident: false } : {}),
+    }
+  })
+}
+
+/**
  * Analyze a session's context composition and pressure (R7).
  *
  * Each turn is bucketed by part type across the five canonical buckets
@@ -342,6 +489,10 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   // happened to arrive this run (R7.6, R10.1).
   const availability = contextCompositionAvailability(options.measurability)
   const declared = typeof availability === 'object' && availability.availability === 'not_measurable'
+  // A numeric-text part is still a part that arrived: the session can chart a
+  // composition (with the unreadable part as residual) even though nothing in
+  // it was countable. Declaring the source structureless here would hide the
+  // turn's own measured input behind a false "no message structure" answer.
   const hasStructure = turns.some((turn) =>
     turn.parts.some((part) => part.text !== '' || part.tokens !== undefined)
   )
@@ -359,6 +510,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   const flaggedTurns: number[] = []
   let residualTotal = 0
   let derivedCounts = false
+  const observed = new Set<CanonicalContentKey>()
 
   for (const [position, turn] of turns.entries()) {
     const buckets = emptyBuckets()
@@ -367,14 +519,28 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     let strippedCount = 0
     let strippedTokens = 0
     let derivedThisTurn = false
+    let nonResidentToolDefinitions = 0
 
     for (const part of turn.parts) {
+      // A definition offered but not resident is not in the context, so it
+      // must add nothing to the buckets, the groups, or the residual (D7). It
+      // is still counted, so the turn can say what was offered.
+      if (part.resident === false) {
+        nonResidentToolDefinitions += 1
+        continue
+      }
+      const text = partText(part)
+      // Observed means "supplied something countable". A non-string text that
+      // carries no usable count supplied nothing, so it must not read as
+      // observed-empty any more than an absent part does (D8).
+      const measured = measuredCount(part.tokens)
+      if (text !== '' || measured !== undefined) observed.add(part.part)
       // Instruction fences ride inside history and tool results; stripping
       // them anywhere else would miscount a system prompt that happens to
       // quote a fence, so the strip applies to the carrier buckets only.
       const strippable = part.part === 'conversation_history' || part.part === 'tool_result_content'
       const containsMarkers =
-        strippable && part.text.includes(markers.open) && part.text.includes(markers.close)
+        strippable && text.includes(markers.open) && text.includes(markers.close)
       let tokens: number
 
       if (containsMarkers) {
@@ -382,7 +548,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         // pieces, so the split is always derived — and that derivation is
         // precisely what a tokenizer-drift attribution of the turn's
         // residual would be claiming (R7.3).
-        const { blocks, remainder } = stripInstructionBlocks(part.text, markers)
+        const { blocks, remainder } = stripInstructionBlocks(text, markers)
         const remainderTokens = countTokens(remainder)
         buckets[part.part] += remainderTokens
         derivedThisTurn = true
@@ -396,9 +562,18 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         }
         tokens = partTokens
       } else {
-        tokens = part.tokens ?? countTokens(part.text)
-        if (part.tokens === undefined) derivedThisTurn = true
+        tokens = measured ?? countTokens(text)
+        if (measured === undefined || part.derived === true) derivedThisTurn = true
         buckets[part.part] += tokens
+        // A REDUCED part carries the instruction blocks that were stripped out
+        // of its text, already counted: the carrier bucket keeps the
+        // remainder and the instruction bucket keeps the blocks, exactly as
+        // the split above does for a part whose text is still in hand.
+        if (part.instructionTokens !== undefined) {
+          buckets.instruction_context += part.instructionTokens
+          strippedCount += part.strippedCount ?? 0
+          strippedTokens += part.instructionTokens
+        }
       }
 
       // Server resolution reads ground truth only (the schema-cost rule,
@@ -443,7 +618,10 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     let classification: ClassifiedTurnContext | undefined
     if (options.classify) {
       const telemetry = typeof options.classify === 'object' ? options.classify : undefined
-      classification = classifyTurnContext(turn, telemetry, { countTokens })
+      // Classification reads resident items only: a non-resident definition
+      // would otherwise be classified as if it occupied the context (D7).
+      const resident = { ...turn, parts: turn.parts.filter((part) => part.resident !== false) }
+      classification = classifyTurnContext(resident, telemetry, { countTokens })
     }
 
     perTurn.push({
@@ -463,6 +641,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
       accumulationRate,
       freshInput: turn.freshInput,
       ...(freshInputJump !== undefined ? { freshInputJump } : {}),
+      ...(nonResidentToolDefinitions > 0 ? { nonResidentToolDefinitions } : {}),
       ...(classification !== undefined ? { classification } : {}),
     })
     if (freshInputJump !== undefined) flaggedTurns.push(position + 1)
@@ -477,6 +656,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     contextLimit,
     ...(options.contextLimitSource !== undefined ? { contextLimitSource: options.contextLimitSource } : {}),
     turns: perTurn,
+    observedParts: CANONICAL_CONTENT_KEYS.filter((key) => observed.has(key)),
     residualTotal,
     derivedCounts,
     freshJumpFactor,

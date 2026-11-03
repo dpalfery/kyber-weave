@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -120,10 +119,16 @@ public sealed class CursorRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Cursor);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
 
         // Read upfront so the primary-agent fail-closed check can see whether a
         // canonical skill already occupies the lowered identity before any file is built,
@@ -166,6 +171,20 @@ public sealed class CursorRenderer : ISquadRenderer
             {
                 if (skillIdentities.Contains(agent.Name))
                 {
+                    if (sharedIdentities.Contains(agent.Name))
+                    {
+                        // The canonical skill is the entry point and is emitted by the skill
+                        // loop, so no lowered skill is emitted here; one identity, one
+                        // projection.
+                        degradations.Add(BuildPrimaryAgentDegradation(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary,
+                            true));
+                        continue;
+                    }
+
                     throw new SquadRenderValidationException(
                         $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
                         $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
@@ -210,8 +229,9 @@ public sealed class CursorRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -400,52 +420,61 @@ public sealed class CursorRenderer : ISquadRenderer
         StringBuilder details = new();
         if (unexpressed.Count > 0)
         {
-            details.Append(CultureInfo.InvariantCulture, $"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
+            details.Append(CultureInfo.InvariantCulture,
+                $"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
         }
         else
         {
-            details.Append("Cursor subagent configuration enforces readonly mode, but cannot express other fine-grained permissions.");
+            details.Append(
+                "Cursor subagent configuration enforces readonly mode, but cannot express other fine-grained permissions.");
         }
 
         if (unenforcedDenials.Count > 0)
         {
-            details.Append(CultureInfo.InvariantCulture, $" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
+            details.Append(CultureInfo.InvariantCulture,
+                $" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
         }
 
         if (agent.DelegatesTo.Count > 0)
         {
-            details.Append(" Permitted delegation roster cannot be pinned in subagent frontmatter (Cursor resolves subagents at Task-call time).");
+            details.Append(
+                " Permitted delegation roster cannot be pinned in subagent frontmatter (Cursor resolves subagents at Task-call time).");
         }
 
         return new SquadDegradationRecord(
-            Target: "cursor",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: details.ToString());
+            "cursor",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            details.ToString());
     }
 
     private static SquadDegradationRecord BuildPrimaryAgentDegradation(
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false)
     {
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
+        string projectionText = reusedCanonicalSkill
+            ? "this agent reuses the same-name canonical skill as its entry point, because the " +
+              "canonical skill already occupies that identity; no separate agent file is emitted"
+            : "this agent renders as a top-level Cursor skill instead of a '.cursor/agents/' file";
+
         return new SquadDegradationRecord(
-            Target: "cursor",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Cursor has no primary-agent selection primitive, so fallback profile " +
-            $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent} " +
-            "and this agent renders as a top-level Cursor skill instead of a " +
-            "'.cursor/agents/' file. Capability decisions " +
+            "cursor",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            "Cursor has no primary-agent selection primitive, so fallback profile " +
+            $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent} and " +
+            projectionText + ". Capability decisions " +
             $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
             "are not enforced: a top-level Cursor skill runs under the harness default tool " +
             "set, not the canonical capability lattice, and its delegates-to roster " +

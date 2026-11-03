@@ -12,6 +12,11 @@ import { isNotMeasurable, type MetricAvailability } from './types.js'
 // part or a named window in the sessions themselves overrides it. Fixtures
 // are synthetic: real key names, invented content.
 
+// The real condition for OpenCode (D7): it exports no telemetry of its own, so
+// a dimension is unmeasurable until the capture plugin has recorded sessions.
+const OPENCODE_NO_CAPTURE_REASON =
+  'OpenCode exports no session telemetry unless the KyberDash capture plugin has recorded sessions; none carrying this counter were observed.'
+
 const CONTENT_DIMENSIONS = ['tool_yield', 'tool_definitions', 'schema_cost'] as const
 const PRESSURE_DIMENSIONS = [
   'context_pressure',
@@ -113,7 +118,7 @@ describe('harnessDimensionAvailability — no evidence returns the static reason
 
   it('keeps the exact static wording', () => {
     expect(reasonOf(harnessDimensionAvailability('opencode', 'context_pressure', { windowSources: ['default'] }))).toBe(
-      'OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.',
+      OPENCODE_NO_CAPTURE_REASON,
     )
     expect(reasonOf(harnessDimensionAvailability('claude-code', 'tool_yield', { bucketParts: [] }))).toBe(
       'Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.',
@@ -298,5 +303,82 @@ describe('signals — the inputs are the evidence', () => {
       status: 'not_measurable',
       reason: reasonOf(harnessDimensionAvailability('opencode', 'context_pressure')),
     })
+  })
+})
+
+describe('harnessDimensionAvailability — OpenCode token, cache and cost evidence (D7)', () => {
+  it('measures token usage and derives cost when sessions carry token counters', () => {
+    expect(isNotMeasurable(harnessDimensionAvailability('opencode', 'token_usage'))).toBe(true)
+    expect(isNotMeasurable(harnessDimensionAvailability('opencode', 'cost'))).toBe(true)
+    expect(harnessDimensionAvailability('opencode', 'token_usage', { tokenUsage: true })).toBe('measured')
+    expect(harnessDimensionAvailability('opencode', 'cost', { tokenUsage: true })).toBe('derived')
+    expect(harnessDimensionAvailability('opencode', 'cost', { cost: true })).toBe('derived')
+  })
+
+  it('measures cache dimensions only on cache-read evidence', () => {
+    for (const dim of ['cache_hit_rate', 'cache_efficiency', 'cache']) {
+      expect(isNotMeasurable(harnessDimensionAvailability('opencode', dim, { tokenUsage: true }))).toBe(true)
+      expect(harnessDimensionAvailability('opencode', dim, { cacheRead: true })).toBe('measured')
+    }
+  })
+
+  it('does not let token evidence unlock content or window dimensions', () => {
+    for (const dim of [...CONTENT_DIMENSIONS, ...PRESSURE_DIMENSIONS]) {
+      expect(harnessDimensionAvailability('opencode', dim, { tokenUsage: true, cacheRead: true, cost: true })).toEqual(
+        harnessDimensionAvailability('opencode', dim),
+      )
+    }
+  })
+
+  it('words every static OpenCode refusal as the real condition', () => {
+    for (const dim of ['token_usage', 'cost', 'cache_hit_rate', 'context_pressure', 'tool_yield', 'delegation_overhead']) {
+      expect(reasonOf(harnessDimensionAvailability('opencode', dim))).toContain('KyberDash capture plugin')
+    }
+  })
+
+  it('leaves other harnesses unchanged by false or absent flags', () => {
+    for (const harness of ['aider', 'claude-code', 'cursor', 'copilot']) {
+      for (const dim of ['token_usage', 'cost', 'cache_hit_rate']) {
+        expect(harnessDimensionAvailability(harness, dim, { tokenUsage: false, cacheRead: false, cost: false })).toEqual(
+          harnessDimensionAvailability(harness, dim),
+        )
+      }
+    }
+  })
+})
+
+describe('harness rollup — OpenCode token and cache evidence from recorded sessions', () => {
+  const counted = (cache: number) =>
+    payload({
+      harness: 'opencode',
+      summary: {
+        total_input: 1000,
+        total_output: 200,
+        total_cache_read: cache,
+        cost: { basis: 'derived', status: 'priced', value: 0.01, currency: 'USD' },
+      },
+    })
+
+  it('digests token, cache-read and cost evidence', () => {
+    const digest = digestSessionPayloads([counted(400)])
+    expect(digest.tokenUsage).toBe(true)
+    expect(digest.cacheRead).toBe(true)
+    expect(digest.cost).toBe(true)
+    const empty = digestSessionPayloads([payload({ harness: 'opencode', summary: { total_input: 0 } })])
+    expect(empty.tokenUsage).toBe(false)
+    expect(empty.cacheRead).toBe(false)
+    expect(empty.cost).toBe(false)
+  })
+
+  it('measures the OpenCode cache hit rate when sessions carry cache reads', () => {
+    const rollup = rollupOf('opencode', [counted(400)])
+    expect(rollup.cacheHitRate).toBe(0.4)
+    expect(rollup.measurability['cache_hit_rate']).toBe('measured')
+  })
+
+  it('keeps the OpenCode cache hit rate not_measurable without cache reads', () => {
+    const rollup = rollupOf('opencode', [counted(0)])
+    expect(rollup.cacheHitRate).toBeNull()
+    expect(reasonOf(rollup.measurability['cache_hit_rate']!)).toContain('KyberDash capture plugin')
   })
 })

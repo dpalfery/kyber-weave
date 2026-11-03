@@ -133,7 +133,8 @@ describe('shared design tokens (R8.12)', () => {
     const referencedTheme = themeTokens.filter((token) => isReferenced(token, sources, vars))
     expect(referencedTheme.length, 'components should consume at least some @theme tokens').toBeGreaterThan(0)
 
-    execSync('npm run build', { cwd: webRoot, stdio: 'pipe' })
+    // execSync blocks the event loop, so the vitest test timeout cannot stop a hung Vite build; bound it here.
+    execSync('npm run build', { cwd: webRoot, stdio: 'pipe', timeout: 120_000, killSignal: 'SIGKILL' })
     expect(existsSync(distCssDir), 'vite should emit CSS under dist/dash/assets').toBe(true)
     const built = readdirSync(distCssDir)
       .filter((name) => name.endsWith('.css'))

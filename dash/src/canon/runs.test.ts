@@ -678,3 +678,104 @@ describe('Issue #182 — twin front-ends build one run', () => {
     store.close()
   })
 })
+
+describe('buildRuns malformed counters (non-number dims)', () => {
+  it('builds the run when a turn carries non-number counter dims', async () => {
+    // A corrupt row carries strings, NaN, Infinity, and objects where finite
+    // counters belong. The twin collapse reads those as unmeasured rather
+    // than crashing, and the run still builds from the turn's content.
+    const store = new CanonStore(':memory:')
+    store.upsert(
+      makeRecord('corrupt-dims-1', {
+        sessionId: 'sess-corrupt',
+        timestamp: '2026-09-03T10:00:00.000Z',
+        tokens: {
+          freshInput: 'lots',
+          cacheRead: Number.NaN,
+          cacheCreation: Number.POSITIVE_INFINITY,
+          output: Number.NaN,
+          reportedInput: {},
+          reportedOutput: [],
+        } as unknown as TokenUsage,
+        raw: { cwd: '/repo/app' },
+      }),
+    )
+
+    const report = await buildRuns(store)
+
+    expect(report.runsBuilt).toBe(1)
+    expect(report.executionsBuilt).toBe(1)
+    expect(store.listRuns()).toHaveLength(1)
+    store.close()
+  })
+})
+
+// Kilo review: `hasTurnEvidence` compared untrusted bytes with `> 0`, so the
+// string '28' coerced true — a run built from a turn twin-dedupe had already
+// read as unmeasured — and `Object.keys(r.content)` threw when a corrupt row
+// carried `null` where the content map belongs, failing the whole build.
+describe('buildRuns turn evidence — malformed counters and content', () => {
+  it('reads a non-numeric counter as no token evidence', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(
+      makeRecord('string-counter-1', {
+        sessionId: 'sess-string-counter',
+        tokens: tokens({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 0,
+          reportedInput: '28' as unknown as number,
+          reportedOutput: 0,
+        }),
+        content: {},
+      }),
+    )
+
+    const report = await buildRuns(store)
+
+    expect(report.runsBuilt).toBe(0)
+    expect(store.listRuns()).toHaveLength(0)
+    store.close()
+  })
+
+  it('reads a non-finite counter from a corrupt row as no token evidence', async () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.upsert(
+      makeRecord('inf-counter-1', {
+        sessionId: 'sess-inf-counter',
+        tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+        content: {},
+      }),
+    )
+    // JSON cannot carry Infinity, so a persisted non-finite value arrives as
+    // the `1e400` literal, which JSON.parse reads as Infinity.
+    const writer = new DatabaseSync(path)
+    writer
+      .prepare('UPDATE records SET tokens_json = ? WHERE span_id = ?')
+      .run('{"freshInput":0,"cacheRead":0,"cacheCreation":0,"output":0,"reportedInput":1e400,"reportedOutput":0}', 'inf-counter-1')
+    writer.close()
+
+    const report = await buildRuns(store)
+
+    expect(report.runsBuilt).toBe(0)
+    store.close()
+  })
+
+  it('survives a null content map on a turn record', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(
+      makeRecord('null-content-1', {
+        sessionId: 'sess-null-content',
+        tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+        content: null as unknown as CanonicalRecord['content'],
+      }),
+    )
+
+    const report = await buildRuns(store)
+
+    expect(report.runsBuilt).toBe(0)
+    store.close()
+  })
+})

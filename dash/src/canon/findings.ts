@@ -12,7 +12,7 @@
 import { detectFindings } from '../analysis/findings.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
-import { CanonStore } from './store.js'
+import { CanonStore, reduceRecordPayloads } from './store.js'
 import type { CanonicalRecord } from './types.js'
 
 export type BuildFindingsReport = {
@@ -33,6 +33,41 @@ export type BuildFindingsReport = {
  * scope findings to one harness instead of showing every run's findings on every tab.
  */
 export function buildFindings(store: CanonStore): BuildFindingsReport {
+  const steps = buildFindingsSteps(store)
+  let step = steps.next()
+  while (!step.done) step = steps.next()
+  return step.value
+}
+
+/**
+ * The same build, handing the event loop back between runs.
+ *
+ * WHY two shapes: the projection over a real corpus spends seconds in the
+ * detector sweep, and a rebuild that holds the event loop starves every
+ * pending HTTP handler. The build itself is one implementation — a generator
+ * that pauses between runs — and the two drivers below decide whether a pause
+ * is a loop turn (here) or nothing at all (the synchronous `buildFindings`).
+ */
+export async function buildFindingsYielding(
+  store: CanonStore,
+  yieldToLoop: () => Promise<void>,
+): Promise<BuildFindingsReport> {
+  const steps = buildFindingsSteps(store)
+  let step = steps.next()
+  while (!step.done) {
+    await yieldToLoop()
+    step = steps.next()
+  }
+  return step.value
+}
+
+/**
+ * The findings build as a sequence of steps, pausing between runs.
+ *
+ * The pause point is the generator's `yield`: the synchronous driver steps
+ * over it, the yielding driver awaits a loop turn there.
+ */
+function* buildFindingsSteps(store: CanonStore): Generator<void, BuildFindingsReport> {
   const report: BuildFindingsReport = { runsExamined: 0, findingsBuilt: 0, pruned: 0 }
   const builtIds = new Set<string>()
   const identities = store.sessionIdentities()
@@ -44,6 +79,12 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       const share = identities.shareOf(sessionId)
       const shareRecords =
         share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      // The detectors read a few attributes out of each payload, and a
+      // session's decompressed payloads are the projection's working set — the
+      // measured corpus held 1.5 GB of them at once. The payloads are reduced
+      // to the attributes the readers look up before the twin collapse reads
+      // them, and released one record at a time.
+      reduceRecordPayloads(shareRecords)
       // Twin collectors describe the same turns twice (issue #182, ADR 0009
       // D4): detectors that count or sum across turns (duplicate-tool-call,
       // unbounded-delegation) would read one conversation as two. Scoped per
@@ -85,6 +126,7 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       builtIds.add(finding.id)
       report.findingsBuilt += 1
     }
+    yield
   }
 
   // A rebuild is authoritative. Anything the detectors did not re-emit is stale.

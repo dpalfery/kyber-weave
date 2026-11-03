@@ -85,7 +85,8 @@ public static class OntologyConfigLoader
             statuses: section.Statuses,
             technologies: NormalizeTechnologies(section.Technologies),
             baseRequiredKeys: section.BaseRequiredKeys,
-            requiredKeysByType: requiredKeys);
+            requiredKeysByType: requiredKeys,
+            intake: section.Intake);
     }
 
     /// <summary>

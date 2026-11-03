@@ -96,7 +96,7 @@ builder.Services.AddSingleton(new DocumentIndexHost(
 builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisReader(repoRoot));
 
 builder.Services
-    .AddMcpServer()
+    .AddMcpServer(DocsServerInstructions.Configure)
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 

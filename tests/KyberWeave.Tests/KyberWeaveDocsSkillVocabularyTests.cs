@@ -8,10 +8,14 @@ namespace KyberWeave.Tests;
 /// fitted. A coding standard labelled that way validates, and nothing reports that
 /// it will never resolve as a standard.
 /// </summary>
+/// <remarks>
+/// The skill root pins the Kyber-Docs rename: the authoring contract lives at
+/// <c>.apm/skills/kyber-docs-authoring</c>, not the retired <c>kyber-weave-docs</c> directory.
+/// </remarks>
 public sealed class KyberWeaveDocsSkillVocabularyTests
 {
     private static string SkillRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills", "kyber-weave-docs");
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills", "kyber-docs-authoring");
 
     [Fact]
     public void TheSkillReadsTheClosedDocTypeSetFromTheOntology()

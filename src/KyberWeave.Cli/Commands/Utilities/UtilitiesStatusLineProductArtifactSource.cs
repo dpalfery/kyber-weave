@@ -64,6 +64,7 @@ internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatu
             StatusLineTarget.Claude => "claude",
             StatusLineTarget.Agy => "antigravity",
             StatusLineTarget.Pi => "pi",
+            StatusLineTarget.CommandCode => "commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

@@ -32,17 +32,22 @@ public sealed record GateReport(
 /// <param name="Findings">Findings surviving the council's own confirmation pass.</param>
 /// <param name="ChangedPaths">Repository-relative paths the change touches.</param>
 /// <param name="ChangedLines">Total added and removed lines.</param>
+/// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
 public sealed record FindingsReport(
     string Schema,
     IReadOnlyList<ReviewFinding> Findings,
     IReadOnlyList<string> ChangedPaths,
-    int ChangedLines)
+    int ChangedLines,
+    IReadOnlyDictionary<string, int>? PathLineCounts = null)
 {
     /// <summary>The current findings format.</summary>
     public const string CurrentSchema = "kyber-weave.review-findings/v1";
 
     /// <summary>The scope this report describes.</summary>
-    public ReviewScope ToScope() => new(ChangedPaths, ChangedLines);
+    public ReviewScope ToScope()
+    {
+        return new ReviewScope(ChangedPaths, ChangedLines, PathLineCounts);
+    }
 }
 
 /// <summary>Reads and writes the review documents that pass between layers.</summary>
@@ -82,7 +87,7 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         return JsonSerializer.Deserialize<GateReport>(json, Options)
-            ?? throw new JsonException("The gate report is empty.");
+               ?? throw new JsonException("The gate report is empty.");
     }
 
     /// <summary>Reads a findings report.</summary>
@@ -90,7 +95,7 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         return JsonSerializer.Deserialize<FindingsReport>(json, Options)
-            ?? throw new JsonException("The findings report is empty.");
+               ?? throw new JsonException("The findings report is empty.");
     }
 
     /// <summary>Reads a duplicates report.</summary>
@@ -98,6 +103,6 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         return JsonSerializer.Deserialize<DuplicateReport>(json, Options)
-            ?? throw new JsonException("The duplicates report is empty.");
+               ?? throw new JsonException("The duplicates report is empty.");
     }
 }

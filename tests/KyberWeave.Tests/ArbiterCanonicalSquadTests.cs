@@ -41,6 +41,7 @@ public sealed class ArbiterCanonicalSquadTests
         "product-planning-devin",
         "publishing-worker",
         "read-only",
+        "root-fixer",
         "worker",
     ];
 

@@ -2,6 +2,10 @@
 
 <!-- What changed and why -->
 
+## Documentation impact
+
+<!-- Scale (new-component | extends-component | no-design-change), affected components, and the Design harvest targets. -->
+
 ## Test plan
 
 - [ ] `dotnet build KyberWeave.sln -c Release`

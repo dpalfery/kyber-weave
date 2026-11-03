@@ -16,7 +16,7 @@ public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
     /// trigger exits 1 and names the known triggers. Exits 1 when the
     /// configuration itself fails to load.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))

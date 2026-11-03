@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 
+// Longest any one step (install, build, test, package) may run before it is killed.
+const STEP_TIMEOUT_MS = 30 * 60_000
 const MODES = new Set(['preflight', 'tests', 'package'])
 
 function usage() {
@@ -38,6 +40,8 @@ function run(command, args, options = {}) {
       cwd: options.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Bounds a hung step; spawn kills the child and 'close' reports it.
+      timeout: STEP_TIMEOUT_MS,
     })
     const stdout = []
     const stderr = []

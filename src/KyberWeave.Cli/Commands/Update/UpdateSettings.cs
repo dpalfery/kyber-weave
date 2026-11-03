@@ -28,4 +28,9 @@ public sealed class UpdateSettings : CommandSettings
     [CommandOption("--no-arbiter")]
     [Description("Leave an installed kyber-weave-arbiter unchanged.")]
     public bool NoArbiter { get; set; }
+
+    [CommandOption("--no-restart")]
+    [Description(
+        "Do not restart the KyberDash engine or tray after the update; the OpenCode capture plugin is still upgraded.")]
+    public bool NoRestart { get; set; }
 }

@@ -142,7 +142,7 @@ public sealed class ArbiterFactBuilderTests
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nInvestigate.";
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "investigate",
-            "task-reviewer",
+            "review-triage",
             Prompt,
             "conductor",
             "harness",
@@ -203,11 +203,11 @@ public sealed class ArbiterFactBuilderTests
             {
                 Harness = "antigravity",
                 Phase = "pre",
-                Target = "task-reviewer",
+                Target = "review-triage",
                 Prompt = Prompt,
                 IsDispatch = true,
             },
-            "task-reviewer",
+            "review-triage",
             Prompt);
 
         Assert.Equal("investigate", classification.Trigger);

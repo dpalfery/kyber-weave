@@ -89,20 +89,87 @@ export const FILE_SOURCE_UNMEASURABLE: readonly string[] = [
  * Per-reader limits for the transcript formats D5 supports. Claude stores
  * conversation and tool-result content but injects prompts and tool schemas
  * at runtime. Codex stores prompts, instructions, conversation, and results,
- * but records tool names rather than definition schemas.
+ * but records tool names rather than definition schemas. Kilo's shared
+ * runtime stores conversation text and completed tool output in kilo.db but
+ * never the runtime prompt, its schemas, or instruction context (D7). The Kilo
+ * capture plugin supplies the prompt and schemas per turn; the synthesizer
+ * lifts those two declarations for a turn the plugin recorded.
  */
 export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new Map([
   ['claude', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['claude-code', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['codex', ['schema_cost', 'tool_definitions']],
-  ['opencode', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
-  ['kilo', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
-  ['kilo-code', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  // OpenCode has no entry: it has no transcript reader. Its sessions come from the capture
+  // plugin, which supplies content per turn (with the user's consent), so no bucket is
+  // declared unmeasurable up front. `measurabilityFor` still falls back to
+  // FILE_SOURCE_UNMEASURABLE for a file-sourced OpenCode record.
+  ['kilo', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  ['kilo-code', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  // The shared-runtime harness reads the same kilo.db store as its provider,
+  // so its capability row names the same limitation instead of falling
+  // through to the survey family.
+  ['kilo-shared-runtime', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  // The legacy VS Code task tree shares the provider and the reader
+  // registration but not the store: ui_messages.json has no reader-compatible
+  // parts, so nothing the SQLite reader measures is measurable there either.
+  ['kilo-vscode-legacy', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot-vscode', ['schema_cost', 'system_prompt', 'tool_definitions', 'tool_result_content']],
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
+  ['commandcode', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions']],
+  // Copilot CLI's journal carries the system prompt only on the turns it pairs
+  // with a reader turn, so system_prompt stays declared here and is lifted per
+  // record (see `measurabilityForRecord`). Its other keys keep the copilot
+  // family's declaration. The journal carries no tool schemas: the `<tools>`
+  // block in its system prompt is usage guidance, so tool_definitions is never
+  // lifted.
+  ['copilot-cli', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  // Antigravity exports MCP tool schemas (the `mcp/<server>/<tool>.json`
+  // catalogue) as tool_definitions, but not built-in tool schemas, the system
+  // prompt, or skill text. The catalogue is a directory snapshot, not a
+  // resident-context measurement, so schema_cost stays unmeasurable. The
+  // catalogue reaches a turn only where it was paired, so tool_definitions
+  // stays declared here and is lifted per record (see `measurabilityForRecord`).
+  ...['antigravity', 'antigravity-cli', 'antigravity-ide'].map((id): [string, readonly string[]] => [
+    id,
+    ['schema_cost', ...CANONICAL_CONTENT_KEYS],
+  ]),
+])
+
+/**
+ * The reason Copilot CLI's tool_definitions is declared not measurable. The
+ * `<tools>` section of its system prompt reads like a tool list but is usage
+ * guidance, so it must not be taken for the offered set (D8).
+ */
+const COPILOT_CLI_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** The reason Antigravity's tool_definitions is not measurable on a turn with no paired catalogue. */
+const ANTIGRAVITY_TOOL_DEFINITIONS_REASON =
+  'Antigravity does not export tool definitions for this turn; its MCP catalogue is paired only where the turn carries it.'
+
+/**
+ * Readers whose declared limits are settled record by record (D8): a declared
+ * key is measured on a record only where that record's paired reader turn
+ * carried parts of it. Every other reader keeps its declaration whole, because
+ * its limit concerns completeness rather than presence — Cursor's conversation
+ * prefix is incomplete even on a turn that carries one.
+ */
+const PER_RECORD_LIFT_HARNESSES: ReadonlySet<string> = new Set([
+  // Kilo's prompt and tool definitions come from the capture plugin for the turns it
+  // recorded; kilo.db carries neither, so every other turn keeps the declaration.
+  'kilo-shared-runtime',
+  'copilot-cli',
+  'antigravity',
+  'antigravity-cli',
+  'antigravity-ide',
+])
+
+/** Keys a reader never lifts, however its paired turn reads (D8). */
+const NEVER_LIFTED: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['copilot-cli', new Set(['tool_definitions'])],
 ])
 
 /**
@@ -247,6 +314,8 @@ export function normalizeHarnessName(harness: string): string {
     return 'kilo-shared-runtime'
   }
   if (lower === 'kimicode' || lower === 'kimi-code') return 'kimi-code'
+  // The npm package is published as `command-code`; the provider, registry and reader all use `commandcode`.
+  if (lower === 'commandcode' || lower === 'command-code') return 'commandcode'
   return lower
 }
 
@@ -371,6 +440,12 @@ export function measurabilityFor(
           ? provider === 'gemini'
             ? 'Gemini session files do not export a cache-creation counter.'
             : 'Antigravity conversation stores do not export a cache-creation counter.'
+          : metric === 'tool_definitions' && surveyFamily(provider) === 'antigravity'
+            ? ANTIGRAVITY_TOOL_DEFINITIONS_REASON
+          : metric === 'tool_definitions' && provider === 'copilot-cli'
+            ? COPILOT_CLI_TOOL_DEFINITIONS_REASON
+          : metric === 'system_prompt' && provider === 'copilot-cli'
+            ? 'Copilot CLI session journals carry the system prompt only on turns the journal pairs with a reader turn.'
           : metric === 'system_prompt' && provider === 'copilot-vscode'
             ? 'VS Code Copilot chat-session files do not store the runtime system prompt.'
             : metric === 'tool_definitions' && provider === 'copilot-vscode'
@@ -399,6 +474,62 @@ export function measurabilityFor(
       ),
     ]),
   )
+}
+
+/**
+ * The measurability one synthesized record stamps (D8). The declaration for its
+ * provider stands, except that a declared key the paired reader turn carried
+ * parts of is measured on this record alone: a sibling turn the journal did not
+ * pair keeps the declared reason. Copilot CLI is declared on its own, because
+ * its journal limits differ from the copilot family's. The harness id decides
+ * the declaration, so a Copilot CLI envelope takes the CLI's declaration even
+ * though its calls arrive under the shared `copilot` provider label.
+ */
+export function measurabilityForRecord(
+  provider: string,
+  harnessId: string,
+  carriedKeys: ReadonlySet<string>,
+): Measurability {
+  const harness = normalizeHarnessName(harnessId)
+  // The legacy Kilo task tree shares kilo-code's provider string and reader registration
+  // but not its store: its own row declares every content bucket unmeasurable, so the
+  // harness id selects it. Keying on the harness for every record would re-key other
+  // split surfaces (claude-cli, copilot-vscode) whose providers already carry the right row.
+  const family = harness === 'copilot-cli' || harness === 'kilo-vscode-legacy' ? harness : provider
+  const declared = measurabilityFor(family)
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return declared
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
+  const stamped: Measurability = { ...declared }
+  for (const key of carriedKeys) {
+    if (key in stamped && !neverLifted.has(key)) stamped[key] = 'measured'
+  }
+  return stamped
+}
+
+/**
+ * The measurability one tool.invoke child stamps (D29). A child is not a paired
+ * reader turn: it carries only the result it was handed. A child has no paired
+ * reader turn of its own, so D8 gives it the family declaration for every key
+ * it does not carry itself, rather than the carrier's lifted state. Other
+ * harnesses keep the carrier's map unchanged.
+ */
+export function measurabilityForChild(
+  parent: Measurability,
+  provider: string,
+  harnessId: string,
+  childCarriedKeys: ReadonlySet<string>,
+): Measurability {
+  const harness = normalizeHarnessName(harnessId)
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return { ...parent }
+  const family = harness === 'copilot-cli' ? 'copilot-cli' : provider
+  const declared = measurabilityFor(family)
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
+  const stamped: Measurability = { ...parent }
+  for (const [key, value] of Object.entries(declared)) {
+    if (typeof value !== 'object') continue
+    stamped[key] = childCarriedKeys.has(key) && !neverLifted.has(key) ? 'measured' : value
+  }
+  return stamped
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +711,24 @@ export const SURVEYED_HARNESSES = [
 
 export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
 
+/**
+ * Why an OpenCode dimension is unmeasurable when no session evidence lifts it (D7).
+ * OpenCode exports no telemetry of its own; its sessions are recorded only by the
+ * KyberDash capture plugin, so the refusal names that condition rather than a
+ * setting of the harness.
+ */
+const OPENCODE_NO_CAPTURE_REASON =
+  'OpenCode exports no session telemetry unless the KyberDash capture plugin has recorded sessions; none carrying this counter were observed.'
+
+/**
+ * What the capture plugin adds once it is installed: counters always, content only with
+ * the user's consent. Appended to the prefix survey's reason, which is about content.
+ * The base reason above is also pinned verbatim by the dimension answers, so the consent
+ * condition rides beside it rather than inside it.
+ */
+const OPENCODE_CONTENT_CONSENT_NOTE =
+  'Even with the capture plugin, prompt and conversation content is recorded only with content consent, and no prefix bytes are exported.'
+
 const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
   [
     'copilot',
@@ -694,12 +843,12 @@ const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability,
   [
     'opencode',
     {
-      status: 'not_measurable',
-      confidence: 'documented',
-      cacheRead: false,
-      cacheCreation: false,
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
       reason:
-        'OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.',
+        'The KyberDash capture plugin exports cache read and cache write counters on every OpenCode model call it records; OpenCode itself exports no session telemetry, so a session the plugin did not record carries none.',
     },
   ],
 ])
@@ -823,7 +972,7 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
       prefixBytes: false,
       fallback: 'none',
       reason:
-        'OpenCode OpenTelemetry is disabled; no prefix bytes or transcript telemetry are available.',
+        `${OPENCODE_NO_CAPTURE_REASON} ${OPENCODE_CONTENT_CONSENT_NOTE}`,
     },
   ],
 ])
@@ -846,8 +995,8 @@ export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'c
   // Only an uncatalogued harness (`not_measurable` with `assumed`
   // confidence) falls back to the data — a documented negative is a
   // verified record even when its status is not literally `unsupported`
-  // (re-review #2: Kilo 7 — OpenCode is catalogued `not_measurable` with
-  // documented confidence, and its absent counters are absence, not data).
+  // (re-review #2: Kilo 7 — a documented negative is a catalogued record, and
+  // its absent counters are absence, not data).
   if (availability.confidence === 'assumed') return true
   if (availability.status === 'unsupported') return false
   // The per-counter flags are the record for every other catalogued
@@ -915,9 +1064,16 @@ export type DimensionEvidence = {
   bucketParts?: Iterable<string>
   /** Provenance of each window the sessions' pressures were measured against. */
   windowSources?: Iterable<ContextLimitSource>
+  /** Sessions carried observed, positive token counters (input or output). */
+  tokenUsage?: boolean
+  /** Sessions carried an observed, positive cache-read counter. */
+  cacheRead?: boolean
+  /** Sessions carried a priced cost figure. */
+  cost?: boolean
 }
 
 const TOOL_DIMENSIONS = new Set(['tool_yield', 'tool_definitions', 'schema_cost'])
+const CACHE_DIMENSIONS = new Set(['cache_hit_rate', 'cache_efficiency', 'cache'])
 const PRESSURE_DIMENSIONS = new Set([
   'context_pressure',
   'context_pressure_median',
@@ -952,6 +1108,10 @@ function evidencedAvailability(dim: string, evidence: DimensionEvidence | undefi
     }
     return declared ? 'derived' : undefined
   }
+  // Counters are measured; a cost is priced from them, so it is derived (D7).
+  if (dim === 'token_usage') return evidence.tokenUsage === true ? 'measured' : undefined
+  if (CACHE_DIMENSIONS.has(dim)) return evidence.cacheRead === true ? 'measured' : undefined
+  if (dim === 'cost') return evidence.cost === true || evidence.tokenUsage === true ? 'derived' : undefined
   return undefined
 }
 
@@ -980,6 +1140,12 @@ export function harnessDimensionAvailability(
 
   // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
   if (dim === 'cache_hit_rate' || dim === 'cache_efficiency' || dim === 'cache') {
+    if (normalized === 'opencode') {
+      // The survey says the capture plugin exports the counters; that is a capability, not
+      // a finding. With no recorded session carrying them, the static answer is still the
+      // no-capture refusal, and the evidence above is what lifts it (D7).
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
+    }
     const cache = cacheAvailability(normalized)
     if (cache.status === 'unsupported' || cache.status === 'not_measurable') {
       return unavailable(cache.reason)
@@ -1005,7 +1171,7 @@ export function harnessDimensionAvailability(
     dim === 'pressure'
   ) {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal metrics via LiteLLM but records no structured context window or per-turn token usage.')
@@ -1025,7 +1191,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf Cascade telemetry exports non-model metadata without tool definition schemas.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'claude-code') {
       return unavailable('Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.')
@@ -1051,7 +1217,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf does not export execution hierarchy or subagent delegation linkage.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'codex') {
       return unavailable('Codex session files record standalone sessions without execution hierarchy.')
@@ -1067,7 +1233,7 @@ export function harnessDimensionAvailability(
   // 7. Cost: billing basis (derived from token usage or reported)
   if (dim === 'cost') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     return 'derived'
   }
@@ -1075,7 +1241,7 @@ export function harnessDimensionAvailability(
   // 8. Token usage: basic token counters
   if (dim === 'token_usage') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal output via LiteLLM without structured token counters.')
@@ -1094,3 +1260,121 @@ export function harnessDimensionAvailability(
   return 'measured'
 }
 
+
+ // ---------------------------------------------------------------------------
+ // Harness scoping for the quarantine/problems list routes
+ // ---------------------------------------------------------------------------
+
+ /**
+  * Every harness spelling the `?harness=` filter accepts, front-end ids included
+  * (`claude-desktop`, `agy`, `copilot-chat`). The filter normalizes through
+  * `normalizeHarnessName` before matching, so twin front-ends scope to the same rows
+  * as their canonical owner — one harness reached through two collectors is one
+  * harness (issue #182). Anything normalizing outside this set is invalid (400),
+  * never silently unfiltered.
+  */
+ export const HARNESS_FILTER_SPELLINGS: readonly string[] = [
+   'pi',
+   'copilot',
+   'copilot-cli',
+   'copilot-vscode',
+   'copilot-jetbrains',
+   'copilot-agent',
+   'copilot-chat',
+   'github-copilot',
+   'claude-code',
+   'claude-desktop',
+   'claude',
+   'claude-cli',
+   'claude-unclassified',
+   'cursor',
+   'cursor-agent',
+   'codex',
+   'codex-cli',
+   'codex-desktop',
+   'codex-unclassified',
+   'openai-codex',
+   'gemini',
+   'antigravity',
+   'agy',
+   'antigravity-cli',
+   'antigravity-ide',
+   'opencode',
+   'kilo',
+   'kilo-code',
+   'kilo-shared-runtime',
+   'kilo-vscode-legacy',
+   'cline',
+   'cline-cli',
+   'aider',
+   'windsurf',
+   'cascade',
+   'roo',
+   'roo-code',
+   'roo-cline',
+   'kimi-code',
+   'kimicode',
+   'devin',
+   'commandcode',
+   'command-code',
+   'codebuff',
+   'codewhale',
+ ]
+
+ /** Canonical harness ids the filter can resolve to, derived from the spellings above. */
+ const KNOWN_HARNESS_FILTER_IDS: ReadonlySet<string> = new Set(
+   HARNESS_FILTER_SPELLINGS.map((spelling) => normalizeHarnessName(spelling)),
+ )
+
+ /**
+  * The declared spellings, lower-cased. `normalizeHarnessName` folds every `kilo*` prefix
+  * into the shared runtime, so checking only the normalized id would accept `kilo-bogus`;
+  * the filter validates the spelling itself first.
+  */
+ const KNOWN_HARNESS_FILTER_SPELLINGS: ReadonlySet<string> = new Set(
+   HARNESS_FILTER_SPELLINGS.map((spelling) => spelling.toLowerCase()),
+ )
+
+ /**
+  * Stored source values that count as unattributed for the `unknown` scope. `otlp` is the
+  * neutral grouping key `toRawSpan` stamps when the export named no service (ingest.ts);
+  * `unattributed` is the legacy collector's equivalent. Both are grouping keys, never
+  * attribution evidence — which is exactly why they scope to `unknown`.
+  */
+ export const QUARANTINE_UNKNOWN_SOURCES: readonly string[] = ['otlp', 'unattributed', 'unknown']
+
+ /** A parsed `?harness=` filter: unfiltered, unattributed-only, one harness, or invalid. */
+ export type HarnessFilter =
+   | { kind: 'all' }
+   | { kind: 'unknown' }
+   | { kind: 'harness'; id: string }
+   | { kind: 'invalid'; raw: string }
+
+ /**
+  * Parse the quarantine/problems `?harness=` filter. Absent, blank, or `all` means
+  * unfiltered (the list routes' backwards-compatible shape); `unknown` scopes to
+  * unattributed rows; anything else must resolve to a known harness id or it is invalid.
+  */
+ export function parseHarnessFilter(raw: string | null | undefined): HarnessFilter {
+   if (raw === null || raw === undefined || raw.trim() === '') return { kind: 'all' }
+   const trimmed = raw.trim()
+   const lower = trimmed.toLowerCase()
+   if (lower === 'all') return { kind: 'all' }
+   if (lower === 'unknown') return { kind: 'unknown' }
+   if (!KNOWN_HARNESS_FILTER_SPELLINGS.has(lower)) return { kind: 'invalid', raw: trimmed }
+   const id = normalizeHarnessName(trimmed)
+   if (KNOWN_HARNESS_FILTER_IDS.has(id)) return { kind: 'harness', id }
+   return { kind: 'invalid', raw: trimmed }
+ }
+
+ /**
+  * Stored-source spellings that belong to one canonical harness id: every known spelling
+  * normalizing to it, so `?harness=claude-code` also matches rows grouped under
+  * `claude-desktop`. Lower-cased for case-insensitive SQL matching.
+  */
+ export function sourceSpellingsForHarness(id: string): string[] {
+   const want = normalizeHarnessName(id)
+   return HARNESS_FILTER_SPELLINGS.filter((spelling) => normalizeHarnessName(spelling) === want).map(
+     (spelling) => spelling.toLowerCase(),
+   )
+ }

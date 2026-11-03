@@ -98,15 +98,15 @@ describe('piAdapter.normalize — the exclusive convention (R4.2)', () => {
     expect(piAdapter.validate(record)).toBeUndefined()
   })
 
-  it('declares tool_definitions unexported — 14 tools across 368 calls, none exported', () => {
+  it('declares no unexported metric — the collector exports the tool inventory', () => {
     const record = piAdapter.normalize(rawSpan({ spanId: 's1', attributes: piCounts() }))
-    expect(piAdapter.unexportedMetrics()).toEqual(['tool_definitions'])
-    // Absent is not zero (R7.6, R8.5, R10.2): the record says the harness
-    // cannot measure it, and no tool definition is invented.
-    expect(record.measurability).toEqual({
-      tool_definitions: expect.objectContaining({ availability: 'not_measurable' }),
-    })
-    expect(record.content).toEqual({})
+    // `pi.tools.selected` and `pi.tools.snippets` are the keys this adapter
+    // maps into `tool_definitions` content (PI_TOOL_DEFINITION_KEYS), so the
+    // old "pi exports no tool definitions — 14 tools across 368 calls"
+    // declaration was stale: it stamped `not_measurable` on every record
+    // while the definitions sat in that same record. Nothing is declared now.
+    expect(piAdapter.unexportedMetrics()).toEqual([])
+    expect(record.measurability?.tool_definitions).toBeUndefined()
   })
 })
 

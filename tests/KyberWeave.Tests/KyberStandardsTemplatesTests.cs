@@ -16,20 +16,23 @@ public sealed class KyberStandardsTemplatesTests
         "csharp",
         "data-access-layer",
         "github-actions",
+        "go",
         "maui",
         "pulumi",
         "python",
         "react",
+        "rust",
         "sql",
         "tauri",
-        "test"
+        "test",
+        "typescript"
     ];
 
     /// <summary>
-    /// Kyber-Weave embeds all 11 canonical Kyber Squad coding standards templates.
+    /// Kyber-Weave embeds all 14 canonical Kyber Squad coding standards templates.
     /// </summary>
     [Fact]
-    public void AllEnumeratesAllElevenCanonicalTechnologies()
+    public void AllEnumeratesAllFourteenCanonicalTechnologies()
     {
         IReadOnlyList<string> all = KyberStandardsTemplates.All;
 
@@ -45,13 +48,16 @@ public sealed class KyberStandardsTemplatesTests
     [InlineData("csharp")]
     [InlineData("data-access-layer")]
     [InlineData("github-actions")]
+    [InlineData("go")]
     [InlineData("maui")]
     [InlineData("pulumi")]
     [InlineData("python")]
     [InlineData("react")]
+    [InlineData("rust")]
     [InlineData("sql")]
     [InlineData("tauri")]
     [InlineData("test")]
+    [InlineData("typescript")]
     public void TryGetRetrievesTemplateForEachDeclaredTechnology(string technology)
     {
         bool found = KyberStandardsTemplates.TryGet(technology, out string? rawTemplate);

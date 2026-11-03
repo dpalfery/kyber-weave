@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -36,6 +37,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "dal-dev",
         "docs-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "product-owner",
         "pulumi-dev",
@@ -44,10 +46,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "research-agent",
         "review-lens",
         "review-triage",
+        "rust-dev",
         "sql-database-architect",
-        "task-reviewer",
         "tauri-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     private static readonly string[] CanonicalSkills =
@@ -66,16 +69,20 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
+        "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
         "resharper-clt",
-        "second-brain",
+        "rust-dev",
         "security-review",
         "setup-dev-environment",
-        "test-dev"
+        "task-gate",
+        "test-dev",
+        "typescript-dev"
     ];
 
     [Fact]
@@ -144,15 +151,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 21 canonical agents
-        Assert.Equal(21, CanonicalAgents.Length);
+        // Presence of all 23 canonical agents
+        Assert.Equal(23, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 24 canonical skills
-        Assert.Equal(24, CanonicalSkills.Length);
+        // Presence of all 28 canonical skills
+        Assert.Equal(28, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -170,6 +177,39 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".zcode/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".devin/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The stub-tree tests above prove the packer's shape, not the shipped inventory. This packs the
+    /// real canonical source so the APM package must carry the <c>task-gate</c> exit gate and must
+    /// not carry the retired <c>task-reviewer</c> in any entry.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_CanonicalSourceShipsTaskGateAndNoRetiredTaskReviewer()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "task-gate-inventory");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+
+        Assert.Contains("skills/task-gate/SKILL.md", entryNames);
+        Assert.DoesNotContain(entryNames, name => name.Contains("task-reviewer", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The retired <c>second-brain</c> documentation-architecture skill moves to Kyber-Docs
+    /// (<c>.apm/skills/kyber-docs-onboarding-and-assessment</c>). The APM package ships the
+    /// Squad bundle, so no entry may carry it in any path.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "no-second-brain");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+
+        Assert.DoesNotContain(entryNames, name => name.Contains("second-brain", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -285,7 +325,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: contains all 24 canonical skills
+        // Portable components only: contains all 25 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -547,6 +587,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
+                if (TryGetAllowedGateCatalogueInclude(path, out string family))
+                {
+                    Assert.Equal(
+                        $"Gates.{family}.yml",
+                        element.Attribute("LogicalName")?.Value);
+                    continue;
+                }
+
                 Assert.DoesNotContain("products", path, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("kyber-squad", path, StringComparison.OrdinalIgnoreCase);
             }
@@ -638,6 +686,30 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             "..\\..\\products\\kyber-squad\\agents\\conductor.md", "Arbiter.Roster.conductor.md"));
         Assert.True(IsAllowedArbiterEmbeddedInclude(
             "..\\..\\products\\kyber-squad\\skills\\code-review\\references\\lenses\\scope.md", "Arbiter.Lens.scope.md"));
+    }
+
+    /// <summary>
+    /// Core may embed the five gate catalogue family files from
+    /// <c>products/kyber-squad/standards/&lt;family&gt;/gates.yml</c> only when LogicalName
+    /// remaps them to <c>Gates.&lt;family&gt;.yml</c>. They are configuration, not the Squad corpus.
+    /// </summary>
+    private static bool TryGetAllowedGateCatalogueInclude(string path, out string family)
+    {
+        string normalized = path.Replace('\\', '/');
+        string[] families = ["csharp", "typescript", "rust", "go", "python"];
+        foreach (string candidate in families)
+        {
+            if (normalized.EndsWith(
+                    $"products/kyber-squad/standards/{candidate}/gates.yml",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                family = candidate;
+                return true;
+            }
+        }
+
+        family = string.Empty;
+        return false;
     }
 
     private static readonly string[] TextFileExtensions =

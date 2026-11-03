@@ -10,7 +10,7 @@ import { COST_BASIS_MISMATCH, COST_CURRENCY_MISMATCH } from '../canon/cost.js'
 import type { CanonicalRecord, CostBasis, CostBlock, TokenUsage } from '../canon/types.js'
 import { notMeasurable } from '../canon/types.js'
 
-import { compareHarnesses, type ComparisonTable, type MetricRow } from './compare.js'
+import { compareHarnesses, compareIterableRecords, type ComparisonTable, type MetricRow } from './compare.js'
 
 let spanCounter = 0
 
@@ -282,6 +282,23 @@ describe('cost compared only through a declared basis (R10.4)', () => {
     const total = row(table, 'total_cost').cells.pi
     expect(total.value).toBe(5)
     expect(total.render).toBe('$5.00 (partial)')
+  })
+
+  it('keeps a non-finite by-model amount out of the streamed total', () => {
+    const corpus = [
+      turn('pi', {
+        cost: { ...priced(0.1), byModel: { 'pi-model': 0.1, 'nan-model': Number.NaN } },
+      }),
+      turn('pi', { cost: { ...priced(0.2), byModel: { 'pi-model': 0.2 } } }),
+    ]
+
+    const table = compareIterableRecords(corpus)
+
+    // The finite amounts still total exactly; NaN never rides the sums it
+    // would otherwise poison, and no NaN leaks into a rendered figure.
+    const total = row(table, 'total_cost').cells.pi
+    expect(total.value).toBeCloseTo(0.3)
+    expect(total.render).not.toContain('NaN')
   })
 })
 

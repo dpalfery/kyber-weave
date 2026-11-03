@@ -1,0 +1,116 @@
+review:
+# Gates written by Kyber-Weave 0.1.0+f1fd593576a52d04c679b82a9001a47a0256a4cf 'docs init' from its shipped catalogue.
+# This block is yours: edit, remove or add gates freely; re-running 'docs init' never changes it.
+# 'kyber-weave review catalogue' prints the catalogue for newer releases, to copy in by hand.
+# CI: copy templates/github-actions/kyber-weave-review-gate.yml from
+# https://github.com/dpalfery/kyber-weave into .github/workflows/.
+# csharp (VSTest): 'dotnet test' exits 0 when no tests are found; set TreatNoTestsAsError to fail.
+  gates:
+    # csharp: format (.)
+    - id: csharp-format-whitespace
+      run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '-v', 'minimal']
+    # csharp: format (.)
+    - id: csharp-format-style
+      run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '-v', 'minimal']
+    # csharp: lint (.)
+    - id: csharp-format-analyzers
+      run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '-v', 'minimal']
+    # csharp: build (.)
+    - id: csharp-build
+      run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release']
+    # csharp: test (.)
+    - id: csharp-test
+      run: ['dotnet', 'test', 'Fixture.sln', '-c', 'Release', '--no-build']
+  task-gates:
+    csharp-dev:
+      # csharp: format (.)
+      - id: csharp-format-whitespace
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--include', '{changed}']
+      # csharp: format (.)
+      - id: csharp-format-style
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'style', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (.)
+      - id: csharp-format-analyzers
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']
+      # csharp: build (.)
+      - id: csharp-build
+        run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+    dal-dev:
+      # csharp: format (.)
+      - id: csharp-format-whitespace
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--include', '{changed}']
+      # csharp: format (.)
+      - id: csharp-format-style
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'style', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (.)
+      - id: csharp-format-analyzers
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']
+      # csharp: build (.)
+      - id: csharp-build
+        run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+    maui-dev:
+      # csharp: format (.)
+      - id: csharp-format-whitespace
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--include', '{changed}']
+      # csharp: format (.)
+      - id: csharp-format-style
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'style', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (.)
+      - id: csharp-format-analyzers
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']
+      # csharp: build (.)
+      - id: csharp-build
+        run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+    pulumi-dev:
+      # csharp: format (.)
+      - id: csharp-format-whitespace
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--include', '{changed}']
+      # csharp: format (.)
+      - id: csharp-format-style
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'style', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (.)
+      - id: csharp-format-analyzers
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']
+      # csharp: build (.)
+      - id: csharp-build
+        run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+    test-dev:
+      # csharp: format (test-dev copy)
+      - id: csharp-format-whitespace
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--verify-no-changes', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'whitespace', '--include', '{changed}']
+      # csharp: format (test-dev copy)
+      - id: csharp-format-style
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'style', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'style', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (test-dev copy)
+      - id: csharp-format-analyzers
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
+        fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']

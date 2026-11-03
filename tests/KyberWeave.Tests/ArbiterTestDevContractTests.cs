@@ -53,7 +53,7 @@ public sealed class ArbiterTestDevContractTests
             StringComparison.Ordinal);
         Assert.Contains("RED_EVIDENCE: none", digest, StringComparison.Ordinal);
         // The line is a digest field, not prose: it belongs in the returned template.
-        int templateStart = digest.IndexOf("STATUS: READY_FOR_REVIEW", StringComparison.Ordinal);
+        int templateStart = digest.IndexOf("STATUS: PASS | FAIL | ESCALATION", StringComparison.Ordinal);
         Assert.True(templateStart >= 0, "the completion digest template must stay pinned.");
         Assert.Contains("RED_EVIDENCE:", digest[templateStart..], StringComparison.Ordinal);
     }

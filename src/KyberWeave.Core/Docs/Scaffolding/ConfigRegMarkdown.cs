@@ -35,7 +35,13 @@ internal static class ConfigRegMarkdown
     }
 
     /// <summary>The generated region, markers included, with <c>\n</c> line endings.</summary>
-    public static string Render(IReadOnlyList<ConfigRegEntry> entries)
+    /// <param name="entries">
+    /// Registry properties, rendered in order. A mode entry is written the same way as a path
+    /// entry: the property line is what a skill resolves, and <c>`enabled`</c> reads as a
+    /// setting in that position without needing a syntax of its own.
+    /// </param>
+    /// <param name="autonomy">The autonomy setting, rendered as a final property line only when set.</param>
+    public static string Render(IReadOnlyList<ConfigRegEntry> entries, string? autonomy = null)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -53,6 +59,12 @@ internal static class ConfigRegMarkdown
         foreach (ConfigRegEntry entry in entries)
         {
             builder.Append("- **<").Append(entry.Name).Append(">**: `").Append(entry.Path).Append("`\n");
+        }
+
+        if (autonomy is not null)
+        {
+            builder.Append("- **<").Append(ConfigRegConfig.AutonomyProperty).Append(">**: `")
+                .Append(autonomy).Append("`\n");
         }
 
         // The worked example names a real property rather than a literal, so renaming one

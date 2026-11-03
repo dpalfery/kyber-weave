@@ -25,7 +25,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
     /// <c>KW-ARB-HOOK-001</c> envelope instead. Exits 1 on an unreadable event,
     /// an unknown <c>--trigger</c>, or an error result.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))

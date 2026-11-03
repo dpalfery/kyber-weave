@@ -41,7 +41,7 @@ kyber-weave utilities statusline doctor
 kyber-weave utilities statusline remove
 ```
 
-`<harness>` is one of `claude`, `agy`, `pi`.
+`<harness>` is one of `claude`, `agy`, `pi`, `commandcode`.
 
 - **`deploy`** writes only Kyber-owned files, beneath a Kyber-owned staging root, and records each
   one with its SHA-256 digest in the Kyber Utilities receipt. `--dry-run` prints the same guidance
@@ -119,6 +119,24 @@ Pi's extension **replaces the whole footer** — there is no stacking — so the
 cwd, model, and context itself. Pi auto-discovers extensions in `~/.pi/agent/extensions/`; Kyber
 Utilities never deploys there, because a file in that directory is active without your consent.
 
+### Command Code
+
+Copy the staged mod into your mods directory, then reload — or trial-run it first:
+
+```bash
+cp /absolute/path/to/kyber-statusline-commandcode.ts ~/.commandcode/mods/kyber-statusline.ts
+# inside Command Code:
+/reload
+# trial run without installing:
+# cmd --mod /absolute/path/to/kyber-statusline-commandcode.ts
+```
+
+Command Code loads every mod in `~/.commandcode/mods/` automatically; Kyber Utilities never
+deploys there, because a file in that directory is active without your consent. The mod renders
+one segment — `[CC] 📁 repo │ 🌿 branch │ 🤖 model │ ⚡ tokens │ ⏳ turn #n` — after the
+built-in row items; pick the built-ins with `/statusline`. There is no cost segment: the mod
+host exposes no cost API, and `/statusline off` hides the whole row.
+
 **OpenCode: not supported in this slice; see [issue #165](https://github.com/dpalfery/kyber-weave/issues/165).**
 
 ---
@@ -129,7 +147,7 @@ Utilities never deploys there, because a file in that directory is active withou
 
 - receipt checksum health and the executable bit for each owned file;
 - runtime prerequisites where the import inventory declares them: `jq`, `git`, and `awk` for
-  Claude Code; `python3` and `git` for `agy`; `node` for Pi;
+  Claude Code; `python3` and `git` for `agy`; `node` for Pi; `node` and `git` for Command Code;
 - each harness binary and its version;
 - for `agy`, whether `kyberdash` is present — a **warning**, not a failure, because the hand-off
   is optional;
@@ -192,7 +210,7 @@ implementations. Nothing enters the repository until it has been reviewed and sc
 | Constraint | What it means |
 |---|---|
 | **No settings ownership** | Kyber Utilities never creates, edits, merges, backs up, restores, or reads a shared harness settings file, for any harness or command, including `--dry-run`. |
-| **No auto-load deployment** | Deployed files go to a Kyber-owned staging location. Nothing is written into a directory a harness auto-loads (Pi `~/.pi/agent/extensions/`). |
+| **No auto-load deployment** | Deployed files go to a Kyber-owned staging location. Nothing is written into a directory a harness auto-loads (Pi `~/.pi/agent/extensions/`, Command Code `~/.commandcode/mods/`). |
 | **Manual activation** | The tool prints guidance; you edit your own settings. A deployed file is inert until you do. |
 | **Per-user scope** | macOS and Linux only. Project-scope deployment is out of scope. |
 | **Own receipt** | Kyber Utilities records its owned files in its own receipt, separate from Kyber-Squad's. |

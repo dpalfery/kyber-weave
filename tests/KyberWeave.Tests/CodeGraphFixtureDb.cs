@@ -43,6 +43,7 @@ internal sealed class CodeGraphFixtureDb : IDisposable
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -50,12 +51,9 @@ internal sealed class CodeGraphFixtureDb : IDisposable
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
 
-        using Process process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start sqlite3.");
-
-        // Drain before waiting: WaitForExit with undrained redirected pipes deadlocks as
-        // soon as the child writes more than the pipe buffer holds.
-        ProcessResult result = ProcessRunner.ReadToEnd(process);
+        // ProcessRunner drains both pipes before waiting, and kills the tree if sqlite3 has
+        // not exited within the limit. A bare WaitForExit has neither property.
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.StandardError);
     }

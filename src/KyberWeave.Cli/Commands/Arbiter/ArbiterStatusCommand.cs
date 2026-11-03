@@ -23,7 +23,7 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
     /// nothing. Exits 1 only when the configuration itself fails to load; a missing
     /// key is a warning and exits 0.
     /// </summary>
-    protected override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();

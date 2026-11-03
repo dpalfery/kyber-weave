@@ -12,7 +12,7 @@ public sealed class UpdateCommand : Command<UpdateSettings>
 
     internal Func<string, string?>? ReadEnvironment { get; init; }
 
-    protected override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -28,7 +28,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                 settings.NoMcp,
                 settings.NoKyberDash,
                 settings.NoMenubar,
-                settings.NoArbiter));
+                settings.NoArbiter,
+                settings.NoRestart));
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }
@@ -39,10 +40,15 @@ public sealed class UpdateCommand : Command<UpdateSettings>
         }
     }
 
-    public int Execute(CommandContext context, UpdateSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, UpdateSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 
-    private static void Log(string message) =>
+    private static void Log(string message)
+    {
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(message)}[/]");
+    }
 
     private static void WriteOutcome(SelfUpdateOutcome outcome)
     {

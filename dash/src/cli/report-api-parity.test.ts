@@ -20,6 +20,9 @@ import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const homes: string[] = []
 const servers: Server[] = []

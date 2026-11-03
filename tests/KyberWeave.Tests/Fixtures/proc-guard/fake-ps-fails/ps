@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stand-in for `ps`, put first on PATH by a test. It fails and prints nothing, the way ps does
+# when the process table cannot be read, so the guard must not read "no output" as "no such
+# process". It starts nothing.
+exit 1

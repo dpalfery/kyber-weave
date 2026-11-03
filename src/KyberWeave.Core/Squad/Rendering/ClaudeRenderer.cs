@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -35,9 +34,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Base ungoverned tools on every agent: <c>TodoWrite</c>, <c>Skill</c>. MCP server-level
-/// wildcards (<c>mcp__codegraph__*</c>, <c>mcp__kyber-weave__*</c>, <c>mcp__context7__*</c>)
-/// are granted when <c>filesystem.read</c> is allowed unless the agent is a pure
-/// orchestrator (profile id <c>orchestrator</c>). When <c>delegate: allow</c> and
+/// wildcards are granted by two rules, not one (ADR 0050). <c>mcp__kyber-weave__*</c> is
+/// granted whenever <c>filesystem.read</c> is allowed, the pure orchestrator (profile id
+/// <c>orchestrator</c>) included: that server carries <c>agent_coding_standards</c>, and the
+/// role that assigns work is the role deciding which standards apply to whom.
+/// <c>mcp__codegraph__*</c> and <c>mcp__context7__*</c> keep the orchestrator carve-out,
+/// because a role that only routes work has no use for code-graph or library lookups. When
+/// <c>delegate: allow</c> and
 /// <see cref="SquadAgent.DelegatesTo"/> is non-empty, the allow-list emits
 /// <c>Agent(name1, name2, …)</c>; official docs state the parentheses roster is ignored
 /// when the definition runs as a nested subagent, so that limitation is recorded as
@@ -117,10 +120,18 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
     private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
-    private static readonly string[] StandardMcpTools =
+    /// <summary>
+    /// The MCP wildcard every read-entitled subagent carries, the pure orchestrator included.
+    /// </summary>
+    private const string UniversalMcpTool = "mcp__kyber-weave__*";
+
+    /// <summary>
+    /// The MCP wildcards that keep the pure-orchestrator carve-out: a role that only routes work
+    /// has no use for code-graph or library lookups.
+    /// </summary>
+    private static readonly string[] OrchestratorExcludedMcpTools =
     [
         "mcp__codegraph__*",
-        "mcp__kyber-weave__*",
         "mcp__context7__*"
     ];
 
@@ -137,7 +148,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
         ("filesystem.search", ["Grep", "Glob"]),
         ("filesystem.write", ["Edit", "Write", "NotebookEdit"]),
         ("process.execute", ["Bash", "PowerShell"]),
-        ("network.read", ["WebFetch", "WebSearch"]),
+        ("network.read", ["WebFetch", "WebSearch"])
     ];
 
     /// <summary>
@@ -219,7 +230,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -229,6 +240,12 @@ public sealed class ClaudeRenderer : ISquadRenderer
         HashSet<string> skillIdentities = source.Skills
             .Select(skill => skill.Name)
             .ToHashSet(StringComparer.Ordinal);
+
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
 
         // The declared vocabulary, not a renderer-local copy: a capability added to
         // profiles/capabilities.yml must appear in a lowered primary agent's
@@ -270,34 +287,55 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
                 if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
                 {
-                    // Fail closed if a canonical skill occupies the entry-point identity:
-                    // Claude renders both a subagent and an entry-point skill, so collision here
-                    // cannot be resolved by role-prefixed fallback.
                     if (skillIdentities.Contains(agent.Name))
                     {
-                        throw new SquadRenderValidationException(
-                            $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
-                            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                            "identity. Claude renders both a subagent and an entry-point skill, " +
-                            "so this is a fail-closed condition rather than a naming collision " +
-                            "this renderer can resolve on its own.");
+                        // A declared shared identity already has its canonical skill as the entry
+                        // point at .claude/skills/<name>/SKILL.md, so emitting the entry-point
+                        // skill too would project one identity twice. The canonical skill is the
+                        // entry point; skip the duplicate rather than failing closed.
+                        if (sharedIdentities.Contains(agent.Name))
+                        {
+                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                                agent,
+                                fallbackProfile,
+                                source.CapabilityProfiles.Profiles,
+                                capabilityVocabulary,
+                                true,
+                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md"));
+                        }
+                        else
+                        {
+                            // Not a declared shared identity: the canonical skill and the
+                            // entry-point skill would both claim
+                            // .claude/skills/<name>/SKILL.md, and a native target has no
+                            // role-prefixed escape hatch, so this is a real collision that
+                            // cannot be resolved here.
+                            throw new SquadRenderValidationException(
+                                $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
+                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+                                "identity. Claude renders both a subagent and an entry-point skill, " +
+                                "so this is a fail-closed condition rather than a naming collision " +
+                                "this renderer can resolve on its own.");
+                        }
                     }
+                    else
+                    {
+                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(
+                            agent,
+                            request.Scope,
+                            request.Arbiter,
+                            dispatcherAgents,
+                            guardedAgents,
+                            dispatchTargets);
+                        files.Add(skillPrincipal);
+                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
 
-                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(
-                        agent,
-                        request.Scope,
-                        request.Arbiter,
-                        dispatcherAgents,
-                        guardedAgents,
-                        dispatchTargets);
-                    files.Add(skillPrincipal);
-                    SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                    degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                        agent,
-                        fallbackProfile,
-                        source.CapabilityProfiles.Profiles,
-                        capabilityVocabulary));
+                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary));
+                    }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
@@ -322,8 +360,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -607,16 +646,20 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 granted.Add(agentToolEntry);
             }
 
-            bool isPureOrchestrator = string.Equals(
-                agent.CapabilityProfile,
-                "orchestrator",
-                StringComparison.Ordinal);
-
-            if (!isPureOrchestrator &&
-                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow)
+            // Two rules, not one (ADR 0050): kyber-weave carries agent_coding_standards, so it
+            // reaches every read-entitled agent — the pure orchestrator included, because the
+            // role that assigns work is the role deciding which standards apply to whom. The
+            // other two servers keep the orchestrator carve-out.
+            if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))
             {
-                foreach (string mcpTool in StandardMcpTools)
+                granted.Add(UniversalMcpTool);
+            }
+
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    capabilityProfiles))
+            {
+                foreach (string mcpTool in OrchestratorExcludedMcpTools)
                 {
                     granted.Add(mcpTool);
                 }
@@ -645,29 +688,45 @@ public sealed class ClaudeRenderer : ISquadRenderer
         return ordered;
     }
 
+    /// <remarks>
+    /// When <paramref name="reusedCanonicalSkill"/> is set, <paramref name="reusedCanonicalSkillPath"/>
+    /// carries the scope-resolved path of the reused canonical skill:
+    /// <c>.claude/skills/&lt;name&gt;/SKILL.md</c> under Project scope, the bare
+    /// <c>skills/&lt;name&gt;/SKILL.md</c> under Global scope, where the physical root is already
+    /// <c>~/.claude</c>. The record must name the path that was actually emitted; hardcoding the
+    /// project-scope literal points the reader at a file that was never written.
+    /// </remarks>
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradationRecords(
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false,
+        string reusedCanonicalSkillPath = "")
     {
         bool isSkillMode = string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal);
 
         if (isSkillMode)
         {
+            string entryPointDetails = reusedCanonicalSkill
+                ? $"The same-name canonical skill at `{reusedCanonicalSkillPath}` is " +
+                  "the entry point and carries the role; no duplicate entry-point skill is " +
+                  "emitted, because the canonical skill already occupies that identity."
+                : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: skill, so " +
+                  $"this agent also renders as an entry-point skill invoked as `/{agent.Name}` " +
+                  "in the main conversation.";
+
             yield return new SquadDegradationRecord(
-                Target: "claude",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "role-skill-fallback",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Claude has a real primary-agent primitive only through " +
-                    $"'claude --agent <name>' or the 'agent' setting; Claude Code enforces " +
-                    $"tools, Agent(roster) and model only in those modes. Fallback profile " +
-                    $"'{agent.Fallback}' declares no-primary-agent: skill, so this agent also " +
-                    $"renders as an entry-point skill invoked as `/{agent.Name}` in the main " +
-                    "conversation, where the primary-agent enforcement does not apply. The " +
-                    "subagent file is kept.");
+                "claude",
+                agent.Name,
+                agent.Name,
+                "role-skill-fallback",
+                agent.BodyDigest,
+                $"Claude has a real primary-agent primitive only through " +
+                $"'claude --agent <name>' or the 'agent' setting; Claude Code enforces " +
+                $"tools, Agent(roster) and model only in those modes. {entryPointDetails} " +
+                "Where the entry point runs in the main conversation, the primary-agent " +
+                "enforcement does not apply. The subagent file is kept.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -699,17 +758,31 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 string.Join(", ", agent.DelegatesTo) + ".");
         }
 
-        bool isPureOrchestrator = string.Equals(
-            agent.CapabilityProfile,
-            "orchestrator",
-            StringComparison.Ordinal);
-        if (isPureOrchestrator && isSkillMode)
+        if (string.Equals(
+                agent.CapabilityProfile,
+                CapabilityDegradations.PureOrchestratorProfile,
+                StringComparison.Ordinal) &&
+            isSkillMode)
         {
-            // The MCP withholding in ResolveTools is only applied to the subagent allow-list;
-            // the entry-point skill inherits session MCP servers, which may differ.
+            // Name the set the subagent file actually withholds. kyber-weave follows the same
+            // read entitlement as the other two, so an orchestrator whose profile denies
+            // filesystem.read (or resolves to no profile) loses it as well; a note that always
+            // carried the two carve-out servers would describe a grant the subagent file does not
+            // make. The narrowing applies to the allow-list only — the entry-point skill inherits
+            // session MCP servers, which may differ.
+            bool grantsKyberWeave = CapabilityDegradations.GrantsUniversalMcpServers(
+                agent.CapabilityProfile,
+                capabilityProfiles);
+            string withheld = grantsKyberWeave
+                ? "no mcp__codegraph__*, mcp__context7__*"
+                : "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*";
+            string reason = grantsKyberWeave
+                ? "because a role that only routes work has no use for code-graph or library lookups"
+                : "because this agent's capability profile does not allow filesystem.read";
+
             notExpressibleDetails.Add(
-                "The pure-orchestrator MCP withholding (no mcp__codegraph__*, mcp__kyber-weave__*, " +
-                "mcp__context7__*) applies to the subagent file only, not the entry-point skill.");
+                $"The pure-orchestrator MCP withholding ({withheld}, {reason}) applies to the " +
+                "subagent file only, not the entry-point skill.");
         }
 
         if (isSkillMode)
@@ -721,32 +794,34 @@ public sealed class ClaudeRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: "claude",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressibleDetails));
+                "claude",
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
         }
 
         SquadPermissionDecision executeDecision = profile is not null &&
-            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                                                  profile.Permissions.TryGetValue("process.execute",
+                                                      out SquadPermissionDecision exec)
             ? exec
             : SquadPermissionDecision.Deny;
         SquadPermissionDecision writeDecision = profile is not null &&
-            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                                                profile.Permissions.TryGetValue("filesystem.write",
+                                                    out SquadPermissionDecision write)
             ? write
             : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: "claude",
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["Bash", "PowerShell"],
-            withheldWriteTools: ["Edit", "NotebookEdit", "Write"]);
+            "claude",
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["Bash", "PowerShell"],
+            ["Edit", "NotebookEdit", "Write"]);
 
         if (notIsolable is not null)
         {
@@ -774,15 +849,15 @@ public sealed class ClaudeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: "claude",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Claude Code's tool allow-list is binary " +
-                    "and permissionMode is session-wide for the subagent, so these narrow to " +
-                    "'deny' and the corresponding tools are withheld from the agent's 'tools' list.");
+                "claude",
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Claude Code's tool allow-list is binary " +
+                "and permissionMode is session-wide for the subagent, so these narrow to " +
+                "'deny' and the corresponding tools are withheld from the agent's 'tools' list.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -810,30 +885,32 @@ public sealed class ClaudeRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: "claude",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressibleDetails));
+                "claude",
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: "claude",
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["Bash", "PowerShell"],
-            withheldWriteTools: ["Edit", "NotebookEdit", "Write"]);
+            "claude",
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["Bash", "PowerShell"],
+            ["Edit", "NotebookEdit", "Write"]);
 
         if (notIsolable is not null)
         {
@@ -854,7 +931,10 @@ public sealed class ClaudeRenderer : ISquadRenderer
     /// </summary>
     private sealed class ClaudeToolsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(ClaudeToolsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(ClaudeToolsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -868,19 +948,19 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string tool in tools)
             {
                 bool needsQuoting = tool.Contains('(', StringComparison.Ordinal) ||
-                    tool.Contains('*', StringComparison.Ordinal);
+                                    tool.Contains('*', StringComparison.Ordinal);
 
                 emitter.Emit(new Scalar(
                     AnchorName.Empty,
                     TagName.Empty,
                     tool,
                     needsQuoting ? ScalarStyle.SingleQuoted : ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
+                    true,
+                    true));
             }
 
             emitter.Emit(new SequenceEnd());

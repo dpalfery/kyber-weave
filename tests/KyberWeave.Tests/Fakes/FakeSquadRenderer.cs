@@ -32,7 +32,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "review-lens",
         "review-triage",
         "sql-database-architect",
-        "task-reviewer",
         "tauri-dev",
         "test-dev"
     ];
@@ -58,9 +57,9 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "product-owner",
         "python-dev",
         "resharper-clt",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
+        "task-gate",
         "test-dev"
     ];
 

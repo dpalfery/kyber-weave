@@ -1,0 +1,50 @@
+# Gate catalogue, family python (technology: python).
+# Marker pyproject.toml, outermost. Ruff discovers its config per file, so running from the repository root is correct.
+# pytest exits 5 when no tests are collected, and that fails the gate on purpose: an empty suite is not a pass.
+# mypy was chosen over pyright because pyright needs Node (D11).
+# ruff, mypy, pytest are not installed by the catalogue. A missing tool reports KW-REVIEW-033.
+schema: 1
+family: python
+technologies: [python]
+roots:
+  markers: ["pyproject.toml"]
+  nesting: outermost
+gates:
+  - id: format
+    role: format
+    run: [ruff, format, --check, "{{root}}"]
+  - id: lint
+    role: lint
+    run: [ruff, check, "{{root}}"]
+  - id: typecheck
+    role: typecheck
+    working-directory: "{{root}}"
+    run: [mypy, "."]
+  - id: test
+    role: test
+    working-directory: "{{root}}"
+    run: [pytest]
+task-gates:
+  - id: format
+    role: format
+    agents: [python-dev, test-dev]
+    include: ["{{root-glob}}**/*.py", "{{root-glob}}**/*.pyi"]
+    run: [ruff, format, --check, "{changed}"]
+    fix: [ruff, format, "{changed}"]
+  - id: lint
+    role: lint
+    agents: [python-dev, test-dev]
+    include: ["{{root-glob}}**/*.py", "{{root-glob}}**/*.pyi"]
+    run: [ruff, check, "{changed}"]
+    fix: [ruff, check, --fix, "{changed}"]
+  - id: typecheck
+    role: typecheck
+    agents: [python-dev]
+    include: ["{{root-glob}}**/*.py", "{{root-glob}}**/*.pyi"]
+    working-directory: "{{root}}"
+    run: [mypy, "."]
+sources:
+  format: https://docs.astral.sh/ruff/formatter/
+  lint: https://docs.astral.sh/ruff/linter/
+  typecheck: https://mypy.readthedocs.io/en/stable/command_line.html
+  test: https://docs.pytest.org/en/stable/reference/exit-codes.html

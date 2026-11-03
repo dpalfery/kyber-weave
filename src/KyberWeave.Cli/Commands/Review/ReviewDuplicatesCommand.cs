@@ -21,7 +21,7 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, ReviewDuplicatesSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ReviewDuplicatesSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

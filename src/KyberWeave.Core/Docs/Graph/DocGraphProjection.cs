@@ -54,11 +54,11 @@ public sealed class DocGraphProjection
         ArgumentNullException.ThrowIfNull(codeGraph);
         ArgumentOutOfRangeException.ThrowIfNegative(maxCodeNeighbors);
 
-        List<DocGraphNode> nodes = new List<DocGraphNode>();
-        List<DocGraphEdge> edges = new List<DocGraphEdge>();
-        HashSet<string> emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
-        HashSet<string> documentIds = new HashSet<string>(StringComparer.Ordinal);
-        Dictionary<string, string> pathToId = new Dictionary<string, string>(StringComparer.Ordinal);
+        List<DocGraphNode> nodes = new();
+        List<DocGraphEdge> edges = new();
+        HashSet<string> emittedNodeIds = new(StringComparer.Ordinal);
+        HashSet<string> documentIds = new(StringComparer.Ordinal);
+        Dictionary<string, string> pathToId = new(StringComparer.Ordinal);
 
         foreach (DocumentModel document in documents.Documents)
             pathToId.TryAdd(document.RelativePath, DocId(document.Subject));
@@ -128,7 +128,8 @@ public sealed class DocGraphProjection
             {
                 ArgumentNullException.ThrowIfNull(contributor);
                 DocGraphContribution contribution = contributor.Contribute(documents, codeGraph)
-                    ?? throw new InvalidOperationException("A DocGraph contributor returned null.");
+                                                    ?? throw new InvalidOperationException(
+                                                        "A DocGraph contributor returned null.");
 
                 foreach (DocGraphNode node in contribution.Nodes)
                     AddNode(nodes, emittedNodeIds, Copy(node));
@@ -136,6 +137,12 @@ public sealed class DocGraphProjection
                     edges.Add(edge with { });
             }
         }
+
+        DocumentSectionGraph sectionGraph = DocumentSectionGraph.Build(documents.Documents);
+        foreach (DocGraphNode node in sectionGraph.Contribution.Nodes)
+            AddNode(nodes, emittedNodeIds, Copy(node));
+        foreach (DocGraphEdge edge in sectionGraph.Contribution.Edges)
+            edges.Add(edge with { });
 
         DocGraphEdge[] distinctEdges = edges.Distinct().ToArray();
         IReadOnlySet<DocumentPair> related = BuildDocumentRelationships(
@@ -202,11 +209,11 @@ public sealed class DocGraphProjection
         ICodeGraphResolver codeGraph,
         int maxCodeNeighbors)
     {
-        HashSet<DocumentPair> related = new HashSet<DocumentPair>();
+        HashSet<DocumentPair> related = new();
 
         foreach (IGrouping<string, DocGraphEdge> group in edges
                      .Where(edge => SharedTargetLabels.Contains(edge.Label)
-                         && documentIds.Contains(edge.From))
+                                    && documentIds.Contains(edge.From))
                      .GroupBy(edge => edge.To, StringComparer.Ordinal))
         {
             RelateEveryPair(group.Select(edge => edge.From), related);
@@ -220,8 +227,8 @@ public sealed class DocGraphProjection
 
         (string DocumentId, string Path)[] sourceRoots = edges
             .Where(edge => edge.Label == "DESCRIBES"
-                && documentIds.Contains(edge.From)
-                && edge.To.StartsWith("path:", StringComparison.Ordinal))
+                           && documentIds.Contains(edge.From)
+                           && edge.To.StartsWith("path:", StringComparison.Ordinal))
             .Select(edge => (DocumentId: edge.From, Path: NormalizePath(edge.To["path:".Length..])))
             .Where(item => item.Path.Length > 0)
             .ToArray();
@@ -242,7 +249,7 @@ public sealed class DocGraphProjection
 
         Dictionary<string, string[]> codeToDocuments = edges
             .Where(edge => edge.Label is "REFERENCES" or "EXPOSES"
-                && documentIds.Contains(edge.From))
+                           && documentIds.Contains(edge.From))
             .GroupBy(edge => edge.To, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
@@ -258,7 +265,7 @@ public sealed class DocGraphProjection
 
         // Providers enforce the cap against the full index. Enforcing it again makes the
         // optional port safe for simpler fakes and alternative providers as well.
-        Dictionary<string, int> returnedDegree = new Dictionary<string, int>(StringComparer.Ordinal);
+        Dictionary<string, int> returnedDegree = new(StringComparer.Ordinal);
         foreach (CodeGraphEdge edge in codeEdges)
         {
             IncrementDegree(returnedDegree, edge.SourceId);
@@ -303,12 +310,14 @@ public sealed class DocGraphProjection
                 related.Add(DocumentPair.Create(ids[left], ids[right]));
     }
 
-    private static bool PathsOverlap(string left, string right) =>
-        left == "."
-        || right == "."
-        || StringComparer.OrdinalIgnoreCase.Equals(left, right)
-        || left.StartsWith(right + "/", StringComparison.OrdinalIgnoreCase)
-        || right.StartsWith(left + "/", StringComparison.OrdinalIgnoreCase);
+    private static bool PathsOverlap(string left, string right)
+    {
+        return left == "."
+               || right == "."
+               || StringComparer.OrdinalIgnoreCase.Equals(left, right)
+               || left.StartsWith(right + "/", StringComparison.OrdinalIgnoreCase)
+               || right.StartsWith(left + "/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string NormalizePath(string path)
     {
@@ -348,14 +357,22 @@ public sealed class DocGraphProjection
         if (!string.IsNullOrWhiteSpace(to)) edges.Add(new DocGraphEdge(label, from, to));
     }
 
-    private static DocGraphNode Copy(DocGraphNode node) =>
-        new(node.Id, node.Label, new Dictionary<string, string?>(node.Properties, StringComparer.Ordinal));
+    private static DocGraphNode Copy(DocGraphNode node)
+    {
+        return new DocGraphNode(node.Id, node.Label,
+            new Dictionary<string, string?>(node.Properties, StringComparer.Ordinal));
+    }
 
-    private static string DocId(string id) => $"doc:{id}";
+    private static string DocId(string id)
+    {
+        return $"doc:{id}";
+    }
 
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-    private static string? ConceptId(string label, string? name) =>
-        string.IsNullOrWhiteSpace(name) ? null : $"{label.ToLowerInvariant()}:{name}";
+    private static string? ConceptId(string label, string? name)
+    {
+        return string.IsNullOrWhiteSpace(name) ? null : $"{label.ToLowerInvariant()}:{name}";
+    }
 #pragma warning restore CA1308
 
     /// <summary>Resolves a relative link against the linking document's directory.</summary>
@@ -364,7 +381,7 @@ public sealed class DocGraphProjection
         string directory = Path.GetDirectoryName(fromRelativePath)?.Replace('\\', '/') ?? string.Empty;
         string combined = string.IsNullOrEmpty(directory) ? link : $"{directory}/{link}";
 
-        List<string> parts = new List<string>();
+        List<string> parts = new();
         foreach (string segment in combined.Split('/'))
         {
             if (segment is "." or "") continue;
@@ -374,6 +391,7 @@ public sealed class DocGraphProjection
                 parts.RemoveAt(parts.Count - 1);
                 continue;
             }
+
             parts.Add(segment);
         }
 
@@ -382,9 +400,11 @@ public sealed class DocGraphProjection
 
     private readonly record struct DocumentPair(string Left, string Right)
     {
-        public static DocumentPair Create(string left, string right) =>
-            StringComparer.Ordinal.Compare(left, right) <= 0
+        public static DocumentPair Create(string left, string right)
+        {
+            return StringComparer.Ordinal.Compare(left, right) <= 0
                 ? new DocumentPair(left, right)
                 : new DocumentPair(right, left);
+        }
     }
 }

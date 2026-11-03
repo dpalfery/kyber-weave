@@ -65,6 +65,19 @@ public static class CommandHelpers
         }
 
         config = result.Config!;
+
+        // Unknown keys load but do nothing, so each one is surfaced rather than left to be noticed later.
+        foreach (string warning in config.Review.Warnings)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigWarningCode,
+                Severity.Warning,
+                warning,
+                "kyber-weave.yml",
+                result.ConfigPath,
+                Hint: "Check the spelling against the gate keys, or remove the key."));
+        }
+
         return true;
     }
 
@@ -87,6 +100,41 @@ public static class CommandHelpers
         {
             AnsiConsole.WriteLine();
             ReportRenderer.RenderSummary(report);
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// </summary>
+    /// <param name="write">The output to produce at full width.</param>
+    /// <remarks>
+    /// <para>
+    /// A redirected console folds at 80 columns, which splits a repository-relative path, a rule id
+    /// or the remedy command the operator is meant to copy onto a second line — in the one message
+    /// whose whole value is being copy-pasteable.
+    /// </para>
+    /// <para>
+    /// It lives here, once, because every branch reports findings this way and the rule for
+    /// restoring the width is not obvious: a console that cannot measure itself reports 0, and
+    /// Spectre's setter rejects 0, so restoring it verbatim threw from the <c>finally</c> and
+    /// replaced the command's own output and exit code with an unhandled exception. Such a console
+    /// is restored to <see cref="ConsoleWidth.Default"/>. A copy per branch is a fix that lands in
+    /// one of them, and two commands that then render the same finding differently.
+    /// </para>
+    /// </remarks>
+    public static void WriteUnfolded(Action write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+
+        int originalWidth = AnsiConsole.Profile.Width;
+        AnsiConsole.Profile.Width = int.MaxValue;
+        try
+        {
+            write();
+        }
+        finally
+        {
+            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 

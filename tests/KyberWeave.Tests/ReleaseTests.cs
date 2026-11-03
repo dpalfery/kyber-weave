@@ -87,7 +87,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unameOs + "' '" + unameArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedRid, result.StandardOutput.Trim());
@@ -112,7 +112,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_kyberdash_rid '" + kyberWeaveRid + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedKyberDashRid, result.StandardOutput.Trim());
@@ -154,7 +154,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_semver_compare '" + left + "' '" + right + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -177,7 +177,7 @@ public sealed class ReleaseTests
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, listed);
+        ProcessResult result = ProcessRunner.Run(startInfo, listed, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -217,7 +217,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.2.0-rc.1", result.StandardOutput.Trim());
@@ -252,7 +252,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -267,7 +267,7 @@ public sealed class ReleaseTests
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -293,7 +293,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_release_has_kyberdash '" + version + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expected ? 0 : 1, result.ExitCode);
     }
@@ -309,7 +309,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "printf '%s' \"$KYBERDASH_MIN_VERSION\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.1.7-rc.9", result.StandardOutput.Trim());
@@ -327,7 +327,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unsupportedOs + "' x86_64");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -346,7 +346,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid 'Linux' '" + unsupportedArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -375,7 +375,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -398,7 +398,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(1, result.ExitCode);
         // The helper writes the diff to stderr so a user running the
@@ -423,7 +423,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
@@ -446,7 +446,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
@@ -477,7 +477,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -624,7 +624,8 @@ public sealed class ReleaseTests
             "npm --prefix web run build",
             "scripts/pack-sea-web.mjs",
             "\"web.json\":",
-            "scripts/sea-web-smoke.mjs"
+            "scripts/sea-web-smoke.mjs",
+            "scripts/sea-mcp-smoke.mjs"
         ];
         foreach (string value in shared)
         {
@@ -669,6 +670,44 @@ public sealed class ReleaseTests
         // The job runs to the next two-space-indented key, which is the next job.
         Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
         return next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+    }
+
+    /// <summary>
+    /// Reads one job section from release.yml: from
+    /// <c>\n  {jobName}:\n</c> to the next two-space-indented key, so a
+    /// permission or step assertion cannot match a later job's text.
+    /// </summary>
+    /// <remarks>
+    /// A slice to EOF proves nothing about the named job: the next job's text
+    /// would satisfy the assertion. Scoping to the job block keeps each pin on
+    /// the job that owns it.
+    /// </remarks>
+    private static string ReadReleaseJob(string jobName)
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        int start = workflow.IndexOf("\n  " + jobName + ":\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no " + jobName + " job.");
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        return next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+    }
+
+    /// <summary>
+    /// Parses a job's <c>needs: [...]</c> list as a set. GitHub schedules from
+    /// the DAG, not file order, so text position proves nothing and an
+    /// exact-string pin fails on a correct reorder.
+    /// </summary>
+    private static HashSet<string> ParseNeedsSet(string jobText)
+    {
+        Match match = Regex.Match(jobText, @"needs:\s*\[(.*?)\]");
+        Assert.True(match.Success, "the job has no needs: [...].");
+        string[] parts = match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        HashSet<string> needs = new(StringComparer.Ordinal);
+        foreach (string part in parts)
+        {
+            needs.Add(part.Trim());
+        }
+
+        return needs;
     }
 
     /// <summary>
@@ -1052,11 +1091,19 @@ public sealed class ReleaseTests
         string verifyStep = workflow[verifyIndex..];
         Assert.Contains("bash scripts/verify-release-checksums.sh release-assets \"${VERSION}\"", verifyStep, StringComparison.Ordinal);
 
-        // The release job cannot publish what has not been built.
-        Assert.Contains(
-            "needs: [version, build, build-kyberdash, build-tray, pack-squad]",
-            workflow,
-            StringComparison.Ordinal);
+        // The release job cannot publish what has not been built. The SBOM is in
+        // the list because the published asset list contains it, so a release
+        // that published without one would fail the post-publish inventory check.
+        // Issue #417: the per-artifact SBOMs and their attestations gate the
+        // release the same way, so the release job waits for both new jobs.
+        // The needs list is a set: GitHub runs jobs from the DAG, not file order,
+        // so a reorder must stay green while a dropped edge must go red.
+        string releaseJob = ReadReleaseJob("release");
+        HashSet<string> needs = ParseNeedsSet(releaseJob);
+        HashSet<string> expectedNeeds = new(
+            ["version", "build", "build-kyberdash", "build-tray", "pack-squad", "sbom", "artifact-sboms", "attest-sbom"],
+            StringComparer.Ordinal);
+        Assert.Equal(expectedNeeds, needs);
     }
 
     /// <summary>
@@ -1167,7 +1214,9 @@ public sealed class ReleaseTests
     /// The script lists all expected assets when run with --list mode.
     /// The list must include the three tray assets: both darwin variants
     /// (arm64 and x64) and the Windows setup exe. Req 22.1 adds the five
-    /// arbiter archives, growing the list from 20 to 25.
+    /// arbiter archives; issue #417 adds one per-artifact SBOM per published
+    /// archive, so the list carries 51 names: 25 archives, 25 per-artifact
+    /// SBOMs, and the aggregate SBOM.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsListModeOutputsAssetNames()
@@ -1190,21 +1239,252 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
-        // Must output exactly 25 lines (one per asset).
+        // Must output exactly 51 lines (one per asset).
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(25, lines.Length);
+        Assert.Equal(51, lines.Length);
 
         // The three tray assets must be in the list: both darwin architectures and Windows setup.
         Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
         Assert.Contains("kyberdash-tray-darwin-x64.zip", lines);
         Assert.Contains("kyberdash-tray-win-x64-setup.exe", lines);
 
+        // Issue #417: the per-artifact SBOMs ride in the same list, named
+        // <archive-stem>.cdx.json, with the aggregate keeping its versioned name.
+        Assert.Contains("kyber-weave-linux-x64.cdx.json", lines);
+        Assert.Contains("kyberdash-tray-win-x64-setup.cdx.json", lines);
+        Assert.Contains("kyber-squad-0.1.0.cdx.json", lines);
+        Assert.Contains("kyber-weave-sbom-0.1.0.cdx.json", lines);
+
         // --list mode does not write a manifest.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// Issue #417: --list emits one per-artifact SBOM name per published
+    /// archive, derived by <c>artifact_sbom_name</c> as
+    /// <c>&lt;archive-stem&gt;.cdx.json</c> (strip <c>.tar.gz</c> /
+    /// <c>.zip</c> / <c>.exe</c>, append <c>.cdx.json</c>). The aggregate
+    /// SBOM keeps its versioned name.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsListModeEmitsEveryPerArtifactSbomName()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+
+        Assert.Equal(0, result.ExitCode);
+
+        string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(51, lines.Length);
+
+        string[] perArtifactSboms =
+        [
+            "kyber-weave-linux-x64.cdx.json",
+            "kyber-weave-linux-arm64.cdx.json",
+            "kyber-weave-osx-x64.cdx.json",
+            "kyber-weave-osx-arm64.cdx.json",
+            "kyber-weave-win-x64.cdx.json",
+            "kyber-weave-mcp-linux-x64.cdx.json",
+            "kyber-weave-mcp-linux-arm64.cdx.json",
+            "kyber-weave-mcp-osx-x64.cdx.json",
+            "kyber-weave-mcp-osx-arm64.cdx.json",
+            "kyber-weave-mcp-win-x64.cdx.json",
+            "kyberdash-darwin-arm64.cdx.json",
+            "kyberdash-darwin-x64.cdx.json",
+            "kyberdash-linux-arm64.cdx.json",
+            "kyberdash-linux-x64.cdx.json",
+            "kyberdash-win-x64.cdx.json",
+            "kyberdash-tray-darwin-arm64.cdx.json",
+            "kyberdash-tray-darwin-x64.cdx.json",
+            "kyberdash-tray-win-x64-setup.cdx.json",
+            "kyber-squad-0.1.0.cdx.json",
+            "kyber-squad-plugin-0.1.0.cdx.json"
+        ];
+        Assert.Equal(20, perArtifactSboms.Length);
+        foreach (string sbom in perArtifactSboms)
+        {
+            Assert.Contains(sbom, lines);
+        }
+    }
+
+    /// <summary>
+    /// Issue #417: a release whose manifest lacks a per-artifact SBOM fails
+    /// verification the same way a missing archive does.
+    /// </summary>
+    /// <remarks>
+    /// The per-artifact SBOM is a release asset like any other, so the
+    /// pre-publish check is fail-closed on it: omitting
+    /// <c>kyber-weave-linux-x64.cdx.json</c> must exit non-zero, name the
+    /// missing SBOM, and write no manifest.
+    /// </remarks>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsMissingPerArtifactSbom()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+        const string missingSbom = "kyber-weave-linux-x64.cdx.json";
+
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(CultureInfo.InvariantCulture, assetTemplate, version);
+            if (string.Equals(asset, missingSbom, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(missingSbom, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// Issue #417: the per-artifact SBOM name mapping lives in one shared
+    /// shell function so the generator and the checksum manifest cannot
+    /// drift apart. The function strips the archive suffix and appends
+    /// <c>.cdx.json</c>; this pins its existence, not its host file, so the
+    /// extraction into a shared bootstrap does not break the pin.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsDefinesTheArtifactSbomNameMapping()
+    {
+        string scriptsDir = Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts");
+        string[] candidates =
+        [
+            Path.Combine(scriptsDir, "verify-release-checksums.sh"),
+            Path.Combine(scriptsDir, "syft-bootstrap.sh"),
+            Path.Combine(scriptsDir, "generate-artifact-sboms.sh")
+        ];
+
+        // A bare mention in a comment is not the mapping: verify-release-checksums.sh:49-50
+        // names artifact_sbom_name so the manifest and the generator cannot drift apart,
+        // while the definition lives in syft-bootstrap.sh:82. Pin the definition itself
+        // so deleting it goes red even though the comment still mentions the name.
+        const string definition = "artifact_sbom_name() {";
+        bool defined = false;
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(candidate)
+                && File.ReadAllText(candidate).Contains(definition, StringComparison.Ordinal))
+            {
+                defined = true;
+                break;
+            }
+        }
+
+        Assert.True(defined, "no script defines artifact_sbom_name() {; the generator and the checksum manifest share no mapping.");
+    }
+
+    /// <summary>
+    /// Issue #417: the release pipeline generates one SBOM per published
+    /// archive and attests each one. The <c>artifact-sboms</c> job runs the
+    /// per-artifact generator, the <c>attest-sbom</c> job attests the 20
+    /// per-artifact SBOMs plus the aggregate, and the <c>release</c> job waits
+    /// for both before publishing anything and verifies each attestation with
+    /// a bounded retry. Ordering is the needs DAG, not file order: GitHub runs
+    /// jobs from needs, so text position proves nothing and a dropped edge
+    /// must go red.
+    /// </summary>
+    /// <remarks>
+    /// The retry lives in the release job's verify step (Sigstore propagation
+    /// lag after publish), not in the attest job, so this pins retry only there.
+    /// </remarks>
+    [Fact]
+    public void ReleaseWorkflowGeneratesPerArtifactSbomsAndAttestsThemBeforeRelease()
+    {
+        string artifactSbomsJob = ReadReleaseJob("artifact-sboms");
+        Assert.Contains(
+            "scripts/generate-artifact-sboms.sh",
+            artifactSbomsJob,
+            StringComparison.Ordinal);
+
+        string attestJob = ReadReleaseJob("attest-sbom");
+        Assert.Contains("actions/attest", attestJob, StringComparison.Ordinal);
+
+        // 25 per-archive sbom-path entries. The 26th sbom-path is the aggregate
+        // (kyber-weave-sbom-*), which is attested once against the archive glob below.
+        // The character class stops at the line end so the versioned squad paths,
+        // which contain spaces inside ${{ ... }}, still match.
+        MatchCollection sbomPaths = Regex.Matches(attestJob, @"sbom-path:\s*attest-assets/[^\n]+\.cdx\.json");
+        List<string> perArchiveSbomPaths = [];
+        foreach (Match sbomPath in sbomPaths)
+        {
+            if (!sbomPath.Value.Contains("kyber-weave-sbom-", StringComparison.Ordinal))
+            {
+                perArchiveSbomPaths.Add(sbomPath.Value);
+            }
+        }
+
+        Assert.Equal(25, perArchiveSbomPaths.Count);
+        Assert.Contains("sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json", attestJob, StringComparison.Ordinal);
+        Assert.Contains("sbom-path: attest-assets/kyber-weave-arbiter-linux-x64.cdx.json", attestJob, StringComparison.Ordinal);
+        Assert.Contains("sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json", attestJob, StringComparison.Ordinal);
+
+        // The aggregate covers the whole closure, so it is attested once against
+        // every published archive. The glob matches only archives, never the predicates.
+        Assert.Contains(
+            "subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe",
+            attestJob,
+            StringComparison.Ordinal);
+        Assert.Contains("sbom-path: attest-assets/kyber-weave-sbom-", attestJob, StringComparison.Ordinal);
+
+        // The DAG, not text order: attest waits for the per-artifact scan,
+        // release waits for both. Dropping artifact-sboms from either needs set goes red.
+        HashSet<string> attestNeeds = ParseNeedsSet(attestJob);
+        Assert.Contains("sbom", attestNeeds);
+        Assert.Contains("artifact-sboms", attestNeeds);
+
+        string releaseJob = ReadReleaseJob("release");
+        HashSet<string> releaseNeeds = ParseNeedsSet(releaseJob);
+        Assert.Contains("artifact-sboms", releaseNeeds);
+        Assert.Contains("attest-sbom", releaseNeeds);
+
+        // The release job verifies each published archive against its SBOM attestation
+        // with the CycloneDX predicate type and a bounded retry for Sigstore lag.
+        Assert.Contains("gh attestation verify", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("--predicate-type \"https://cyclonedx.org/bom\"", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("for attempt in 1 2 3", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("sleep 15", releaseJob, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1231,7 +1511,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("usage:", result.StandardError, StringComparison.Ordinal);
@@ -1248,7 +1528,7 @@ public sealed class ReleaseTests
         startInfo2.ArgumentList.Add(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
 
-        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty);
+        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result2.ExitCode);
         Assert.Contains("usage:", result2.StandardError, StringComparison.Ordinal);
@@ -1256,7 +1536,11 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Helper array of all 25 expected release assets for fixture tests.
+    /// Helper array of all 51 expected release assets for fixture tests:
+    /// 25 published archives, one per-artifact SBOM per archive derived by
+    /// artifact_sbom_name as &lt;archive-stem&gt;.cdx.json, and the aggregate
+    /// SBOM. Issue #417 adds the 25 per-artifact names; the aggregate keeps
+    /// its versioned name.
     /// </summary>
     private static readonly string[] ReleaseAssets =
     [
@@ -1284,11 +1568,37 @@ public sealed class ReleaseTests
         "kyberdash-tray-darwin-x64.zip",
         "kyberdash-tray-win-x64-setup.exe",
         "kyber-squad-{0}.zip",
-        "kyber-squad-plugin-{0}.zip"
+        "kyber-squad-plugin-{0}.zip",
+        "kyber-weave-linux-x64.cdx.json",
+        "kyber-weave-linux-arm64.cdx.json",
+        "kyber-weave-osx-x64.cdx.json",
+        "kyber-weave-osx-arm64.cdx.json",
+        "kyber-weave-win-x64.cdx.json",
+        "kyber-weave-mcp-linux-x64.cdx.json",
+        "kyber-weave-mcp-linux-arm64.cdx.json",
+        "kyber-weave-mcp-osx-x64.cdx.json",
+        "kyber-weave-mcp-osx-arm64.cdx.json",
+        "kyber-weave-mcp-win-x64.cdx.json",
+        "kyber-weave-arbiter-linux-x64.cdx.json",
+        "kyber-weave-arbiter-linux-arm64.cdx.json",
+        "kyber-weave-arbiter-osx-x64.cdx.json",
+        "kyber-weave-arbiter-osx-arm64.cdx.json",
+        "kyber-weave-arbiter-win-x64.cdx.json",
+        "kyberdash-darwin-arm64.cdx.json",
+        "kyberdash-darwin-x64.cdx.json",
+        "kyberdash-linux-arm64.cdx.json",
+        "kyberdash-linux-x64.cdx.json",
+        "kyberdash-win-x64.cdx.json",
+        "kyberdash-tray-darwin-arm64.cdx.json",
+        "kyberdash-tray-darwin-x64.cdx.json",
+        "kyberdash-tray-win-x64-setup.cdx.json",
+        "kyber-squad-{0}.cdx.json",
+        "kyber-squad-plugin-{0}.cdx.json",
+        "kyber-weave-sbom-{0}.cdx.json"
     ];
 
     /// <summary>
-    /// The complete fixture with all 25 expected assets present and no extras.
+    /// The complete fixture with all 51 expected assets present and no extras.
     /// The script must exit 0 and create a valid SHA256SUMS.txt.
     /// </summary>
     [Fact]
@@ -1299,7 +1609,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 25 expected assets.
+        // Create all 51 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1318,15 +1628,15 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
 
-        // The manifest must have 25 lines (one per asset).
+        // The manifest must have 51 lines (one per asset).
         string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
         string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(25, manifestLines.Length);
+        Assert.Equal(51, manifestLines.Length);
 
         // Each line must match the format: 64 hex characters, two spaces, filename.
         foreach (string line in manifestLines)
@@ -1369,11 +1679,61 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
         Assert.Contains(missingAsset, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// A release directory that has every expected asset except the SBOM fails
+    /// verification, and the diagnostic names the SBOM.
+    /// </summary>
+    /// <remarks>
+    /// The SBOM is a release asset like any other, so the pre-publish check is
+    /// fail-closed on it: a release whose SBOM job did not produce a file must
+    /// not publish. This pins that specifically, because the missing-asset test
+    /// above removes whichever asset happens to be last in the list.
+    /// </remarks>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsAMissingSbom()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+        string sbomName = "kyber-weave-sbom-" + version + ".cdx.json";
+
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            if (asset == sbomName)
+            {
+                continue;
+            }
+
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(sbomName, result.StandardError, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
     }
 
@@ -1411,7 +1771,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("unexpected release asset", result.StandardError, StringComparison.Ordinal);
@@ -1432,7 +1792,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 25 expected assets.
+        // Create all 51 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1456,7 +1816,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1485,7 +1845,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 25 expected assets.
+        // Create all 51 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1507,7 +1867,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains(".hidden-file", result.StandardError, StringComparison.Ordinal);
@@ -1515,7 +1875,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Against an empty asset directory the script exits non-zero, reports all 25
+    /// Against an empty asset directory the script exits non-zero, reports all 51
     /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
     /// and does not print "unbound variable". The last assertion guards the
     /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
@@ -1541,7 +1901,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         // Script must exit non-zero when all assets are missing.
         Assert.NotEqual(0, result.ExitCode);
@@ -1549,13 +1909,15 @@ public sealed class ReleaseTests
         // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
         Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
 
-        // Stderr must report all 25 missing assets.
+        // Stderr must report all 51 missing assets.
         int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
-        Assert.Equal(25, missingCount);
+        Assert.Equal(51, missingCount);
 
         // Must name the first and last expected assets.
         Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("kyber-squad-plugin-" + version + ".zip", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-sbom-" + version + ".cdx.json", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-linux-x64.cdx.json", result.StandardError, StringComparison.Ordinal);
 
         // Must not write a manifest when all assets are missing.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
@@ -1602,7 +1964,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(releaseDirPath, "SHA256SUMS.txt")));
@@ -1643,7 +2005,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1708,7 +2070,7 @@ public sealed class ReleaseTests
             startInfo.ArgumentList.Add(sandbox.Root);
             startInfo.ArgumentList.Add(version);
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Script must exit non-zero when the hash command fails.
             Assert.NotEqual(0, result.ExitCode);
@@ -1765,7 +2127,7 @@ public sealed class ReleaseTests
             };
             resolveInfo.ArgumentList.Add("-c");
             resolveInfo.ArgumentList.Add("command -v " + tool);
-            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty);
+            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             if (resolveResult.ExitCode != 0)
             {
@@ -1797,7 +2159,7 @@ public sealed class ReleaseTests
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
         normalInfo.ArgumentList.Add(sandbox.Root);
         normalInfo.ArgumentList.Add(version);
-        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty);
+        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.Equal(0, normalResult.ExitCode);
 
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
@@ -1845,7 +2207,7 @@ public sealed class ReleaseTests
                 Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
             fallbackInfo.ArgumentList.Add(sandbox.Root);
             fallbackInfo.ArgumentList.Add(version);
-            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Verify sha256sum is not available in the hermetic PATH.
             ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
@@ -1858,7 +2220,7 @@ public sealed class ReleaseTests
             verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
             verifySha256sumAbsent.ArgumentList.Add("-c");
             verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
-            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.NotEqual(0, verifySha256Result.ExitCode);
 
             // Verify shasum IS available in the hermetic PATH.
@@ -1872,7 +2234,7 @@ public sealed class ReleaseTests
             verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
             verifyShasumPresent.ArgumentList.Add("-c");
             verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
-            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty);
+            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.Equal(0, verifyShasumResult.ExitCode);
 
             Assert.Equal(0, fallbackResult.ExitCode);
@@ -1921,7 +2283,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar '" + Path.GetDirectoryName(recorder) + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         string[] argv = File.ReadAllLines(
@@ -1947,7 +2309,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar \"" + Path.GetDirectoryName(recorder) + "\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(
@@ -1976,7 +2338,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_menubar_conflict '" + withMenubar + "' '" + noKyberdash + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expectedExitCode, result.ExitCode);
         if (expectedExitCode != 0)
@@ -2722,7 +3084,7 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(25, lines.Length);
+        Assert.Equal(51, lines.Length);
         foreach (string asset in ArbiterAssetNames)
         {
             Assert.Contains(asset, lines);

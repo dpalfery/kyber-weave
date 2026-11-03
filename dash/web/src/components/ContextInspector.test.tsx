@@ -759,6 +759,21 @@ describe('ContentPane Component (Decision D4 & D14 Compliance)', () => {
   })
 })
 
+describe('ContentPane shared toolbar', () => {
+  it('offers the same Formatted/Raw labels, search and exact Copy as the drawer surfaces', () => {
+    const html = renderHtml(React.createElement(ContentPane, {
+      text: '<custom_tag>Some inner content</custom_tag>',
+      label: 'Custom Tag Test',
+    }))
+    expect(html).toContain('data-testid="context-content-pane-search"')
+    expect(html).toContain('data-testid="context-content-pane-copy"')
+    expect(html).toContain('data-testid="context-content-pane-view-formatted"')
+    expect(html).toContain('data-testid="context-content-pane-view-raw"')
+    expect(html).toContain('>Formatted</button>')
+    expect(html).toContain('>Raw</button>')
+  })
+})
+
 describe('ContextInspector Component', () => {
   it('renders turn index, model badge, block rail, and assembled content', () => {
     const element = React.createElement(ContextInspector, {

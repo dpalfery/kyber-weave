@@ -1,8 +1,10 @@
 # KyberWeave.Cli
 
-The `kyber-weave` binary. Spectre.Console.Cli, three symmetric branches — `skill`,
-`agent`, `docs` — registered in `Program.cs`, plus a top-level `update` verb that
-replaces the running Release binaries.
+The `kyber-weave` binary. Spectre.Console.Cli, six branches — `skill`, `agent`, `docs`,
+`squad`, `utilities`, and `review` — registered in `Program.cs`, plus a top-level `update`
+verb that replaces the running Release binaries. The complete registered surface, with every
+verb, flag, and exit-code rule, is indexed in
+[`docs/cli-command-surface.md`](../../docs/cli-command-surface.md).
 
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
 
@@ -66,6 +68,7 @@ SHA-256 verification. It does not wrap `install.sh`, and it refuses `dotnet run`
 
 ## Documented behaviour
 
-The command surface is described in [`docs/`](../../docs/README.md), by feature. Adding or
-changing a verb, a flag, or an exit-code rule means updating the matching page in the same
-change.
+The command surface is described in [`docs/`](../../docs/README.md), by feature, and indexed
+in [`docs/cli-command-surface.md`](../../docs/cli-command-surface.md). Adding or changing a
+verb, a flag, or an exit-code rule means updating the matching feature page **and** the
+unified command-surface page in the same change.

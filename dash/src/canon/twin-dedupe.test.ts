@@ -899,3 +899,58 @@ describe('TWIN_TURN_MAX_SKEW_MS docblock states the bound that exists', () => {
     expect(docblock).not.toMatch(/each step between/)
   })
 })
+
+// Malformed-byte guards: a corrupt row can carry null (or a non-object) where
+// counters belong, or non-number values where finite counters belong. Those
+// rows read as unmeasured and are never clustered, and they never crash the
+// counter reads on the way through.
+describe('dedupeTwinTurns malformed counters (null tokens, non-number dims)', () => {
+  it('passes a null-tokens turn through without crashing or clustering it', () => {
+    const corrupt = llmInvoke('corrupt-null', {
+      timestamp: '2026-09-23T22:43:53.540Z',
+      tokens: null as unknown as CanonicalRecord['tokens'],
+    })
+    const healthy = otel('otel-healthy', { timestamp: '2026-09-23T22:43:53.540Z' })
+
+    const out = dedupeTwinTurns([corrupt, healthy], 'twin-key')
+
+    expect(out.map((record) => record.spanId).sort()).toEqual(['corrupt-null', 'otel-healthy'])
+    expect(out.find((record) => record.spanId === 'corrupt-null')!.tokens).toBeNull()
+  })
+
+  it('never clusters two null-tokens rows sharing one session key', () => {
+    const first = llmInvoke('corrupt-one', {
+      timestamp: '2026-09-23T22:43:53.540Z',
+      tokens: null as unknown as CanonicalRecord['tokens'],
+    })
+    const second = llmInvoke('corrupt-two', {
+      timestamp: '2026-09-23T22:43:54.540Z',
+      tokens: null as unknown as CanonicalRecord['tokens'],
+    })
+
+    const out = dedupeTwinTurns([first, second], 'twin-key')
+
+    expect(out.map((record) => record.spanId).sort()).toEqual(['corrupt-one', 'corrupt-two'])
+  })
+
+  it('treats non-number counter dims as unmeasured without crashing', () => {
+    const corrupt = llmInvoke('corrupt-dims', {
+      timestamp: '2026-09-23T22:43:53.540Z',
+      tokens: {
+        freshInput: 'lots',
+        cacheRead: Number.NaN,
+        cacheCreation: Number.POSITIVE_INFINITY,
+        output: 'many',
+        reportedInput: {},
+        reportedOutput: [],
+      } as unknown as CanonicalRecord['tokens'],
+    })
+    const healthy = otel('otel-healthy', { timestamp: '2026-09-23T22:43:53.540Z' })
+
+    const out = dedupeTwinTurns([corrupt, healthy], 'twin-key')
+
+    // The corrupt row is excluded from counter matching, so it can never merge
+    // the healthy turn into itself: both rows survive with their own counters.
+    expect(out.map((record) => record.spanId).sort()).toEqual(['corrupt-dims', 'otel-healthy'])
+  })
+})

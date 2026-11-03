@@ -1,0 +1,65 @@
+review:
+# Gates written by Kyber-Weave 0.1.0+f1fd593576a52d04c679b82a9001a47a0256a4cf 'docs init' from its shipped catalogue.
+# This block is yours: edit, remove or add gates freely; re-running 'docs init' never changes it.
+# 'kyber-weave review catalogue' prints the catalogue for newer releases, to copy in by hand.
+# CI: copy templates/github-actions/kyber-weave-review-gate.yml from
+# https://github.com/dpalfery/kyber-weave into .github/workflows/.
+  gates:
+    # typescript, react: typecheck (.)
+    - id: typescript-typecheck
+      run: ['npm', 'run', '--prefix', '.', 'typecheck']
+      os: 'unix'
+    # typescript, react: lint (.)
+    - id: typescript-lint
+      run: ['npm', 'run', '--prefix', '.', 'lint']
+      os: 'unix'
+    # typescript, react: format (.)
+    # package.json has no 'format:check' script; add it and uncomment
+    # - id: typescript-format
+    # run: ['npm', 'run', '--prefix', '.', 'format:check']
+    # os: 'unix'
+    # typescript, react: test (.)
+    - id: typescript-test
+      run: ['npm', 'run', '--prefix', '.', 'test']
+      os: 'unix'
+  task-gates:
+    typescript-dev:
+      # typescript, react: typecheck (.)
+      - id: typescript-typecheck
+        include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+        os: 'unix'
+        run: ['npm', 'run', '--prefix', '.', 'typecheck']
+      # typescript, react: lint (.)
+      - id: typescript-lint
+        include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+        os: 'unix'
+        run: ['npm', 'run', '--prefix', '.', 'lint']
+      # typescript, react: format (.)
+      # package.json has no 'format:check' script; add it and uncomment
+      # - id: typescript-format
+      # include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+      # os: 'unix'
+      # run: ['npm', 'run', '--prefix', '.', 'format:check']
+    react-dev:
+      # typescript, react: typecheck (.)
+      - id: typescript-typecheck
+        include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+        os: 'unix'
+        run: ['npm', 'run', '--prefix', '.', 'typecheck']
+      # typescript, react: lint (.)
+      - id: typescript-lint
+        include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+        os: 'unix'
+        run: ['npm', 'run', '--prefix', '.', 'lint']
+      # typescript, react: format (.)
+      # package.json has no 'format:check' script; add it and uncomment
+      # - id: typescript-format
+      # include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+      # os: 'unix'
+      # run: ['npm', 'run', '--prefix', '.', 'format:check']
+    test-dev:
+      # typescript: lint (test-dev copy)
+      - id: typescript-lint
+        include: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs', '*.json']
+        os: 'unix'
+        run: ['npm', 'run', '--prefix', '.', 'lint']

@@ -11,9 +11,10 @@
 // an explicit explanation.
 
 import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
+import { measuredCount } from './measured.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
-import { CanonStore } from './store.js'
+import { CanonStore, reduceRecordPayloads } from './store.js'
 import { notMeasurable } from './types.js'
 import type {
   CanonicalRecord,
@@ -384,18 +385,34 @@ export function linkExecutions(
 function hasTurnEvidence(records: readonly CanonicalRecord[]): boolean {
   const turns = records.filter((r) => r.op === 'llm.invoke')
   if (turns.length === 0) return false
-  return turns.some(
-    (r) =>
-      r.tokens.reportedInput > 0 ||
-      r.tokens.output > 0 ||
-      (r.parts?.length ?? 0) > 0 ||
-      Object.keys(r.content).length > 0,
-  )
+  return turns.some((r) => {
+    // Same malformed-row guard as twin-dedupe `isUnreportedCounters`: a corrupt
+    // row can carry null (or a non-object) where counters belong; that reads as
+    // no token evidence, never a throw on property access. The counts go
+    // through `measuredCount` because `>` coerces: `'28' > 0` is true, which
+    // would build a run from bytes twin-dedupe had already read as unmeasured.
+    const tokens: unknown = r.tokens
+    const counters =
+      typeof tokens === 'object' && tokens !== null ? (tokens as Record<string, unknown>) : {}
+    const hasTokenEvidence =
+      (measuredCount(counters['reportedInput']) ?? 0) > 0 || (measuredCount(counters['output']) ?? 0) > 0
+    // `content` is typed as a map but a corrupt row can carry null, and
+    // `Object.keys(null)` throws — fail the whole build over one bad row.
+    const content = typeof r.content === 'object' && r.content !== null ? r.content : {}
+    return hasTokenEvidence || (r.parts?.length ?? 0) > 0 || Object.keys(content).length > 0
+  })
 }
 
 export type BuildRunsOptions = {
   inactivityWindowMs?: number
   acceptDerivedGrouping?: boolean
+  /**
+   * Called between units of work (a session key, a planned run).
+   *
+   * The projection injects a real yield so a pending HTTP handler is not
+   * starved by a rebuild; a direct build has nothing to interleave with.
+   */
+  yieldToLoop?: () => Promise<void>
 }
 
 export type BuildRunsReport = {
@@ -417,12 +434,22 @@ export async function buildRuns(
 ): Promise<BuildRunsReport> {
   const inactivityWindowMs = options?.inactivityWindowMs ?? DEFAULT_INACTIVITY_WINDOW_MS
   const acceptDerived = options?.acceptDerivedGrouping !== false
+  const yieldToLoop = options?.yieldToLoop ?? (async () => {})
 
   // 1. Gather all candidate executions from session keys
   const identities = store.sessionIdentities()
   const candidates: ExecutionCandidate[] = []
   for (const sessionKey of store.sessionKeys()) {
-    const grouped = groupByCanonicalHarness(store.recordsForSession(sessionKey.key))
+    // One session key is one unit of work here: it loads that session's
+    // records, which is the expensive part of this phase.
+    await yieldToLoop()
+    // The records are reduced to the attributes the derived views read before
+    // the twin collapse reads them: a session's decompressed payloads are the
+    // projection's working set, and the measured corpus held 1.5 GB of them
+    // at once.
+    const sessionRecords = store.recordsForSession(sessionKey.key)
+    reduceRecordPayloads(sessionRecords)
+    const grouped = groupByCanonicalHarness(sessionRecords)
     for (const [harness, shareRecords] of grouped) {
       // Same twin-collector collapse as `buildSessions` (issue #182, ADR
       // 0009 D4): the candidate's records must be the merged share's turns,
@@ -653,12 +680,20 @@ export async function buildRuns(
   const builtExecutionIds = new Set<string>()
 
   for (const { run, executions } of plannedRuns) {
+    // One planned run is one unit of work: its outcome is derived from the
+    // full records, which is the expensive part of this phase.
+    await yieldToLoop()
     // Outcome derivation reads content, parts and raw, so the full records are
     // loaded here — one run at a time — and released before the next run.
     const outcomeRecords = executions.flatMap((e) => {
       const sessionId = e.sessionId ?? e.executionId
       const share = identities.shareOf(sessionId)
-      return share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      const records =
+        share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      // The outcome derivation reads a few attributes out of each payload, and
+      // a run's payloads are released one record at a time.
+      reduceRecordPayloads(records)
+      return records
     })
     store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
     builtRunIds.add(run.runId)
