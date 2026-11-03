@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -2632,7 +2633,8 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string archive = Path.Combine(sandbox.Root, "evil.tar.gz");
         using (FileStream stream = File.Create(archive))
-        using (TarWriter writer = new(stream, TarEntryFormat.Pax, leaveOpen: false))
+        using (GZipStream gzip = new(stream, CompressionLevel.SmallestSize))
+        using (TarWriter writer = new(gzip, TarEntryFormat.Pax, leaveOpen: true))
         {
             byte[] payload = Encoding.UTF8.GetBytes("owned");
             writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "../evil.txt")
