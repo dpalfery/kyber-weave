@@ -276,23 +276,30 @@ internal static class SquadCommandComposition
     /// </summary>
     public static ISquadRenderer ResolveRenderer()
     {
-        return new SquadRendererRegistry(
-        [
-            new CopilotRenderer(),
-            new CursorRenderer(),
-            new ClaudeRenderer(),
-            new AntigravityRenderer(),
-            new CodexRenderer(),
-            new OpenCodeRenderer(),
-            new KiloRenderer(),
-            new PiRenderer(),
-            new FactoryRenderer(),
-            new WarpRenderer(),
-            new ZCodeRenderer(),
-            new DevinRenderer(),
-            new CommandCodeRenderer()
-        ]);
+        return new SquadRendererRegistry(CreateRenderers());
     }
+
+    /// <summary>
+    ///     Creates one instance of every shipped harness renderer. The cross-harness contract
+    ///     suite runs against this same list, so a renderer added here inherits that contract
+    ///     without anyone remembering to copy it.
+    /// </summary>
+    internal static IReadOnlyList<ISquadRenderer> CreateRenderers() =>
+    [
+        new CopilotRenderer(),
+        new CursorRenderer(),
+        new ClaudeRenderer(),
+        new AntigravityRenderer(),
+        new CodexRenderer(),
+        new OpenCodeRenderer(),
+        new KiloRenderer(),
+        new PiRenderer(),
+        new FactoryRenderer(),
+        new WarpRenderer(),
+        new ZCodeRenderer(),
+        new DevinRenderer(),
+        new CommandCodeRenderer()
+    ];
 
     /// <summary>Resolves the platform filesystem abstraction for creating and inspecting links without administrator rights.</summary>
     public static ISquadLinkFileSystem ResolveLinkFileSystem(ISquadLinkFileSystem? customFileSystem = null)

@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -96,27 +97,6 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         // No disposable state: the suite reads the checked-in corpus, plus per-test fixture
         // copies disposed locally via `using`.
-    }
-
-    [Fact]
-    public void SupportedTargets_IsExactlyDevin()
-    {
-        SquadRendererRegistry registry = new([new DevinRenderer()]);
-
-        Assert.Equal([SquadTarget.Devin], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonDevinTarget()
-    {
-        DevinRenderer renderer = new();
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.ZCode],
-            SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
     [Fact]
@@ -485,30 +465,6 @@ public sealed class DevinRendererContractTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_Devin_IsDeterministic()
-    {
-        SquadRenderResult first = await RenderDevinAsync(ProductRoot);
-        SquadRenderResult second = await RenderDevinAsync(ProductRoot);
-
-        Assert.True(first.Success, string.Join("; ", first.Errors));
-        Assert.Equal(
-            first.Files.Select(f => (f.RelativePath, Convert.ToHexString(f.Content.Span))),
-            second.Files.Select(f => (f.RelativePath, Convert.ToHexString(f.Content.Span))));
-        Assert.Equal(first.Degradations, second.Degradations);
-    }
-
-    [Fact]
-    public async Task RenderAsync_Devin_ProjectsLinkedAgentAndSkillResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            new DevinRenderer(),
-            SquadTarget.Devin,
-            $".devin/agents/{ResourceBearingSquadFixture.AgentName}/AGENT.md",
-            $".devin/agents/{ResourceBearingSquadFixture.AgentName}",
-            ".devin/skills");
-    }
-
-    [Fact]
     public async Task RenderAsync_Devin_GlobalScopeDropsTheDevinPrefix()
     {
         SquadRendererRegistry registry = new([new DevinRenderer()]);
@@ -642,23 +598,6 @@ public sealed class DevinRendererContractTests : IDisposable
             sourceDirectory,
             [SquadTarget.Devin],
             SquadDeploymentScope.Project));
-    }
-
-    private static HashSet<string> SharedIdentities(SquadSource source)
-    {
-        return source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
-    /// A primary shared identity reuses its canonical skill as the entry point, so it is
-    /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
-    {
-        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
     }
 
     private static IReadOnlyList<string> ComputeExpectedBuiltInTools(SquadCapabilityProfile profile)

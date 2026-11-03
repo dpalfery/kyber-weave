@@ -9,6 +9,7 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -96,64 +97,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         // No disposable state: suite reads canonical checked-in corpus.
         // Implements IDisposable per repository test coding standard.
-    }
-
-    /// <summary>
-    ///     Shared identities are read from the loaded fallback profile so the test follows the
-    ///     same generic single-projection contract as the renderer.
-    /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source)
-    {
-        return source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    ///     The shared identities whose canonical skill is suppressed: those carried by a subagent.
-    ///     A primary shared identity reuses its canonical skill as the entry point, so it is
-    ///     emitted. Delegated to the renderer's own resolver so the test cannot drift.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
-    {
-        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-    }
-
-    [Fact]
-    public void SupportedTargets_IsExactlyFactory()
-    {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-
-        Assert.Equal([SquadTarget.Factory], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Claude, SquadTarget.Factory],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("claude", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonFactoryTarget()
-    {
-        FactoryRenderer renderer = new();
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
     [Theory]
@@ -920,77 +863,6 @@ public sealed class FactoryRendererContractTests : IDisposable
         }
     }
 
-    /// <summary>
-    ///     Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
-    ///     reviewer profiles) receive a capability-not-isolable degradation record naming the granted
-    ///     shell tools (Execute) and withheld write tools (ApplyPatch, Create, Edit).
-    ///     Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
-    /// </summary>
-    [Fact]
-    public async Task RenderAsync_Factory_RecordsCapabilityNotIsolableForShellImpliesWrite()
-    {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        string[] grantedShellTools = ["Execute"];
-        string[] withheldWriteTools = ["ApplyPatch", "Create", "Edit"];
-
-        List<string> expectedAgents = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) &&
-                            e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) &&
-                             w == SquadPermissionDecision.Allow;
-                return exec && !write;
-            })
-            .Select(a => a.Name)
-            .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
-
-        Assert.NotEmpty(expectedAgents);
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed =
-                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
-                exec == SquadPermissionDecision.Allow;
-            bool writeAllowed =
-                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
-                write == SquadPermissionDecision.Allow;
-
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
-                d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
-
-            if (executeAllowed && !writeAllowed)
-            {
-                Assert.NotNull(record);
-                Assert.Equal("factory", record.Target);
-                Assert.Equal(agent.Name, record.CanonicalIdentity);
-                Assert.Equal(agent.Name, record.OutputIdentity);
-                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
-                Assert.NotNull(record.Details);
-                foreach (string shellTool in grantedShellTools)
-                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
-                foreach (string writeTool in withheldWriteTools)
-                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
-            }
-            else
-            {
-                Assert.Null(record);
-            }
-        }
-    }
-
     [Fact]
     public async Task RenderAsync_Factory_GlobalScope_StripsFactoryPrefix()
     {
@@ -1317,48 +1189,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            SquadDeploymentFile file1 = first.Files[i];
-            SquadDeploymentFile file2 = second.Files[i];
-
-            Assert.Equal(file1.RelativePath, file2.RelativePath);
-            Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span),
-                $"Content differed for file '{file1.RelativePath}'.");
-        }
-
-        Assert.Equal(first.Degradations.Count, second.Degradations.Count);
-        for (int i = 0; i < first.Degradations.Count; i++) Assert.Equal(first.Degradations[i], second.Degradations[i]);
-    }
-
-    [Fact]
-    public async Task RenderAsync_Factory_ProjectsLinkedAgentAndSkillResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            new FactoryRenderer(),
-            SquadTarget.Factory,
-            ".factory/droids/bug-crusher-investigator.md",
-            ".factory/droids",
-            ".factory/skills");
-    }
-
-    [Fact]
     public async Task RenderSkill_FrontmatterKeyOrderIsStable()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
@@ -1475,24 +1305,6 @@ public sealed class FactoryRendererContractTests : IDisposable
             $"Agent '{identity}' degradation details claim a guessed Factory field: {details}");
     }
 
-    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
-    {
-        const string delimiter = "---\n";
-        Assert.True(
-            text.StartsWith(delimiter, StringComparison.Ordinal),
-            $"'{identity}' is missing the opening frontmatter delimiter.");
-        int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
-        Assert.True(end > 0, $"'{identity}' is missing a closing '---' frontmatter delimiter.");
-
-        string yaml = text[delimiter.Length..(end + 1)];
-        string body = text[(end + 5)..];
-
-        YamlStream stream = new();
-        stream.Load(new StringReader(yaml));
-        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
-        return (root, body);
-    }
-
     private static IReadOnlyList<string> RequireSequence(YamlMappingNode node, string key, string identity)
     {
         if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
@@ -1510,21 +1322,6 @@ public sealed class FactoryRendererContractTests : IDisposable
                              ?? throw new InvalidOperationException(
                                  $"'{identity}' key '{key}' has a null sequence entry."))
             .ToArray();
-    }
-
-    private static string RequireScalar(YamlMappingNode node, string key, string identity)
-    {
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
-        {
-            string presentKeys = string.Join(", ", node.Children.Keys
-                .OfType<YamlScalarNode>()
-                .Select(existing => existing.Value ?? "<null>"));
-            throw new InvalidOperationException(
-                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
-        }
-
-        return Assert.IsType<YamlScalarNode>(value).Value
-               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }
 
