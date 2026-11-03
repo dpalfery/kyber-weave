@@ -276,9 +276,13 @@ describe('installFactoryPlugin: strict mode', () => {
   it.skipIf(POSIX_ONLY)('reports a foreign file whose name carries a control character without breaking the line', () => {
     const f = fixture('factory-foreign-control-')
     mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
-    // The owner's own file, with a newline and a control character in its name: the name
-    // is owner-controlled, and the status surface is line-based.
-    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'owner\nnotes\u0007.md'), 'mine\n')
+    // The owner's own file, with a newline, a control character, a C1 next-line, a line
+    // separator, and a BiDi override in its name: the name is owner-controlled, and the
+    // status surface is line-based.
+    writeFileSync(
+      join(f.pluginDir, 'kyberdash-factory', 'hooks', 'owner\nnotes\u0007\u0085\u2028\u202e.md'),
+      'mine\n',
+    )
 
     const result = strict(f)
 
@@ -288,8 +292,8 @@ describe('installFactoryPlugin: strict mode', () => {
     for (const line of result.err) {
       expect(
         line,
-        'the message carries no control character, so a crafted name cannot break the line',
-      ).not.toMatch(/[\u0000-\u001f\u007f]/)
+        'the message carries no control, separator, or BiDi character, so a crafted name cannot break or spoof the line',
+      ).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/)
     }
     expect(result.err.join(' '), 'the file name is still recognizable').toContain('owner')
   })

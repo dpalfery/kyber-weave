@@ -15,7 +15,7 @@
 // code into the small bounded process it runs in.
 
 import { randomBytes } from 'node:crypto'
-import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 /**
@@ -44,16 +44,36 @@ export function readConsentState(path: string): ConsentState {
   }
   try {
     // The file is measured through the descriptor BEFORE its content is read, so a file
-    // that is already over the bound is refused without ever being materialised.
+    // that is already over the bound is refused without being read at all; the read itself
+    // is bounded too, so a file that grows after the measure is still never materialised.
     const stat = fstatSync(handle)
     if (!stat.isFile()) return 'unreadable'
     if (stat.size > MAX_CONSENT_BYTES) return 'invalid'
-    return parseConsentText(readFileSync(handle, 'utf8'))
+    const text = readBoundedText(handle, MAX_CONSENT_BYTES)
+    return text === undefined ? 'invalid' : parseConsentText(text)
   } catch {
     return 'unreadable'
   } finally {
     closeSync(handle)
   }
+}
+
+/**
+ * At most `max` bytes of the open file, as UTF-8 text, or undefined when it holds more.
+ *
+ * The READ itself is bounded: it asks for no more than `max + 1` bytes, so a file that grew
+ * between the size check and the read is still never materialised past the bound.
+ */
+export function readBoundedText(handle: number, max: number): string | undefined {
+  const buffer = Buffer.alloc(max + 1)
+  let filled = 0
+  while (filled < buffer.length) {
+    const got = readSync(handle, buffer, filled, buffer.length - filled, null)
+    if (got === 0) break
+    filled += got
+  }
+  if (filled > max) return undefined
+  return buffer.subarray(0, filled).toString('utf8')
 }
 
 /** The state the consent file's text names, or 'invalid' when the text is not our shape. */

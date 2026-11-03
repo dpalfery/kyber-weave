@@ -296,6 +296,9 @@ async function readProcessStdin(): Promise<string> {
       const buffer = Buffer.from(chunk)
       bytes += buffer.length
       if (bytes > MAX_STDIN_BYTES) {
+        // The stream is closed before the refusal, as on the deadline path: an open stdin
+        // would keep this one-shot process alive and hold the tool that ran it.
+        process.stdin.destroy()
         throw new Error(`the hook payload is over the ${MAX_STDIN_BYTES} byte bound`)
       }
       chunks.push(buffer)

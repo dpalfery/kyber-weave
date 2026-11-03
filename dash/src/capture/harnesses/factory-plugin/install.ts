@@ -297,13 +297,14 @@ const MAX_DISPLAY_NAME_CHARS = 200
  * A name as the status surface shows it.
  *
  * The names this module echoes come out of the OWNER's tree, and a file name may hold a
- * newline or a control character. A control character is replaced with a space, so a crafted
- * name cannot break the line-based status surface, and the name is capped so one line stays
+ * newline or a control character. A control character (C0, DEL, C1), a line or paragraph
+ * separator, or a BiDi control is replaced with a space, so a crafted name cannot break or
+ * spoof the line-based status surface, and the name is capped so one line stays
  * one line. The name itself is kept, so the owner can still recognise the file a refusal is
  * about.
  */
 function displayName(name: string): string {
-  const cleaned = name.replace(/[\u0000-\u001f\u007f]/g, ' ')
+  const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ')
   return cleaned.length > MAX_DISPLAY_NAME_CHARS ? `${cleaned.slice(0, MAX_DISPLAY_NAME_CHARS)}…` : cleaned
 }
 

@@ -117,8 +117,14 @@ describe('the spool byte bound', () => {
       return {
         ...actual,
         readFileSync: (...args: unknown[]) => {
-          reads.push(String(args[0]))
+          reads.push(`readFileSync ${String(args[0])}`)
           return real(...args)
+        },
+        // The bounded read goes through a descriptor, so it is recorded too: an assertion
+        // on `reads` cannot pass just because the read was not handed the path.
+        readSync: (...args: unknown[]) => {
+          reads.push(`readSync ${String(args[0])}`)
+          return (actual['readSync'] as (...a: unknown[]) => number)(...args)
         },
       }
     })
@@ -127,10 +133,7 @@ describe('the spool byte bound', () => {
 
     const events = spool.readSpoolEvents(stateDir)
 
-    expect(
-      reads,
-      'a spool file that is already over the bound is never read',
-    ).not.toContain(spoolFile)
+    expect(reads, 'a spool file that is already over the bound is never read').toEqual([])
     // Whatever the reader hands back is inside the bound: a reader that refuses the file
     // holds no events at all, and a reader that keeps the newest ones holds fewer than
     // the ceiling. Either way the bound is what the reader answers to.

@@ -749,19 +749,21 @@ describe('the driver that runs the harness', () => {
     chmodSync(script, 0o755)
 
     spawnCapture.calls.length = 0
-    // A bound that is not a number, a bound that is infinite, and a bound that is
-    // negative: none of them is a cap a child can be held to.
-    for (const timeoutMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+    // A bound that is not a number, a bound that is infinite, a bound that is negative,
+    // and a fraction that floors to zero: none of them is a cap a child can be held to.
+    for (const timeoutMs of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0.5]) {
       const cli = resolveFactoryHarnessCli({ processEnv: { PATH: dir }, timeoutMs })
       spawnCapture.on = true
       cli.run(['plugin', 'list'])
     }
-    for (const maxOutputBytes of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+    for (const maxOutputBytes of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0.5]) {
       const cli = resolveFactoryHarnessCli({ processEnv: { PATH: dir }, maxOutputBytes })
       spawnCapture.on = true
       cli.run(['plugin', 'list'])
     }
 
+    // Every case has to reach the spawn, or the check below passes over nothing.
+    expect(spawnCapture.calls.length, 'every bound case reached the spawn').toBe(8)
     const offending = spawnCapture.calls
       .map((options) => ({ timeout: options['timeout'], maxBuffer: options['maxBuffer'] }))
       .filter((bounds) => !isSaneBound(bounds.timeout) || !isSaneBound(bounds.maxBuffer))

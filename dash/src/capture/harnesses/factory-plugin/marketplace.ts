@@ -314,8 +314,10 @@ function unreachableHarness(cause: string): FactoryHarnessCli {
  */
 function commandTimeoutMs(requested: number | undefined): number {
   if (requested === undefined) return DEFAULT_COMMAND_TIMEOUT_MS
-  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_COMMAND_TIMEOUT_MS
-  return Math.floor(requested)
+  if (!Number.isFinite(requested)) return DEFAULT_COMMAND_TIMEOUT_MS
+  // Floored BEFORE the check, so a fraction below one (which floors to zero) falls back too.
+  const whole = Math.floor(requested)
+  return whole > 0 ? whole : DEFAULT_COMMAND_TIMEOUT_MS
 }
 
 /**
@@ -326,8 +328,10 @@ function commandTimeoutMs(requested: number | undefined): number {
  */
 function commandOutputBytes(requested: number | undefined): number {
   if (requested === undefined) return DEFAULT_MAX_OUTPUT_BYTES
-  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_MAX_OUTPUT_BYTES
-  return Math.floor(requested)
+  if (!Number.isFinite(requested)) return DEFAULT_MAX_OUTPUT_BYTES
+  // Floored BEFORE the check, so a fraction below one (which floors to zero) falls back too.
+  const whole = Math.floor(requested)
+  return whole > 0 ? whole : DEFAULT_MAX_OUTPUT_BYTES
 }
 
 /**

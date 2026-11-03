@@ -10,10 +10,10 @@
 // This module is a LEAF: it imports only `node:` built-ins and the shared consent writer's
 // atomic file write, so the plugin never drags engine code into the process it runs in.
 
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { closeSync, fstatSync, mkdirSync, openSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { writeFileAtomic } from '../../consent-file.js'
+import { readBoundedText, writeFileAtomic } from '../../consent-file.js'
 
 /** The most events the spool holds; the oldest is dropped when it is full. */
 export const SPOOL_MAX_EVENTS = 500
@@ -42,14 +42,16 @@ export function readSpoolEvents(stateDir: string): unknown[] {
     // A spool that was never written holds no events; so does one that cannot be opened.
     return []
   }
-  let text: string
+  let text: string | undefined
   try {
     // The spool file is measured through the descriptor BEFORE its content is read, so a
-    // file that is already over the bound is refused without ever being materialised: the
-    // bound holds before the read, not after it.
+    // file that is already over the bound is refused without being read at all. The read
+    // itself is bounded too: a spool that grows after the measure is still never
+    // materialised past the bound.
     const stat = fstatSync(handle)
     if (!stat.isFile() || stat.size > SPOOL_MAX_BYTES) return []
-    text = readFileSync(handle, 'utf8')
+    text = readBoundedText(handle, SPOOL_MAX_BYTES)
+    if (text === undefined) return []
   } catch {
     return []
   } finally {

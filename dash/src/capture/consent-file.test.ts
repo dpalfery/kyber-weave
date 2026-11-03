@@ -217,25 +217,45 @@ type ConsentModule = typeof import('./consent-file.js')
  * replaced for the load, so every read the module makes is recorded, and the real module
  * is put back in the `afterEach`.
  */
-async function loadWithRecordedReads(): Promise<{
+async function loadWithRecordedReads(reportedSize?: number): Promise<{
   module: ConsentModule
   reads: string[]
+  bytesRead: () => number
 }> {
+  // Every content read is recorded, whichever call makes it and whatever it is handed (a
+  // path or a descriptor), so an assertion on `reads` cannot pass just because the read
+  // went through a descriptor.
   const reads: string[] = []
+  let bytes = 0
   vi.doMock('node:fs', async (importOriginal) => {
     const actual = (await importOriginal()) as Record<string, unknown>
-    const real = actual['readFileSync'] as (...args: unknown[]) => unknown
+    const realReadFile = actual['readFileSync'] as (...args: unknown[]) => unknown
+    const realRead = actual['readSync'] as (...args: unknown[]) => number
+    const realFstat = actual['fstatSync'] as (...args: unknown[]) => { size: number }
     return {
       ...actual,
       readFileSync: (...args: unknown[]) => {
-        reads.push(String(args[0]))
-        return real(...args)
+        reads.push(`readFileSync ${String(args[0])}`)
+        return realReadFile(...args)
+      },
+      readSync: (...args: unknown[]) => {
+        reads.push(`readSync ${String(args[0])}`)
+        const got = realRead(...args)
+        bytes += got
+        return got
+      },
+      // A file that grows between the measure and the read is simulated by reporting a
+      // smaller size than the file holds.
+      fstatSync: (...args: unknown[]) => {
+        const stat = realFstat(...args)
+        if (reportedSize !== undefined) Object.defineProperty(stat, 'size', { value: reportedSize })
+        return stat
       },
     }
   })
   vi.resetModules()
   const module = await import('./consent-file.js')
-  return { module, reads }
+  return { module, reads, bytesRead: () => bytes }
 }
 
 /**
@@ -271,11 +291,23 @@ describe('the consent file is bounded before it is read', () => {
     const { module, reads } = await loadWithRecordedReads()
     const state = module.readConsentState(path)
 
-    expect(
-      reads,
-      'a consent file that is already over the bound is never read',
-    ).not.toContain(path)
+    expect(reads, 'a consent file that is already over the bound is never read').toEqual([])
     expect(state, 'the over-bound file is invalid').toBe('invalid')
+  })
+
+  it('never reads past the bound when the file grows after it was measured', async () => {
+    const dir = tempDir()
+    const path = consentPathIn(dir)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, `{"version":1,"content":true,"note":"${'x'.repeat(64 * 1024)}"}`)
+
+    // The measure says the file is small; the file on disk is sixteen times the bound.
+    const { module, reads, bytesRead } = await loadWithRecordedReads(100)
+    const state = module.readConsentState(path)
+
+    expect(reads.some((read) => read.startsWith('readFileSync')), 'the file is never read whole').toBe(false)
+    expect(bytesRead(), 'the read stops one byte past the bound').toBeLessThanOrEqual(4096 + 1)
+    expect(state, 'a file that grew past the bound is invalid').toBe('invalid')
   })
 })
 
