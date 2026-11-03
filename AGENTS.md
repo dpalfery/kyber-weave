@@ -26,9 +26,10 @@ gate before Ready / Kilo review. Map changed files to tests:
   (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
   zero tests. Check the run reports a non-zero test count.
 - Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
-- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test '<test_name_substring>'`
-  (the filter is optional; omit it to run the whole crate when the change touches shared crate
-  code, which is what `fast-loop.sh` does).
+- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
+  The crate is one small test target, so this runs it whole, as `fast-loop.sh` does for any
+  change under `dash/tray/src-tauri/`. To narrow while iterating, add a quoted name filter
+  (`cargo test 'tray_menu'`) and check the result line shows a non-zero `passed` count.
 - Governed docs: `docs validate . --merge-ready` and `docs drift .`.
 
 Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`
