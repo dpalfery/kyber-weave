@@ -18,10 +18,14 @@ as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)).
 you changed, plus build/lint of the touched projects; the full suite is CI's job, and CI is the
 gate before Ready / Kilo review. Map changed files to tests:
 
-- .NET: `scripts/fast-loop.sh --class <Area>*` or
+- .NET: `scripts/fast-loop.sh --class <Area>*` (builds first), or build then filter:
+  `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
   `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
-- KyberDash: `npm --prefix dash run test:related -- <changed files>` (`vitest related --run`).
-- Tray UI: `npm --prefix dash/tray/ui exec vitest run <path>`; tray crate: `cargo test` in `dash/tray/src-tauri`.
+- KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
+  (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
+  zero tests. Check the run reports a non-zero test count.
+- Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
+- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test <filter>`.
 - Governed docs: `docs validate . --merge-ready` and `docs drift .`.
 
 Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`
@@ -47,7 +51,8 @@ cross-cutting changes or CI reproduction listed above; otherwise CI runs the ful
 
 ```bash
 dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
-dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
+# Cross-cutting changes or CI reproduction only, instead of the line above:
+# dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```

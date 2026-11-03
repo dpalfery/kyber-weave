@@ -37,10 +37,12 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    several comments are the same mechanism.
 5. **Run the gates.** Build and formatters for the touched projects, and the tests that target
    the changed code (map changed files to test classes/files, e.g. `dotnet test --filter`,
-   `vitest related --run <files>`, `cargo test -p <crate>`). Do not run the full suite locally:
-   CI runs it (on Linux too, for cross-platform repositories). Run it locally only when the fix
-   touches cross-cutting code (shared core, build config, migrations) or to reproduce a CI
-   failure. Do not rely on a worker's "tests pass"; read the totals.
+   `vitest related --run <files>`, `cargo test <filter>` run from the crate's directory, after
+   `cargo fmt --check` and `cargo clippy`). Do not run the full suite locally: CI runs it (on
+   Linux too, for cross-platform repositories). Run it locally only when the fix touches
+   cross-cutting code (shared core libraries, the repository's gate config, build or toolchain
+   config, CI workflows, migrations or schemas; the repository's AGENTS.md names the exact
+   paths) or to reproduce a CI failure. Do not rely on a worker's "tests pass"; read the totals.
 6. **Push (never force-push), then reply.** Replies must cite commits that exist on the remote,
    so push first. Stacked PRs: fix bottom-up, merge each level into the next, push all levels.
 7. **Reply to every comment you acted on with the fix commit hash**, one line, linking the
