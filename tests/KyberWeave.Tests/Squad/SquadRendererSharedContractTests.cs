@@ -337,18 +337,48 @@ public sealed class SquadRendererSharedContractTests
         });
     }
 
+    public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnsafeOutputName()
+    {
+        TheoryData<SquadTarget, string> rows = [];
+        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        {
+            rows.Add(target, "agent-name");
+            rows.Add(target, "skill-name");
+            rows.Add(target, "resource-path");
+        }
+
+        return rows;
+    }
+
     /// <summary>
-    /// The pipeline's name gate runs inside every renderer, not only in the helper: a source whose
-    /// agent name carries path syntax fails the render before any file is built.
+    /// The pipeline's gate runs inside every renderer, not only in the helper: a source whose agent
+    /// name, skill name or resource path carries path syntax fails the render before any file is
+    /// built.
     /// </summary>
     [Theory]
-    [MemberData(nameof(ShippedTargets))]
-    public async Task EachRendererRefusesACanonicalNameThatIsNotOnePathSegment(SquadTarget target)
+    [MemberData(nameof(ShippedTargetsWithEachUnsafeOutputName))]
+    public async Task EachRendererRefusesAnOutputNameThatIsNotAPortablePath(SquadTarget target, string tampering)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadSource tampered = source with
+        SquadSource tampered = tampering switch
         {
-            Agents = [.. source.Agents.Select((agent, index) => index == 0 ? agent with { Name = "nested/agent" } : agent)]
+            "agent-name" => source with
+            {
+                Agents = [.. source.Agents.Select((agent, index) => index == 0 ? agent with { Name = "nested/agent" } : agent)]
+            },
+            "skill-name" => source with
+            {
+                Skills = [.. source.Skills.Select((skill, index) => index == 0 ? skill with { Name = ".." } : skill)]
+            },
+            _ => source with
+            {
+                Agents =
+                [
+                    .. source.Agents.Select((agent, index) => index == 0
+                        ? agent with { Resources = [new SquadResource("../outside.md", "escape\n")] }
+                        : agent)
+                ]
+            }
         };
 
         await Assert.ThrowsAsync<SquadRenderValidationException>(() => RendererFor(target).RenderAsync(

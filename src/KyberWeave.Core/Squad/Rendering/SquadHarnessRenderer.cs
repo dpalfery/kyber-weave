@@ -68,6 +68,12 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             ValidateOutputNames(source);
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
         }
+        catch (OperationCanceledException canceled)
+        {
+            return Task.FromCanceled<SquadRenderResult>(canceled.CancellationToken.IsCancellationRequested
+                ? canceled.CancellationToken
+                : new CancellationToken(canceled: true));
+        }
         catch (Exception exception)
         {
             return Task.FromException<SquadRenderResult>(exception);
@@ -95,19 +101,30 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         }
     }
 
+    /// <summary>
+    /// Holds each resource path to the same portable-path policy the registry applies to the
+    /// rendered tree, so the early gate and the final check cannot disagree about what is safe.
+    /// </summary>
     private static void ValidateResourcePaths(string owner, IReadOnlyList<SquadResource> resources)
     {
         foreach (SquadResource resource in resources)
         {
-            if (string.IsNullOrWhiteSpace(resource.RelativePath) ||
-                resource.RelativePath.StartsWith('/') ||
-                resource.RelativePath.Contains('\\', StringComparison.Ordinal) ||
-                resource.RelativePath.Split('/').Any(segment => segment.Length == 0 || segment.Trim('.').Length == 0))
+            try
+            {
+                if (string.Equals(SquadPathPolicy.NormalizeRelativePath(resource.RelativePath), resource.RelativePath, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+            }
+            catch (Exception exception) when (exception is not SquadRenderValidationException)
             {
                 throw new SquadRenderValidationException(
-                    $"Resource '{resource.RelativePath}' owned by '{owner}' is not a relative path of portable " +
-                    "segments, so it cannot be projected beside its principal.");
+                    $"Resource '{resource.RelativePath}' owned by '{owner}' is not a portable relative path: {exception.Message}",
+                    exception);
             }
+
+            throw new SquadRenderValidationException(
+                $"Resource '{resource.RelativePath}' owned by '{owner}' is not a canonical portable relative path.");
         }
     }
 
@@ -584,15 +601,26 @@ internal sealed class SquadHarnessRenderContext
         };
 
     /// <summary>
-    /// Rejects a canonical name that would not stay one path segment: blank, carrying a separator, or
-    /// made only of dots (<c>.</c>, <c>..</c>).
+    /// Rejects a canonical name that would not stay one portable path segment: blank, carrying a
+    /// separator, made only of dots (<c>.</c>, <c>..</c>), or failing the registry's
+    /// <see cref="SquadPathPolicy"/> segment rules.
     /// </summary>
     public static void ValidatePathSegment(string name)
     {
-        if (string.IsNullOrWhiteSpace(name) ||
-            name.Contains('/', StringComparison.Ordinal) ||
-            name.Contains('\\', StringComparison.Ordinal) ||
-            name.Trim('.').Length == 0)
+        bool portable;
+        try
+        {
+            portable = !string.IsNullOrWhiteSpace(name) &&
+                       !name.Contains('/', StringComparison.Ordinal) &&
+                       name.Trim('.').Length != 0 &&
+                       string.Equals(SquadPathPolicy.NormalizeRelativePath(name), name, StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is not SquadRenderValidationException)
+        {
+            portable = false;
+        }
+
+        if (!portable)
         {
             throw new SquadRenderValidationException(
                 $"Canonical name '{name}' is not a valid single-segment path for rendering.");
