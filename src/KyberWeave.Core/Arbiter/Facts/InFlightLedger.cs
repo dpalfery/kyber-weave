@@ -182,10 +182,47 @@ public sealed class InFlightLedger
     }
 
     /// <summary>Reads every complete event, in append order. Takes no lock.</summary>
-    public IReadOnlyList<ArbiterLedgerEvent> ReadAll() =>
-        [.. ArbiterLogFiles.ReadCompleteLines(FilePath)
-            .Select(line => JsonSerializer.Deserialize<ArbiterLedgerEvent>(line, ArbiterJson.Options))
-            .OfType<ArbiterLedgerEvent>()];
+    public IReadOnlyList<ArbiterLedgerEvent> ReadAll() => ReadAllWithDiagnostics().Records;
+
+    /// <summary>
+    /// Reads every complete event and reports how many lines were malformed. The hook
+    /// uses <see cref="ReadAll"/> and skips them; <c>audit</c> uses this overload to
+    /// report the corruption instead of silently hiding it.
+    /// </summary>
+    public (IReadOnlyList<ArbiterLedgerEvent> Records, int MalformedLines) ReadAllWithDiagnostics()
+    {
+        List<ArbiterLedgerEvent> records = [];
+        int malformed = 0;
+        foreach (string line in ArbiterLogFiles.ReadCompleteLines(FilePath))
+        {
+            ArbiterLedgerEvent? record = TryDeserialize(line);
+            if (record is null)
+            {
+                malformed++;
+                continue;
+            }
+
+            records.Add(record);
+        }
+
+        return (records, malformed);
+    }
+
+    /// <summary>
+    /// A malformed line is skipped rather than thrown: one corrupt append must not
+    /// fail pairing and every in-flight query on every call.
+    /// </summary>
+    private static ArbiterLedgerEvent? TryDeserialize(string line)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<ArbiterLedgerEvent>(line, ArbiterJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Resolves the pre event a post event pairs with: by <c>call-id</c> where

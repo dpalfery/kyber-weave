@@ -47,10 +47,48 @@ public sealed class DecisionLog
     }
 
     /// <summary>Reads every complete decision, in append order. Takes no lock.</summary>
-    public IReadOnlyList<ArbiterDecisionRecord> ReadAll() =>
-        [.. ArbiterLogFiles.ReadCompleteLines(FilePath)
-            .Select(line => JsonSerializer.Deserialize<ArbiterDecisionRecord>(line, ArbiterJson.Options))
-            .OfType<ArbiterDecisionRecord>()];
+    public IReadOnlyList<ArbiterDecisionRecord> ReadAll() => ReadAllWithDiagnostics().Records;
+
+    /// <summary>
+    /// Reads every complete decision and reports how many lines were malformed. The
+    /// hook uses <see cref="ReadAll"/> and skips them; <c>audit</c> uses this overload
+    /// to report the corruption instead of silently hiding it.
+    /// </summary>
+    public (IReadOnlyList<ArbiterDecisionRecord> Records, int MalformedLines) ReadAllWithDiagnostics()
+    {
+        List<ArbiterDecisionRecord> records = [];
+        int malformed = 0;
+        foreach (string line in ArbiterLogFiles.ReadCompleteLines(FilePath))
+        {
+            ArbiterDecisionRecord? record = TryDeserialize(line);
+            if (record is null)
+            {
+                malformed++;
+                continue;
+            }
+
+            records.Add(record);
+        }
+
+        return (records, malformed);
+    }
+
+    /// <summary>
+    /// A malformed line is skipped rather than thrown: one corrupt append must not
+    /// fail every future evaluation, which the hook would otherwise turn into
+    /// KW-ARB-HOOK-001 until someone edits the file by hand.
+    /// </summary>
+    private static ArbiterDecisionRecord? TryDeserialize(string line)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<ArbiterDecisionRecord>(line, ArbiterJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The <c>REPEAT</c> count: one plus the number of earlier escalation

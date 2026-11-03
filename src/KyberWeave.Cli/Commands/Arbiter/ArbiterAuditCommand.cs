@@ -74,8 +74,20 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         IReadOnlyList<ArbiterDecisionRecord> records;
         try
         {
-            events = ledger.ReadAll();
-            records = decisions.ReadAll();
+            (events, int malformedEvents) = ledger.ReadAllWithDiagnostics();
+            (records, int malformedRecords) = decisions.ReadAllWithDiagnostics();
+            if (malformedEvents + malformedRecords > 0)
+            {
+                report.Add(new Diagnostic(
+                    ArbiterEvaluator.HookErrorCode,
+                    Severity.Error,
+                    $"The arbiter log under '{arbiterDirectory}' holds " +
+                    $"{malformedEvents + malformedRecords} line(s) that are not a complete record.",
+                    arbiterDirectory,
+                    "The ledger or the decision log holds a line that is not a complete record; the audit fails closed rather than reporting a partial log."));
+                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                return 1;
+            }
         }
         // A truncated, hand-edited or foreign line is malformed JSON, which throws
         // JsonException rather than an IOException. Reading the log must fail closed the
