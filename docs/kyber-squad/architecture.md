@@ -21,7 +21,7 @@ decided-by:
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
-  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 sections:
   "#":
     keywords:
@@ -642,7 +642,7 @@ kyberdash kyber capture plugin install --harness factory --preserve
   version before it runs the verb
   ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The Factory plugin
   targets Factory's documented plugin layout
-  ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)).
+  ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)).
 
 ### The Factory plugin subtree Squad does not own
 

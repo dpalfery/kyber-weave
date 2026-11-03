@@ -18,7 +18,7 @@ decided-by:
   - adr/0045-conductor-operator-channel-opt-in
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
-  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration

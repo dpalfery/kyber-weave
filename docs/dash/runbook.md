@@ -10,7 +10,7 @@ last-reviewed: 2026-11-02
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
-  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 code-refs:
   - registerKyberCommands
@@ -288,7 +288,7 @@ or upgrade the plugin, then restart OpenCode: the running service does not hot-r
 
 Factory is captured by a Kyber-owned **hooks plugin** that Factory installs from a marketplace
 KyberDash publishes, and it declares no Factory config key
-([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)). Turn it on and check it:
+([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)). Turn it on and check it:
 
 ```bash
 kyberdash kyber capture enable  --harness factory

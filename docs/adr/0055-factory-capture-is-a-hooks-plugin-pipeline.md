@@ -1,5 +1,5 @@
 ---
-id: adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+id: adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
@@ -12,7 +12,7 @@ code-refs:
   - FACTORY_CONTRACT_VERSION
 ---
 
-# ADR 0053: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
+# ADR 0055: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 
 ## Status
 
