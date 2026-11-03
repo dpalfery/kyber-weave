@@ -92,7 +92,7 @@ The per-cluster **dispatch tally** lives on the run's persisted execution artifa
 
 When the ready queue is empty and every task has cleared its exit gate, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
 
-With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. The draft pull request is pushed before the review council runs, so the council reviews a pull request that already exists. `REQUEST_CHANGES` follows the bounded auto-remediation loop below; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). The verdict goes in the PR description and is not a conductor gate. The pull request is marked ready once required CI passes, and review happens after that (the autonomy contract sets the 60-minute CI wait).
+With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. The draft pull request is pushed before the review council runs, so the council reviews a pull request that already exists. `REQUEST_CHANGES` follows the bounded auto-remediation loop below. The verdict goes in the PR description and is not a conductor gate. The pull request is marked ready once required CI passes, and review happens after that (the autonomy contract sets the 60-minute CI wait).
 
 ### Bounded council remediation loop (Critical/Major only, per Q3)
 
@@ -102,7 +102,7 @@ Unactionable, out-of-scope, or second-failure findings park immediately with the
 
 Minor/Info findings never trigger remediation and never park: a Minor-only council reports its findings and moves on without a remediation loop and without parking the change or task.
 
-The following verdict paths are not findings for this loop and bypass remediation entirely: KW-REVIEW-008 reserved-path escalation (always-human paths), size escalation over max-reviewable-lines (KW-REVIEW-009), and any blocking-gate failure (blocking-gate verdict rule 3, including docs validate, docs drift, build, test, and analyzers). Each keeps its escalation and REQUEST_CHANGES path as written; a size escalation is reported as pending human review and never cancels an in-flight remediation pass already dispatched.
+- **Bypass paths**: blocking-gate failure (blocking-gate verdict rule, including docs validate, docs drift, build, test, and analyzers) bypasses finding remediation entirely and follows its existing REQUEST_CHANGES path.
 
 ## Closeout
 

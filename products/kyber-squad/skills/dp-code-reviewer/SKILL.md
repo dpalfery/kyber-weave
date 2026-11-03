@@ -28,8 +28,7 @@ Run the review, produce and record the verdict, and let the change proceed regar
 
 This exists because a review system's first weeks are its least trustworthy, and finding that
 out by blocking real work is expensive in exactly the currency the system needs most —
-willingness to keep it on. Run shadow until the false-positive rate is known and the
-`always-human` paths have been checked against what the repository actually holds. Then
+willingness to keep it on. Run shadow until the false-positive rate is known. Then
 switch. Do not skip it on a repository the reviewer has never seen.
 
 ### verifier
@@ -64,8 +63,6 @@ being disputed.
 1. **Review** — `code-review` in the current mode.
 2. **Verdict**:
    - `APPROVE` → the change is ready. Report it and stop.
-   - `NEEDS_HUMAN` → **stop immediately.** Do not iterate, do not attempt to fix into an
-     approval. Report which rule escalated it and hand it to a person.
    - `REQUEST_CHANGES` → continue.
 3. **Route** the findings back to the agent that wrote the code — not to a general worker.
    Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
@@ -76,7 +73,6 @@ being disputed.
 ### Termination
 
 - `APPROVE` — done.
-- `NEEDS_HUMAN` — escalated, and the loop ends there.
 - **Three cycles without the accepted-finding count falling** — stop and escalate. A loop
   that is not converging is not going to, and the usual cause is a finding the implementing
   agent does not understand or does not accept. That needs a person, not a fourth attempt.
@@ -98,7 +94,7 @@ Each cycle:
 
 ```
 REVIEW CYCLE {n} — mode: {shadow|enabled|verifier|full}
-Verdict:   {APPROVE|REQUEST_CHANGES|NEEDS_HUMAN}   Risk: {LOW|MEDIUM|HIGH}
+Verdict:   {APPROVE|REQUEST_CHANGES}   Risk: {LOW|MEDIUM|HIGH}
 Findings:  {surviving} surviving ({fixed} fixed, {new} new since cycle {n-1})
 Gates:     {passed}/{total}   {failing gate ids, if any}
 Next:      {COMMIT_READY|FIXING|RE_REVIEWING|ESCALATED}

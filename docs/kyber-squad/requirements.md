@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-02
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering

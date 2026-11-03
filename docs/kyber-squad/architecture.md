@@ -1480,8 +1480,7 @@ a draft pull request before the whole-change council runs, so the council review
 already exists. `github-devops` then waits for required CI, for at most 60 minutes, and marks the pull
 request ready once every required check passes. The council verdict is written into the pull request
 description and does not gate readiness. Review that follows is ordinary post-ready pull request review,
-not a conductor gate. The conductor never merges. Autonomous `NEEDS_HUMAN` verdicts and unresolved
-circuit-breakers are listed as pending human review, not held back
+not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
 ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 ### Host documentation side

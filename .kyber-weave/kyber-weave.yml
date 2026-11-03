@@ -388,27 +388,6 @@ review:
     minimum-lines: 4
 
   policy:
-    # The artifacts that govern what agents may do are not approvable by an agent. A change
-    # widening a capability profile or editing an instruction surface is exactly the change
-    # an automated reviewer has the least standing to wave through, so it escalates on path
-    # alone — before any finding is weighed, and with no way for the engine to decide
-    # otherwise.
-    always-human:
-      - "products/kyber-squad/profiles/capabilities.yml"
-      - "products/kyber-squad/agents/**"
-      - ".kyber-weave/kyber-weave.yml"
-      - "**/*secret*"
-      - "**/*credential*"
-    # Raised from 10000 to 20000 because one delivery — the KyberDash sessions-list payload
-    # independence (schema v21 and v22 with the session-turn split, the covering index, the
-    # bounded read routes, the engine's maintenance-pass fix, the CLI's vacuum command, and
-    # their tests and documentation) — reached roughly 17,400 changed lines. The owner
-    # reviewed that single unit and approved it rather than splitting it (PR 397), which is
-    # the remedy this ceiling's own documentation names: "Split the change or have a human
-    # review it." A change to this file is human-only by the policy above, and that approval
-    # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
-    # stamp for whatever comes next.
-    max-reviewable-lines: 20000
     # strict: min-confidence 5, and one surviving major requests changes. The preset supplies
     # both thresholds, so major-count-blocks and min-confidence are deliberately not set here.
     strictness: strict
@@ -425,8 +404,7 @@ config-reg:
 mcp:
   # The MCP servers this repository's agent instructions rely on. `docs init` wires these
   # into the harnesses it detects; the declaration is host-owned from the moment it exists
-  # and docs init never edits it again. This file is on the review.policy.always-human
-  # list in this repository, so every change here escalates for human review by path alone.
+  # and docs init never edits it again.
   required-servers:
     kyber-weave:
       command: [kyber-weave-mcp, --repo-root, .]

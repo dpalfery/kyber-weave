@@ -281,7 +281,7 @@ app.Configure(config =>
             .WithExample("review", "duplicates", ".", "--out", "duplicates.json");
 
         review.AddCommand<ReviewVerdictCommand>("verdict")
-            .WithDescription("Compute approve / request-changes / needs-human from findings and gates.")
+            .WithDescription("Compute approve / request-changes from findings and gates.")
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
     });
 

@@ -142,24 +142,30 @@ public sealed class SquadAutonomousGatesInventoryTests
         Assert.DoesNotContain("**`KW-REVIEW-008`**", hardStops, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The protected-path list is a fixed policy surface. Removing the section 9 bullet must not
-    /// change any path it guards, so each path and the always-human rule itself stay pinned.
-    /// </summary>
     [Fact]
-    public void AlwaysHumanPathListIsUnchanged()
+    public void VerdictRulesAndSection10RecordRetirementOfNeedsHumanAndAlwaysHuman()
     {
         string text = ReadInventory();
-        int start = text.IndexOf("## 10. Always-human paths", StringComparison.Ordinal);
-        int end = text.IndexOf("## 11.", start, StringComparison.Ordinal);
-        Assert.True(start >= 0 && end > start, "Section 10 (Always-human paths) must be present.");
-        string section = text[start..end];
+        int s8Start = text.IndexOf("## 8. Verdict rules", StringComparison.Ordinal);
+        int s8End = text.IndexOf("## 9. Hard stops", StringComparison.Ordinal);
+        Assert.True(s8Start >= 0 && s8End > s8Start, "Section 8 (Verdict rules) and section 9 (Hard stops) must both be present.");
+        string section8 = text[s8Start..s8End];
 
-        AssertInventoryContains(section, "- `products/kyber-squad/profiles/capabilities.yml`");
-        AssertInventoryContains(section, "- `products/kyber-squad/agents/**`");
-        AssertInventoryContains(section, "- `.kyber-weave/kyber-weave.yml`");
-        AssertInventoryContains(section, "- `**/*secret*`");
-        AssertInventoryContains(section, "- `**/*credential*`");
-        AssertInventoryContains(section, "`KW-REVIEW-008` itself always stays human.");
+        int s10Start = text.IndexOf("## 10. Always-human paths", StringComparison.Ordinal);
+        int s10End = text.IndexOf("## 11.", s10Start, StringComparison.Ordinal);
+        Assert.True(s10Start >= 0 && s10End > s10Start, "Section 10 (Always-human paths) and section 11 must both be present.");
+        string section10 = text[s10Start..s10End];
+
+        AssertInventoryContains(section8, "KW-REVIEW-008");
+        AssertInventoryContains(section8, "KW-REVIEW-009");
+        Assert.Contains("Retired", section8, StringComparison.OrdinalIgnoreCase);
+        AssertInventoryContains(section8, "APPROVE");
+        AssertInventoryContains(section8, "REQUEST_CHANGES");
+
+        Assert.Contains("Retired", section10, StringComparison.OrdinalIgnoreCase);
+        AssertInventoryContains(section10, "NEEDS_HUMAN");
+        AssertInventoryContains(section10, "always-human");
+        AssertInventoryContains(section10, "APPROVE");
+        AssertInventoryContains(section10, "REQUEST_CHANGES");
     }
 }

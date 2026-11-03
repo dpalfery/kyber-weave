@@ -74,7 +74,6 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     {
         ReviewVerdict.Approve => "APPROVE",
         ReviewVerdict.RequestChanges => "REQUEST CHANGES",
-        ReviewVerdict.NeedsHuman => "NEEDS HUMAN",
         _ => verdict.ToString()
     };
 

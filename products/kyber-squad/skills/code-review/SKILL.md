@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change (the gate is named pre-push; a draft push never waits for it). Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change (the gate is named pre-push; a draft push never waits for it). Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
 ---
 
@@ -28,10 +28,8 @@ the request, the commit or pull-request description, and any governing plan or s
 under the paths declared as **<plan-index>** and **<specification-index>** in the root
 `AGENTS.md` registry.
 
-Two things fall out of this and govern everything after it: **which lenses can possibly
-apply**, and **whether the change is reviewable at all**. A diff past the host's
-`review.policy.max-reviewable-lines` ceiling is not made safe by reviewing it harder; it
-escalates.
+What falls out of this and governs everything after it is **which lenses can possibly apply**;
+a change touching only Markdown does not need a database-migration lens spun up to tell you so.
 
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
@@ -189,12 +187,10 @@ Rules, in evaluation order. The first that fires decides:
 
 | # | Rule | Verdict |
 |---|---|---|
-| 1 | A changed path matches `review.policy.always-human` | `NEEDS_HUMAN` |
-| 2 | The diff exceeds `max-reviewable-lines` | `NEEDS_HUMAN` |
-| 3 | A blocking gate failed | `REQUEST_CHANGES` |
-| 4 | Any surviving `critical` finding | `REQUEST_CHANGES` |
-| 5 | Surviving `major` findings reach `major-count-blocks` | `REQUEST_CHANGES` |
-| 6 | Otherwise | `APPROVE` |
+| 1 | A blocking gate failed | `REQUEST_CHANGES` |
+| 2 | Any surviving `critical` finding | `REQUEST_CHANGES` |
+| 3 | Surviving `major` findings reach `major-count-blocks` | `REQUEST_CHANGES` |
+| 4 | Otherwise | `APPROVE` |
 
 Findings whose `confidence` is **below** `review.policy.min-confidence` are excluded before
 the critical and major blocking rules. Equal to the threshold is kept; above it is kept.
@@ -207,10 +203,6 @@ host that also declares `min-confidence` or `major-count-blocks` overrides the p
 number. Minor findings never block at any level. Pass the strictness and the effective
 `min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
 findings instead of having them dropped at the source and a lenient host is not flooded.
-
-The two escalation rules run **before** any finding is weighed, because a reserved path and
-an unreviewable diff both say the same thing: this change is not the engine's to settle,
-however clean or filthy the council's report was.
 
 **Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids (stop reworking each and list the ids in the PR; park never holds back delivery). Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
 
@@ -257,7 +249,7 @@ Procedure above and the host's declared gates.
 ## Report format
 
 ### Verdict
-- **Verdict:** `APPROVE` / `REQUEST_CHANGES` / `NEEDS_HUMAN`
+- **Verdict:** `APPROVE` / `REQUEST_CHANGES`
 - **Risk:** `LOW` / `MEDIUM` / `HIGH`
 - **Rule:** the `KW-REVIEW-*` rule that decided it, and why it fired.
 
@@ -308,8 +300,6 @@ review:
     minimum-lines: 4                       # normalized lines, signature and braces excluded
   policy:
     strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
-    always-human: ["**/auth/**", "**/*secret*"]
-    max-reviewable-lines: 10000
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:

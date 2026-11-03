@@ -1,3 +1,4 @@
+using System.Reflection;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
@@ -19,15 +20,16 @@ public class ReviewConfigTests
         Assert.ThrowsAny<YamlException>(() => Load(yaml));
 
     [Fact]
-    public void AnUnconfiguredHostDeclaresNoGatesAndNoReservedPaths()
+    public void AnUnconfiguredHostDeclaresNoGatesAndDefaultPolicyThresholds()
     {
         ReviewConfig config = Load("ontology:\n  docs-root: docs\n");
 
         Assert.Empty(config.Gates);
-        Assert.Empty(config.Policy.AlwaysHuman);
-        Assert.Equal(10_000, config.Policy.MaxReviewableLines);
         Assert.Equal(7, config.Policy.MinConfidence);
+        Assert.Equal(3, config.Policy.MajorCountBlocks);
         Assert.False(config.Coverage.IsDeclared);
+        Assert.Null(typeof(ReviewPolicy).GetProperty("AlwaysHuman"));
+        Assert.Null(typeof(ReviewPolicy).GetProperty("MaxReviewableLines"));
     }
 
     [Fact]
@@ -104,9 +106,6 @@ public class ReviewConfigTests
                 file-line-percent: 85
                 class-line-percent: 80
               policy:
-                always-human:
-                  - "**/auth/**"
-                max-reviewable-lines: 4000
                 major-count-blocks: 2
                 min-confidence: 8
                 suppressions:
@@ -115,8 +114,6 @@ public class ReviewConfigTests
                     expires: 2026-11-18
             """);
 
-        Assert.Equal(["**/auth/**"], config.Policy.AlwaysHuman);
-        Assert.Equal(4000, config.Policy.MaxReviewableLines);
         Assert.Equal(2, config.Policy.MajorCountBlocks);
         Assert.Equal(8, config.Policy.MinConfidence);
         Assert.True(config.Coverage.IsDeclared);
@@ -126,7 +123,7 @@ public class ReviewConfigTests
     [Fact]
     public void StrictnessDefaultsToBalancedWithTheProductThresholds()
     {
-        ReviewPolicy policy = Load("review:\n  policy:\n    max-reviewable-lines: 5000\n").Policy;
+        ReviewPolicy policy = Load("review:\n  policy: {}\n").Policy;
 
         Assert.Equal(ReviewStrictness.Balanced, policy.Strictness);
         Assert.Equal(7, policy.MinConfidence);
@@ -202,7 +199,6 @@ public class ReviewConfigTests
     [Theory]
     [InlineData("min-confidence: 0", "min-confidence")]
     [InlineData("min-confidence: 11", "min-confidence")]
-    [InlineData("max-reviewable-lines: 0", "max-reviewable-lines")]
     [InlineData("major-count-blocks: 0", "major-count-blocks")]
     public void OutOfRangePolicyValuesAreRejected(string line, string expected) =>
         Assert.Contains(expected, Invalid($"review:\n  policy:\n    {line}\n").Message, StringComparison.Ordinal);
@@ -278,7 +274,7 @@ public class ReviewConfigTests
     /// mid-review.
     /// </summary>
     [Fact]
-    public void ThisRepositorysOwnReviewConfigurationLoadsAndReservesItsGovernanceArtifacts()
+    public void ThisRepositorysOwnReviewConfigurationLoadsCleanlyWithStrictPolicy()
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
 
@@ -288,12 +284,10 @@ public class ReviewConfigTests
         Assert.Contains(review.Gates, g => g.Id == "build");
         Assert.Contains(review.Gates, g => g.Id == "test");
         Assert.All(review.Gates, g => Assert.NotEmpty(g.Run));
+        Assert.Equal(ReviewStrictness.Strict, review.Policy.Strictness);
 
-        Assert.True(
-            PathGlob.FirstMatch(review.Policy.AlwaysHuman, "products/kyber-squad/profiles/capabilities.yml") is not null,
-            "The capability profiles decide what every agent may do and must never be approvable by an agent.");
-        Assert.True(
-            PathGlob.FirstMatch(review.Policy.AlwaysHuman, "products/kyber-squad/agents/code-reviewer.md") is not null,
-            "Instruction surfaces must escalate to a human.");
+        string configText = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
+        Assert.DoesNotContain("always-human", configText, StringComparison.Ordinal);
+        Assert.DoesNotContain("max-reviewable-lines", configText, StringComparison.Ordinal);
     }
 }

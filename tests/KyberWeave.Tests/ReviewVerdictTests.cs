@@ -1,3 +1,4 @@
+using System.Reflection;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -38,17 +39,16 @@ public class ReviewVerdictTests
             "Use <= or count + 1.");
 
     private static ReviewConfig Config(ReviewPolicy? policy = null) =>
-        new() { Policy = policy ?? new ReviewPolicy { AlwaysHuman = ["**/auth/**"] } };
+        new() { Policy = policy ?? new ReviewPolicy() };
 
-    private static ReviewPolicy PresetWithReservedPaths(ReviewStrictness strictness)
+    private static ReviewPolicy Preset(ReviewStrictness strictness)
     {
         ReviewPolicy preset = ReviewPolicy.ForStrictness(strictness);
         return new ReviewPolicy
         {
             Strictness = strictness,
             MinConfidence = preset.MinConfidence,
-            MajorCountBlocks = preset.MajorCountBlocks,
-            AlwaysHuman = ["**/auth/**"]
+            MajorCountBlocks = preset.MajorCountBlocks
         };
     }
 
@@ -71,8 +71,8 @@ public class ReviewVerdictTests
     {
         ReviewFinding major = Finding(ReviewSeverity.Major, confidence: 5);
 
-        ReviewOutcome balanced = Evaluate([major], config: Config(PresetWithReservedPaths(ReviewStrictness.Balanced)));
-        ReviewOutcome strict = Evaluate([major], config: Config(PresetWithReservedPaths(ReviewStrictness.Strict)));
+        ReviewOutcome balanced = Evaluate([major], config: Config(Preset(ReviewStrictness.Balanced)));
+        ReviewOutcome strict = Evaluate([major], config: Config(Preset(ReviewStrictness.Strict)));
 
         Assert.Equal(ReviewVerdict.Approve, balanced.Verdict);
         Assert.Equal(ReviewVerdict.RequestChanges, strict.Verdict);
@@ -84,7 +84,7 @@ public class ReviewVerdictTests
     {
         ReviewOutcome strict = Evaluate(
             [Finding(ReviewSeverity.Minor), Finding(ReviewSeverity.Minor, id: "correctness/other")],
-            config: Config(PresetWithReservedPaths(ReviewStrictness.Strict)));
+            config: Config(Preset(ReviewStrictness.Strict)));
 
         Assert.Equal(ReviewVerdict.Approve, strict.Verdict);
     }
@@ -181,31 +181,28 @@ public class ReviewVerdictTests
         Assert.Equal(4, outcome.Accepted.Count);
     }
 
-    /// <summary>
-    /// The policy outranks the findings in both directions: a reserved path escalates a
-    /// change with nothing wrong with it, and it escalates rather than merely adding to a
-    /// changes-requested verdict, because "a human must look at this" is a different
-    /// instruction from "fix this".
-    /// </summary>
     [Fact]
-    public void AReservedPathEscalatesRegardlessOfHowCleanTheReviewWas()
+    public void ReviewVerdictDefinesOnlyApproveAndRequestChanges()
     {
-        ReviewOutcome outcome = Evaluate(scope: Scope(10, "src/auth/TokenIssuer.cs"));
+        Assert.Equal(["Approve", "RequestChanges"], Enum.GetNames<ReviewVerdict>());
 
-        Assert.Equal(ReviewVerdict.NeedsHuman, outcome.Verdict);
-        Assert.Equal(RiskGrade.High, outcome.Risk);
-        Assert.Equal(2, outcome.ExitCode);
-        Assert.Contains(outcome.Diagnostics, d => d.Code == VerdictEngine.ReservedPath);
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        Assert.Null(typeof(VerdictEngine).GetField("ReservedPath", flags));
+        Assert.Null(typeof(VerdictEngine).GetField("ChangeTooLarge", flags));
+        Assert.Null(typeof(VerdictEngine).GetField("NoReservedPathsDeclared", flags));
     }
 
     [Fact]
-    public void AReservedPathOutranksACriticalFinding()
+    public void TouchToAuthPathWithCleanGatesAndNoFindingsIsApproved()
     {
         ReviewOutcome outcome = Evaluate(
-            [Finding(ReviewSeverity.Critical)],
+            gates: [new GateResult("test", true, 0, "passed")],
             scope: Scope(10, "src/auth/TokenIssuer.cs"));
 
-        Assert.Equal(ReviewVerdict.NeedsHuman, outcome.Verdict);
+        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
+        Assert.Equal(RiskGrade.Low, outcome.Risk);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code is "KW-REVIEW-008" or "KW-REVIEW-011");
     }
 
     [Theory]
@@ -224,12 +221,16 @@ public class ReviewVerdictTests
         Assert.Equal(expected, PathGlob.IsMatch(pattern, path));
 
     [Fact]
-    public void AChangeTooLargeToReviewEscalatesRatherThanBeingGraded()
+    public void LargeChangeWithCleanGatesAndNoFindingsIsApproved()
     {
-        ReviewOutcome outcome = Evaluate(scope: Scope(10_001));
+        ReviewOutcome outcome = Evaluate(
+            gates: [new GateResult("test", true, 0, "passed")],
+            scope: Scope(10_001));
 
-        Assert.Equal(ReviewVerdict.NeedsHuman, outcome.Verdict);
-        Assert.Contains(outcome.Diagnostics, d => d.Code == VerdictEngine.ChangeTooLarge);
+        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
+        Assert.Equal(RiskGrade.Low, outcome.Risk);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-009");
     }
 
     /// <summary>
@@ -351,7 +352,7 @@ public class ReviewVerdictTests
         ReviewConfig config = new()
         {
             Coverage = new ReviewCoverage(85, 85),
-            Policy = new ReviewPolicy { AlwaysHuman = ["**/auth/**"] }
+            Policy = new ReviewPolicy()
         };
 
         ReviewOutcome outcome = Evaluate(config: config, coverage: new CoverageResult(81.2, 90));
@@ -363,11 +364,11 @@ public class ReviewVerdictTests
     }
 
     [Fact]
-    public void AHostThatDeclaredNoReservedPathsIsToldSoRatherThanSilentlyUnprotected()
+    public void DefaultConfigEmitsNoReservedPathsDiagnostic()
     {
         ReviewOutcome outcome = Evaluate(config: new ReviewConfig());
 
-        Assert.Contains(outcome.Diagnostics, d => d.Code == VerdictEngine.NoReservedPathsDeclared);
+        Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == "KW-REVIEW-011");
     }
 
     [Fact]

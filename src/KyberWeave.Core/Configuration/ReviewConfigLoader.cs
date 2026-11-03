@@ -588,10 +588,6 @@ public static class ReviewConfigLoader
             baseMinConfidence = preset.MinConfidence;
         }
 
-        int maxLines = policy.MaxReviewableLines ?? defaults.MaxReviewableLines;
-        if (maxLines <= 0)
-            throw new YamlException("review.policy.max-reviewable-lines must be greater than zero.");
-
         int majorBlocks = policy.MajorCountBlocks ?? baseMajorBlocks;
         if (majorBlocks <= 0)
             throw new YamlException("review.policy.major-count-blocks must be greater than zero.");
@@ -603,8 +599,6 @@ public static class ReviewConfigLoader
         return new ReviewPolicy
         {
             Strictness = strictness,
-            AlwaysHuman = policy.AlwaysHuman is null ? defaults.AlwaysHuman : [.. policy.AlwaysHuman],
-            MaxReviewableLines = maxLines,
             MajorCountBlocks = majorBlocks,
             MinConfidence = minConfidence,
             Suppressions = policy.Suppressions is null

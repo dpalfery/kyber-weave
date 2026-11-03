@@ -4,7 +4,7 @@ title: Review council
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-20
+last-reviewed: 2026-11-02
 ---
 
 # Review council
@@ -30,7 +30,7 @@ them, they win, and the thing that conflicts is the bug.
 exit gate run by its own developer agent, never a reviewer. `code-reviewer` never runs on a
 per-task basis unless a human specifically asks it to.**
 
-Not on a failed task gate. Not on a path the policy reserves. Not on a concern that looks
+Not on a failed task gate. Not on a policy concern. Not on a concern that looks
 serious. Every one of those is a per-task council bill — seventeen lenses and a full gate suite
 spent to settle a question about a couple of files, and spent again on the next task. A task
 that cannot converge produces a *finding*, and findings are collected, planned by `architect`,
@@ -73,9 +73,9 @@ fail differently:
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and
   produce a repeatable artifact. That artifact is what a claim about executed behaviour is
   allowed to cite. Nothing else counts.
-- **A verdict engine** turns findings and gate results into `APPROVE`, `REQUEST_CHANGES`, or
-  `NEEDS_HUMAN` by fixed rule. It is ordinary unit-tested code, so the same inputs give the
-  same answer twice and every decision names the rule that made it.
+- **A verdict engine** turns findings and gate results into `APPROVE` or `REQUEST_CHANGES` by
+  fixed rule. It is ordinary unit-tested code, so the same inputs give the same answer twice
+  and every decision names the rule that made it.
 
 ## Two layers of review, and the first is cheaper
 
@@ -97,7 +97,7 @@ reaches the council means the gate did not run.
 
 **The top layer runs once.** `code-reviewer` reviews the whole run at the end — and a single task
 only when a human explicitly asks. Nothing a task does summons it: not a failed pass, not a
-reserved path, not a concern that looks serious. Each of those would be a per-task council bill.
+policy concern, not a concern that looks serious. Each of those would be a per-task council bill.
 
 What the task layer does not cover, and names as uncovered in every report: security modelling,
 authorization and tenancy, performance at scale, blast radius and revertibility, cross-file
@@ -113,9 +113,7 @@ kyber-weave review verdict . --findings findings.json --gates gates.json
 kyber-weave review catalogue                                        # print the shipped per-technology gates
 ```
 
-Exit codes are distinct on purpose: `0` approve, `1` changes requested, `2` needs a human.
-A change that merely touches a protected path must not look, to a caller reading the exit
-code, like one the review rejected.
+Exit codes are binary: `0` approve, `1` changes requested.
 
 ## What makes it trustworthy
 
@@ -123,16 +121,11 @@ code, like one the review rejected.
 and a concrete `failure_scenario`. Anything missing one is dropped before it can influence the
 verdict, and the lens that produced it is named.
 
-**The policy outranks the engine.** Paths a repository reserves — authentication, secrets, and
-here the capability profiles and agent instruction surfaces themselves — escalate to a human
-on path alone, before any finding is weighed. The artifacts that decide what agents may do are
-not approvable by an agent.
-
 **Suppressions expire.** There is no permanent one. A lapsed suppression returns its finding
 without anyone having to remember to go looking.
 
 **Risk comes from findings, not size.** A twelve-line migration dropping a column outranks a
-three-thousand-line generated-client refresh. Size appears only as an attention ceiling.
+three-thousand-line generated-client refresh. A large clean diff stays `LOW`.
 
 ## Related
 

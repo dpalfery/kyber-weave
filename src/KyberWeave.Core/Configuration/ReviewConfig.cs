@@ -133,18 +133,6 @@ public sealed class ReviewPolicy
     /// <summary>The preset these thresholds came from.</summary>
     public ReviewStrictness Strictness { get; init; } = ReviewStrictness.Balanced;
 
-    /// <summary>Glob patterns whose paths always escalate to a human reviewer.</summary>
-    public IReadOnlyList<string> AlwaysHuman { get; init; } = [];
-
-    /// <summary>
-    /// The largest diff, in changed lines, that is reviewed at all.
-    /// </summary>
-    /// <remarks>
-    /// An attention limit, not a risk signal. A change past this ceiling is not made safe by
-    /// reviewing it harder, so it escalates rather than being graded.
-    /// </remarks>
-    public int MaxReviewableLines { get; init; } = 10_000;
-
     /// <summary>How many surviving major findings force changes to be requested.</summary>
     public int MajorCountBlocks { get; init; } = 3;
 

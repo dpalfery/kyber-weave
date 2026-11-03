@@ -34,7 +34,10 @@ public sealed class McpConfigTests : IDisposable
     private readonly TempDirectory _root = new();
 
     /// <summary>Deletes the repository tree the file-backed cases wrote.</summary>
-    public void Dispose() => _root.Dispose();
+    public void Dispose()
+    {
+        _root.Dispose();
+    }
 
     /// <summary>
     /// Every key of the design's worked example reaches the model unchanged, so a host can copy
@@ -44,19 +47,19 @@ public sealed class McpConfigTests : IDisposable
     public void AFullSectionParsesEveryDeclaredField()
     {
         McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                kyber-weave:
-                  command: [kyber-weave-mcp, --repo-root, .]
-                  provenance: first-party
-                  level: required
-                  install: dotnet tool install --global KyberWeave.Mcp
-                codegraph:
-                  command: [codegraph, serve, --mcp]
-                  provenance: third-party
-                  level: recommended
-                  install: codegraph init .
-            """).Mcp;
+                                                               mcp:
+                                                                 required-servers:
+                                                                   kyber-weave:
+                                                                     command: [kyber-weave-mcp, --repo-root, .]
+                                                                     provenance: first-party
+                                                                     level: required
+                                                                     install: dotnet tool install --global KyberWeave.Mcp
+                                                                   codegraph:
+                                                                     command: [codegraph, serve, --mcp]
+                                                                     provenance: third-party
+                                                                     level: recommended
+                                                                     install: codegraph init .
+                                                               """).Mcp;
 
         Assert.Equal(2, config.RequiredServers.Count);
 
@@ -84,12 +87,12 @@ public sealed class McpConfigTests : IDisposable
     public void AnEntryWithoutALevelIsTreatedAsRequired()
     {
         McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                codegraph:
-                  command: [codegraph, serve, --mcp]
-                  provenance: third-party
-            """).Mcp;
+                                                               mcp:
+                                                                 required-servers:
+                                                                   codegraph:
+                                                                     command: [codegraph, serve, --mcp]
+                                                                     provenance: third-party
+                                                               """).Mcp;
 
         Assert.Equal(McpRequirementLevel.Required, config.RequiredServers[ThirdPartyServer].Level);
     }
@@ -102,12 +105,12 @@ public sealed class McpConfigTests : IDisposable
     public void ArgvOrderIsPreserved()
     {
         McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                codegraph:
-                  command: [codegraph, --quiet, serve, --repo-root, ., --mcp]
-                  provenance: third-party
-            """).Mcp;
+                                                               mcp:
+                                                                 required-servers:
+                                                                   codegraph:
+                                                                     command: [codegraph, --quiet, serve, --repo-root, ., --mcp]
+                                                                     provenance: third-party
+                                                               """).Mcp;
 
         Assert.Equal(
             ["codegraph", "--quiet", "serve", "--repo-root", ".", "--mcp"],
@@ -122,16 +125,16 @@ public sealed class McpConfigTests : IDisposable
     public void InstallIsOptionalAndKeptVerbatimWithoutTouchingTheArgv()
     {
         McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                kyber-weave:
-                  command: [kyber-weave-mcp, --repo-root, .]
-                  provenance: first-party
-                codegraph:
-                  command: [codegraph, serve, --mcp]
-                  provenance: third-party
-                  install: codegraph init .
-            """).Mcp;
+                                                               mcp:
+                                                                 required-servers:
+                                                                   kyber-weave:
+                                                                     command: [kyber-weave-mcp, --repo-root, .]
+                                                                     provenance: first-party
+                                                                   codegraph:
+                                                                     command: [codegraph, serve, --mcp]
+                                                                     provenance: third-party
+                                                                     install: codegraph init .
+                                                               """).Mcp;
 
         Assert.Null(config.RequiredServers[FirstPartyServer].Install);
 
@@ -144,7 +147,7 @@ public sealed class McpConfigTests : IDisposable
     [Theory]
     [InlineData("autonomy: autonomous\n")]
     [InlineData("ontology:\n  docs-root: docs\n")]
-    [InlineData("review:\n  policy:\n    max-reviewable-lines: 400\n")]
+    [InlineData("review:\n  policy:\n    strictness: strict\n")]
     public void AnAbsentSectionDeclaresNoServers(string yaml)
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
@@ -187,19 +190,19 @@ public sealed class McpConfigTests : IDisposable
     public void TheHostsServerMapReplacesTheDefaultsRatherThanMerging()
     {
         McpConfig defaults = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                inherited:
-                  command: [inherited-mcp, --serve]
-                  provenance: third-party
-            """).Mcp;
+                                                                 mcp:
+                                                                   required-servers:
+                                                                     inherited:
+                                                                       command: [inherited-mcp, --serve]
+                                                                       provenance: third-party
+                                                                 """).Mcp;
         McpYamlSection? section = KyberWeaveYamlParser.Parse("""
-            mcp:
-              required-servers:
-                codegraph:
-                  command: [codegraph, serve, --mcp]
-                  provenance: third-party
-            """).Mcp;
+                                                             mcp:
+                                                               required-servers:
+                                                                 codegraph:
+                                                                   command: [codegraph, serve, --mcp]
+                                                                   provenance: third-party
+                                                             """).Mcp;
 
         McpConfig merged = McpConfigLoader.Merge(defaults, section);
 
@@ -217,12 +220,12 @@ public sealed class McpConfigTests : IDisposable
     public void TheServerMapFallsBackToTheDefaultsWhenTheSectionIsAbsent()
     {
         McpConfig defaults = KyberWeaveConfigLoader.LoadFromYaml("""
-            mcp:
-              required-servers:
-                inherited:
-                  command: [inherited-mcp, --serve]
-                  provenance: third-party
-            """).Mcp;
+                                                                 mcp:
+                                                                   required-servers:
+                                                                     inherited:
+                                                                       command: [inherited-mcp, --serve]
+                                                                       provenance: third-party
+                                                                 """).Mcp;
         McpYamlSection? section = KyberWeaveYamlParser.Parse("autonomy: autonomous\n").Mcp;
 
         McpConfig merged = McpConfigLoader.Merge(defaults, section);

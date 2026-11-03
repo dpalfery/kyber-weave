@@ -17,16 +17,11 @@ public sealed record ReviewOutcome(
 {
     /// <summary>The exit code a command should return for this verdict.</summary>
     /// <remarks>
-    /// <see cref="ReviewVerdict.NeedsHuman"/> is not a failure and does not share an exit
-    /// code with <see cref="ReviewVerdict.RequestChanges"/>. Collapsing them would make a
-    /// change that merely touches a protected path indistinguishable, to any caller reading
-    /// the exit code, from one the review actually rejected.
+    /// Returns 0 for <see cref="ReviewVerdict.Approve"/> and 1 for <see cref="ReviewVerdict.RequestChanges"/>.
     /// </remarks>
     public int ExitCode => Verdict switch
     {
         ReviewVerdict.Approve => 0,
-        ReviewVerdict.RequestChanges => 1,
-        ReviewVerdict.NeedsHuman => 2,
         _ => 1
     };
 }
