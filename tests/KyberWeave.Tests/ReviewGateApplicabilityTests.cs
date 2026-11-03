@@ -26,7 +26,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     private static ReviewConfig Config(params ReviewGate[] gates) => new() { Gates = gates };
 
     private static ReviewConfig PolicyConfig() =>
-        new() { Policy = new ReviewPolicy { AlwaysHuman = ["**/auth/**"] } };
+        new() { Policy = new ReviewPolicy() };
 
     [Fact]
     public void AppliesWhenPathsAreParsedFromYaml()
@@ -115,13 +115,12 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     public void TheVerdictIgnoresNotApplicableGates()
     {
         ReviewConfig config = PolicyConfig();
-        ReviewScope scope = new(["src/Foo.cs"], 10);
         GateResult notApplicable = new("dash-gate", true, 1, "failed", 0, "no changed path matches applies-when");
 
         ReviewOutcome withNotApplicable =
-            VerdictEngine.Evaluate(scope, [], [notApplicable], config, Today);
+            VerdictEngine.Evaluate([], [notApplicable], config, Today);
         ReviewOutcome without =
-            VerdictEngine.Evaluate(scope, [], [], config, Today);
+            VerdictEngine.Evaluate([], [], config, Today);
 
         // Even a non-zero exit code on a not-applicable gate changes nothing.
         Assert.Equal(ReviewVerdict.Approve, withNotApplicable.Verdict);

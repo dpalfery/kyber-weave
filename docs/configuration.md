@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -541,14 +541,6 @@ binary you install yourself as `third-party`, whatever it does.
 The declaration is independent of Squad: it is not Squad's `toolchain.yml`
 `required-mcp-tools` roster and not `products/kyber-squad/mcp.json`, and neither is read by
 the check or the repair.
-
-**Editing this section escalates for human review by path, in this repository and in any
-host that copies the policy.** The section lives in `.kyber-weave/kyber-weave.yml`, which is
-on this repository's `review.policy.always-human` list, so **any** change to the file — the
-MCP declaration included — is routed to a human before any finding is weighed, whatever the
-change contains. That is the accepted cost of keeping the declaration in the file the rest
-of the product already reads, and it is why the declaration's schema and scaffolded default
-are part of what a reviewer approves.
 
 ## This repository's own config
 

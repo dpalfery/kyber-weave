@@ -59,15 +59,15 @@ These stay human in autonomous mode:
 - merge, publish, delete, or spend (committing to a feature branch, pushing it, and opening a draft pull request are allowed, as above);
 - an unresolvable `STATUS: BLOCKED` or write error (`PLAN_WRITE_ERROR`, `SPEC_WRITE_ERROR`), such as missing credentials or access.
 
-## NEEDS_HUMAN and circuit-breakers are non-fatal
+## Circuit-breakers are non-fatal
 
-In autonomous mode `NEEDS_HUMAN` never blocks or parks anything. That covers a `NEEDS_HUMAN` from `code-reviewer`, the protected-path escalation (`KW-REVIEW-008`), and the size escalation (`KW-REVIEW-009`). Each is reported as a finding: delivery continues, the item is listed in the PR description and in the final report as pending human review, and the draft pull request is the human review.
+When a developer task trips a circuit-breaker (`ESCALATION: circuit-breaker`), it is reported as a finding and delivery continues — the draft pull request is the human review, so every open circuit-breaker finding is listed in the PR description as pending human review.
 
 A circuit-breaker that `architect` mediation cannot resolve keeps rework on that cluster halted. It is listed in the PR as an open finding, and delivery continues. A failing cluster normally keeps required CI red, so the PR stays draft.
 
 Finish every unaffected queued task and the closeout, then deliver as above. "Park" applies only to an individual remediation-loop finding: it means stop reworking that finding and list its id in the PR. It never holds back delivery.
 
-In supervised mode `NEEDS_HUMAN` is terminal, and a circuit-breaker escalates to the user.
+Supervised behaviour is unchanged: an unresolved circuit-breaker finding escalates to the user and blocks completion until the user resolves it.
 
 ## Final report
 
@@ -75,5 +75,5 @@ Add to the completion report:
 
 - every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
 - the count of auto-approved gates;
-- every `NEEDS_HUMAN` and open circuit-breaker finding, listed as pending human review;
+- every open circuit-breaker finding (and any run-start doctor exit 3 item), listed as pending human review;
 - the draft pull request link and its CI state (ready, or what it is waiting for).

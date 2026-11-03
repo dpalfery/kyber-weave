@@ -93,7 +93,7 @@ public sealed class SquadAutonomyContractTests
     }
 
     [Fact]
-    public void AutonomousNeedsHumanIsAReportedFindingAndDeliveryContinues()
+    public void AutonomousCircuitBreakerIsAReportedFindingAndDeliveryContinues()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
         string execution = Read("agents", "conductor", "references", "execution-and-review.md");
@@ -105,8 +105,8 @@ public sealed class SquadAutonomyContractTests
             "the draft pull request is the human review",
             "listed in the PR",
             "delivery continues");
-        Assert.Contains("is terminal", execution, StringComparison.Ordinal);
-        Assert.Contains("autonomy contract", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("NEEDS_HUMAN", autonomy, StringComparison.Ordinal);
+        Assert.DoesNotContain("NEEDS_HUMAN", execution, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -199,9 +199,9 @@ public sealed class SquadAutonomyContractTests
             "Ask for approval or concrete revision feedback",
             "ask the final blocking question as **approve and execute**",
             "explicitly chooses **approve and execute**",
-            "`NEEDS_HUMAN` is terminal",
             "reopens approval of the affected Test contract",
             "Supervised behaviour is unchanged");
+        Assert.DoesNotContain("NEEDS_HUMAN", contract, StringComparison.Ordinal);
         AssertAll(Read("skills", "bug-crusher", "SKILL.md"),
             "Relay its decision digests and final **approve and execute** gate",
             "surface every grouped question");

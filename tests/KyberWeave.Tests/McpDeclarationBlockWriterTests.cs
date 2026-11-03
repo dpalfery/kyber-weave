@@ -10,8 +10,8 @@ namespace KyberWeave.Tests;
 ///     and then hands the section over for good.
 /// </summary>
 /// <remarks>
-///     The host configuration is on this repository's <c>review.policy.always-human</c> list, so a
-///     tool that rewrote the declaration on its next run would raise a human-review escalation
+///     The host configuration is host-owned from the moment it exists, so a
+///     tool that rewrote the declaration on its next run would raise an escalation
 ///     against a change nobody asked for. The section is therefore written once — embedded when
 ///     the file is created, appended when the file has none — and afterwards it belongs to the
 ///     host, <c>--force</c> included.
@@ -19,16 +19,15 @@ namespace KyberWeave.Tests;
 public sealed class McpDeclarationBlockWriterTests : IDisposable
 {
     /// <summary>
-    ///     The block exactly as the design renders it: one server declared, the third-party
-    ///     example commented out, and the always-human consequence stated in the header comment.
+    ///     The block exactly as the design renders it: one server declared, and the third-party
+    ///     example commented out.
     /// </summary>
     private const string DeclarationBlock =
         """
         mcp:
           # The MCP servers this repository's agent instructions rely on. `docs init` wires these
           # into the harnesses it detects; the declaration is host-owned from the moment it exists
-          # and docs init never edits it again. This file is on the review.policy.always-human
-          # list in this repository, so every change here escalates for human review by path alone.
+          # and docs init never edits it again.
           required-servers:
             kyber-weave:
               command: [kyber-weave-mcp, --repo-root, .]
@@ -59,7 +58,10 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     private string ConfigFile => Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml");
 
@@ -86,6 +88,29 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         Assert.Equal(McpRequirementLevel.Required, declared.Value.Level);
 
         Assert.Equal(DeclarationBlock, ReadDeclarationSection(File.ReadAllText(ConfigFile)));
+    }
+
+    /// <summary>
+    ///     The scaffolded declaration text must not cite the retired always-human or needs-human
+    ///     review policies.
+    /// </summary>
+    [Fact]
+    public void ScaffoldedMcpDeclarationDoesNotCiteRetiredAlwaysHumanOrNeedsHumanPolicy()
+    {
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        string configContent = File.ReadAllText(ConfigFile);
+
+        Assert.DoesNotContain("always-human", configContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("needs-human", configContent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("escalates for human review", configContent, StringComparison.OrdinalIgnoreCase);
+
+        Assert.DoesNotContain("always-human", McpDeclarationBlockWriter.DeclarationYaml,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("needs-human", McpDeclarationBlockWriter.DeclarationYaml,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("escalates for human review", McpDeclarationBlockWriter.DeclarationYaml,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -131,7 +156,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     /// <summary>
     ///     A host-owned declaration is never rewritten, with or without <c>--force</c>.
     ///     Regenerating it would replace the servers this repository actually depends on with the
-    ///     tool's guess, and every such run would escalate for human review by path alone.
+    ///     tool's guess, rewriting operator state without permission.
     /// </summary>
     [Theory]
     [InlineData(false)]
@@ -267,7 +292,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
                 continue;
 
             bool opensNextRegion = line[0] != ' '
-                && (line[0] != '#' || lines[index - 1].Length == 0);
+                                   && (line[0] != '#' || lines[index - 1].Length == 0);
             if (opensNextRegion)
             {
                 end = index;
@@ -278,8 +303,10 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         return string.Join('\n', lines, start, end - start).TrimEnd('\n');
     }
 
-    private static string InNewlineStyle(string text, string newline) =>
-        newline == "\n" ? text : text.Replace("\n", newline, StringComparison.Ordinal);
+    private static string InNewlineStyle(string text, string newline)
+    {
+        return newline == "\n" ? text : text.Replace("\n", newline, StringComparison.Ordinal);
+    }
 
     private void WriteHostConfig(string yaml)
     {

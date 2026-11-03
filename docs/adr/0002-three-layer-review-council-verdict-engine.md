@@ -4,14 +4,14 @@ title: Three-Layer Code Review Council with Deterministic Verdict Engine
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-11-02
 ---
 
 # ADR 0002: Three-Layer Code Review Council with Deterministic Verdict Engine
 
 ## Status
 
-Accepted
+Accepted; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict.
 
 ## Context
 
@@ -37,8 +37,9 @@ We replace the single-prompt reviewer with a three-layer review architecture sep
 
 3. **Deterministic Verdict Engine (`kyber-weave review verdict`)**:
    - Implemented as unit-tested C# code (`KyberWeave.Core/Review`, `KW-REVIEW-*` rule family), completely independent of model inference.
-   - Evaluates findings and gate outcomes against repository policy (`review.policy`, `always-human` path globs, confidence/severity thresholds).
-   - Generates structured SARIF reports and deterministic verdicts: `APPROVE`, `REQUEST_CHANGES`, or `NEEDS_HUMAN`.
+   - Evaluates findings and gate outcomes against repository policy (`review.policy`, confidence/severity thresholds).
+   - Generates structured SARIF reports and deterministic binary verdicts: `APPROVE` (0) or `REQUEST_CHANGES` (1).
+   - *Amendment (2026-11-02)*: The owner directive retired `NEEDS_HUMAN`, `always-human` path globs (`KW-REVIEW-008`, `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`). Verdicts are strictly binary: clean runs approve (0); any blocking gate failure, critical finding, or exceeding major findings requests changes (1).
 
 ## Alternatives Considered
 
@@ -51,4 +52,4 @@ We replace the single-prompt reviewer with a three-layer review architecture sep
 - Review verdicts are completely auditable, deterministic, and backed by unit tests (`VerdictEngine`).
 - Gate commands execute safely without shell vulnerabilities.
 - Review lenses focus exclusively on their domain of expertise and auto-skip irrelevant changes.
-- Human review is strictly and deterministically enforced for sensitive capability or configuration paths via `always-human`.
+- *Amendment (2026-11-02)*: Verdicts are binary (`APPROVE` or `REQUEST_CHANGES`). Sensitive paths and diff sizes no longer escalate to `NEEDS_HUMAN`; gates and findings alone determine acceptance.

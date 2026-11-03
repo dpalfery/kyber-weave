@@ -172,7 +172,17 @@ public static class TestGitRepositoryTemplate
             }
             else if (entry is FileInfo file)
             {
-                file.CopyTo(targetPath, true);
+                try
+                {
+                    file.CopyTo(targetPath, true);
+                }
+                catch (IOException) when (IsTransientGitLock(file.FullName) && !File.Exists(file.FullName))
+                {
+                    // Git background maintenance can remove a transient lock between the
+                    // directory enumeration and the copy. The template does not need it.
+                    continue;
+                }
+
                 try
                 {
                     File.SetAttributes(targetPath, FileAttributes.Normal);
@@ -188,6 +198,7 @@ public static class TestGitRepositoryTemplate
     private static void InitializeReviewGatesAgentTemplate(string repo)
     {
         RunGit(repo, "init", "--quiet");
+        ConfigureTemplateRepository(repo);
         WriteFile(repo, "src/a.cs", "// a\n");
         WriteFile(repo, "src/gone.cs", "// gone\n");
         WriteFile(repo, "notes/readme.md", "# readme\n");
@@ -204,6 +215,7 @@ public static class TestGitRepositoryTemplate
     private static void InitializeReviewGatesCouncilTemplate(string repo)
     {
         RunGit(repo, "init", "--quiet");
+        ConfigureTemplateRepository(repo);
         WriteFile(repo, "src/a.cs", "// a\n");
         WriteFile(repo, "notes/readme.md", "# readme\n");
         RunGit(repo, "add", "-A");
@@ -226,6 +238,7 @@ public static class TestGitRepositoryTemplate
         CopyDirectory(cleanPath, repo);
         WriteHostConfig(repo, technologies);
         RunGit(repo, "init", "--quiet");
+        ConfigureTemplateRepository(repo);
         RunGit(repo, "add", "-A");
         RunGit(
             repo,
@@ -241,6 +254,7 @@ public static class TestGitRepositoryTemplate
     {
         WriteHostConfig(repo, technologies);
         RunGit(repo, "init", "--quiet");
+        ConfigureTemplateRepository(repo);
         RunGit(repo, "add", "-A");
         RunGit(
             repo,
@@ -275,6 +289,27 @@ public static class TestGitRepositoryTemplate
         string path = Path.Combine(repo, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
+    }
+
+    /// <summary>
+    ///     Whether a path is a transient git lock file. Only these may vanish during a template
+    ///     copy; a missing tracked file is real corruption and must still fail the copy.
+    /// </summary>
+    internal static bool IsTransientGitLock(string path)
+    {
+        string normalized = path.Replace('\\', '/');
+        return normalized.Contains("/.git/", StringComparison.Ordinal) &&
+               normalized.EndsWith(".lock", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Stops the template repository from starting background auto-gc or maintenance, whose
+    ///     transient lock files can disappear while a test copies the template.
+    /// </summary>
+    private static void ConfigureTemplateRepository(string repo)
+    {
+        RunGit(repo, "config", "gc.auto", "0");
+        RunGit(repo, "config", "maintenance.auto", "false");
     }
 
     private static void RunGit(string repo, params string[] arguments)

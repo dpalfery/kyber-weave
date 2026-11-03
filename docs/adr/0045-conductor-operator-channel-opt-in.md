@@ -4,7 +4,7 @@ title: Conductor Operator Channel as an Opt-In Render-Time Overlay, and Non-Bloc
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-02
 component: KyberSquad
 code-refs:
   - SquadOperatorChannel
@@ -18,10 +18,7 @@ supersedes: []
 
 ## Status
 
-Accepted, 2026-10-27. Records two decisions. Decision 1 gives the Copilot CLI conductor an
-opt-in channel to the operator, added at install time only when the user turns it on, through an
-MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review
-findings are reported in the pull request rather than holding the change back.
+Accepted, 2026-10-27; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict. Records two decisions and one subsequent amendment. Decision 1 gives the Copilot CLI conductor an opt-in channel to the operator, added at install time only when the user turns it on, through an MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review findings are reported in the pull request rather than holding the change back. Amendment 3 records the retirement of `NEEDS_HUMAN` and associated escalate-to-human review rules.
 
 ## Context
 
@@ -122,15 +119,17 @@ autonomous-gates inventory, and they reverse owner decision Q5 of the archived
   time, the pull request stays draft and the report says "draft: CI failed" or "draft: CI pending".
 - Review runs after the pull request is ready. The council verdict goes in the pull request
   description; it does not gate readiness.
-- In autonomous mode, `NEEDS_HUMAN` from the council, the protected-path escalation (`KW-REVIEW-008`),
-  the size escalation (`KW-REVIEW-009`), and unresolved circuit-breakers are reported findings. They
-  are listed in the pull request description and the final report as pending human review. None of
-  them stops delivery.
-- `KW-REVIEW-008` still returns `NEEDS_HUMAN` on its protected paths. The engine's verdict is
-  unchanged; only what autonomous delivery does with it changes.
-- In supervised mode, `NEEDS_HUMAN` stays terminal.
+- In autonomous mode, unresolved circuit-breakers are reported findings. They are listed in the
+  pull request description and the final report as pending human review. None of them stops delivery.
 - The self-review step keeps the name `pre-push` as the name of its gate. It is a gate that runs
   after the draft push, and a draft push never waits for it.
+
+### 3. Binary verdict engine and retirement of NEEDS_HUMAN (2026-11-02 Amendment)
+
+Following the 2026-11-02 owner directive, `NEEDS_HUMAN`, `always-human` path globs (`KW-REVIEW-008`, `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) are retired across both supervised and autonomous modes:
+- The review council verdict engine enforces a binary verdict: `APPROVE` (0) or `REQUEST_CHANGES` (1).
+- Unresolved circuit-breakers continue to be reported in the draft pull request and final report as pending human review in autonomous mode without holding back delivery.
+- Delivery readiness is governed strictly by required CI checks.
 
 ## Alternatives considered
 
@@ -190,6 +189,7 @@ Delivery:
   `REQUEST_CHANGES`.
 - Anything that reads `autonomy.md` or the autonomous-gates inventory must use the non-blocking wording.
   Earlier wording is removed rather than kept beside it.
+- *Amendment (2026-11-02)*: Verdicts are binary (`APPROVE` or `REQUEST_CHANGES`). `NEEDS_HUMAN` no longer exists as an engine verdict.
 
 Maintenance:
 

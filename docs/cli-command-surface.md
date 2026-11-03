@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 ---
 
 # CLI command surface
@@ -285,7 +285,7 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 | [`review gates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
 | [`review duplicates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
-| [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes / needs-human from findings and gates. |
+| [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes from findings and gates. |
 
 `review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
 declared for that agent under `review.task-gates` and runs them against the files that agent
@@ -428,7 +428,7 @@ risk. The three rules below mirror the contract in
 | `docs init` | `1` on a scaffold failure or a configuration failure (`KW-CONFIG-001`). MCP wiring findings — missing, differing, unlaunchable, undetectable, declined, or refused — never fail the run |
 | `docs mcp-wire` | `0` when every named target was written, already held every declared server and was reported as `nothing to write`, or nothing was named; `1` when any named target was refused or the configuration could not load. A refusal includes a configuration that is a symbolic link, which is refused before it is read, a configuration this process may not inspect, and a receipt that could not be persisted — the record lands before the file, so a write it cannot record is a write it does not make. `--dry-run` exits what the real run would have exited |
 | `docs mcp-unwire` | `0` when every named file was restored or deleted, or when no target was named; `1` on any refusal — no receipt record, a file that is gone, a digest that differs from the recorded one, a file that is a symbolic link, or a file this process may not read. A record whose file still holds the pre-write bytes is an interrupted write, not drift, and is reported at `0` |
-| `review verdict` | `0` approve, `1` request-changes, `2` needs-human |
+| `review verdict` | `0` approve, `1` request-changes |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
 | `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |

@@ -911,6 +911,49 @@ public sealed class SquadCanonicalContentTests
         Assert.Empty(offenders);
     }
 
+    [Fact]
+    public void ReviewSurfacesEnforceBinaryApproveOrRequestChangesVerdict()
+    {
+        string[] reviewSurfaces =
+        [
+            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
+            Path.Combine(ProductRoot, "agents", "review-lens.md"),
+            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
+            Path.Combine(ProductRoot, "skills", "dp-code-reviewer", "SKILL.md"),
+            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md")
+        ];
+
+        string[] forbiddenPhrases =
+        [
+            "NEEDS_HUMAN",
+            "NEEDS HUMAN",
+            "Needs-human",
+            "needs-human",
+            "always-human",
+            "max-reviewable-lines"
+        ];
+
+        foreach (string surface in reviewSurfaces)
+        {
+            string fileText = File.ReadAllText(surface);
+            foreach (string phrase in forbiddenPhrases)
+            {
+                Assert.DoesNotContain(phrase, fileText, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        string codeReviewer = File.ReadAllText(Path.Combine(ProductRoot, "agents", "code-reviewer.md"));
+        string codeReviewSkill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+
+        Assert.Contains("APPROVE", codeReviewer, StringComparison.Ordinal);
+        Assert.Contains("REQUEST_CHANGES", codeReviewer, StringComparison.Ordinal);
+
+        Assert.Contains("APPROVE", codeReviewSkill, StringComparison.Ordinal);
+        Assert.Contains("REQUEST_CHANGES", codeReviewSkill, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The restatement pin is worth having only if it can fail. It has to see the shape in the skill that
     /// owns it, in each way the bug-crusher skill once spelled it out, and across a line wrap, and it has

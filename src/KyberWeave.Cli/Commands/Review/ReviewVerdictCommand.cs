@@ -10,6 +10,9 @@ namespace KyberWeave.Cli.Commands.Review;
 /// </summary>
 public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
 {
+    /// <summary>The command description shared by the real registration and the help tests.</summary>
+    public const string Description = "Compute approve / request-changes from findings and gates.";
+
     private const string UnreadableInput = "KW-REVIEW-023";
     private const string Verdict = "KW-REVIEW-024";
 
@@ -45,8 +48,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         }
 
         ReviewOutcome outcome = VerdictEngine.Evaluate(
-            findings!.ToScope(),
-            findings.Findings,
+            findings!.Findings,
             gates?.Gates ?? [],
             config.Review,
             DateOnly.FromDateTime(DateTime.UtcNow),
@@ -56,7 +58,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         report.Add(new Diagnostic(
             Verdict,
             outcome.Verdict == ReviewVerdict.Approve ? Severity.Info : Severity.Error,
-            $"{Describe(outcome.Verdict)} — risk {outcome.Risk.ToString().ToUpperInvariant()}, " +
+            $"{DescribeForSummary(outcome.Verdict)} — risk {outcome.Risk.ToString().ToUpperInvariant()}, " +
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             "review"));
 
@@ -70,12 +72,28 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     }
 
     /// <summary>The verdict as printed in the console summary.</summary>
+    internal static string DescribeForSummary(ReviewVerdict verdict)
+    {
+        try
+        {
+            return Describe(verdict);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The exit code already carries the invalid-verdict signal (2). Returning a
+            // readable summary keeps Finish and the exit code reachable instead of crashing.
+            return $"INVALID VERDICT ({verdict})";
+        }
+    }
+
     private static string Describe(ReviewVerdict verdict) => verdict switch
     {
         ReviewVerdict.Approve => "APPROVE",
         ReviewVerdict.RequestChanges => "REQUEST CHANGES",
-        ReviewVerdict.NeedsHuman => "NEEDS HUMAN",
-        _ => verdict.ToString()
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(verdict),
+            verdict,
+            "The review verdict is not a defined value.")
     };
 
     private static bool TryRead<T>(
