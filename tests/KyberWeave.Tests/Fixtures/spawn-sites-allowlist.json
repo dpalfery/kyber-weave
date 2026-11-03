@@ -406,7 +406,7 @@
     {
       "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
-      "count": 32,
+      "count": 33,
       "bound": "ProcessRunner timeout 60 s kills the child tree. Children are install.sh helper calls under /bin/sh (KYBER_WEAVE_INSTALL_LIB=1 returns before any download) calling a pure helper or a stub, or verify-release-checksums.sh over sandbox files under /bin/bash, or a stub recorder (lines 2274-2329)."
     },
     {

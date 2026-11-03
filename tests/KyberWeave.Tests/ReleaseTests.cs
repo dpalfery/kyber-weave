@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Formats.Tar;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -2617,6 +2618,35 @@ public sealed class ReleaseTests
         string installed = Path.Combine(release.InstallDirectory, "kyber-weave");
         Assert.Equal(InstallPayload, File.ReadAllText(installed));
         Assert.False(File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave-mcp")));
+    }
+
+    /// <summary>
+    /// A checksum proves the archive bytes, not the paths inside it. A member that
+    /// escapes the temporary directory is refused before tar writes anything.
+    /// </summary>
+    [Fact]
+    public void InstallerRejectsAnArchiveMemberThatEscapesTheTempDirectory()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string archive = Path.Combine(sandbox.Root, "evil.tar.gz");
+        using (FileStream stream = File.Create(archive))
+        using (TarWriter writer = new(stream, TarEntryFormat.Pax, leaveOpen: false))
+        {
+            byte[] payload = Encoding.UTF8.GetBytes("owned");
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "../evil.txt")
+            {
+                DataStream = new MemoryStream(payload),
+            });
+        }
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; verify_archive_members \"" + archive + "\"");
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("unsafe archive member", result.StandardError, StringComparison.Ordinal);
     }
 
     /// <summary>

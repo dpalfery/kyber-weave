@@ -597,6 +597,27 @@ kyber_weave_apply_release_origin
 # `return 0 2>/dev/null || exit 0`: in sourced mode `return 0` cleanly exits
 # the dotted file; in script mode `return` raises but is swallowed by stderr
 # redirection and the `||` chains to `exit 0`.
+# verify_archive_members <archive-path>
+#
+# A checksum proves the bytes are the ones the release published; it says nothing
+# about the paths inside the archive. Refuse absolute members, parent-directory
+# segments and link members before tar writes anything, so a crafted archive cannot
+# escape the temporary directory as the installer user.
+verify_archive_members() {
+    archive="$1"
+    members=$(tar -tzf "$archive") || die "could not list ${archive}"
+    printf '%s\n' "$members" | while IFS= read -r member; do
+        case "$member" in
+            /*|../*|*/../*|*/..|..) die "refusing unsafe archive member '${member}' in ${archive}" ;;
+        esac
+    done
+    tar -tvzf "$archive" | while IFS= read -r line; do
+        case "$line" in
+            l*|h*) die "refusing link member in ${archive}" ;;
+        esac
+    done
+}
+
 if [ "${KYBER_WEAVE_INSTALL_LIB:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -730,6 +751,7 @@ verify_and_extract() {
         die "refusing to install ${archive} after a checksum mismatch"
     fi
 
+    verify_archive_members "$dest"
     tar -xzf "$dest" -C "$TMPDIR_KW"
 }
 

@@ -183,8 +183,59 @@ function verifyArchiveSha256(archivePath, archiveName, sums) {
   }
 }
 
+function assertSafeArchiveEntry(name) {
+  if (!name) {
+    throw new Error("Archive contains an empty member name");
+  }
+  const normalized = name.replace(/\\/g, "/");
+  if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`Archive contains an unsafe member: ${name}`);
+  }
+}
+
+function assertSafeArchive(archivePath, rid) {
+  if (isWindowsRid(rid)) {
+    if (process.platform === "win32") {
+      const escaped = archivePath.replace(/'/g, "''");
+      const script =
+        `$zip=[System.IO.Compression.ZipFile]::OpenRead('${escaped}'); ` +
+        "try { $zip.Entries | ForEach-Object { " +
+        "if ($_.FullName -match '(^|/)\\.\\.(/|$)' -or [System.IO.Path]::IsPathRooted($_.FullName)) { " +
+        "throw \"unsafe zip entry: $($_.FullName)\" } } } finally { $zip.Dispose() }";
+      execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        stdio: "inherit",
+      });
+      return;
+    }
+    const names = execFileSync("unzip", ["-Z1", archivePath], {
+      encoding: "utf8",
+    });
+    for (const name of names.split("\n").filter(Boolean)) {
+      assertSafeArchiveEntry(name);
+    }
+    return;
+  }
+
+  const names = execFileSync("tar", ["-tzf", archivePath], {
+    encoding: "utf8",
+  });
+  for (const name of names.split("\n").filter(Boolean)) {
+    assertSafeArchiveEntry(name);
+  }
+
+  const listing = execFileSync("tar", ["-tvzf", archivePath], {
+    encoding: "utf8",
+  });
+  for (const line of listing.split("\n").filter(Boolean)) {
+    if (line.startsWith("l") || line.startsWith("h")) {
+      throw new Error(`Archive contains a link member: ${line}`);
+    }
+  }
+}
+
 function extractArchive(archivePath, destDir, rid) {
   ensureDir(destDir);
+  assertSafeArchive(archivePath, rid);
   if (isWindowsRid(rid)) {
     // Prefer PowerShell Expand-Archive on Windows; unzip elsewhere if present.
     if (process.platform === "win32") {
@@ -299,5 +350,6 @@ module.exports = {
   readPackageVersion,
   parseSha256Sums,
   verifyArchiveSha256,
+  assertSafeArchiveEntry,
   sha256File,
 };
