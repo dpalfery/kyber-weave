@@ -15,9 +15,6 @@ public class ReviewVerdictTests
 {
     private static readonly DateOnly Today = new(2026, 8, 20);
 
-    private static ReviewScope Scope(int lines = 100, params string[] paths) =>
-        new(paths.Length == 0 ? ["src/Foo.cs"] : paths, lines);
-
     private static ReviewFinding Finding(
         ReviewSeverity severity = ReviewSeverity.Major,
         int confidence = 9,
@@ -230,15 +227,11 @@ public class ReviewVerdictTests
     }
 
     /// <summary>
-    /// Scope size is reporting metadata, not a risk input. The risk grade comes from findings
-    /// and gates, so a large clean scope stays low and a critical finding raises it.
+    /// The risk grade comes from findings and gates, not from scope metadata.
     /// </summary>
     [Fact]
-    public void RiskGradeComesFromFindingsNotScopeMetadata()
+    public void RiskGradeComesFromFindings()
     {
-        ReviewScope large = Scope(9_999);
-        Assert.Equal(9_999, large.EffectiveChangedLines);
-
         Assert.Equal(RiskGrade.Low, Evaluate().Risk);
         Assert.Equal(RiskGrade.High, Evaluate([Finding(ReviewSeverity.Critical)]).Risk);
     }

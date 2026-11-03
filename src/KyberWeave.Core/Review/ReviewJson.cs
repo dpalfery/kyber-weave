@@ -44,8 +44,8 @@ public sealed record FindingsReport(
     public const string CurrentSchema = "kyber-weave.review-findings/v1";
 
     /// <summary>
-    /// The scope metadata this report describes. The verdict engine does not consume it; callers
-    /// use it to report the change's size and paths.
+    /// The scope metadata this report describes. The verdict engine does not consume it; this is
+    /// a convenience accessor for reporting the change's size and paths.
     /// </summary>
     public ReviewScope ToScope()
     {

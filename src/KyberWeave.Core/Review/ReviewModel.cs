@@ -143,7 +143,7 @@ public sealed record DroppedFinding(ReviewFinding Finding, string Code, string R
 /// <remarks>
 /// Scope is reporting metadata for reviewers. It is not an input to
 /// <see cref="VerdictEngine.Evaluate" />; the verdict is computed from findings, gates, config,
-/// and the evaluation date only.
+/// the evaluation date, and the optional coverage result only.
 /// </remarks>
 public sealed record ReviewScope(
     IReadOnlyList<string> ChangedPaths,

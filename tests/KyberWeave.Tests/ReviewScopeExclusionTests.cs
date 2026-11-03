@@ -124,8 +124,8 @@ public sealed class ReviewScopeExclusionTests
     }
 
     /// <summary>
-    /// With size-based escalation removed, large source diffs approve normally when
-    /// deterministic gates and review findings are clean.
+    /// Large source diffs keep their full effective line count; scope is reporting metadata,
+    /// not a verdict input.
     /// </summary>
     [Fact]
     public void SourceOnlyLargeDiffKeepsItsFullEffectiveLineCount()

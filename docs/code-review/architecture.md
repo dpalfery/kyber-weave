@@ -326,7 +326,7 @@ Step 3 spends one more `review-lens` invocation attempting to refute every survi
 
 ## How the verdict is computed
 
-`VerdictEngine.Evaluate` is a pure function of (findings, gates, config, date). Same
+`VerdictEngine.Evaluate` is a pure function of (findings, gates, config, date, coverage). Same
 inputs, same verdict, every time. The order is the contract:
 
 ```mermaid
