@@ -116,17 +116,9 @@ public sealed class ReviewVerdictCliCommandTests
             [new GateResult("build", true, 0, "passed")]);
         File.WriteAllText(gatesPath, ReviewJson.Write(gates));
 
-        ReviewVerdictSettings settings = new()
-        {
-            Path = repoDir,
-            Findings = findingsPath,
-            Gates = gatesPath,
-            Format = "json"
-        };
-
-        ReviewVerdictCommand command = new();
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => command.Execute(null!, settings, CancellationToken.None));
+            () => CreateApp().Run(
+                ["review", "verdict", repoDir, "--findings", findingsPath, "--gates", gatesPath, "--format", "json"]));
 
         Assert.Equal(0, run.Result);
         Assert.Contains("APPROVE", run.Output, StringComparison.Ordinal);
@@ -177,17 +169,9 @@ public sealed class ReviewVerdictCliCommandTests
             [new GateResult("build", true, 0, "passed")]);
         File.WriteAllText(gatesPath, ReviewJson.Write(gates));
 
-        ReviewVerdictSettings settings = new()
-        {
-            Path = repoDir,
-            Findings = findingsPath,
-            Gates = gatesPath,
-            Format = "json"
-        };
-
-        ReviewVerdictCommand command = new();
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => command.Execute(null!, settings, CancellationToken.None));
+            () => CreateApp().Run(
+                ["review", "verdict", repoDir, "--findings", findingsPath, "--gates", gatesPath, "--format", "json"]));
 
         Assert.Equal(1, run.Result);
         Assert.Contains("REQUEST CHANGES", run.Output, StringComparison.Ordinal);
