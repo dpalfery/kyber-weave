@@ -11,7 +11,7 @@ decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
-  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
@@ -546,7 +546,7 @@ The decision and the alternatives it rejected are in
 ### Factory (Droid) capture plugin pipeline (`kyberdash-factory`)
 
 KyberDash captures Factory through one hooks-plugin pipeline
-([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)):
+([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
 
 ```mermaid
 flowchart LR
@@ -870,7 +870,7 @@ Factory's own native export can be pointed at the KyberDash receiver:
 `export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"` is Factory's own documented example,
 and Droid pushes OTLP/HTTP directly, so no collector is needed and KyberDash is simply the
 customer's own collector. The path is authorized as a **second, complementary** path
-([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)), never as the primary
+([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)), never as the primary
 one.
 
 **The organisation's pin is read from the harness's own directory.** An organisation's managed

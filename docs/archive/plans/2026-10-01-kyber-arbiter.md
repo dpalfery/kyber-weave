@@ -8,8 +8,8 @@ owner: dpalfery
 created: 2026-10-01
 last-reviewed: 2026-10-10
 development-mode: test-first
-documentation-impact: extends-component
-impact-components: [KyberSquad]
+documentation-impact: new-component
+impact-components: [KyberArbiter]
 ---
 
 # Kyber Arbiter — three-step decision gates for Kyber-Squad delegation and review
@@ -1853,46 +1853,44 @@ Then run these:
 
 ## Review and closeout
 
-This plan established the architectural foundation for Kyber Arbiter. Due to scope, discovery findings, and owner direction (D26, D28, D32, D34), the complete requirements, design, and three-phase execution tasks were authored and published in the formal specification at [`docs/archive/specs/kyber-arbiter/`](../specs/kyber-arbiter/README.md). The specification was archived before implementation per Q16 so trunk carries the governed artifact; the durable design is harvested into [`docs/kyber-squad/arbiter.md`](../../kyber-squad/arbiter.md) and the phase pull requests deliver it.
+This plan established the architectural foundation for Kyber Arbiter. Due to scope, discovery findings, and owner direction (D26, D28, D32, D34), the complete requirements, design, and three-phase execution tasks were authored and published in the formal specification at [`docs/archive/specs/kyber-arbiter/`](../specs/kyber-arbiter/README.md). The specification was archived before implementation per Q16 so trunk carries the governed artifact; the durable design is harvested into [`docs/kyber-arbiter/architecture.md`](../../kyber-arbiter/architecture.md) and the phase pull requests deliver it.
 
 ## Design harvest
 
-Scale: `documentation-impact: extends-component`, `impact-components: [KyberSquad]`.
+Scale: `documentation-impact: new-component`, `impact-components: [KyberArbiter]`.
 
 | ID | Design item | Target component | Target doc type |
 |---|---|---|---|
-| H1 | Three-step evaluation model, trigger families, and the fixed `undecidable` mapping (D1, D6, D10, D11) | KyberSquad | architecture |
-| H2 | Rule model, the 18 permanent `KW-ARB-*` rules, host overrides, and the closed predicate set (D14, D30, D33) | KyberSquad | architecture |
-| H3 | Surfaces: the Core engine, the `kyber-weave-arbiter` binary (`hook`, `serve`), and the `arbiter` CLI (D2, D16, D22) | KyberSquad | architecture |
-| H4 | Facts, plan parser, header grammar, and trigger classification (D9, D21, D24, D25, D27) | KyberSquad | architecture |
-| H5 | Provider, credentials, configuration, and diagnostics (D17, D18, D19, D23) | KyberSquad | architecture |
-| H6 | Ledger, decision log, audit, escalation envelope, and review notes (D5, D15, D31) | KyberSquad | architecture |
-| H7 | Harness hooks, owned blocks, rendering, fail-closed behaviour, and the MCP fallback (D3, D4, D6, D7, D8, D12, D13) | KyberSquad | architecture |
-| H8 | Delivery phases, distribution, and size per phase (D20, D26, D28, D29, D32, D34) | KyberSquad | architecture |
+| H1 | Three-step evaluation model, trigger families, and the fixed `undecidable` mapping (D1, D6, D10, D11) | KyberArbiter | architecture |
+| H2 | Rule model, the 18 permanent `KW-ARB-*` rules, host overrides, and the closed predicate set (D14, D30, D33) | KyberArbiter | architecture |
+| H3 | Surfaces: the Core engine, the `kyber-weave-arbiter` binary (`hook`, `serve`), and the `arbiter` CLI (D2, D16, D22) | KyberArbiter | architecture |
+| H4 | Facts, plan parser, header grammar, and trigger classification (D9, D21, D24, D25, D27) | KyberArbiter | architecture |
+| H5 | Provider, credentials, configuration, and diagnostics (D17, D18, D19, D23) | KyberArbiter | architecture |
+| H6 | Ledger, decision log, audit, escalation envelope, and review notes (D5, D15, D31) | KyberArbiter | architecture |
+| H7 | Harness hooks, owned blocks, rendering, fail-closed behaviour, and the MCP fallback (D3, D4, D6, D7, D8, D12, D13) | KyberArbiter | architecture |
+| H8 | Delivery phases, distribution, and size per phase (D20, D26, D28, D29, D32, D34) | KyberArbiter | architecture |
 
 ## Closeout mapping
 
-No ADR — ADR waiver: this plan establishes a new rule-engine design inside Kyber-Squad with no
-new external boundary, dependency, or schema; ADRs 0028 and 0029 are authored during delivery
-as the design requires. The durable design is harvested into the canonical Kyber Arbiter
+ADRs 0053 (three-step decision gates) and 0054 (owned blocks in shared hook files) record the durable architectural decisions. The durable design is harvested into the canonical Kyber Arbiter
 architecture page; the archived specification remains the detailed record. Plan status:
 complete/superseded, archived per KW-DOC-LIFECYCLE-003.
 
 | ID | Destination |
 |---|---|
-| D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15, D16, D17, D18, D19, D20, D21, D22, D23 | [Kyber Arbiter architecture](../../kyber-squad/arbiter.md) |
-| Q9 | [Delivery](../../kyber-squad/arbiter.md#delivery) — three phases by harness group |
-| Q10 | [Harness support](../../kyber-squad/arbiter.md#harness-support) — owned-block command signature |
-| Q11 | [Harness support](../../kyber-squad/arbiter.md#harness-support) — marker header and routing headers |
-| Q15 | [Harness support](../../kyber-squad/arbiter.md#harness-support) — post-dispatch return handling |
-| H1 | [Three-step evaluation](../../kyber-squad/arbiter.md#three-step-evaluation) |
-| H2 | [Decision points and rules](../../kyber-squad/arbiter.md#decision-points-and-rules) |
-| H3 | [Surfaces](../../kyber-squad/arbiter.md#surfaces) |
-| H4 | [Decision points and rules](../../kyber-squad/arbiter.md#decision-points-and-rules) |
-| H5 | [Configuration](../../kyber-squad/arbiter.md#configuration) |
-| H6 | [Ledger, audit, and escalation](../../kyber-squad/arbiter.md#ledger-audit-and-escalation) |
-| H7 | [Harness support](../../kyber-squad/arbiter.md#harness-support) |
-| H8 | [Delivery](../../kyber-squad/arbiter.md#delivery) |
+| D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15, D16, D17, D18, D19, D20, D21, D22, D23 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md) |
+| Q9 | [Delivery](../../kyber-arbiter/architecture.md#delivery-and-caller-notes) — three phases by harness group |
+| Q10 | [Harness support](../../kyber-arbiter/runbook.md#hooks) — owned-block command signature |
+| Q11 | [Harness support](../../kyber-arbiter/runbook.md#hooks) — marker header and routing headers |
+| Q15 | [Harness support](../../kyber-arbiter/runbook.md#hooks) — post-dispatch return handling |
+| H1 | [Three-step evaluation](../../kyber-arbiter/architecture.md#the-engine) |
+| H2 | [Decision points and rules](../../kyber-arbiter/architecture.md#the-rules) |
+| H3 | [Surfaces](../../kyber-arbiter/architecture.md#the-engine) |
+| H4 | [Decision points and rules](../../kyber-arbiter/architecture.md#the-rules) |
+| H5 | [Configuration](../../kyber-arbiter/architecture.md#configuration) |
+| H6 | [Ledger, audit, and escalation](../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| H7 | [Harness support](../../kyber-arbiter/runbook.md#hooks) |
+| H8 | [Delivery](../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
 
 ## Sources
 

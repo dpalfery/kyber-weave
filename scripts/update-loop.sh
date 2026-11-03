@@ -154,6 +154,9 @@ stage_from_directory() {
     if [ -x "${source_dir}/kyber-weave-mcp" ]; then
         cp "${source_dir}/kyber-weave-mcp" "${BIN}/kyber-weave-mcp"
     fi
+    if [ -x "${source_dir}/kyber-weave-arbiter" ]; then
+        cp "${source_dir}/kyber-weave-arbiter" "${BIN}/kyber-weave-arbiter"
+    fi
     chmod 755 "${BIN}"/kyber-weave*
     xattr -d com.apple.quarantine "${BIN}"/kyber-weave* 2>/dev/null || true
     log "copied the binaries already on this machine from ${source_dir}"
@@ -180,7 +183,7 @@ stage_from_release_tree() {
 unpack_published_binaries() {
     tag="$1"
     target="$2"
-    for binary in kyber-weave kyber-weave-mcp; do
+    for binary in kyber-weave kyber-weave-mcp kyber-weave-arbiter; do
         archive="${RELEASE_TREE}/${tag}/${binary}-${RID}.tar.gz"
         [ -f "$archive" ] || die "missing ${archive}"
         tar -C "$target" -xzf "$archive"
@@ -361,6 +364,16 @@ if [ "$MCP_AFTER" = "kyber-weave-mcp ${TO_VERSION}" ]; then
     pass "MCP reports ${TO_VERSION} after update"
 else
     fail "MCP reports '${MCP_AFTER}', expected 'kyber-weave-mcp ${TO_VERSION}'"
+fi
+
+# The published release carries a runnable arbiter alongside the CLI and the
+# MCP server. Asserted against the pristine "to" binaries: the updater itself
+# learns the arbiter separately, so this proves the release published it.
+ARBITER_AFTER="$("${TO_BIN}/kyber-weave-arbiter" --version 2>&1 || echo "<crashed>")"
+if [ "$ARBITER_AFTER" = "kyber-weave-arbiter ${TO_VERSION}" ]; then
+    pass "Arbiter reports ${TO_VERSION} (release carries a runnable arbiter)"
+else
+    fail "Arbiter reports '${ARBITER_AFTER}', expected 'kyber-weave-arbiter ${TO_VERSION}'"
 fi
 
 # Update replaces what is installed; it never adds a kyberdash nobody installed.

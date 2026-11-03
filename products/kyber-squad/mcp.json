@@ -3,6 +3,10 @@
     "kyber-weave": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
+    },
+    "kyber-weave-arbiter": {
+      "command": "kyber-weave-arbiter",
+      "args": ["serve", "--repo-root", "."]
     }
   }
 }

@@ -1,0 +1,16 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-task-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-conductor-5",
+  "agent_type": "conductor",
+  "tool_name": "Task",
+  "tool_input": {
+    "description": "Write tests for T3",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nWrite the tests.",
+    "subagent_type": "test-dev"
+  },
+  "tool_use_id": "toolu-task-1"
+}

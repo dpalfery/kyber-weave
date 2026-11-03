@@ -117,7 +117,7 @@ builds wrote into `opencode.jsonc`, from the key receipt, and drop that receipt 
 left in place with a warning. The OpenCode harness declares no key, so `status` renders no OTLP environment
 snippet for it. The key-level rules of decisions 1 to 3 still govern every other harness and this one-time restore.
 
-Amended 2026-11-02 (Factory (Droid) capture plugin, [ADR 0053](0053-factory-capture-is-a-hooks-plugin-pipeline.md)):
+Amended 2026-11-02 (Factory (Droid) capture plugin, [ADR 0055](0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
 Factory joins the plugin-only writers. Its capture writer owns a whole plugin **tree** — the
 Kyber-owned marketplace tree it publishes — with its receipt at
 `~/.kyberdash/factory-plugin-receipt.json` and its consent file at
@@ -319,6 +319,6 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
   — the tray's ownership of the receiver
 - [ADR 0029: Per-Bucket, OTel-First Content Precedence](0029-kyberdash-per-bucket-otel-first-content-precedence.md)
   — how captured content is reconciled with file content
-- [ADR 0053: Factory (Droid) Capture Is a Hooks-Plugin Pipeline](0053-factory-capture-is-a-hooks-plugin-pipeline.md)
+- [ADR 0055: Factory (Droid) Capture Is a Hooks-Plugin Pipeline](0055-factory-capture-is-a-hooks-plugin-pipeline.md)
   — the Factory writer this record's plugin-tree rules now cover
 - [KyberDash architecture](../dash/architecture.md)

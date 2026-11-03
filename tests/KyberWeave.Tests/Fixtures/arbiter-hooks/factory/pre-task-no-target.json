@@ -1,0 +1,12 @@
+{
+  "session_id": "session-factory-3",
+  "transcript_path": "/repo/.factory/transcripts/session-factory-3.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Task",
+  "tool_input": {
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.5\n\nImplement the adapter.",
+    "description": "No target"
+  }
+}

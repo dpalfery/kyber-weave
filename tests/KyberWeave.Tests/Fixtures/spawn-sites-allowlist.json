@@ -406,7 +406,7 @@
     {
       "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
-      "count": 32,
+      "count": 34,
       "bound": "ProcessRunner timeout 60 s kills the child tree. Children are install.sh helper calls under /bin/sh (KYBER_WEAVE_INSTALL_LIB=1 returns before any download) calling a pure helper or a stub, or verify-release-checksums.sh over sandbox files under /bin/bash, or a stub recorder (lines 2274-2329)."
     },
     {
@@ -418,7 +418,7 @@
     {
       "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 14,
+      "count": 15,
       "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
     },
     {
@@ -1104,6 +1104,114 @@
       "text": "_process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))",
       "count": 1,
       "bound": "The only Process.Start for the stdio session; the child is killed through ProcessRunner.TryKillTree in Dispose on every path, and its reads are bounded by the session budget."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterServeStartupFailureTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 2,
+      "bound": "Started by the ProcessRunner.Run at lines 40 and 68: timeout 60 s kills the child tree on expiry; the child is the Arbiter serve process under test."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterServeStartupFailureTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 2,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; the Arbiter serve process is expected to exit or fail fast."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterServeStdioTransportTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run at line 53: timeout 30 s kills the child tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterServeStdioTransportTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; stdin requests are finite and the server exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterShimBehaviourTests.cs",
+      "text": "ProcessStartInfo startInfo = new(bun)",
+      "count": 1,
+      "bound": "Started by the using Process.Start at line 278; the process is disposed and its tree killed in the test's finally."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArbiterShimBehaviourTests.cs",
+      "text": "using Process process = Process.Start(startInfo)",
+      "count": 1,
+      "bound": "using-scoped process disposed on every path; the test's finally kills the process tree and waits for exit."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DistributionManifestTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);",
+      "count": 5,
+      "bound": "ProcessRunner default timeout kills the child tree; the commands are self-exiting file inspections."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DistributionManifestTests.cs",
+      "text": "ProcessStartInfo startInfo = new(node)",
+      "count": 2,
+      "bound": "Started by the ProcessRunner.Run at lines 410 and 450: ProcessRunner default timeout kills the child tree; the node commands self-exit."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);",
+      "count": 3,
+      "bound": "ProcessRunner default timeout kills the child tree; the release scripts self-exit."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterCommandComposition.cs",
+      "text": "(startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput);",
+      "count": 1,
+      "bound": "The injected runner delegate is always called through ProcessRunner.Run with the caller's timeout; the Arbiter command's process is bounded by that timeout."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterCommandComposition.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run delegate above with the caller's timeout; git argv only, self-exiting."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterDoctorCommand.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run in the doctor probe with its timeout; git argv only, self-exiting."
+    },
+    {
+      "file": "src/KyberWeave.Core/Arbiter/Credentials/ICredentialStore.cs",
+      "text": "return ProcessRunner.Run(startInfo, standardInput);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the store's timeout kills the child tree; the credential-store command reads stdin and self-exits."
+    },
+    {
+      "file": "src/KyberWeave.Core/Arbiter/Credentials/MacKeychainCredentialStore.cs",
+      "text": "ProcessStartInfo startInfo = new(\"security\")",
+      "count": 2,
+      "bound": "Started by ProcessRunner.Run in the store with its timeout; the security command self-exits."
+    },
+    {
+      "file": "src/KyberWeave.Core/Arbiter/Credentials/SecretServiceCredentialStore.cs",
+      "text": "ProcessStartInfo startInfo = new(\"secret-tool\")",
+      "count": 2,
+      "bound": "Started by ProcessRunner.Run in the store with its timeout; secret-tool self-exits."
+    },
+    {
+      "file": "src/KyberWeave.Core/Arbiter/Facts/GitFacts.cs",
+      "text": "ProcessStartInfo startInfo = new(gitExecutable)",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run at line 250 with its timeout; git argv only, self-exiting."
+    },
+    {
+      "file": "src/KyberWeave.Core/Arbiter/Facts/GitFacts.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, standardInput);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the fact-builder timeout kills the child tree; git argv only, self-exiting."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"node\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run below with a 60 s timeout that kills the child tree; the Node one-liner exits immediately."
     }
   ]
 }

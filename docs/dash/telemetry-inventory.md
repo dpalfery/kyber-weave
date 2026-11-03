@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-11-02
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
-  - adr/0053-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -86,7 +86,7 @@ where a missing stage sits, and whether a record becomes a dashboard-visible ses
 | opencode — native (`service.name=opencode`) | no. Native spans carry no contract-3 marker and no adapter claims them; they quarantine as unclaimed. (In the 2026-10-30 measurement, 0 of 55,261 native spans carried usage at 2.2.x.) | none by design ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)) | no | no | no |
 | opencode — plugin (`kyberdash-opencode`) | Contract-3 request, step and tool spans with OpenCode's usage and cost; system prompt, tools and skills under consent | none; the OpenCode live gate passed on 2026-10-31 (OpenCode 2.2.3, [runbook §1b](runbook.md#1b-opencode-capture-enable-and-verify)) | yes | yes | yes, measured for usage and cost; content `not_measurable` with a reason while consent is off |
 | droid — plugin (`kyberdash-factory`) | Contract-1 session, turn and tool spans with the model, the tool name and the byte sizes; the prompt text under consent | none by design: the hook payload carries no counter, so the token classes read `not_measurable` with a reason naming the file-source pairing | yes | yes | yes, measured for the turn and tool structure; the token classes `not_measurable` with a reason |
-| droid — native (`gen_ai.agent.name=droid`) | no. No adapter claims a native span: the `droid` adapter recognises only the plugin envelope, and the native `genai` fingerprint sits on the trace root alone, so a real turn's group scores 0.5 against the registry's 0.6 threshold. A native span quarantines as `unclaimed`, its decoded packet kept as the audit evidence. (Measured against real captured spans: accepted 0, quarantined 2.) | none by design for spans ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)); the native **metrics** path stays a capture / owner gate | no | no | no |
+| droid — native (`gen_ai.agent.name=droid`) | no. No adapter claims a native span: the `droid` adapter recognises only the plugin envelope, and the native `genai` fingerprint sits on the trace root alone, so a real turn's group scores 0.5 against the registry's 0.6 threshold. A native span quarantines as `unclaimed`, its decoded packet kept as the audit evidence. (Measured against real captured spans: accepted 0, quarantined 2.) | none by design for spans ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)); the native **metrics** path stays a capture / owner gate | no | no | no |
 | pi | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | copilot (chat) | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | antigravity | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
@@ -192,7 +192,7 @@ the harness id for that one id (see
 ## Factory (Droid) capture: the plugin path and the file path
 
 **[VERIFIED]** Factory is **one** harness under one canonical id, `droid`, reached through two
-capture sources ([ADR 0053](../adr/0053-factory-capture-is-a-hooks-plugin-pipeline.md)):
+capture sources ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
 
 - the **plugin** source: the Kyber-owned `kyberdash-factory` plugin, whose hook events arrive over
   OTLP as contract-1 spans in the `factory.*` namespace;

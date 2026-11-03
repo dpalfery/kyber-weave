@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-10-09T12:00:00.000Z",
+  "cwd": "/repo",
+  "session_id": "sess-copilot-vs-2",
+  "transcript_path": "/repo/transcript.jsonl",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "runSubagent",
+  "tool_input": {
+    "description": "Continue the work",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.2\n\nContinue the implementation."
+  },
+  "tool_use_id": "toolu-copilot-vs-dispatch-2"
+}

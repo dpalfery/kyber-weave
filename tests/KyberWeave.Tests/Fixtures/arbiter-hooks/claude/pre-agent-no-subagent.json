@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-passthrough-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-conductor-2",
+  "agent_type": "conductor",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Ask a question",
+    "prompt": "What does this module do?"
+  },
+  "tool_use_id": "toolu-passthrough-1"
+}

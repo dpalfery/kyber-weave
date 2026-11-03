@@ -1,0 +1,10 @@
+{
+  "conversation_id": "conv-cursor-3",
+  "cwd": "/repo",
+  "hook_event_name": "preToolUse",
+  "tool_name": "Read",
+  "tool_use_id": "toolu-cursor-nondispatch-1",
+  "tool_input": {
+    "path": "docs/plans/x.md"
+  }
+}

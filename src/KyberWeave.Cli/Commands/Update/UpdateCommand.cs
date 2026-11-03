@@ -28,6 +28,7 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                 settings.NoMcp,
                 settings.NoKyberDash,
                 settings.NoMenubar,
+                settings.NoArbiter,
                 settings.NoRestart));
             WriteOutcome(outcome);
             return outcome.ExitCode;

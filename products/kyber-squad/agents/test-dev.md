@@ -108,7 +108,9 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 
 ## Completion digest
 
-Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest:
+Every digest records RED evidence on one line the Arbiter can parse. The in-flight ledger reads the `RED_EVIDENCE:` value from your returned output as its `ledger.red-evidence` fact, and rule `KW-ARB-MODE-001` uses it to gate test-first plans: an implementation dispatch with no RED evidence on record escalates. Record the line even when your RED run already unblocked an earlier GREEN task — the ledger, not your memory of the run, is what a later task is judged on.
+
+Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 7-field worker completion digest:
 
 ```text
 STATUS: PASS | FAIL | ESCALATION
@@ -117,7 +119,10 @@ TESTS: total=N failed=N passed=N
 COMMIT: <commit-sha | NONE>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
+RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 ```
+
+The `RED_EVIDENCE:` line names the filter you ran, the tests that failed, and why they failed — the assertion the RED run failed on, not a build error. Emit `RED_EVIDENCE: none` when the work recorded no RED run, such as a maintenance pass with no failing-first cycle. Anything but a literal `none` counts as evidence, so the fields must be the values you actually ran, never placeholders.
 
 If the iteration circuit breaker trips, return instead:
 

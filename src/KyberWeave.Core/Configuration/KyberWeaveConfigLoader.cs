@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Configuration;
@@ -143,6 +144,7 @@ public static class KyberWeaveConfigLoader
                 document.Review,
                 repositoryRoot,
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
+            Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp)
         };
     }
