@@ -37,7 +37,8 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; }
 
-    private protected SquadHarnessSpec Spec { get; }
+    /// <summary>The harness facts this renderer runs on; the shared contract suite reads them too.</summary>
+    internal SquadHarnessSpec Spec { get; }
 
     /// <inheritdoc />
     public Task<SquadRenderResult> RenderAsync(

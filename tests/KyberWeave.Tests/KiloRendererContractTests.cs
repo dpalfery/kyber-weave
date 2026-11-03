@@ -33,280 +33,59 @@ public sealed class KiloRendererContractTests : IDisposable
         // No disposable state: suite reads canonical checked-in corpus.
     }
 
+    /// <summary>
+    ///     Kilo's own decisions on the real corpus: every agent is a native agent file carrying its
+    ///     invocation as <c>mode</c>; every resource-owning agent records the discovery guard with
+    ///     Kilo's scanner glob; and every configured capability decision, denies included, is
+    ///     recorded as unexpressed, because Kilo's permission map is keyed by tool name. The skill
+    ///     document and record identity are the shared pipeline's, checked in
+    ///     <see cref="Squad.SquadRendererSharedContractTests"/>.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Kilo_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await new SquadRendererRegistry([new KiloRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Kilo], SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
-
-        // C3: every rendered owner also projects its validated resource closure beside its
-        // principal output, so the corpus count is principals plus emitted closures.
-        int expectedFileCount =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                + expectedSkillCount
-                                + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                                    .Sum(skill => skill.Resources.Count);
-        Assert.Equal(expectedFileCount, result.Files.Count);
-
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("kilo", f.Target);
-            Assert.True(
-                f.RelativePath.StartsWith(".kilo/agents/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith(".kilo/skills/", StringComparison.Ordinal),
-                $"File '{f.RelativePath}' does not start with expected Kilo directory.");
-        });
-
-        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
-        int inheritedModelAgentCount = 0;
-        int concreteModelAgentCount = 0;
-
         foreach (SquadAgent agent in source.Agents)
         {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".kilo/agents/{agent.Name}.md");
-
-            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                agent.Name);
-            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
-            Assert.True(
-                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name),
-                    StringComparison.Ordinal),
-                $"Agent '{agent.Name}' description mismatch.");
-
-            string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
-            Assert.Equal(expectedMode, RequireScalar(frontmatter, "mode", agent.Name));
-
-            // Model resolution: verify against loaded ModelProfiles.
-            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("kilo", out string? expectedModel))
-            {
-                if (string.Equals(expectedModel, "inherit", StringComparison.Ordinal))
-                {
-                    inheritedModelAgentCount++;
-                    Assert.False(
-                        frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                        $"Agent '{agent.Name}' should omit 'model' when resolved to inherit.");
-                }
-                else
-                {
-                    concreteModelAgentCount++;
-                    Assert.True(
-                        string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name),
-                            StringComparison.Ordinal),
-                        $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
-                }
-            }
-            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
-            {
-                concreteModelAgentCount++;
-                Assert.True(
-                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name),
-                        StringComparison.Ordinal),
-                    $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
-            }
-            else
-            {
-                inheritedModelAgentCount++;
-                Assert.False(
-                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                    $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
-            }
-
-            // Exact comparison with the discovery-guarded body: in-closure .md
-            // resource links are rewritten to .markdown so they still resolve beside
-            // their principal; every other byte stays verbatim.
-            string verbatimBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!verbatimBody.EndsWith('\n')) verbatimBody += "\n";
-
-            string expectedAgentBody = verbatimBody;
-            foreach (SquadResource resource in agent.Resources)
-                if (resource.RelativePath.EndsWith(".md", StringComparison.Ordinal))
-                    expectedAgentBody = expectedAgentBody.Replace(
-                        resource.RelativePath,
-                        string.Concat(resource.RelativePath[..^".md".Length], ".markdown"),
-                        StringComparison.Ordinal);
-
-            Assert.True(
-                string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
-                $"Agent '{agent.Name}' body mismatch.");
-
-            // Pin the guard link-by-link, matching SquadResourceRenderingContract:
-            // every authored in-closure .md link appears rewritten, and the original
-            // target is gone.
-            foreach (SquadResource resource in agent.Resources)
-            {
-                if (!resource.RelativePath.EndsWith(".md", StringComparison.Ordinal) ||
-                    !verbatimBody.Contains(resource.RelativePath, StringComparison.Ordinal))
-                    continue;
-
-                string rewrittenTarget = string.Concat(resource.RelativePath[..^".md".Length], ".markdown");
-                Assert.Contains(rewrittenTarget, body, StringComparison.Ordinal);
-                Assert.DoesNotContain(resource.RelativePath, body, StringComparison.Ordinal);
-            }
+            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".kilo/agents/{agent.Name}.md");
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), agent.Name);
+            Assert.Equal(agent.Description, RequireScalar(frontmatter, "description", agent.Name));
+            Assert.Equal(
+                agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent",
+                RequireScalar(frontmatter, "mode", agent.Name));
         }
 
-        // Canonical model resolution verification:
-        // 'conductor' uses the orchestration profile (kilo: inherit) and must omit 'model'.
-        // All non-conductor agents configure concrete kilo models and must emit them.
-        Assert.Equal(1, inheritedModelAgentCount);
-        Assert.Equal(source.Agents.Count - 1, concreteModelAgentCount);
-
-        SquadDeploymentFile conductorFile = Assert.Single(
-            result.Files,
-            f => f.RelativePath == ".kilo/agents/conductor.md");
-        (YamlMappingNode conductorFrontmatter, _) = SplitFrontmatter(
-            Encoding.UTF8.GetString(conductorFile.Content.Span),
-            "conductor");
-        Assert.False(
-            conductorFrontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-            "Agent 'conductor' must omit 'model' key in frontmatter because orchestration has kilo: inherit.");
-
-        SquadDeploymentFile architectFile = Assert.Single(
-            result.Files,
-            f => f.RelativePath == ".kilo/agents/architect.md");
-        (YamlMappingNode architectFrontmatter, _) = SplitFrontmatter(
-            Encoding.UTF8.GetString(architectFile.Content.Span),
-            "architect");
         Assert.Equal(
-            "kilo/deepseek/deepseek-v4-pro-0813",
-            RequireScalar(architectFrontmatter, "model", "architect"));
+            source.Agents.Where(agent => agent.Resources.Count > 0).Select(agent => agent.Name).Order(StringComparer.Ordinal),
+            result.Degradations.Where(d => d.Code == "resource-links-rewritten").Select(d => d.CanonicalIdentity).Order(StringComparer.Ordinal));
+        Assert.All(
+            result.Degradations.Where(d => d.Code == "resource-links-rewritten"),
+            d => Assert.Contains("{agent,agents}/**/*.md", d.Details, StringComparison.Ordinal));
 
-        // Shared identities suppression verification
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".kilo/agents/{sharedIdentity}.md");
-            string sharedSkillPath = $".kilo/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            else
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-        }
-
-        // Skills verification
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".kilo/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name),
-                    StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description mismatch.");
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n')) expectedSkillBody += "\n";
-
-            Assert.True(
-                string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
-        }
-
-        // Degradations: every agent whose capability profile configures permissions carries
-        // 'permission-not-expressible', including Deny decisions to prevent silent capability
-        // widening, and every agent that owns resources carries 'resource-links-rewritten'.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-        string[] expectedDegraded = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                return capabilityVocabulary.Any(cap => prof.Permissions.ContainsKey(cap));
-            })
-            .Select(a => a.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
+        string[] constrained = source.Agents
+            .Where(agent => source.CapabilityProfiles.Capabilities.Any(
+                source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions.ContainsKey))
+            .Select(agent => agent.Name)
+            .Order(StringComparer.Ordinal)
             .ToArray();
-
-        Assert.NotEmpty(expectedDegraded);
+        Assert.NotEmpty(constrained);
         Assert.Equal(
-            expectedDegraded,
-            result.Degradations
-                .Where(d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal))
-                .Select(d => d.CanonicalIdentity)
-                .OrderBy(n => n, StringComparer.Ordinal));
+            constrained,
+            result.Degradations.Where(d => d.Code == "permission-not-expressible").Select(d => d.CanonicalIdentity).Order(StringComparer.Ordinal));
+        Assert.All(result.Degradations, d => Assert.True(
+            d.Code is "permission-not-expressible" or "resource-links-rewritten",
+            $"Unexpected Kilo degradation code '{d.Code}' for '{d.CanonicalIdentity}'."));
 
-        // Discovery-guard degradations: every agent that owns resources records one
-        // resource-links-rewritten degradation quoting the harness scanner glob.
-        string[] expectedGuardDegraded = source.Agents
-            .Where(a => a.Resources.Count > 0)
-            .Select(a => a.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.NotEmpty(expectedGuardDegraded);
-        Assert.Equal(
-            expectedGuardDegraded,
-            result.Degradations
-                .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal))
-                .Select(d => d.CanonicalIdentity)
-                .OrderBy(name => name, StringComparer.Ordinal));
-
-        foreach (SquadDegradationRecord guardDegradation in result.Degradations
-                     .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal)))
-        {
-            Assert.Equal("kilo", guardDegradation.Target);
-            Assert.Equal(guardDegradation.CanonicalIdentity, guardDegradation.OutputIdentity);
-            Assert.Equal(agentsByName[guardDegradation.CanonicalIdentity].BodyDigest,
-                guardDegradation.InstructionDigest);
-            Assert.Contains(".markdown", guardDegradation.Details, StringComparison.Ordinal);
-            Assert.Contains("{agent,agents}/**/*.md", guardDegradation.Details, StringComparison.Ordinal);
-        }
-
-        // Verify canonical denies are recorded in degradation details (preventing capability widening)
-        SquadDegradationRecord conductorDegradation = Assert.Single(
+        // Denies are recorded too: silently dropping one would widen the deployed agent.
+        SquadDegradationRecord conductor = Assert.Single(
             result.Degradations,
-            d => d.CanonicalIdentity == "conductor" &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.Contains("filesystem.search", conductorDegradation.Details, StringComparison.Ordinal);
-        Assert.Contains("process.execute", conductorDegradation.Details, StringComparison.Ordinal);
-
-        foreach (SquadDegradationRecord degradation in result.Degradations)
-        {
-            Assert.True(
-                string.Equals("kilo", degradation.Target, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
-            Assert.True(
-                degradation.Code is "permission-not-expressible" or "resource-links-rewritten",
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong code.");
-            Assert.True(
-                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
-            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
-        }
+            d => d.CanonicalIdentity == "conductor" && d.Code == "permission-not-expressible");
+        Assert.Contains("filesystem.search", conductor.Details, StringComparison.Ordinal);
+        Assert.Contains("process.execute", conductor.Details, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -2,8 +2,10 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using System.Text;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -18,8 +20,10 @@ namespace KyberWeave.Tests.Squad;
 /// production list, so a new renderer is held to them the day it ships. Resource projection and the
 /// shell-implies-write record depend on the harness, so a new renderer adds its row to
 /// <see cref="ResourceProjectionContracts"/> and, when it cannot isolate the shell from writes,
-/// <see cref="ShellWithoutWriteContracts"/>. How a harness's files look stays in that harness's own
-/// suite.
+/// <see cref="ShellWithoutWriteContracts"/>. The skill document, the skill loop and degradation
+/// record identity come from the shared render pipeline (ADR 0055), so they are checked here once
+/// against each renderer's own <see cref="SquadHarnessSpec"/>; a harness suite keeps only what its
+/// harness decides.
 /// </remarks>
 public sealed class SquadRendererSharedContractTests
 {
@@ -74,6 +78,25 @@ public sealed class SquadRendererSharedContractTests
         [SquadTarget.Pi] = new(["bash"], ["edit", "write"], SubagentsOnly: true),
         [SquadTarget.ZCode] = new(["Bash"], ["Edit", "Write"], SubagentsOnly: false),
     };
+
+    /// <summary>
+    /// Harnesses that emit every canonical skill, a suppressed shared identity included: Warp has no
+    /// agent file to carry the body, and Antigravity's Native Both pattern keeps both namespaces
+    /// (ADR 0022). Every other harness emits a subagent shared identity once, as its agent file.
+    /// </summary>
+    private static readonly HashSet<SquadTarget> EmitsEveryCanonicalSkill = [SquadTarget.Warp, SquadTarget.Antigravity];
+
+    public static TheoryData<SquadTarget, SquadDeploymentScope> ShippedTargetsAtEachScope()
+    {
+        TheoryData<SquadTarget, SquadDeploymentScope> rows = [];
+        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        {
+            rows.Add(target, SquadDeploymentScope.Project);
+            rows.Add(target, SquadDeploymentScope.Global);
+        }
+
+        return rows;
+    }
 
     public static TheoryData<SquadTarget> ShippedTargets() =>
         new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
@@ -194,6 +217,104 @@ public sealed class SquadRendererSharedContractTests
     }
 
     /// <summary>
+    /// Every renderer is on the shared pipeline, so its harness facts are a spec the shared checks
+    /// below can read rather than a copy each suite restates.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public void EachRendererRunsOnTheSharedPipelineWithASpecForItsOwnTarget(SquadTarget target)
+    {
+        SquadHarnessRenderer renderer = Assert.IsAssignableFrom<SquadHarnessRenderer>(RendererFor(target));
+
+        Assert.Equal(target, renderer.Spec.Target);
+        Assert.Equal(SquadTargetCatalog.GetToken(target), renderer.Spec.Token);
+    }
+
+    /// <summary>
+    /// The skill document is the pipeline's, not the harness's: each canonical skill a harness does
+    /// not suppress ships once, under the harness's skills directory, with its name, its description
+    /// lowered by the spec's line-break rule, the spec's license, and its body verbatim.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargetsAtEachScope))]
+    public async Task EachRendererEmitsEachCanonicalSkillOnceWithItsNameDescriptionLicenseAndBodyIntact(
+        SquadTarget target,
+        SquadDeploymentScope scope)
+    {
+        SquadHarnessSpec spec = SpecFor(target);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        HashSet<string> suppressed = EmitsEveryCanonicalSkill.Contains(target)
+            ? []
+            : SquadRenderedOutput.SuppressedSkillIdentities(source);
+        SquadRenderResult result = await TestSquadCorpus.GetDefaultRenderAsync(target, scope);
+        string skillsDirectory = spec.ResolveDirectory("skills", scope);
+
+        Assert.Contains(source.Skills, skill => suppressed.Count == 0 || !suppressed.Contains(skill.Name));
+        foreach (SquadSkill skill in source.Skills)
+        {
+            string path = $"{skillsDirectory}/{skill.Name}/SKILL.md";
+            if (suppressed.Contains(skill.Name))
+            {
+                Assert.DoesNotContain(result.Files, file => file.RelativePath == path);
+                continue;
+            }
+
+            SquadDeploymentFile file = Assert.Single(result.Files, candidate => candidate.RelativePath == path);
+            (YamlMappingNode frontmatter, string body) =
+                SquadRenderedOutput.SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), skill.Name);
+
+            Assert.Equal(skill.Name, SquadRenderedOutput.RequireScalar(frontmatter, "name", skill.Name));
+            Assert.Equal(
+                SquadHarnessLowering.SingleLine(skill.Description, spec.DescriptionLineBreaks),
+                SquadRenderedOutput.RequireScalar(frontmatter, "description", skill.Name));
+            Assert.Equal(
+                spec.SkillLicense,
+                frontmatter.Children.TryGetValue(new YamlScalarNode("license"), out YamlNode? license)
+                    ? ((YamlScalarNode)license).Value
+                    : null);
+            Assert.Equal(Normalized(skill.InstructionBody), body);
+        }
+    }
+
+    /// <summary>
+    /// What a harness emits is its own, under its own root: every file carries the harness token and,
+    /// at project scope, sits under the spec's root; every record names the harness and carries the
+    /// body digest of the agent it describes, so a receipt cannot attribute a lowering to the wrong
+    /// harness or the wrong revision.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargetsAtEachScope))]
+    public async Task EachRendererEmitsItsFilesAndRecordsUnderItsOwnTarget(SquadTarget target, SquadDeploymentScope scope)
+    {
+        SquadHarnessSpec spec = SpecFor(target);
+        Dictionary<string, SquadAgent> agents = TestSquadCorpus.CanonicalSource.Agents
+            .ToDictionary(agent => agent.Name, StringComparer.Ordinal);
+        SquadRenderResult result = await TestSquadCorpus.GetDefaultRenderAsync(target, scope);
+
+        Assert.NotEmpty(result.Files);
+        Assert.All(result.Files, file =>
+        {
+            Assert.Equal(spec.Token, file.Target);
+            if (scope == SquadDeploymentScope.Project)
+            {
+                Assert.StartsWith(spec.ProjectRoot + "/", file.RelativePath, StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.False(
+                    file.RelativePath.StartsWith(spec.ProjectRoot + "/", StringComparison.Ordinal),
+                    $"'{file.RelativePath}' keeps the project-scope root at global scope.");
+            }
+        });
+        Assert.All(result.Degradations, record =>
+        {
+            Assert.Equal(spec.Token, record.Target);
+            Assert.True(agents.TryGetValue(record.CanonicalIdentity, out SquadAgent? agent), record.CanonicalIdentity);
+            Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+        });
+    }
+
+    /// <summary>
     /// A request naming a target with no renderer fails as a whole, before the renderers that do
     /// exist run, and points at the <c>docs/todo</c> entry for adding the missing one.
     /// </summary>
@@ -218,6 +339,15 @@ public sealed class SquadRendererSharedContractTests
 
     private static ISquadRenderer RendererFor(SquadTarget target) =>
         SquadCommandComposition.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
+
+    private static SquadHarnessSpec SpecFor(SquadTarget target) =>
+        Assert.IsAssignableFrom<SquadHarnessRenderer>(RendererFor(target)).Spec;
+
+    private static string Normalized(string body)
+    {
+        string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return normalized.EndsWith('\n') ? normalized : normalized + "\n";
+    }
 
     private static SquadTarget AnotherTarget(SquadTarget target) =>
         target == SquadTarget.Copilot ? SquadTarget.Claude : SquadTarget.Copilot;
