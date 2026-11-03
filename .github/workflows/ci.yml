@@ -445,9 +445,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Intentional github/codeql-action v4 pin (v4.39.0)
+      # Intentional github/codeql-action v4 pin (v4.39.1)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -467,9 +467,9 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
-      # Intentional github/codeql-action v4 pin (v4.39.0)
+      # Intentional github/codeql-action v4 pin (v4.39.1)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -529,7 +529,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: always() && hashFiles('trivy.sarif') != ''
         with:
           sarif_file: trivy.sarif
@@ -548,7 +548,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -585,7 +585,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: always() && hashFiles('semgrep.sarif') != ''
         with:
           sarif_file: semgrep.sarif
@@ -615,7 +615,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: always() && hashFiles('results.sarif') != ''
         with:
           sarif_file: results.sarif
@@ -681,7 +681,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-authoring, legacy category)
         if: always()
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-authoring.sarif
           category: kyber-weave-skills
@@ -694,7 +694,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-integrity-review)
         if: always()
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-integrity-review.sarif
           category: kyber-weave-skills-_apm_skills_kyber-docs-integrity-review
@@ -702,7 +702,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-onboarding-and-assessment)
         if: always()
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-onboarding-and-assessment.sarif
           category: kyber-weave-skills-_apm_skills_kyber-docs-onboarding-and-assessment
@@ -714,7 +714,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-weave-cli)
         if: always()
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
           category: kyber-weave-skills-_apm_skills_kyber-weave-cli
