@@ -176,6 +176,10 @@ describe('the Factory identity the gate reads', () => {
       'gen_ai.tool.call.arguments',
       'gen_ai.tool.call.result',
       'message.content',
+      // The plugin envelope's own prompt text: the plugin gates it at
+      // emission, but a span it parked is re-delivered without that gate
+      // running again, so the store-side gate has to be able to strip it.
+      'factory.turn.prompt.text',
     ])
   })
 

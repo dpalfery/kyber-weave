@@ -376,9 +376,16 @@ function settlePendingInteractionPrompts(store: CanonStore, now: number, ttlMs: 
 // gate strips its content too. This is the one place the gate reaches past
 // Factory's own spans, and it reaches only spans that belong to NO harness: an
 // unattributed span of another harness loses its content from the quarantine
-// evidence, which is what an unknown origin is worth. A CLAIMED span's content is
-// never touched, and that is what leaves another harness's own
+// evidence, which is what an unknown origin is worth. A CLAIMED span of ANOTHER
+// harness keeps its content, and that is what leaves another harness's own
 // `gen_ai.input.messages` alone.
+//
+// THE CLAIMED PLUGIN ENVELOPE. The plugin gates its own prompt at emission, but a
+// span it PARKED because the delivery failed is re-delivered later without that gate
+// running again, so the store-side gate strips the claimed envelope's content too:
+// it is the last line that can keep the owner's prompt text out of the corpus. The
+// envelope's identity attributes — the span id, the session id, the model, the tool
+// name — are not content and survive the gate.
 //
 // THE RESIDUAL. A Factory child that arrives before its root AND is claimed by
 // another harness — the registry's source inheritance handed its group to a
@@ -424,6 +431,18 @@ function identifyFactorySpans(spans: readonly OtlpSpan[]): boolean[] {
  */
 function withoutFactoryContent(span: OtlpSpan): OtlpSpan {
   return { ...span, attributes: stripFactoryContent(span.attributes) }
+}
+
+/**
+ * True for a span the Factory adapter claimed as its plugin envelope.
+ *
+ * The claim is what makes the span Factory's: the adapter claims the plugin
+ * envelope and nothing else, and the envelope is the plugin's own `factory.*`
+ * namespace. A span of another harness keeps its content, even one that carries
+ * Factory's own content attributes — the gate is scoped to Factory's own spans.
+ */
+function isClaimedFactoryEnvelope(raw: RawSpan, attributed: ReadonlyMap<string, string>): boolean {
+  return attributed.get(raw.spanId) === DROID_HARNESS && isDroidPluginSpan(raw)
 }
 
 /** What one batch did, so a caller can log or assert on it. */
@@ -516,6 +535,12 @@ export function ingestBatchWithAdapters(
     if (contentAllowed) return false
     // Factory's own span: the root, the legacy names, or a known Factory trace.
     if (factoryOwned[index]) return true
+    // A CLAIMED Factory plugin envelope. The plugin gates its own prompt at
+    // emission, but a span it parked because the delivery failed is
+    // re-delivered without that gate running again, so the store-side gate is
+    // the last line that can keep the owner's text out of the corpus. The
+    // envelope's identity attributes are not content and survive the gate.
+    if (isClaimedFactoryEnvelope(rawSpans[index]!, attributed)) return true
     // A span no adapter claimed has no known origin, and Factory's native root
     // can arrive after its children: its content is stripped too.
     return !attributed.has(rawSpans[index]!.spanId) && contentBearing[index]
