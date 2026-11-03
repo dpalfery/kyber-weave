@@ -80,7 +80,7 @@ public static class GitFacts
         // hash-object aborts the whole batch on the first unreadable path, so only
         // files that still exist go on stdin; the rest have no blob to record.
         List<string> existing = paths
-            .Where(p => IsRepoRelative(p) && File.Exists(Path.Combine(workingDirectory, p)))
+            .Where(p => IsRepoRelative(p) && ExistsInRepo(workingDirectory, p))
             .Distinct(StringComparer.Ordinal)
             .ToList();
         Dictionary<string, string> blobs = new(StringComparer.Ordinal);
@@ -234,12 +234,42 @@ public static class GitFacts
     /// newline would either escape the repository or add a second path to the
     /// <c>--stdin-paths</c> batch. Those never reach <c>File.Exists</c> or git.
     /// </summary>
-    private static bool IsRepoRelative(string path) =>
-        !string.IsNullOrWhiteSpace(path)
-        && !Path.IsPathRooted(path)
-        && !path.Contains('\n', StringComparison.Ordinal)
-        && !path.Contains('\r', StringComparison.Ordinal)
-        && !path.Split('/', '\\').Any(segment => segment == "..");
+    private static bool IsRepoRelative(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)
+            || path.Contains('\0', StringComparison.Ordinal)
+            || path.Contains('\n', StringComparison.Ordinal)
+            || path.Contains('\r', StringComparison.Ordinal)
+            || Path.IsPathRooted(path))
+        {
+            return false;
+        }
+
+        // Drive-relative (C:foo) is not rooted but still escapes the repository.
+        if (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+        {
+            return false;
+        }
+
+        // Win32 strips a trailing dot or space from a segment, so ".. " resolves to
+        // the parent even though it is not the literal "..". Reject both.
+        return path.Split('/', '\\').All(segment =>
+            segment != ".."
+            && !segment.EndsWith('.')
+            && !segment.EndsWith(' '));
+    }
+
+    private static bool ExistsInRepo(string workingDirectory, string path)
+    {
+        try
+        {
+            return File.Exists(Path.Combine(workingDirectory, path));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     private static string? RunGit(
         string workingDirectory,

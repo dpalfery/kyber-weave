@@ -31,6 +31,10 @@ public sealed class LoopbackAddressTests
     [InlineData("0x7f000001")]
     [InlineData("0x7f.0.0.1")]
     [InlineData("0177.0.0.1")]
+    // The two- and three-part inet_aton forms.
+    [InlineData("127.1")]
+    [InlineData("127.0.1")]
+    [InlineData("0x7f.1")]
     [InlineData("::1")]
     public void ALoopbackHostIsRecognized(string host)
     {
@@ -52,6 +56,9 @@ public sealed class LoopbackAddressTests
     [InlineData("192.168.1.1")]
     [InlineData("10.0.0.1")]
     [InlineData("3232235777")]
+    // Octal accumulation must not wrap into 127.0.0.1.
+    [InlineData("040000000177.0.0.1")]
+    [InlineData("040000000000")]
     public void ANonLoopbackHostIsNot(string host)
     {
         Assert.False(LoopbackAddress.IsLoopbackHost(host));

@@ -83,6 +83,31 @@ internal static class LoopbackAddress
             return false;
         }
 
+        if (parts.Length == 2)
+        {
+            if (!TryParsePart(parts[0], out uint first) || first > byte.MaxValue
+                || !TryParsePart(parts[1], out uint rest) || rest > 0xFFFFFF)
+            {
+                return false;
+            }
+
+            address = new IPAddress([(byte)first, (byte)(rest >> 16), (byte)(rest >> 8), (byte)rest]);
+            return true;
+        }
+
+        if (parts.Length == 3)
+        {
+            if (!TryParsePart(parts[0], out uint first) || first > byte.MaxValue
+                || !TryParsePart(parts[1], out uint second) || second > byte.MaxValue
+                || !TryParsePart(parts[2], out uint rest) || rest > 0xFFFF)
+            {
+                return false;
+            }
+
+            address = new IPAddress([(byte)first, (byte)second, (byte)(rest >> 8), (byte)rest]);
+            return true;
+        }
+
         if (parts.Length != 4)
         {
             return false;
@@ -122,14 +147,21 @@ internal static class LoopbackAddress
 
         if (text.Length > 1 && text[0] == '0')
         {
-            foreach (char digit in text.AsSpan(1))
+            try
             {
-                if (digit is < '0' or > '7')
+                foreach (char digit in text.AsSpan(1))
                 {
-                    return false;
-                }
+                    if (digit is < '0' or > '7')
+                    {
+                        return false;
+                    }
 
-                value = (value * 8) + (uint)(digit - '0');
+                    value = checked((value * 8) + (uint)(digit - '0'));
+                }
+            }
+            catch (OverflowException)
+            {
+                return false;
             }
 
             return true;

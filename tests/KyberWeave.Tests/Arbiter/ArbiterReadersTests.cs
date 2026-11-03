@@ -180,13 +180,16 @@ public sealed class ArbiterReadersTests : IDisposable
 
             IReadOnlyDictionary<string, string> blobs = GitFacts.GetBlobIds(
                 repo,
-                ["inside.txt", "/etc/passwd", outside, "../outside.txt", "a\nb"]);
+                ["inside.txt", "/etc/passwd", outside, "../outside.txt", "a\nb", "a\0b", ".. /outside.txt", "C:/outside.txt"]);
 
             Assert.Contains("inside.txt", blobs.Keys);
             Assert.DoesNotContain("/etc/passwd", blobs.Keys);
             Assert.DoesNotContain(outside, blobs.Keys);
             Assert.DoesNotContain("../outside.txt", blobs.Keys);
             Assert.DoesNotContain("a\nb", blobs.Keys);
+            Assert.DoesNotContain("a\0b", blobs.Keys);
+            Assert.DoesNotContain(".. /outside.txt", blobs.Keys);
+            Assert.DoesNotContain("C:/outside.txt", blobs.Keys);
         }
         finally
         {
@@ -285,7 +288,7 @@ public sealed class ArbiterReadersTests : IDisposable
 
         Dictionary<string, string?> plannerHeaders = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["TARGET"] = "architect",
+            ["TARGET"] = " architect ",
         };
         CallerResolution planner = CallerResolver.Resolve(headers: plannerHeaders);
         Assert.Equal(CallerSource.Header, planner.Source);

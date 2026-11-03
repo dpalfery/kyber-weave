@@ -70,10 +70,13 @@ public static class CallerResolver
     /// substring: <c>release-planner-tool</c> is not a planner and must not make a
     /// non-conductor caller look like the conductor.
     /// </summary>
-    private static bool IsPlannerTarget(string target) =>
-        target.Equals("architect", StringComparison.OrdinalIgnoreCase)
-        || target.Equals("product-owner", StringComparison.OrdinalIgnoreCase)
-        || target.Equals("product-planning", StringComparison.OrdinalIgnoreCase);
+    private static bool IsPlannerTarget(string target)
+    {
+        string normalized = target.Trim();
+        return normalized.Equals("architect", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("product-owner", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("product-planning", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? Header(IReadOnlyDictionary<string, string?> headers, string name)
     {
