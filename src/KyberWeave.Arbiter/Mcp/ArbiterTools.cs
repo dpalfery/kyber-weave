@@ -98,6 +98,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     private const string Harness = "serve";
     private const string UnidentifiedCaller = "unidentified";
 
+    /// <summary>The most evaluations one MCP call may fan out to.</summary>
+    private const int MaxFanOutUnits = 64;
+
     [McpServerTool(Name = "arbiter_evaluate", ReadOnly = false, OpenWorld = false)]
     [Description("""
         Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
@@ -144,6 +147,15 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.");
         }
 
+        // A single call is bounded: each unit is a provider call and a ledger append,
+        // so an unbounded client array is a denial of service and ledger bloat.
+        if (facts.Lens is { Count: > MaxFanOutUnits })
+        {
+            return Failure(
+                provenance,
+                $"A lens fan-out carries at most {MaxFanOutUnits} units; split the call.");
+        }
+
         // A refutation call is one evaluation per finding id, because a REFUTE header
         // names one finding. Ids are checked before any evaluation, so a bad id records
         // nothing (review 20.1-2, Major).
@@ -151,6 +163,13 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         if (facts.Lens is not { Count: > 0 } && Present(facts.Finding))
         {
             List<FindingBlock> blocks = FindingBlocks(facts.Finding!);
+            if (blocks.Count > MaxFanOutUnits)
+            {
+                return Failure(
+                    provenance,
+                    $"A refutation carries at most {MaxFanOutUnits} findings; split the call.");
+            }
+
             string? problem = FindingIdProblem(blocks);
             if (problem is not null)
             {

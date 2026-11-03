@@ -51,7 +51,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
     /// only correlates the trusted <c>.agent.md</c> evaluation with the
     /// project-wide re-fire for the same call.
     /// </summary>
-    internal static readonly ConcurrentDictionary<string, string> TrustedDecisions = new();
+    internal static readonly ConcurrentDictionary<TrustedDecisionKey, string> TrustedDecisions = new();
 
     /// <summary>Creates an adapter for one Copilot harness token over the hook decision engine.</summary>
     public CopilotHookAdapter(IHookDecisionEngine engine, string harnessToken)
@@ -220,14 +220,6 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         if (IsLocalDispatchTool(tool))
         {
             string? toolUseId = GetString(payload, "tool_use_id");
-            if (!string.IsNullOrWhiteSpace(toolUseId)
-                && TrustedDecisions.TryGetValue(toolUseId, out string? stored))
-            {
-                context.Log.WriteLine(
-                    $"Reusing trusted-caller decision already logged for tool_use_id '{toolUseId}'.");
-                return stored;
-            }
-
             JsonElement toolInput = RequireToolInput(payload);
             string? agentName = GetString(toolInput, "agentName");
             string? target = !string.IsNullOrWhiteSpace(agentName)
@@ -236,6 +228,19 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Copilot hook event: runSubagent input carries no prompt.");
+
+            // A trusted decision is valid only for the exact dispatch it decided. The
+            // project-wide re-fire repeats the same tool_use_id and payload; a different
+            // payload under a reused id must be evaluated, not answered from the cache.
+            TrustedDecisionKey? key = string.IsNullOrWhiteSpace(toolUseId)
+                ? null
+                : new TrustedDecisionKey(toolUseId, agentName, prompt);
+            if (key is not null && TrustedDecisions.TryGetValue(key.Value, out string? stored))
+            {
+                context.Log.WriteLine(
+                    $"Reusing trusted-caller decision already logged for tool_use_id '{toolUseId}'.");
+                return stored;
+            }
 
             HookOutcome outcome = DecidePre(
                 _harnessToken, payload, caller, target, prompt, config, context);
@@ -257,9 +262,9 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
             // Only a trusted evaluation is kept: the .agent.md hook renders
             // --caller, while the project-wide re-fire carries none.
-            if (!string.IsNullOrWhiteSpace(toolUseId) && !string.IsNullOrWhiteSpace(renderedCaller))
+            if (key is not null && !string.IsNullOrWhiteSpace(renderedCaller))
             {
-                TrustedDecisions[toolUseId] = output;
+                TrustedDecisions[key.Value] = output;
             }
 
             return output;
@@ -750,6 +755,8 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 ["permissionDecisionReason"] = reason,
             },
         }.ToJsonString();
+
+    internal readonly record struct TrustedDecisionKey(string ToolUseId, string? AgentName, string Prompt);
 
     private static string RenderLocalPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderLocalPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

@@ -85,6 +85,21 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     /// <c>outcome:</c> line and the tool contradicts itself.
     /// </summary>
     [Fact]
+    public void Evaluate_TooManyLenses_IsRefusedBeforeAnyEvaluation()
+    {
+        ArbiterTools tools = CreateTools();
+        string[] lenses = [.. Enumerable.Range(0, 65).Select(index => $"lens-{index}")];
+
+        string response = tools.Evaluate(
+            "lens.spawn",
+            new ArbiterFacts { Lens = lenses, Prompt = "Review the change." });
+
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Contains("at most 64", response, StringComparison.Ordinal);
+        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+    }
+
+    [Fact]
     public void Evaluate_ATriggerCarryingANewline_CannotForgeAnOutcomeLine()
     {
         ArbiterTools tools = CreateTools();

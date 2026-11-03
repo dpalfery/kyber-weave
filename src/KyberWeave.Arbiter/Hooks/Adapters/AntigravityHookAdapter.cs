@@ -309,7 +309,10 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             string prompt = GetString(subagent, "Prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Antigravity hook event: a Subagents element carries no Prompt.");
-            dispatches.Add(new Dispatch(GetString(subagent, "TypeName"), prompt));
+            string target = GetString(subagent, "TypeName")
+                ?? throw new InvalidOperationException(
+                    "Malformed Antigravity hook event: a Subagents element carries no TypeName.");
+            dispatches.Add(new Dispatch(target, prompt));
         }
 
         return dispatches;
