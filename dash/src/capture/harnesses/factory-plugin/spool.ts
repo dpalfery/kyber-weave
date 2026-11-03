@@ -10,7 +10,7 @@
 // This module is a LEAF: it imports only `node:` built-ins and the shared consent writer's
 // atomic file write, so the plugin never drags engine code into the process it runs in.
 
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { writeFileAtomic } from '../../consent-file.js'
@@ -35,12 +35,25 @@ function spoolPath(stateDir: string): string {
 
 /** Every event the spool holds, oldest first. A missing or unreadable spool holds nothing. */
 export function readSpoolEvents(stateDir: string): unknown[] {
+  let handle: number
+  try {
+    handle = openSync(spoolPath(stateDir), 'r')
+  } catch {
+    // A spool that was never written holds no events; so does one that cannot be opened.
+    return []
+  }
   let text: string
   try {
-    text = readFileSync(spoolPath(stateDir), 'utf8')
+    // The spool file is measured through the descriptor BEFORE its content is read, so a
+    // file that is already over the bound is refused without ever being materialised: the
+    // bound holds before the read, not after it.
+    const stat = fstatSync(handle)
+    if (!stat.isFile() || stat.size > SPOOL_MAX_BYTES) return []
+    text = readFileSync(handle, 'utf8')
   } catch {
-    // A spool that was never written holds no events; so does one that cannot be read.
     return []
+  } finally {
+    closeSync(handle)
   }
   const events: unknown[] = []
   for (const line of text.split('\n')) {
