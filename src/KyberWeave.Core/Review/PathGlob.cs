@@ -38,13 +38,6 @@ public static class PathGlob
         }
     }
 
-    /// <summary>The first pattern that matches, or <see langword="null"/>.</summary>
-    public static string? FirstMatch(IEnumerable<string> patterns, string path)
-    {
-        ArgumentNullException.ThrowIfNull(patterns);
-        return patterns.FirstOrDefault(pattern => IsMatch(pattern, path));
-    }
-
     private static string Normalize(string path) => path.Replace('\\', '/');
 
     private static string Translate(string pattern)

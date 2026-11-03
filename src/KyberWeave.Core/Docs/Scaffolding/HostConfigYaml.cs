@@ -867,9 +867,8 @@ internal static partial class HostConfigYaml
     /// <para>
     /// Each line keeps its own terminator rather than one style for the document, because this
     /// type edits a line and has no business normalizing the rest of an operator's file — the
-    /// diff would show changes nobody made, on a file that escalates for human review by path
-    /// alone. Only the lines this tool adds take a new terminator, and they take the document's
-    /// dominant style.
+    /// diff would show changes nobody made. Only the lines this tool adds take a new terminator,
+    /// and they take the document's dominant style.
     /// </para>
     /// </remarks>
     private sealed class HostConfigLines

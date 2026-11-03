@@ -11,25 +11,31 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Renders the real, checked-in canonical Squad source (<c>products/kyber-squad</c>) through
-/// <see cref="AntigravityRenderer"/> and pins the native agent-per-directory contract
-/// (agents at <c>.agents/agents/&lt;name&gt;/agent.md</c>, skills at <c>.agents/skills/&lt;name&gt;/SKILL.md</c>).
+///     Renders the real, checked-in canonical Squad source (<c>products/kyber-squad</c>) through
+///     <see cref="AntigravityRenderer" /> and pins the native agent-per-directory contract
+///     (agents at <c>.agents/agents/&lt;name&gt;/agent.md</c>, skills at <c>.agents/skills/&lt;name&gt;/SKILL.md</c>).
 /// </summary>
 /// <remarks>
-/// Counts and collision sets are derived from the loaded <see cref="SquadSource"/> so the
-/// suite tracks the shipped corpus rather than hardcoded 22/26/46 literals that would
-/// silently drift. Native dual emission means no role- prefix collision resolution: agents and
-/// skills render to separate namespace roots.
+///     Counts and collision sets are derived from the loaded <see cref="SquadSource" /> so the
+///     suite tracks the shipped corpus rather than hardcoded 22/26/46 literals that would
+///     silently drift. Native dual emission means no role- prefix collision resolution: agents and
+///     skills render to separate namespace roots.
 /// </remarks>
 public sealed class AntigravityRendererContractTests : IDisposable
 {
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    public void Dispose()
+    {
+        // No disposable state: the suite only reads the checked-in corpus. IDisposable is
+        // implemented per the test-coding-standard so adding fixtures later has a home.
+    }
+
     /// <summary>
-    /// Shared identities are read from the loaded fallback profile's shared-identities
-    /// list — the same authoritative source the renderer uses — rather than a literal
-    /// roster that could drift from profiles/fallbacks.yml.
+    ///     Shared identities are read from the loaded fallback profile's shared-identities
+    ///     list — the same authoritative source the renderer uses — rather than a literal
+    ///     roster that could drift from profiles/fallbacks.yml.
     /// </summary>
     private static IReadOnlyList<string> SharedIdentities(SquadSource source)
     {
@@ -39,8 +45,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The expected permission-degradation roster is derived from the loaded capability
-    /// profiles' own declared vocabulary, mirroring the renderer's source of truth.
+    ///     The expected permission-degradation roster is derived from the loaded capability
+    ///     profiles' own declared vocabulary, mirroring the renderer's source of truth.
     /// </summary>
     private static bool HasNonDenyCapability(SquadCapabilityProfiles profiles, SquadCapabilityProfile profile)
     {
@@ -50,10 +56,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Collisions are derived from the loaded source (agent identity that also exists as a
-    /// canonical skill), not a hardcoded roster, so the suite tracks the corpus rather than
-    /// a snapshot that could silently drift. Shared conductor identities are excluded —
-    /// they reuse the canonical skill rather than emitting a role-prefixed one.
+    ///     Collisions are derived from the loaded source (agent identity that also exists as a
+    ///     canonical skill), not a hardcoded roster, so the suite tracks the corpus rather than
+    ///     a snapshot that could silently drift. Shared conductor identities are excluded —
+    ///     they reuse the canonical skill rather than emitting a role-prefixed one.
     /// </summary>
     private static HashSet<string> DeriveCollisions(SquadSource source)
     {
@@ -63,12 +69,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
             .Where(a => skillNames.Contains(a.Name) && !shared.Contains(a.Name))
             .Select(a => a.Name)
             .ToHashSet(StringComparer.Ordinal);
-    }
-
-    public void Dispose()
-    {
-        // No disposable state: the suite only reads the checked-in corpus. IDisposable is
-        // implemented per the test-coding-standard so adding fixtures later has a home.
     }
 
     [Fact]
@@ -96,7 +96,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
-    /// <summary>Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived from the source.</summary>
+    /// <summary>
+    ///     Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived
+    ///     from the source.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
@@ -106,11 +109,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             .Select(skill => skill.Name)
             .ToHashSet(StringComparer.Ordinal);
         foreach (string identity in shared)
-        {
             Assert.True(
                 canonicalSkillNames.Contains(identity),
                 $"Shared identity '{identity}' has no canonical skill projection.");
-        }
 
         HashSet<string> collisions = DeriveCollisions(source);
 
@@ -188,9 +189,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             foreach (string line in skill.Description.Split(
                          ['\r', '\n'],
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
                 Assert.Contains(line, emittedDescription, StringComparison.Ordinal);
-            }
 
             Assert.True(
                 string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
@@ -278,14 +277,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             bool isCapabilityNotIsolable = executeAllowed && !writeAllowed;
 
             if (!isCapabilityNotIsolable && HasNonDenyCapability(source.CapabilityProfiles, profile))
-            {
                 expectedPermissionAgents.Add(agent.Name);
-            }
 
-            if (agent.DelegatesTo.Count > 0)
-            {
-                expectedPermissionAgents.Add(agent.Name);
-            }
+            if (agent.DelegatesTo.Count > 0) expectedPermissionAgents.Add(agent.Name);
         }
 
         string[] expectedPermissionArray = expectedPermissionAgents
@@ -352,10 +346,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // File paths, targets, contents, and degradation records must remain byte/value
         // identical across renders of the same canonical source.
         Assert.Equal(first.Degradations.Count, second.Degradations.Count);
-        for (int i = 0; i < first.Degradations.Count; i++)
-        {
-            Assert.Equal(first.Degradations[i], second.Degradations[i]);
-        }
+        for (int i = 0; i < first.Degradations.Count; i++) Assert.Equal(first.Degradations[i], second.Degradations[i]);
     }
 
     [Fact]
@@ -389,33 +380,22 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // Verify degradations are also deterministic
         Assert.Equal(first.Degradations.Count, second.Degradations.Count);
-        for (int i = 0; i < first.Degradations.Count; i++)
-        {
-            Assert.Equal(first.Degradations[i], second.Degradations[i]);
-        }
+        for (int i = 0; i < first.Degradations.Count; i++) Assert.Equal(first.Degradations[i], second.Degradations[i]);
 
         // Verify that agent resources are projected under .agents/agents/ beside agent.md
         SquadSource source = TestSquadCorpus.CanonicalSource;
         foreach (SquadAgent agent in source.Agents)
-        {
             foreach (SquadResource resource in agent.Resources)
-            {
                 Assert.Contains(
                     first.Files,
                     f => f.RelativePath == $".agents/agents/{agent.Name}/{resource.RelativePath}");
-            }
-        }
 
         // Verify that skill resources are also projected under .agents/skills/
         foreach (SquadSkill skill in source.Skills)
-        {
             foreach (SquadResource resource in skill.Resources)
-            {
                 Assert.Contains(
                     first.Files,
                     f => f.RelativePath == $".agents/skills/{skill.Name}/{resource.RelativePath}");
-            }
-        }
     }
 
     [Fact]
@@ -514,12 +494,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // Every agent must emit a native agent.md file at .agents/agents/<name>/agent.md
         foreach (SquadAgent agent in source.Agents)
-        {
             Assert.True(
                 result.Files.Any(f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md" &&
                                       f.Target == "antigravity"),
                 $"Agent '{agent.Name}' must render to .agents/agents/{agent.Name}/agent.md");
-        }
     }
 
     /// <summary>Every canonical skill still emits its <c>SKILL.md</c> under native rendering.</summary>
@@ -533,12 +511,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // Every canonical skill must still emit a SKILL.md file (native both pattern)
         foreach (SquadSkill skill in source.Skills)
-        {
             Assert.True(
                 result.Files.Any(f => f.RelativePath == $".agents/skills/{skill.Name}/SKILL.md" &&
                                       f.Target == "antigravity"),
                 $"Skill '{skill.Name}' must render to .agents/skills/{skill.Name}/SKILL.md");
-        }
     }
 
     /// <summary>Native rendering emits no role-prefixed collision files.</summary>
@@ -826,10 +802,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
-    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
-    /// shell tools (run_command) and withheld write tools (write_to_file, replace_file_content, multi_replace_file_content).
-    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    ///     Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    ///     reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    ///     shell tools (run_command) and withheld write tools (write_to_file, replace_file_content,
+    ///     multi_replace_file_content).
+    ///     Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_CapabilityNotIsolableDegradationRecordPresent()
@@ -880,14 +857,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 Assert.Equal(agent.BodyDigest, record.InstructionDigest);
                 Assert.NotNull(record.Details);
                 foreach (string shellTool in grantedShellTools)
-                {
                     Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
-                }
 
                 foreach (string writeTool in withheldWriteTools)
-                {
                     Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
-                }
             }
             else
             {
@@ -938,10 +911,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.Contains("invoke_subagent", tools);
 
             // If agent is orchestrator/conductor, must also have manage_subagents
-            if (agent.Name == "conductor" || agent.Name == "orchestrator")
-            {
-                Assert.Contains("manage_subagents", tools);
-            }
+            if (agent.Name == "conductor" || agent.Name == "orchestrator") Assert.Contains("manage_subagents", tools);
         }
 
         // D12: Agents with empty delegates-to must NOT have invoke_subagent or enable_subagent_tools: true
@@ -972,11 +942,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             // enable_subagent_tools should not be true for non-delegating agents
             YamlNode? enableSubagentNode = OptionalScalar(frontmatter, "enable_subagent_tools");
             if (enableSubagentNode is YamlScalarNode enableSubagentScalar)
-            {
                 Assert.False(
                     string.Equals("true", enableSubagentScalar.Value, StringComparison.OrdinalIgnoreCase),
                     $"Non-delegating agent '{agent.Name}' should not have enable_subagent_tools: true");
-            }
         }
     }
 
@@ -1010,8 +978,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins rendered Antigravity models by agent identity so planners and reviewers use
-    /// Pro while workers and orchestration remain on Flash, independently of models.yml.
+    ///     Pins rendered Antigravity models by agent identity so planners and reviewers use
+    ///     Pro while workers and orchestration remain on Flash, independently of models.yml.
     /// </summary>
     [Fact]
     public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
@@ -1117,11 +1085,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     .ToArray();
 
                 foreach (string inconclusive in inconclusivelTools)
-                {
                     Assert.False(
                         tools.Contains(inconclusive, StringComparer.Ordinal),
                         $"Agent '{agent.Name}' must not have '{inconclusive}' tool (withheld per D12)");
-                }
             }
         }
     }
@@ -1193,22 +1159,21 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Every agent the source entitles to <c>kyber-weave</c> renders it in its own frontmatter, in
-    /// the one entry shape live-probed against <c>agy</c> 1.4.12, and every agent the source does
-    /// not entitle renders no <c>mcpServers</c> key at all.
+    ///     Every agent the source entitles to <c>kyber-weave</c> renders it in its own frontmatter, in
+    ///     the one entry shape live-probed against <c>agy</c> 1.4.12, and every agent the source does
+    ///     not entitle renders no <c>mcpServers</c> key at all.
     /// </summary>
     /// <remarks>
-    /// The roster is computed from the loaded capability profiles by
-    /// <see cref="SquadMcpGrantProjection"/>, never from the renderer, so a renderer that re-added
-    /// the pure-orchestrator carve-out fails here rather than agreeing with its own copy of the
-    /// rule. <c>conductor</c>'s presence is asserted explicitly as well, because that one agent is
-    /// the whole point of ADR 0050: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
-    /// the role that assigns work is the role that needs it.
-    ///
-    /// The shape is asserted structurally rather than by string match because it is the contract.
-    /// The probe called <c>{name, command, args}</c> entries successfully; the alternative
-    /// single-key map spelling (<c>- kyber-weave: {command, args}</c>) listed and ran but was never
-    /// called, so it is not the shape this suite accepts.
+    ///     The roster is computed from the loaded capability profiles by
+    ///     <see cref="SquadMcpGrantProjection" />, never from the renderer, so a renderer that re-added
+    ///     the pure-orchestrator carve-out fails here rather than agreeing with its own copy of the
+    ///     rule. <c>conductor</c>'s presence is asserted explicitly as well, because that one agent is
+    ///     the whole point of ADR 0050: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
+    ///     the role that assigns work is the role that needs it.
+    ///     The shape is asserted structurally rather than by string match because it is the contract.
+    ///     The probe called <c>{name, command, args}</c> entries successfully; the alternative
+    ///     single-key map spelling (<c>- kyber-weave: {command, args}</c>) listed and ran but was never
+    ///     called, so it is not the shape this suite accepts.
     /// </remarks>
     [Fact]
     public async Task EveryReadEntitledAgentRendersTheKyberWeaveMcpServerInTheCallVerifiedShape()
@@ -1244,12 +1209,41 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlNode servers = RequireNode(frontmatter, "mcpServers");
             YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(servers);
-            YamlMappingNode entry = Assert.IsType<YamlMappingNode>(Assert.Single(entries.Children));
+
+            bool entitledToCodegraph = CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                agent.CapabilityProfile,
+                source.CapabilityProfiles.Profiles);
+
+            if (agent.Name == "conductor")
+            {
+                Assert.Single(entries.Children);
+            }
+            else if (entitledToCodegraph)
+            {
+                Assert.Equal(2, entries.Children.Count);
+                YamlMappingNode codegraphEntry = Assert.IsType<YamlMappingNode>(
+                    Assert.Single(entries.Children, node =>
+                        node is YamlMappingNode map && RequireScalar(map, "name") == "codegraph"));
+                string[] codegraphKeys =
+                [
+                    .. codegraphEntry.Children.Keys
+                        .Select(key => (key as YamlScalarNode)?.Value ?? string.Empty)
+                ];
+                Assert.Equal(["name", "command", "args"], codegraphKeys);
+                Assert.Equal("codegraph", RequireScalar(codegraphEntry, "name"));
+            }
+
+            YamlMappingNode entry = Assert.IsType<YamlMappingNode>(
+                Assert.Single(entries.Children, node =>
+                    node is YamlMappingNode map && RequireScalar(map, "name") == "kyber-weave"));
 
             // The verified entry shape, and only that shape: an entry that also carried the server
             // name as its own key would be the spelling the probe never called.
-            string[] keys = [.. entry.Children.Keys
-                .Select(key => (key as YamlScalarNode)?.Value ?? string.Empty)];
+            string[] keys =
+            [
+                .. entry.Children.Keys
+                    .Select(key => (key as YamlScalarNode)?.Value ?? string.Empty)
+            ];
             Assert.Equal(["name", "command", "args"], keys);
             Assert.Equal("kyber-weave", RequireScalar(entry, "name"));
             Assert.Equal(declaration.Command, RequireScalar(entry, "command"));
@@ -1258,15 +1252,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// An agent whose profile denies <c>filesystem.read</c> renders no MCP server and carries a
-    /// <c>permission-not-expressible</c> record naming the server it lost and the rule that lost it,
-    /// while a granted agent beside it carries no withholding claim.
+    ///     An agent whose profile denies <c>filesystem.read</c> renders no MCP server and carries a
+    ///     <c>permission-not-expressible</c> record naming the server it lost and the rule that lost it,
+    ///     while a granted agent beside it carries no withholding claim.
     /// </summary>
     /// <remarks>
-    /// Two outcomes, two records. A blanket "MCP is not expressible here" sentence would have made
-    /// a deliberately granted agent indistinguishable from a withheld one in the only place a
-    /// review or a <c>squad doctor</c> run reads either, which is how the pre-ADR-0049 renderer
-    /// reported every agent as degraded while granting nobody.
+    ///     Two outcomes, two records. A blanket "MCP is not expressible here" sentence would have made
+    ///     a deliberately granted agent indistinguishable from a withheld one in the only place a
+    ///     review or a <c>squad doctor</c> run reads either, which is how the pre-ADR-0049 renderer
+    ///     reported every agent as degraded while granting nobody.
     /// </remarks>
     [Fact]
     public async Task AnAgentWhoseProfileDeniesFileReadRendersNoMcpServerAndRecordsTheWithholding()
@@ -1309,35 +1303,32 @@ public sealed class AntigravityRendererContractTests : IDisposable
             + "this test proves nothing.");
         foreach (SquadDegradationRecord record in result.Degradations.Where(record =>
                      string.Equals(record.CanonicalIdentity, granted.Name, StringComparison.Ordinal)))
-        {
             Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
-        }
     }
 
     /// <summary>
-    /// A squad that declares MCP servers but not <c>kyber-weave</c> grants it to nobody: every
-    /// entitled agent renders no <c>mcpServers</c> key, and no record claims a server was withheld.
+    ///     A squad that declares MCP servers but not <c>kyber-weave</c> grants no universal server:
+    ///     the orchestrator and read-denied agents render no <c>mcpServers</c> key, while read-entitled
+    ///     specialists receive only the orchestrator-excluded servers the declaration names. No record
+    ///     claims a server was withheld.
     /// </summary>
     /// <remarks>
-    /// This is the declaration half of the fail-closed rule, and it is a different question from
-    /// the profile half the read-denied test above covers. The profiles here entitle every agent;
-    /// only the <c>mcp.json</c> is short of the server. Without this case a renderer that resolved
-    /// whichever server the declaration happened to name first — or one that emitted an empty
-    /// <c>mcpServers: []</c> rather than omitting the key — would satisfy every other Antigravity
-    /// assertion in this file, and on this harness an explicit empty list reads as "exclude every
-    /// MCP server" rather than as an absent key.
-    ///
-    /// Nothing is reported as withheld, because nothing was there to withhold: the profiles entitled
-    /// every agent and only the declaration was short. What is reported is the configuration gap
-    /// itself, in one record per agent, naming the missing server. Without that sentence a renamed or
-    /// dropped `mcp.json` entry would cost every agent the grant in silence.
+    ///     This is the declaration half of the fail-closed rule, and it is a different question from
+    ///     the profile half the read-denied test above covers. The profiles here entitle every agent;
+    ///     only the <c>mcp.json</c> is short of the universal server. The declared non-universal server
+    ///     follows the orchestrator-excluded partition, which is the same rule Factory applies to its
+    ///     whitelist, so a specialist receives it and the pure orchestrator does not. Nothing is
+    ///     reported as withheld, because nothing was there to withhold: the profiles entitled every
+    ///     agent and only the universal declaration was short. What is reported is the configuration
+    ///     gap itself, in one record per agent, naming the missing server. Without that sentence a
+    ///     renamed or dropped `mcp.json` entry would cost every agent the grant in silence.
     /// </remarks>
     [Fact]
-    public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsItToNobodyAndClaimsNoWithholding()
+    public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsOnlyOrchestratorExcludedServers()
     {
-        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("codegraph");
+        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("other-server");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        Assert.Equal(["codegraph"], SquadMcpDeclaration.ServerNames(source));
+        Assert.Equal(["other-server"], SquadMcpDeclaration.ServerNames(source));
 
         // The profiles still entitle agents, so a passing render cannot be explained by an empty
         // entitlement set.
@@ -1358,11 +1349,27 @@ public sealed class AntigravityRendererContractTests : IDisposable
             YamlMappingNode frontmatter = ReadFrontmatter(Assert.Single(
                 result.Files,
                 file => file.RelativePath == $".agents/agents/{agent.Name}/agent.md"));
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
-                $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
-                + "'kyber-weave' server. An omitted key is the only fail-closed answer: on Antigravity "
-                + "an explicit empty list excludes every server rather than inheriting nothing.");
+
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    source.CapabilityProfiles.Profiles))
+            {
+                YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(
+                    RequireNode(frontmatter, "mcpServers"));
+                Assert.Equal(
+                    ["other-server"],
+                    entries.Children.Select(child =>
+                        RequireScalar(Assert.IsType<YamlMappingNode>(child), "name")));
+            }
+            else
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+                    $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
+                    + "'kyber-weave' server and the agent is not entitled to an orchestrator-excluded "
+                    + "server. An omitted key is the only fail-closed answer: on Antigravity an explicit "
+                    + "empty list excludes every server rather than inheriting nothing.");
+            }
         }
 
         Assert.All(
@@ -1397,15 +1404,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A missing server and a denying profile are two independent reasons one agent has no grant,
-    /// so the one record names both: the renamed-or-dropped declaration and the profile that would
-    /// still withhold the grant after the server came back.
+    ///     A missing server and a denying profile are two independent reasons one agent has no grant,
+    ///     so the one record names both: the renamed-or-dropped declaration and the profile that would
+    ///     still withhold the grant after the server came back.
     /// </summary>
     /// <remarks>
-    /// Reporting only the declaration would hide the entitlement: an operator who restores the
-    /// server would watch this agent stay grantless with no record saying why. Reporting only the
-    /// entitlement would hide the declaration every other agent's record names. The combined
-    /// sentence is the only outcome that leaves neither gap silent.
+    ///     Reporting only the declaration would hide the entitlement: an operator who restores the
+    ///     server would watch this agent stay grantless with no record saying why. Reporting only the
+    ///     entitlement would hide the declaration every other agent's record names. The combined
+    ///     sentence is the only outcome that leaves neither gap silent.
     /// </remarks>
     [Fact]
     public async Task AMissingServerAndADenyingProfileAreBothNamedInOneRecord()
@@ -1441,14 +1448,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A shell gap, a missing server, and a denying profile are three independent reasons one
-    /// agent has no grant, so the one record names all three.
+    ///     A shell gap, a missing server, and a denying profile are three independent reasons one
+    ///     agent has no grant, so the one record names all three.
     /// </summary>
     /// <remarks>
-    /// The D10 early return carries the shell-escape record past the grant checks. Without the
-    /// merge, a triple-gap agent's record would name the shell gap and the missing server while
-    /// hiding the denying profile — the same silent loss the missing-server sentence was added
-    /// to prevent, one path earlier.
+    ///     The D10 early return carries the shell-escape record past the grant checks. Without the
+    ///     merge, a triple-gap agent's record would name the shell gap and the missing server while
+    ///     hiding the denying profile — the same silent loss the missing-server sentence was added
+    ///     to prevent, one path earlier.
     /// </remarks>
     [Fact]
     public async Task AShellGapAndAMissingServerAndADenyingProfileAreAllNamedInOneRecord()
@@ -1470,12 +1477,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
             StringComparer.Ordinal)
         {
             ["process.execute"] = SquadPermissionDecision.Allow,
-            ["filesystem.write"] = SquadPermissionDecision.Deny,
+            ["filesystem.write"] = SquadPermissionDecision.Deny
         };
         profiles[denied.CapabilityProfile] = baseProfile with { Permissions = permissions };
         source = source with
         {
-            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles },
+            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles }
         };
 
         SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
@@ -1502,14 +1509,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A malformed declaration and a denying profile are two independent reasons one agent has no
-    /// grant, so the one record names the denial even though there is no server to name.
+    ///     A malformed declaration and a denying profile are two independent reasons one agent has no
+    ///     grant, so the one record names the denial even though there is no server to name.
     /// </summary>
     /// <remarks>
-    /// The declaration half contributes nothing here: with no well-formed <c>mcpServers</c> object
-    /// there is no missing-key sentence to write. The entitlement half still holds — the profile
-    /// denies the read the grant rests on — so the record carries it alone. Entitled profiles stay
-    /// silent on this path, exactly as the rejection-branch theory below pins.
+    ///     The declaration half contributes nothing here: with no well-formed <c>mcpServers</c> object
+    ///     there is no missing-key sentence to write. The entitlement half still holds — the profile
+    ///     denies the read the grant rests on — so the record carries it alone. Entitled profiles stay
+    ///     silent on this path, exactly as the rejection-branch theory below pins.
     /// </remarks>
     [Fact]
     public async Task AMalformedDeclarationAndADenyingProfileNameTheDenialAlone()
@@ -1544,8 +1551,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A shell gap, an unusable declaration, and a denying profile are three independent reasons
-    /// one agent has no grant, so the one record names the shell gap and the denial.
+    ///     A shell gap, an unusable declaration, and a denying profile are three independent reasons
+    ///     one agent has no grant, so the one record names the shell gap and the denial.
     /// </summary>
     [Fact]
     public async Task AShellGapAndAMalformedDeclarationAndADenyingProfileAreAllNamedInOneRecord()
@@ -1564,7 +1571,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             StringComparer.Ordinal)
         {
             ["process.execute"] = SquadPermissionDecision.Allow,
-            ["filesystem.write"] = SquadPermissionDecision.Deny,
+            ["filesystem.write"] = SquadPermissionDecision.Deny
         };
         profiles[denied.CapabilityProfile] = baseProfile with { Permissions = permissions };
 
@@ -1572,7 +1579,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         source = source with
         {
             McpConfiguration = declaration.RootElement.Clone(),
-            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles },
+            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles }
         };
 
         SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
@@ -1597,39 +1604,36 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A declaration that cannot be resolved to a usable launch definition fails closed: no entitled
-    /// agent renders <c>mcpServers</c>, rather than every agent rendering an entry built from a
-    /// partial or guessed definition.
+    ///     A declaration that cannot be resolved to a usable launch definition fails closed: no entitled
+    ///     agent renders <c>mcpServers</c>, rather than every agent rendering an entry built from a
+    ///     partial or guessed definition.
     /// </summary>
     /// <remarks>
-    /// Each row is one rejection branch of <c>ResolveUniversalMcpServer</c>, driven through a
-    /// hand-built <see cref="SquadSource"/>: the missing <c>mcpServers</c> key, a non-object
-    /// <c>mcpServers</c>, a non-object entry, a missing, non-string, or blank <c>command</c>, a
-    /// missing or non-array <c>args</c>, and an <c>args</c> element that is null, a number, a
-    /// boolean, an object, or an array.
-    ///
-    /// The hand-built source is necessary rather than lazy. <see cref="SquadSourceLoader"/> rejects
-    /// every one of these states at load time (<c>ParseMcp</c> and <c>ValidateMcpServer</c> demand an
-    /// object <c>mcpServers</c>, an object <c>kyber-weave</c> entry, a non-empty string
-    /// <c>command</c>, and a string-array <c>args</c>), so no on-disk corpus can reach them. They
-    /// exist to keep a hand-built or future-loaded source from rendering a server the operator never
-    /// declared, and until this theory they were asserted only in prose.
-    ///
-    /// The first row is the positive control: it is the same well-formed declaration the shipped
-    /// corpus carries, so it proves the hand-built path really does reach the renderer and that a
-    /// resolved declaration still grants. Without it, a renderer that had stopped granting anything
-    /// would satisfy every rejection row.
-    ///
-    /// The <c>args</c> element rows exist because the renderer asks each element its
-    /// <see cref="JsonElement.ValueKind"/> before reading it, exactly as the sibling <c>command</c>
-    /// branch does, and a non-string element then rejects the whole declaration. Reading the element
-    /// with <see cref="JsonElement.GetString"/> alone answers only for a string or a null and raises
-    /// for every other kind, so the null row would survive that regression while a number, a
-    /// boolean, an object, or an array would escape <c>RenderAsync</c> as a failed render — an
-    /// exception in place of the withheld grant this contract promises. Each kind earns its own row
-    /// for that reason: one representative would pass again the moment the guard was narrowed to the
-    /// kinds it happens to cover. The loader rejects every one of these states first, so the rows
-    /// pin a hand-built or future-loaded source rather than a shipped corpus.
+    ///     Each row is one rejection branch of <c>ResolveUniversalMcpServer</c>, driven through a
+    ///     hand-built <see cref="SquadSource" />: the missing <c>mcpServers</c> key, a non-object
+    ///     <c>mcpServers</c>, a non-object entry, a missing, non-string, or blank <c>command</c>, a
+    ///     missing or non-array <c>args</c>, and an <c>args</c> element that is null, a number, a
+    ///     boolean, an object, or an array.
+    ///     The hand-built source is necessary rather than lazy. <see cref="SquadSourceLoader" /> rejects
+    ///     every one of these states at load time (<c>ParseMcp</c> and <c>ValidateMcpServer</c> demand an
+    ///     object <c>mcpServers</c>, an object <c>kyber-weave</c> entry, a non-empty string
+    ///     <c>command</c>, and a string-array <c>args</c>), so no on-disk corpus can reach them. They
+    ///     exist to keep a hand-built or future-loaded source from rendering a server the operator never
+    ///     declared, and until this theory they were asserted only in prose.
+    ///     The first row is the positive control: it is the same well-formed declaration the shipped
+    ///     corpus carries, so it proves the hand-built path really does reach the renderer and that a
+    ///     resolved declaration still grants. Without it, a renderer that had stopped granting anything
+    ///     would satisfy every rejection row.
+    ///     The <c>args</c> element rows exist because the renderer asks each element its
+    ///     <see cref="JsonElement.ValueKind" /> before reading it, exactly as the sibling <c>command</c>
+    ///     branch does, and a non-string element then rejects the whole declaration. Reading the element
+    ///     with <see cref="JsonElement.GetString" /> alone answers only for a string or a null and raises
+    ///     for every other kind, so the null row would survive that regression while a number, a
+    ///     boolean, an object, or an array would escape <c>RenderAsync</c> as a failed render — an
+    ///     exception in place of the withheld grant this contract promises. Each kind earns its own row
+    ///     for that reason: one representative would pass again the moment the guard was narrowed to the
+    ///     kinds it happens to cover. The loader rejects every one of these states first, so the rows
+    ///     pin a hand-built or future-loaded source rather than a shipped corpus.
     /// </remarks>
     [Theory]
     [InlineData(
@@ -1708,20 +1712,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 + " it. An unresolvable declaration yields no entry at all — never one built from a "
                 + "partial definition, and never an empty '[]', which Antigravity reads as exclude-all.");
 
-            if (!grants)
-            {
-                continue;
-            }
+            if (!grants) continue;
 
             YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(
                 RequireNode(frontmatter, "mcpServers"));
             Assert.NotEmpty(entries.Children);
         }
 
-        if (grants)
-        {
-            return;
-        }
+        if (grants) return;
 
         foreach (SquadDegradationRecord record in result.Degradations)
         {
@@ -1731,9 +1729,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The launch definition the squad's own <c>mcp.json</c> declares for <c>kyber-weave</c>, read
-    /// from the loaded source so the rendered entry is compared against the declaration rather
-    /// than against a literal the renderer could have drifted from.
+    ///     The launch definition the squad's own <c>mcp.json</c> declares for <c>kyber-weave</c>, read
+    ///     from the loaded source so the rendered entry is compared against the declaration rather
+    ///     than against a literal the renderer could have drifted from.
     /// </summary>
     private static (string Command, string[] Args) DeclaredKyberWeaveServer(SquadSource source)
     {
@@ -1775,7 +1773,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         return
         [
             .. sequence.Children.Select(child => Assert.IsType<YamlScalarNode>(child).Value
-                ?? throw new InvalidOperationException($"Key '{key}' has a null sequence entry."))
+                                                 ?? throw new InvalidOperationException(
+                                                     $"Key '{key}' has a null sequence entry."))
         ];
     }
 }

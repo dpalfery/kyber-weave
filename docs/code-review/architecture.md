@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -99,13 +99,11 @@ flowchart TD
 
     subgraph VE["LAYER 3 — Verdict engine (unit-tested code)"]
         direction LR
-        Drop["Drop findings:<br/>no evidence · low confidence · suppressed"] --> Rules["Apply rules 1-6<br/>in fixed order"]
+        Drop["Drop findings:<br/>no evidence · low confidence · suppressed"] --> Rules["Apply rules 1-4<br/>in fixed order"]
     end
 
-    VE --> Out["APPROVE · REQUEST_CHANGES · NEEDS_HUMAN<br/>+ risk grade + KW-REVIEW-* diagnostics"]
+    VE --> Out["APPROVE · REQUEST_CHANGES<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
-    Out -->|"NEEDS_HUMAN · supervised: stop"| Human["terminal human handoff"]
-    Out -->|"NEEDS_HUMAN · autonomous: report"| PendingReview["listed in draft PR as pending human review<br/>delivery continues"]
     Out -->|"APPROVE"| RunComplete["run complete"]
     Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
@@ -328,38 +326,31 @@ Step 3 spends one more `review-lens` invocation attempting to refute every survi
 
 ## How the verdict is computed
 
-`VerdictEngine.Evaluate` is a pure function of (scope, findings, gates, config, date). Same
+`VerdictEngine.Evaluate` is a pure function of (findings, gates, config, date, coverage). Same
 inputs, same verdict, every time. The order is the contract:
 
 ```mermaid
 flowchart TD
-    Start["Accepted findings + gate results"] --> R1{"1 · A changed path matches<br/>policy.always-human?"}
-    R1 -->|"yes"| NH["NEEDS_HUMAN · exit 2<br/>KW-REVIEW-008"]
-    R1 -->|"no"| R2{"2 · Diff exceeds<br/>max-reviewable-lines?"}
-    R2 -->|"yes"| NH2["NEEDS_HUMAN · exit 2<br/>KW-REVIEW-009"]
-    R2 -->|"no"| R3{"3 · A blocking gate failed?"}
-    R3 -->|"yes"| RC["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-005"]
-    R3 -->|"no"| R4{"4 · Any critical finding?"}
-    R4 -->|"yes"| RC2["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-006"]
-    R4 -->|"no"| R5{"5 · Majors ≥ major-count-blocks?"}
-    R5 -->|"yes"| RC3["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-007"]
-    R5 -->|"no"| AP["APPROVE · exit 0"]
+    Start["Accepted findings + gate results"] --> R1{"1 · A blocking gate failed?"}
+    R1 -->|"yes"| RC["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-005"]
+    R1 -->|"no"| R2{"2 · Any critical finding?"}
+    R2 -->|"yes"| RC2["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-006"]
+    R2 -->|"no"| R3{"3 · Majors ≥ major-count-blocks?"}
+    R3 -->|"yes"| RC3["REQUEST_CHANGES · exit 1<br/>KW-REVIEW-007"]
+    R3 -->|"no"| AP["APPROVE · exit 0"]
 ```
 
-Three properties of that order are load-bearing:
+The properties of that order are load-bearing:
 
-**The escalation rules run first.** A reserved path and an unreviewable diff both say the same
-thing — *this change is not the engine's to settle* — and that is true regardless of how clean
-or how filthy the council's report was. Neither can be overridden by the engine; the policy
-outranks it.
+**Gate failures outrank findings.** A failing blocking gate forces `REQUEST_CHANGES` immediately;
+clean code cannot pass with failed build, test, or analyzer evidence.
 
-**`NEEDS_HUMAN` does not share an exit code with `REQUEST_CHANGES`.** Collapsing them would
-make a change that merely touches a protected path indistinguishable, to any caller reading
-the exit code, from one the review actually rejected.
+**Exit codes are binary.** `0` for `APPROVE` and `1` for `REQUEST_CHANGES`. Former rules
+`KW-REVIEW-008`, `KW-REVIEW-009`, and `KW-REVIEW-011` are retired in place; review policy no longer
+escalates to a separate human verdict or exit code `2`.
 
 **Risk is graded from findings, never from diff size.** A twelve-line migration dropping a
-column outranks a three-thousand-line regeneration of a generated client. Size appears only as
-an attention ceiling, and a large clean diff stays `LOW`.
+column outranks a three-thousand-line regeneration of a generated client. A large clean diff stays `LOW`.
 
 Coverage is reported (`KW-REVIEW-010`) and **never decisive**. A verdict driven by a coverage
 number rewards padding that number — which is precisely the defect the `test-adequacy` lens
@@ -411,8 +402,6 @@ review:
     file-line-percent: 85
   policy:
     strictness: balanced   # lenient | balanced | strict
-    always-human: ["**/auth/**", "**/*secret*"]
-    max-reviewable-lines: 10000
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
@@ -433,18 +422,6 @@ autonomous-gate rule that only critical and major findings gate a change.
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
 can anything that later edits this file, nor any value arriving from a diff, a finding, or a
 lens prompt. That is the injection surface closed at the point the value is written.
-
-This repository reserves its own governance artifacts, which is the case worth copying:
-
-```yaml
-always-human:
-  - "products/kyber-squad/profiles/capabilities.yml"
-  - "products/kyber-squad/agents/**"
-  - ".kyber-weave/kyber-weave.yml"
-```
-
-The artifacts that decide what agents may do are not approvable by an agent, and a change to
-the review configuration escalates through the review configuration.
 
 ### Task gates
 

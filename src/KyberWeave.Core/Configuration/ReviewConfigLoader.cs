@@ -24,6 +24,10 @@ public static class ReviewConfigLoader
     private static readonly string[] TaskGateKeys =
         ["id", "include", "os", "run", "fix", "blocking", "timeout", "working-directory", "fail-on-output"];
 
+    /// <summary>Keys the typed reader maps on <c>review.policy</c>. Any other key is ignored and reported.</summary>
+    private static readonly string[] PolicyKeys =
+        ["major-count-blocks", "min-confidence", "strictness", "suppressions"];
+
     /// <summary>Merges the parsed <c>review:</c> section over the defaults.</summary>
     /// <param name="defaults">The configuration a host gets when a key is absent.</param>
     /// <param name="section">The parsed section, or null when the host declares none.</param>
@@ -380,6 +384,11 @@ public static class ReviewConfigLoader
             }
         }
 
+        if (ChildOf(review, "policy") is YamlMappingNode policy)
+        {
+            AddUnknownKeys(policy, PolicyKeys, "review.policy", warnings);
+        }
+
         if (ChildOf(review, "task-gates") is YamlMappingNode taskGates)
         {
             foreach (KeyValuePair<YamlNode, YamlNode> agentEntry in taskGates.Children)
@@ -608,10 +617,6 @@ public static class ReviewConfigLoader
             baseMinConfidence = preset.MinConfidence;
         }
 
-        int maxLines = policy.MaxReviewableLines ?? defaults.MaxReviewableLines;
-        if (maxLines <= 0)
-            throw new YamlException("review.policy.max-reviewable-lines must be greater than zero.");
-
         int majorBlocks = policy.MajorCountBlocks ?? baseMajorBlocks;
         if (majorBlocks <= 0)
             throw new YamlException("review.policy.major-count-blocks must be greater than zero.");
@@ -623,8 +628,6 @@ public static class ReviewConfigLoader
         return new ReviewPolicy
         {
             Strictness = strictness,
-            AlwaysHuman = policy.AlwaysHuman is null ? defaults.AlwaysHuman : [.. policy.AlwaysHuman],
-            MaxReviewableLines = maxLines,
             MajorCountBlocks = majorBlocks,
             MinConfidence = minConfidence,
             Suppressions = policy.Suppressions is null

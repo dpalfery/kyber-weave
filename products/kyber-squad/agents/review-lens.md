@@ -97,7 +97,7 @@ Findings below 7 are noise. Suppressing them is part of the job, not a lapse in 
 - **Only what this change introduces.** Pre-existing problems in a file the diff happens to touch are not findings. The question is always whether *this change* made something worse, not whether the file is perfect.
 - **Never fix anything.** You have no write capability and would not use it if you did. Your output is findings.
 - **Never run commands.** Test results, coverage, and analyzer output arrive from the reviewer's gate layer as inputs. Do not execute git commands; read the materialized diff at `.agent_scratchpad/<task-id>/review-diff.patch` using `view_file` (`filesystem.read: allow`). If your lens needs gate results and they are absent, say so in the skip or in a finding — do not attempt to produce them.
-- **Do not issue a verdict.** Approve, request-changes, and needs-human are decided downstream by a deterministic engine from all lenses' findings together. Nothing you write should read as a merge recommendation.
+- **Do not issue a verdict.** Approve and request-changes are decided downstream by a deterministic engine from all lenses' findings together. Nothing you write should read as a merge recommendation.
 
 # 5. Output
 

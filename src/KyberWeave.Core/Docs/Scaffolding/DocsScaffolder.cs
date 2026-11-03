@@ -396,9 +396,7 @@ public static class DocsScaffolder
     /// The <c>mcp:</c> declaration and the review gates are append-only: written when the file
     /// has none, never rewritten once the host has one. Both are host-owned from the moment
     /// they exist, so a re-run that regenerated either would replace the repository's own
-    /// claims with the tool's guess — and, since the host config is on this repository's
-    /// <c>review.policy.always-human</c> list, escalate a change nobody made for human review
-    /// by path alone.
+    /// claims with the tool's guess, showing up in review as changes nobody made.
     /// </para>
     /// </remarks>
     private static ScaffoldedFile WriteHostConfig(
@@ -436,8 +434,8 @@ public static class DocsScaffolder
         bool mergeChanged = !string.Equals(existing, updated, StringComparison.Ordinal);
 
         // A host-owned mcp declaration is never rewritten, with or without --force, for the
-        // same reason as the review block below and one more: the declaration is host-owned
-        // from the moment it exists, and this file escalates for human review by path alone.
+        // same reason as the review block below: the declaration is host-owned from the
+        // moment it exists and belongs entirely to the host repository.
         bool mcpAppended = false;
         if (!McpDeclarationBlockWriter.HasMcpSection(updated))
         {
