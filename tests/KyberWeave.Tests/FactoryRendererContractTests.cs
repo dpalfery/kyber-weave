@@ -173,7 +173,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -466,7 +466,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_WhitelistsDeclaredMcpServersForEntitledDroids()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declaredMcpServers);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -530,7 +530,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_RecordsMcpWithholdingOnlyWhenTheWhitelistIsEmpty()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
@@ -624,7 +624,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
@@ -671,7 +671,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("a, b");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a, b"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -714,7 +714,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers();
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        Assert.Empty(SquadMcpDeclaration.ServerNames(source));
+        Assert.Empty(DeclaredFactoryMcpServers(source));
         Assert.NotEmpty(source.Agents);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -806,7 +806,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("a,b", "bracket[server]", "plain");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -830,7 +830,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("zeta-reader", "alpha-reader");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["alpha-reader", "zeta-reader"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -878,7 +878,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declared);
 
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
@@ -1454,10 +1454,17 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>The <c>mcpServers</c> sequence a rendered droid's frontmatter carries.</summary>
-    private static IReadOnlyList<string> RenderedMcpServers(SquadRenderResult result, string agentName)
+    private static IReadOnlyList<string> DeclaredFactoryMcpServers(SquadSource source)
     {
-        return RequireSequence(RenderedAgentFrontmatter(result, agentName), "mcpServers", agentName);
+        return
+        [
+            .. SquadMcpDeclaration.ServerNames(source)
+                .Where(name => !string.Equals(name, "kyber-weave-arbiter", StringComparison.Ordinal))
+        ];
     }
+
+    private static IReadOnlyList<string> RenderedMcpServers(SquadRenderResult result, string agentName) =>
+        RequireSequence(RenderedAgentFrontmatter(result, agentName), "mcpServers", agentName);
 
     private static void AssertDoesNotClaimGuessedFactoryField(string details, string identity)
     {

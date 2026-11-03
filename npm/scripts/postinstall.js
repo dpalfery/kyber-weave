@@ -1,8 +1,8 @@
 "use strict";
 
 /**
- * Downloads self-contained CLI + MCP binaries for this platform from the
- * GitHub Release that matches package.json version (tag vX.Y.Z).
+ * Downloads self-contained CLI, MCP, and arbiter binaries for this platform from
+ * the GitHub Release that matches package.json version (tag vX.Y.Z).
  *
  * Skip with: KYBER_WEAVE_SKIP_DOWNLOAD=1
  * Or point at local binaries: KYBER_WEAVE_BINARY_DIR=/path/to/dir
@@ -28,7 +28,7 @@ async function main() {
     // CI that needs the binary should re-run: npm run install-binaries
     process.stderr.write(
       `kyber-weave: postinstall warning: ${err.message}\n` +
-        "kyber-weave: binaries will be fetched on first `kyber-weave` / `kyber-weave-mcp` invocation.\n"
+        "kyber-weave: binaries will be fetched on first `kyber-weave` / `kyber-weave-mcp` / `kyber-weave-arbiter` invocation.\n"
     );
   }
 }

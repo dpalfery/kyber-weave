@@ -39,9 +39,17 @@ internal sealed class ReviewGateYaml
 
     public int? TimeoutSeconds { get; init; }
 
+    public ReviewAppliesWhenYaml? AppliesWhen { get; init; }
+
     public string? WorkingDirectory { get; init; }
 
     public bool? FailOnOutput { get; init; }
+}
+
+/// <summary>One entry's <c>applies-when</c> mapping: the paths the gate applies to.</summary>
+internal sealed class ReviewAppliesWhenYaml
+{
+    public List<string>? Paths { get; init; }
 }
 
 /// <summary>One entry of <c>review.task-gates.&lt;agent&gt;</c>.</summary>

@@ -36,3 +36,7 @@ Where a target lowers this identity to a skill (Cursor, Pi, ZCode, Devin, Warp) 
 skill *is* the entry point and this wrapper is not deployed. Where a target keeps a native
 agent file (Claude, Factory, Copilot, Codex, OpenCode, Kilo, Antigravity) this wrapper is that
 file and the canonical skill sits beside it, so loading it always resolves.
+
+## Investigator dispatches
+
+Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook recognises it as a planner investigation. A blocked dispatch is reported in your own digest (`GAPS`) and never retried unchanged.

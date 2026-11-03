@@ -216,8 +216,11 @@ public static class VerdictEngine
         IReadOnlyList<GateResult> gates,
         List<Diagnostic> diagnostics)
     {
+        // A gate that did not apply is neither passed nor failed: it was never executed,
+        // so its result is no evidence either way and the verdict with it equals the
+        // verdict without it.
         bool failed = false;
-        foreach (GateResult gate in gates.Where(g => g is { Blocking: true, Passed: false }))
+        foreach (GateResult gate in gates.Where(g => g is { Blocking: true, Passed: false, NotApplicableReason: null }))
         {
             failed = true;
             diagnostics.Add(new Diagnostic(
@@ -314,7 +317,7 @@ public static class VerdictEngine
         IReadOnlyList<GateResult> gates)
     {
         if (accepted.Exists(f => f.Severity == ReviewSeverity.Critical) ||
-            gates.Any(g => g is { Blocking: true, Passed: false }))
+            gates.Any(g => g is { Blocking: true, Passed: false, NotApplicableReason: null }))
         {
             return RiskGrade.High;
         }

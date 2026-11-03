@@ -36,13 +36,35 @@ function isWindowsRid(rid) {
   return rid === "win-x64";
 }
 
+// Release asset base names per tool. "cli" keeps its historical name for the
+// CLI archive (kyber-weave-<rid>); each additional tool maps to its own binary.
+const TOOL_BASE_NAMES = {
+  cli: "kyber-weave",
+  mcp: "kyber-weave-mcp",
+  arbiter: "kyber-weave-arbiter",
+};
+
+function toolBaseName(tool) {
+  const base = Object.prototype.hasOwnProperty.call(TOOL_BASE_NAMES, tool)
+    ? TOOL_BASE_NAMES[tool]
+    : undefined;
+  if (base === undefined) {
+    // No fallback to the CLI binary: a typo or an unknown tool would otherwise resolve
+    // to kyber-weave, and the caller would download and launch the wrong program.
+    throw new Error(
+      `Unknown tool '${tool}'. Expected one of: ${Object.keys(TOOL_BASE_NAMES).join(", ")}.`,
+    );
+  }
+  return base;
+}
+
 function binaryFileName(tool, rid) {
-  const base = tool === "mcp" ? "kyber-weave-mcp" : "kyber-weave";
+  const base = toolBaseName(tool);
   return isWindowsRid(rid) ? `${base}.exe` : base;
 }
 
 function assetArchiveName(tool, rid) {
-  const base = tool === "mcp" ? "kyber-weave-mcp" : "kyber-weave";
+  const base = toolBaseName(tool);
   const ext = isWindowsRid(rid) ? "zip" : "tar.gz";
   return `${base}-${rid}.${ext}`;
 }

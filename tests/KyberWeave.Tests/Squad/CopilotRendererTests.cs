@@ -908,7 +908,7 @@ public sealed class CopilotRendererTests
             .Select(segment => segment[..segment.IndexOf(')', StringComparison.Ordinal)])
             .Where(target => target.Contains("/agents/conductor/references/", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(5, targets.Length);
+        Assert.Equal(9, targets.Length);
         Assert.All(targets, target => Assert.DoesNotContain("\\", target, StringComparison.Ordinal));
     }
 

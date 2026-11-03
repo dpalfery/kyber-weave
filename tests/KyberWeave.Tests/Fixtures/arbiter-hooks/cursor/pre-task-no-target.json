@@ -1,0 +1,11 @@
+{
+  "conversation_id": "conv-cursor-2",
+  "cwd": "/repo",
+  "hook_event_name": "preToolUse",
+  "tool_name": "Task",
+  "tool_use_id": "toolu-cursor-no-target-1",
+  "tool_input": {
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 12.5\n\nImplement the adapter.",
+    "description": "No target"
+  }
+}

@@ -236,6 +236,30 @@ internal static class SquadCommandComposition
         return ResolveProbe(null);
     }
 
+    /// <summary>Resolves the Kyber-Weave Arbiter process probe using the specified process executor.</summary>
+    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor) =>
+        new(executor ?? ProcessExecutor.Instance);
+
+    /// <summary>Resolves the Kyber-Weave Arbiter process probe using the default process executor.</summary>
+    public static ArbiterProcessProbe ResolveArbiterProbe() => ResolveArbiterProbe(null);
+
+    /// <summary>
+    /// Carries the host's Arbiter settings into a render: the enabled flag verbatim and the
+    /// provider timeout converted from milliseconds to whole hook seconds with headroom.
+    /// </summary>
+    /// <remarks>
+    /// The hook timeout is ceil(timeout-ms / 1000) + 2 (Req 22.2, 5.3): whole seconds for
+    /// the harness hook contract plus two seconds of dispatch headroom beyond the provider
+    /// budget.
+    /// </remarks>
+    public static SquadArbiterWiring ResolveArbiterWiring(Core.Arbiter.ArbiterConfig arbiter)
+    {
+        ArgumentNullException.ThrowIfNull(arbiter);
+        long timeoutMs = Math.Max(1, arbiter.Provider.TimeoutMs);
+        int hookTimeoutSeconds = (int)Math.Min(int.MaxValue, (timeoutMs + 999) / 1000 + 2);
+        return new SquadArbiterWiring(arbiter.Enabled, hookTimeoutSeconds);
+    }
+
     /// <summary>
     ///     Resolves the renderer used to lower canonical Squad source into harness-native
     ///     files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, Command Code, and Antigravity are native;

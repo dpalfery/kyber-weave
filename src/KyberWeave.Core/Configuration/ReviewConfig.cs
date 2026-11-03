@@ -2,6 +2,15 @@ using System.Collections.ObjectModel;
 
 namespace KyberWeave.Core.Configuration;
 
+/// <summary>The paths a gate applies to, when it declares any.</summary>
+/// <param name="Paths">PathGlob patterns; the gate applies when a changed path matches one.</param>
+/// <remarks>
+/// A gate without this runs unconditionally. The patterns are evaluated through
+/// <c>KW-ARB-GATE-001</c>, so the runner and the Arbiter answer "does this gate apply"
+/// from the same rule rather than from two implementations that can drift apart.
+/// </remarks>
+public sealed record ReviewGateAppliesWhen(IReadOnlyList<string> Paths);
+
 /// <summary>One deterministic gate the host declares.</summary>
 /// <param name="Id">Slug identifying the gate in findings and reports.</param>
 /// <param name="Run">The command and its arguments, already split into argv.</param>
@@ -11,6 +20,7 @@ namespace KyberWeave.Core.Configuration;
 /// <param name="WorkingDirectory">
 /// Repository-relative directory the gate runs in; null means the repository root.
 /// </param>
+/// <param name="AppliesWhen">The paths the gate applies to, or null when it always runs.</param>
 /// <remarks>
 /// <see cref="Run"/> is a list, never a command line, because
 /// <see cref="Processes.ProcessRunner"/> refuses a concatenated argument string and refuses
@@ -25,7 +35,8 @@ public sealed record ReviewGate(
     bool Blocking = true,
     int TimeoutSeconds = 900,
     string? Os = null,
-    string? WorkingDirectory = null)
+    string? WorkingDirectory = null,
+    ReviewGateAppliesWhen? AppliesWhen = null)
 {
     /// <summary>Glob patterns selecting the changed files the gate applies to; empty for every change.</summary>
     public IReadOnlyList<string> Include { get; init; } = [];

@@ -122,3 +122,21 @@ Before closeout completes, run the documentation-impact review step:
 ### Closeout completion
 
 Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE in the execution artifact and carry the outcome in the PR description.
+
+Only a successful closeout completes the objective.
+
+## Arbiter routing headers
+
+Unless you hold `arbiter_evaluate` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
+
+## Worker packets
+
+A packet to an implementation specialist is its whole context. State in the packet that the worker does not open plan, spec, or todo files and performs only the work the packet describes.
+
+## Escalations
+
+On `STATUS: ARBITER_ESCALATION`, follow `NEXT` and do not retry the blocked dispatch unchanged:
+
+- `REPEAT: 1`: dispatch architect with the envelope as a planner dispatch whose marker is the envelope.
+- `REPEAT` 2 or greater: record a run finding and stop that task; do not dispatch architect again for it. The findings drain takes the finding.
+- A `malformed` planner answer: re-issue the planner dispatch with a recognised marker; do not send the envelope onward. A repeat stops as above.

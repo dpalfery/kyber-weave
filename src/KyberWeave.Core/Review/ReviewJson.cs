@@ -12,11 +12,16 @@ namespace KyberWeave.Core.Review;
 /// tests more than one language writes one report each, and only one of them can be the
 /// figure a coverage floor is checked against; the rest are evidence a reviewer reads here.
 /// </param>
+/// <param name="Base">
+/// The commit the change was measured against. Absent in reports written before the
+/// Arbiter started recording it; readers treat a missing base as an absent fact.
+/// </param>
 public sealed record GateReport(
     string Schema,
     IReadOnlyList<GateResult> Gates,
     CoverageResult? Coverage = null,
-    IReadOnlyList<CoverageReport>? CoverageReports = null)
+    IReadOnlyList<CoverageReport>? CoverageReports = null,
+    string? Base = null)
 {
     /// <summary>The current gate report format.</summary>
     public const string CurrentSchema = "kyber-weave.review-gates/v1";

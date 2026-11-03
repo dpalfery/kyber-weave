@@ -1577,6 +1577,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
                   network.read: deny
                   network.publish: deny
                   delegate: deny
+                  decision.query: deny
             """,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -1646,6 +1647,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
                   network.read: deny
                   network.publish: deny
                   delegate: deny
+                  decision.query: deny
             """,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
