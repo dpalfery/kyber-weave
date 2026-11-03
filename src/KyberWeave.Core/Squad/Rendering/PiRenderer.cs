@@ -539,7 +539,7 @@ public sealed class PiRenderer : ISquadRenderer
     /// </remarks>
     private static string RenderArbiterExtension(int timeoutSeconds)
     {
-        int timeoutMs = timeoutSeconds * 1000;
+        long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
 
         return $$"""
             import { spawnSync } from "node:child_process";

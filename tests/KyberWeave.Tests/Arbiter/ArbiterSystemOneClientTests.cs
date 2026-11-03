@@ -176,6 +176,38 @@ public sealed class ArbiterSystemOneClientTests
     }
 
     [Fact]
+    public async Task Score_OutOfRangeValue_ClampsToTheLastLevelInsteadOfOverflowing()
+    {
+        const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + ScoreRuleId + "\":" +
+            "{\"type\":\"score\",\"score\":1e300,\"legend\":{\"0\":\"low\",\"1\":\"high\"}," +
+            "\"probabilities\":{\"1\":0.9},\"confidence\":0.92}}}";
+        using StubHandler handler = new(JsonResponse(json));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ScoreRule()], Facts());
+
+        Assert.Equal("high", result.AnswersByRule[ScoreRuleId]);
+    }
+
+    [Fact]
+    public async Task Response_LargerThanTheCap_IsUndecidableWithoutMaterializingIt()
+    {
+        string huge = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + ChoiceRuleId + "\":\"" +
+            new string('x', 2 * 1024 * 1024) + "\"}}";
+        using StubHandler handler = new(
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(huge, Encoding.UTF8, "application/json"),
+            });
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        Assert.True(result.RequestSent);
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
+    }
+
+    [Fact]
     public async Task Request_NoulQuestion_SendsTypeAndInstructions()
     {
         const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + NoulRuleId + "\":" +

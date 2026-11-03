@@ -682,6 +682,8 @@ public static class ArbiterConfigLoader
         int timeoutMs = section.TimeoutMs ?? defaults.TimeoutMs;
         if (timeoutMs <= 0)
             throw new YamlException("arbiter.provider.timeout-ms must be greater than zero.");
+        if (timeoutMs > 600_000)
+            throw new YamlException("arbiter.provider.timeout-ms must be at most 600000 ms (ten minutes).");
 
         return new ArbiterProviderConfig(
             kind,

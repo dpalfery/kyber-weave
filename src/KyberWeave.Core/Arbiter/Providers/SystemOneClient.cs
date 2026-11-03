@@ -23,6 +23,9 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 {
     private const int MaxAttempts = 5;
 
+    /// <summary>The largest provider response the hook will materialize, in bytes.</summary>
+    private const int MaxResponseBytes = 1 << 20;
+
     private readonly HttpClient _client;
     private readonly Uri _endpoint;
     private readonly string _model;
@@ -157,10 +160,30 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
                     return UndecidableAll(askRules, null, null, true);
                 }
 
+                if (response.Content.Headers.ContentLength is long declaredLength
+                    && declaredLength > MaxResponseBytes)
+                {
+                    return UndecidableAll(askRules, null, null, true);
+                }
+
                 string body;
                 try
                 {
-                    body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                    using Stream stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+                    using MemoryStream buffer = new();
+                    byte[] chunk = new byte[8192];
+                    int read;
+                    while ((read = await stream.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0)
+                    {
+                        if (buffer.Length + read > MaxResponseBytes)
+                        {
+                            return UndecidableAll(askRules, null, null, true);
+                        }
+
+                        await buffer.WriteAsync(chunk.AsMemory(0, read), timeout.Token).ConfigureAwait(false);
+                    }
+
+                    body = Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
                 }
                 catch (OperationCanceledException)
                 {
@@ -252,8 +275,8 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
             }
 
             string mapped = rule.Ask.Levels is { Count: > 0 } levels
-                ? levels[Math.Clamp(
-                    (int)Math.Round(score, MidpointRounding.AwayFromZero), 0, levels.Count - 1)]
+                ? levels[(int)Math.Clamp(
+                    Math.Round(score, MidpointRounding.AwayFromZero), 0d, levels.Count - 1d)]
                 : score.ToString(CultureInfo.InvariantCulture);
             return rule.Answers.Contains(mapped, StringComparer.Ordinal)
                 ? mapped

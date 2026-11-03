@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -80,6 +81,18 @@ public sealed class ArbiterConfigTests
         Assert.Equal("nimble", config.Arbiter.Provider.Model);
         Assert.Equal(1500, config.Arbiter.Provider.TimeoutMs);
         Assert.Equal(ExpectedRuleIds, config.Arbiter.Rules.Select(rule => rule.Id).Distinct());
+    }
+
+    [Fact]
+    public void ProviderTimeout_AboveTheCap_IsRejected()
+    {
+        YamlException ex = Assert.Throws<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml("""
+            arbiter:
+              provider:
+                timeout-ms: 600001
+            """));
+
+        Assert.Contains("600000", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
