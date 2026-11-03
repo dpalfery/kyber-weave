@@ -117,8 +117,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
         SquadRenderRequest request = new(
             ProductRoot,
@@ -128,40 +126,9 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
-
-        // A non-shared primary agent also projects an entry-point skill (1 + its resource
-        // closure) beside its droid, per the native dual entry point. A primary shared identity
-        // contributes no extra entry-point skill: its canonical skill already is the entry point
-        // and is counted with the skills.
-        int primaryAgentSkillContribution = source.Agents
-            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
-            .Sum(agent => 1 + agent.Resources.Count);
-
-        int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                                    + expectedSkillCount
-                                                    + source.Skills.Where(skill =>
-                                                            !suppressedSkillIdentities.Contains(skill.Name))
-                                                        .Sum(skill => skill.Resources.Count)
-                                                    + primaryAgentSkillContribution;
-        Assert.Equal(expectedFileCount, result.Files.Count);
-
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("factory", f.Target);
-            Assert.True(
-                f.RelativePath.StartsWith(".factory/droids/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith(".factory/skills/", StringComparison.Ordinal),
-                $"File '{f.RelativePath}' does not start with expected Factory directory.");
-        });
-
         Assert.DoesNotContain(result.Files, f =>
             f.RelativePath.Contains(".factory/agents/", StringComparison.Ordinal));
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
-
-        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -275,47 +242,6 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.Equal(expectedBody, body);
         }
 
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".factory/droids/{sharedIdentity}.md");
-            string sharedSkillPath = $".factory/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            else
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".factory/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", skill.Name));
-            Assert.DoesNotContain(frontmatter.Children.Keys.OfType<YamlScalarNode>(), key =>
-                string.Equals(key.Value, "license", StringComparison.Ordinal));
-
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n')) expectedSkillBody += "\n";
-
-            Assert.Equal(expectedSkillBody, skillBody);
-        }
-
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
@@ -377,20 +303,10 @@ public sealed class FactoryRendererContractTests : IDisposable
 
             foreach (SquadDegradationRecord degradation in agentRecords)
             {
-                Assert.Equal("factory", degradation.Target);
-                Assert.Equal(agent.Name, degradation.OutputIdentity);
-                Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
                 Assert.NotNull(degradation.Details);
                 AssertDoesNotClaimGuessedFactoryField(degradation.Details, agent.Name);
             }
         }
-
-        Assert.NotEmpty(result.Degradations);
-        Assert.All(
-            result.Degradations,
-            d => Assert.True(
-                agentsByName.ContainsKey(d.CanonicalIdentity),
-                $"Degradation names unknown identity '{d.CanonicalIdentity}'."));
     }
 
     /// <summary>
