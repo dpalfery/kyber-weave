@@ -54,7 +54,12 @@ harness meant a registry edit.
 5. **Moving a renderer onto the pipeline must not change a byte.** Where two renderers disagreed
    only by accident, the spec keeps both forms (for example, `SquadLineBreaks.LineFeedOnly`), so
    unifying them is a separate, deliberate output change.
-6. **Shared behaviour is tested once.** `SquadRendererSharedContractTests` holds every renderer to
+6. **The pipeline fails closed on unsafe or unresolvable source before any harness renders.**
+   Every agent's model, capability and fallback profile must resolve, and every canonical name and
+   resource path must pass the registry's `SquadPathPolicy`. A miss refuses the render on every
+   harness alike, rather than each harness guessing at a grant or a model. The loader already
+   enforces the profile rule for source read from disk; a preloaded source is held to it here.
+7. **Shared behaviour is tested once.** `SquadRendererSharedContractTests` holds every renderer to
    its own spec for the skill document, file roots, global-scope layout, and record identity. A
    harness suite keeps only what that harness decides.
 

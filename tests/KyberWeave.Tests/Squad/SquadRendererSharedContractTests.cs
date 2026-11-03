@@ -337,6 +337,49 @@ public sealed class SquadRendererSharedContractTests
         });
     }
 
+    public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnresolvableProfile()
+    {
+        TheoryData<SquadTarget, string> rows = [];
+        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        {
+            rows.Add(target, "model-profile");
+            rows.Add(target, "capability-profile");
+            rows.Add(target, "fallback");
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// An agent naming a profile its source does not declare fails the render on every harness,
+    /// whether or not that harness reads the profile, so no harness guesses at a grant or a model.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargetsWithEachUnresolvableProfile))]
+    public async Task EachRendererRefusesAnAgentWhoseProfileDoesNotResolve(SquadTarget target, string key)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource tampered = source with
+        {
+            Agents =
+            [
+                .. source.Agents.Select((agent, index) => index != 0
+                    ? agent
+                    : key switch
+                    {
+                        "model-profile" => agent with { ModelProfile = "undeclared" },
+                        "capability-profile" => agent with { CapabilityProfile = "undeclared" },
+                        _ => agent with { Fallback = "undeclared" }
+                    })
+            ]
+        };
+
+        SquadRenderValidationException refused = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            RendererFor(target).RenderAsync(
+                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
+        Assert.Contains(key, refused.Message, StringComparison.Ordinal);
+    }
+
     public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnsafeOutputName()
     {
         TheoryData<SquadTarget, string> rows = [];

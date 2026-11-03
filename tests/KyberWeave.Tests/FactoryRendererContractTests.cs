@@ -607,17 +607,12 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     An agent whose capability profile cannot be resolved still carries the MCP withholding
-    ///     receipt for its empty whitelist, so the fail-closed exclusion is visible rather than
-    ///     silent.
+    ///     An agent whose capability profile cannot be resolved is refused before anything renders:
+    ///     the pipeline fails closed on an unresolvable profile for every harness (ADR 0056), rather
+    ///     than rendering an agent whose grants it cannot derive.
     /// </summary>
-    /// <remarks>
-    ///     The renderer defends against an unresolvable profile even though the source loader
-    ///     normally rejects one: a preloaded source can reach it. Withholding the whitelist without
-    ///     the receipt would make the exclusion invisible in the only stream a doctor run inspects.
-    /// </remarks>
     [Fact]
-    public async Task RenderAsync_Factory_RecordsMcpWithholdingWhenTheCapabilityProfileIsUnresolved()
+    public async Task RenderAsync_Factory_RefusesAnAgentWhoseCapabilityProfileIsUnresolved()
     {
         string agentName = "review-lens";
         SquadSource canonical = TestSquadCorpus.CanonicalSource;
@@ -633,20 +628,14 @@ public sealed class FactoryRendererContractTests : IDisposable
             ]
         };
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project,
-            PreloadedSource: source));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        Assert.Empty(RenderedMcpServers(result, agentName));
-        SquadDegradationRecord withheld = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, agentName, StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(withheld.Details);
-        Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+        SquadRenderValidationException refused = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project,
+                PreloadedSource: source)));
+        Assert.Contains(agentName, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("unresolved-profile", refused.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

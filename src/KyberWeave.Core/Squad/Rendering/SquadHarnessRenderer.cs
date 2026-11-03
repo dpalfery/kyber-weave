@@ -65,6 +65,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         try
         {
             SquadSource source = SquadRenderSource.Load(request, Spec.Target);
+            ValidateProfileReferences(source);
             ValidateOutputNames(source);
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
         }
@@ -77,6 +78,47 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         catch (Exception exception)
         {
             return Task.FromException<SquadRenderResult>(exception);
+        }
+    }
+
+    /// <summary>
+    /// Every profile an agent names must resolve before any harness renders it. An unresolvable
+    /// reference is a source error, not an absence of constraints or of a model, so the render
+    /// fails closed on every harness alike rather than each one guessing (ADR 0056). The loader
+    /// already enforces this for source read from disk; a preloaded source is held to it here.
+    /// </summary>
+    private static void ValidateProfileReferences(SquadSource source)
+    {
+        foreach (SquadAgent agent in source.Agents)
+        {
+            RequireProfile(agent, "model-profile", agent.ModelProfile, source.ModelProfiles.Profiles.Keys, "profiles/models.yml");
+            RequireProfile(agent, "capability-profile", agent.CapabilityProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
+            RequireProfile(agent, "fallback", agent.Fallback, source.FallbackProfiles.Profiles.Keys, "profiles/fallbacks.yml");
+            if (agent.CopilotCapabilityProfile is { } copilotProfile)
+            {
+                RequireProfile(agent, "copilot-capability-profile", copilotProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
+            }
+
+            if (agent.DevinCapabilityProfile is { } devinProfile)
+            {
+                RequireProfile(agent, "devin-capability-profile", devinProfile, source.CapabilityProfiles.Profiles.Keys, "profiles/capabilities.yml");
+            }
+        }
+    }
+
+    private static void RequireProfile(
+        SquadAgent agent,
+        string key,
+        string profile,
+        IEnumerable<string> declared,
+        string declaringFile)
+    {
+        string[] names = [.. declared.Order(StringComparer.Ordinal)];
+        if (!names.Contains(profile, StringComparer.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' {key} '{profile}' is not declared in {declaringFile}. " +
+                $"Declared: {string.Join(", ", names)}.");
         }
     }
 
