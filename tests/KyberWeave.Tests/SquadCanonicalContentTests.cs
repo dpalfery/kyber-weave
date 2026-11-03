@@ -940,7 +940,7 @@ public sealed class SquadCanonicalContentTests
             string fileText = File.ReadAllText(surface);
             foreach (string phrase in forbiddenPhrases)
             {
-                Assert.DoesNotContain(phrase, fileText, StringComparison.Ordinal);
+                Assert.DoesNotContain(phrase, fileText, StringComparison.OrdinalIgnoreCase);
             }
         }
 
