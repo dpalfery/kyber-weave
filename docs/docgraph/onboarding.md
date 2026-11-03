@@ -128,13 +128,11 @@ writes, and the output ends with the manual repair command.** `docs init` has no
 flag; a script that wants the repair runs
 [`docs mcp-wire`](mcp-runbook.md#docs-mcp-wire), whose invocation is the consent.
 
-**Editing the declaration escalates for human review in this repository, and in any host
-that copies the policy.** `.kyber-weave/kyber-weave.yml` is on this repository's
-`review.policy.always-human` list, so **any** change to it — the MCP declaration included —
-escalates by path alone, before any finding is weighed. That is deliberate rather than
+**Editing the declaration modifies repository configuration.** `.kyber-weave/kyber-weave.yml`
+configures repository-level tools and servers, so any change to it — the MCP declaration
+included — is reviewed alongside the code changes it accompanies. That is deliberate rather than
 incidental: the declaration decides which servers your instructions depend on, and the
-scaffolded default is part of what a reviewer sees and approves. Adopting repositories that
-carry the same policy inherit the same consequence.
+scaffolded default is part of what a reviewer sees and approves.
 
 The per-harness recipes, the two repair verbs, their flags and exit codes, and the harnesses
 the repair will not write are in the [MCP runbook](mcp-runbook.md#checking-and-wiring). The

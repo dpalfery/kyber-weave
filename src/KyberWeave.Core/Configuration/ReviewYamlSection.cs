@@ -85,10 +85,6 @@ internal sealed class ReviewCoverageYaml
 /// <summary>The <c>review.policy</c> mapping.</summary>
 internal sealed class ReviewPolicyYaml
 {
-    public List<string>? AlwaysHuman { get; init; }
-
-    public int? MaxReviewableLines { get; init; }
-
     public int? MajorCountBlocks { get; init; }
 
     public int? MinConfidence { get; init; }

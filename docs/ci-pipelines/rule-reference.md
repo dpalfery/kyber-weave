@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-02
 ---
 
 # Rule reference
@@ -176,16 +176,17 @@ decision names the id that made it.
 | `KW-REVIEW-005` | Error | A blocking gate failed |
 | `KW-REVIEW-006` | Error | A surviving critical finding |
 | `KW-REVIEW-007` | Error | Surviving major findings reached the blocking threshold |
-| `KW-REVIEW-008` | Error | A changed path is reserved for human review by policy |
-| `KW-REVIEW-009` | Error | The diff exceeds the reviewable size ceiling |
+| `KW-REVIEW-008` | Retired | Formerly: A changed path is reserved for human review by policy. Retired 2026-11-02. |
+| `KW-REVIEW-009` | Retired | Formerly: The diff exceeds the reviewable size ceiling. Retired 2026-11-02. |
 | `KW-REVIEW-010` | Warning | Measured coverage is below the declared floor |
-| `KW-REVIEW-011` | Info | No reserved paths are declared, so nothing can escalate on path alone |
+| `KW-REVIEW-011` | Retired | Formerly: No reserved paths are declared, so nothing can escalate on path alone. Retired 2026-11-02. |
 | `KW-REVIEW-012` | Warning | A coverage floor is declared but no coverage report was produced |
 
-`-008` and `-009` are evaluated before any finding is weighed, and neither can be overridden
-by the engine: both say the change is not the engine's to settle, not that it is faulty.
-`-010` and `-012` never block — a verdict driven by a coverage number rewards padding that
-number, and a missing report is the same class of signal rather than a failed gate.
+The Review Council verdict is strictly binary: `0` (`APPROVE`) or `1` (`REQUEST_CHANGES`).
+Former rules `-008`, `-009`, and `-011` are retired in place and no longer escalate to a
+human review verdict. `-010` and `-012` never block — a verdict driven by a coverage number
+rewards padding that number, and a missing report is the same class of signal rather than a
+failed gate.
 
 ### Gates — `review gates`
 

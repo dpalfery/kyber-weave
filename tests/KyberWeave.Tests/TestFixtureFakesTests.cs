@@ -12,6 +12,21 @@ namespace KyberWeave.Tests;
 public sealed class TestFixtureFakesTests
 {
     /// <summary>
+    /// Only transient git lock files may be skipped when their source disappears during a copy;
+    /// a missing content file or a missing non-lock git file is real corruption.
+    /// </summary>
+    [Theory]
+    [InlineData("/tmp/repo/.git/objects/maintenance.lock", true)]
+    [InlineData("/tmp/repo/.git/index.lock", true)]
+    [InlineData("/tmp/repo/src/Cargo.lock", false)]
+    [InlineData("/tmp/repo/.git/config", false)]
+    [InlineData("/tmp/repo/.git/objects/pack/pack-1.pack", false)]
+    public void TransientGitLockDetectionIsLimitedToGitLockFiles(string path, bool expected)
+    {
+        Assert.Equal(expected, TestGitRepositoryTemplate.IsTransientGitLock(path));
+    }
+
+    /// <summary>
     /// Keys whose sanitized representations would collide must still map to isolated template directories.
     /// </summary>
     [Fact]

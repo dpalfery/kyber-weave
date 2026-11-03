@@ -25,10 +25,7 @@ public enum ReviewVerdict
     Approve,
 
     /// <summary>Something must change before this can proceed.</summary>
-    RequestChanges,
-
-    /// <summary>Outside what an automated review is permitted to settle.</summary>
-    NeedsHuman
+    RequestChanges
 }
 
 /// <summary>How risky the change is, derived from what the review found.</summary>
@@ -39,13 +36,13 @@ public enum ReviewVerdict
 /// </remarks>
 public enum RiskGrade
 {
-    /// <summary>Nothing of consequence found, no reserved path touched.</summary>
+    /// <summary>Nothing of consequence found.</summary>
     Low,
 
     /// <summary>Real findings, or a change reaching beyond its own module.</summary>
     Medium,
 
-    /// <summary>Critical findings, a failed blocking gate, or a reserved path.</summary>
+    /// <summary>Critical findings or a failed blocking gate.</summary>
     High
 }
 
@@ -143,19 +140,23 @@ public sealed record DroppedFinding(ReviewFinding Finding, string Code, string R
 /// <param name="ChangedPaths">Repository-relative paths the diff touches.</param>
 /// <param name="ChangedLines">Total added and removed lines.</param>
 /// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
+/// <remarks>
+/// Scope is reporting metadata for reviewers. It is not an input to
+/// <see cref="VerdictEngine.Evaluate" />; the verdict is computed from findings, gates, config,
+/// the evaluation date, and the optional coverage result only.
+/// </remarks>
 public sealed record ReviewScope(
     IReadOnlyList<string> ChangedPaths,
     int ChangedLines,
     IReadOnlyDictionary<string, int>? PathLineCounts = null)
 {
-    /// <summary>Lines that count toward the reviewable ceiling after generated churn is ignored.</summary>
+    /// <summary>Lines that count toward review scope line-count metadata after generated churn is ignored.</summary>
     /// <remarks>
-    /// Lockfiles and scratch output are machine-generated churn, not human review load, so
-    /// they are excluded from the <c>KW-REVIEW-009</c> numerator while staying listed in
-    /// <see cref="ChangedPaths"/> for reviewers to see. When per-path counts are present
-    /// the numerator is their scoped sum; without them the even-split fallback divides with
-    /// a ceiling so it overestimates toward escalation rather than letting a change slip
-    /// under the ceiling.
+    /// Lockfiles and scratch output are machine-generated churn, so they are excluded from
+    /// the effective changed lines numerator while staying listed in <see cref="ChangedPaths"/>
+    /// for reviewers to see. When per-path counts are present the numerator is their scoped sum;
+    /// without them the even-split fallback divides with a ceiling to provide scope line-count
+    /// metadata.
     /// </remarks>
     public int EffectiveChangedLines => ComputeEffectiveChangedLines();
 
@@ -246,9 +247,8 @@ public sealed record ReviewScope(
                 return scoped;
             }
 
-            // Incomplete per-path counts fall through to the even-split heuristic below,
-            // which divides with a ceiling: overestimating errs toward escalation, never
-            // toward slipping under the ceiling.
+            // Incomplete per-path counts fall through to the even-split heuristic below
+            // using ceiling division so effective changed lines are not underestimated.
         }
 
         if (ChangedPaths.Count == 0)

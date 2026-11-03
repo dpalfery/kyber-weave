@@ -17,10 +17,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// The section is written once and afterwards belongs to the host. <c>docs init</c> appends it
 /// only when the file has none and never rewrites one that exists, <c>--force</c> included:
 /// regenerating it would replace the servers a repository actually depends on with the tool's
-/// own guess. The rule has a second edge here that the review block does not carry on its own —
-/// the host configuration is on this repository's <c>review.policy.always-human</c> list, so a
-/// change to it escalates for human review by path alone, before any finding is weighed. A
-/// rewrite on every run would raise that escalation against a change nobody asked for.
+/// own guess. A rewrite on every run would churn operator configuration nobody asked to change.
 /// </para>
 /// <para>
 /// Nothing here reads a configuration. The declaration is independent of Squad's
@@ -32,8 +29,7 @@ public static partial class McpDeclarationBlockWriter
 {
     /// <summary>
     /// The declaration as the design renders it: <c>kyber-weave</c> declared first-party and
-    /// required, the third-party example commented out, and the always-human consequence stated
-    /// in the header comment.
+    /// required, and the third-party example commented out.
     /// </summary>
     /// <remarks>
     /// One constant is the single source of the block's text. The scaffolder's fresh-file
@@ -44,8 +40,7 @@ public static partial class McpDeclarationBlockWriter
         mcp:
           # The MCP servers this repository's agent instructions rely on. `docs init` wires these
           # into the harnesses it detects; the declaration is host-owned from the moment it exists
-          # and docs init never edits it again. This file is on the review.policy.always-human
-          # list in this repository, so every change here escalates for human review by path alone.
+          # and docs init never edits it again.
           required-servers:
             kyber-weave:
               command: [kyber-weave-mcp, --repo-root, .]

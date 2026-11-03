@@ -1228,6 +1228,19 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
 Standardizing this schema eliminates rejection rework caused by formatting variations.
 
+### Worktree MCP setup and canonical binding
+
+When conductor executes concurrent tasks in isolated git worktrees, MCP configuration binds to the canonical repository root rather than ephemeral worktree paths:
+
+1. **Argument splicing**: Worktree MCP setup splices `--repo-root` and `--path` arguments to absolute canonical paths so tools inspect canonical governance and symbols.
+2. **Symlink guard (fail closed)**: Worktrees must never create symbolic links or reparse points to `.codegraph/` (background watchers would mutate the canonical database from worktree state). Worktree setup fails closed if a `.codegraph` symlink is detected.
+3. **Canonical doctor check**: Worktree initialization executes:
+   ```bash
+   kyber-weave doctor --check <canonical-root>
+   ```
+   This verifies canonical index presence and MCP server responsiveness before dispatching worker tasks, avoiding false-positive index failures against empty worktrees.
+4. **Conditional worktree indexing**: Ephemeral worktrees share the canonical index by default. A local `codegraph init .` is run in the worktree only when a task's acceptance criteria explicitly require indexing newly added branch symbols.
+
 ---
 
 ## User-home response guidance

@@ -116,9 +116,10 @@ public sealed class SquadAutonomyRemediationTests
         string execution = ExecutionAndReview();
 
         AssertAll(execution,
-            "KW-REVIEW-008",
             "blocking-gate",
             "bypass");
+        Assert.DoesNotContain("KW-REVIEW-008", execution, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-REVIEW-009", execution, StringComparison.Ordinal);
     }
 
     /// <summary>

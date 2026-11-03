@@ -4,7 +4,7 @@ title: Autonomous gates inventory
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-02
 ---
 
 # Autonomous gates inventory
@@ -28,7 +28,7 @@ Baseline: `main` at `2089297`. Sources read on that baseline:
 `products/kyber-squad/skills/code-review/SKILL.md`,
 `review:` in `.kyber-weave/kyber-weave.yml`, and
 `src/KyberWeave.Core/Review/VerdictEngine.cs` with `review verdict`
-rules 1–6. See [review council architecture](../code-review/architecture.md),
+rules 1–4. See [review council architecture](../code-review/architecture.md),
 [Kyber-Squad architecture](../kyber-squad/architecture.md), and the
 [rule reference](../ci-pipelines/rule-reference.md).
 
@@ -69,7 +69,7 @@ flowchart LR
     Draft --> Council["whole-change council"]
     Council --> PrePush["pre-push self-review (name only; runs after the draft push)"]
     PrePush --> Val["docs validate / docs drift"]
-    Val --> Verdict["verdict rules 1-6"]
+    Val --> Verdict["verdict rules 1-4"]
     Verdict --> Delivery["verdict in PR description<br/>ready once required CI passes"]
 ```
 
@@ -108,13 +108,13 @@ flowchart LR
 |---|---|---|---|---|
 | Developer `task-gate` — `TASK_GATE: PASS \| FAIL \| NONE_DECLARED \| NONE_APPLICABLE \| UNAVAILABLE` per `review.task-gates` | Owning developer (`csharp-dev`, `test-dev`, `react-dev`, `tauri-dev`, `github-devops`, and others) | `auto-approve with provenance` on `PASS` / `NONE_DECLARED` / `NONE_APPLICABLE`; rework on `FAIL` or missing line, to the same worker session (circuit-breaker after 2 reworks per key) | keep | **Irreversible-action justification:** the deterministic exit gate is the only evidence a task is done. No agent audits a single task; removing this gate would let unbuilt or unformatted code reach the council. `code-reviewer` remains the single whole-change council, never a per-task reviewer. |
 | Iteration circuit-breaker (`ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`), `STATUS: ESCALATION` | `conductor`, `architect` (mediation) | `park` — halt rework for that cluster, record `ESCALATION: circuit-breaker`, continue unaffected work | keep | Prevents thrash loops from consuming the run. Keep: unbounded retry would spend execution without converging. |
-| `NEEDS_HUMAN` from `code-reviewer` (including `KW-REVIEW-008` and `KW-REVIEW-009`) and unresolved circuit-breakers | `conductor` | `report` — never blocks or parks anything. Listed in the draft pull request and final report as pending human review; delivery continues. An unresolved circuit-breaker keeps rework on its cluster halted and is listed in the PR as an open finding | reduce (supervised mode keeps `NEEDS_HUMAN` terminal) | Non-fatal in autonomous mode by design: the draft pull request is the human review. Supervised mode is unchanged. |
+| Unresolved circuit-breakers | `conductor` | `report` — never blocks or parks anything. Listed in the draft pull request and final report as pending human review; delivery continues. Keeps rework on its cluster halted and is listed in the PR as an open finding | reduce | Non-fatal in autonomous mode by design: the draft pull request is the human review. Supervised mode is unchanged. |
 
 ## 5. Whole-change council gate
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Whole-change `council` — `code-reviewer` once over the accumulated diff (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; `NEEDS_HUMAN` and exhausted `REQUEST_CHANGES` are reported in the PR description, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` follows the bounded remediation loop, and any finding still open is listed by id in the PR. Council findings are reported rather than stopping delivery. |
+| Whole-change `council` — `code-reviewer` once over the accumulated diff (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; exhausted `REQUEST_CHANGES` is reported in the PR description, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` follows the bounded remediation loop, and any finding still open is listed by id in the PR. Council findings are reported rather than stopping delivery. |
 | Per-task council invocation (without a human asking) | — | Refused: the reviewer says the routing is wrong rather than proceeding | keep (as a ban) | Per-task LLM review was removed by #424 and is not reinstated; the `task-gate` owns per-task evidence. Running fifteen lenses per task is cost without coverage gain. |
 
 ## 6. Pre-push self-review gate
@@ -131,31 +131,31 @@ this gate. Required CI decides readiness.
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| `docs validate` (blocking gate, `KW-DOC-*`, `KW-CONFIG-REG-*`, `KW-DOC-LIFECYCLE-*`) | `docs-dev`, enforced by `GateRunner` | `hard-stop` — a failing blocking gate forces `REQUEST_CHANGES` per verdict rule 3; fix and re-gate | keep | Governance corpus must stay at zero findings. Removing it would let drift ship as truth. |
+| `docs validate` (blocking gate, `KW-DOC-*`, `KW-CONFIG-REG-*`, `KW-DOC-LIFECYCLE-*`) | `docs-dev`, enforced by `GateRunner` | `hard-stop` — a failing blocking gate forces `REQUEST_CHANGES` per verdict rule 1; fix and re-gate | keep | Governance corpus must stay at zero findings. Removing it would let drift ship as truth. |
 | `docs drift` (`KW-DOC-DRIFT-*`: `code-refs` and `api-endpoints` resolution against the code graph) | `docs-dev` | `hard-stop` on the same blocking-gate path | keep | Drift means the documentation claims coverage it no longer has. Keep; editing anything under `docs/` re-runs both checks in the same change. |
 
 ## 8. Verdict rules
 
 The `verdict rules` are evaluated in fixed order by `VerdictEngine.Evaluate`.
 The first rule that fires decides. Findings below `min-confidence` are dropped
-before rules 4–5; coverage is reported, never decisive.
+before rules 2–3; coverage is reported, never decisive.
 
 | # | Rule | Verdict | Autonomous behavior | Disposition |
 |---|---|---|---|---|
-| 1 | A changed path matches `review.policy.always-human` → `KW-REVIEW-008` | `NEEDS_HUMAN` | `report` — listed in the draft PR as pending human review; delivery continues (reserved-path escalation, before any finding is weighed) | keep — see §10 |
-| 2 | Diff exceeds `max-reviewable-lines` (`20000`) → `KW-REVIEW-009` | `NEEDS_HUMAN` | `report` — listed in the draft PR as pending human review; delivery continues (size escalation; never subdivide to slip under) | keep — reduce scope via exclusion only for lockfiles/scratch (plan item C), never by splitting |
-| 3 | A blocking gate failed → `KW-REVIEW-005` (includes `docs validate`, `docs drift`, build, test, analyzers, and every other `blocking: true` gate) | `REQUEST_CHANGES` | `hard-stop` — cannot be approved past; fix, re-run, second verdict governs | keep — **irreversible-action justification:** a failing blocking gate is failed evidence; approving past it would ship unverified claims |
-| 4 | Any surviving `critical` finding → `KW-REVIEW-006` | `REQUEST_CHANGES` | Bounded remediation before park (plan item B); Minor/Info never block here | reduce — gate only on Critical and Major per owner decision Q3; Minor/Info are reported, never blocking |
-| 5 | Surviving `major` findings reach `major-count-blocks` (`3`) → `KW-REVIEW-007` | `REQUEST_CHANGES` | Same remediation loop as rule 4 | reduce — same Q3 scope as rule 4 |
-| 6 | Otherwise | `APPROVE` | `auto-approve with provenance` — deliver per §11 | keep |
+| — | `KW-REVIEW-008` (formerly `always-human` reserved paths) | Retired | Retired by 2026-11-02 owner directive; Review Council verdict is binary (`APPROVE` or `REQUEST_CHANGES`) | Retired |
+| — | `KW-REVIEW-009` (formerly `max-reviewable-lines` size ceiling) | Retired | Retired by 2026-11-02 owner directive; Review Council verdict is binary (`APPROVE` or `REQUEST_CHANGES`) | Retired |
+| 1 | A blocking gate failed → `KW-REVIEW-005` (includes `docs validate`, `docs drift`, build, test, analyzers, and every other `blocking: true` gate) | `REQUEST_CHANGES` | `hard-stop` — cannot be approved past; fix, re-run, second verdict governs | keep — **irreversible-action justification:** a failing blocking gate is failed evidence; approving past it would ship unverified claims |
+| 2 | Any surviving `critical` finding → `KW-REVIEW-006` | `REQUEST_CHANGES` | Bounded remediation before park (plan item B); Minor/Info never block here | reduce — gate only on Critical and Major per owner decision Q3; Minor/Info are reported, never blocking |
+| 3 | Surviving `major` findings reach `major-count-blocks` (`3`) → `KW-REVIEW-007` | `REQUEST_CHANGES` | Same remediation loop as rule 2 | reduce — same Q3 scope as rule 2 |
+| 4 | Otherwise | `APPROVE` | `auto-approve with provenance` — deliver per §11 | keep |
 
 `KW-REVIEW-001` (dropped, missing evidence), `KW-REVIEW-002` (below
 confidence floor), `KW-REVIEW-003` (suppressed), `KW-REVIEW-004`
 (suppression expired), `KW-REVIEW-010` (coverage below floor), and
 `KW-REVIEW-012` (no coverage report) shape the accepted-finding set but never
 decide the verdict. Blocking gates that fail shut the run regardless of how
-clean the council was; `KW-REVIEW-008` and `KW-REVIEW-009` escalate regardless
-of how clean or filthy the findings were.
+clean the council was. Former rules `KW-REVIEW-008` and `KW-REVIEW-009` are
+Retired in place, leaving the verdict binary (`APPROVE` or `REQUEST_CHANGES`).
 
 ## 9. Hard stops
 
@@ -173,9 +173,9 @@ conductor returns `STATUS: NEEDS_DECISION`.
   with `SOURCES_SEARCHED` + `COST_OF_WRONG`. A hard block carrying a real
   `RECOMMENDED` option is decided as
   `autonomous: low-confidence, no authoritative source`, not relayed.
-- **Blocking-gate failure → `REQUEST_CHANGES`** (verdict rule 3) — a failing
+- **Blocking-gate failure → `REQUEST_CHANGES`** (verdict rule 1) — a failing
   blocking gate cannot be approved past.
-- **Always-human procedure** — the `code-reviewer` per-task ban, the
+- **Standard review procedure** — the `code-reviewer` per-task ban, the
   whole-change council, and the pre-push self-review sync/council/checklist/
   evidence steps stay as written; only finding-severity gating changes per Q3.
 
@@ -188,28 +188,16 @@ Copilot CLI at global scope, so on every other target the hard stops work exactl
 
 ## 10. Always-human paths
 
-Touching one forces `KW-REVIEW-008` → `NEEDS_HUMAN` by verdict rule 1, before
-any finding is weighed. No task narrows or removes this list.
+**Retired.** By the 2026-11-02 owner directive, `NEEDS_HUMAN`, `always-human` paths (`KW-REVIEW-008` / `KW-REVIEW-011`),
+and the `max-reviewable-lines` size ceiling (`KW-REVIEW-009`) are retired. The Review Council verdict is now
+strictly binary: `APPROVE` or `REQUEST_CHANGES`.
 
-- `products/kyber-squad/profiles/capabilities.yml`
-- `products/kyber-squad/agents/**`
-- `.kyber-weave/kyber-weave.yml`
-- `**/*secret*`
-- `**/*credential*`
-
-Rationale: the artifacts that decide what agents may do, and any secret or
-credential material, are not approvable by an agent. The engine therefore still
-returns `NEEDS_HUMAN` on them, and autonomous delivery reports them as pending human
-review rather than approving them. In autonomous runs the human judgement happens on the
-draft pull request, and merge stays human. A change widening a capability profile or editing
-an instruction surface escalates on path alone.
-`KW-REVIEW-008` itself always stays human.
-
-`KW-REVIEW-009` (size ceiling `max-reviewable-lines: 20000`) is the companion
-escalation: an unreviewable diff is not the engine's to settle. Lockfile and
-scratch-output scoping (plan item C) excludes machine-generated churn from the
-numerator only; source-only overflow still escalates and never suppresses a
-remediation pass already in flight.
+Historically, touching paths such as `products/kyber-squad/profiles/capabilities.yml`,
+`products/kyber-squad/agents/**`, `.kyber-weave/kyber-weave.yml`, `**/*secret*`, or `**/*credential*`
+forced `KW-REVIEW-008` → `NEEDS_HUMAN`. Under the autonomous delivery model, the draft pull request itself
+is the human review before merge. Any critical or major defect discovered in these files is adjudicated through
+standard council findings requesting changes (`REQUEST_CHANGES`), or auto-approved (`APPROVE`) when clean,
+without needing a separate `NEEDS_HUMAN` escape hatch.
 
 ## 11. Push rule (Q5)
 
@@ -222,9 +210,8 @@ replaces the earlier rule that held an unapproved change back from the remote.
 - Mark it ready once required CI passes. Its wait is at most 60 minutes. If CI
   fails or is not done, it stays draft and the report says what it is waiting for.
 - The council verdict, every `autonomous: low-confidence` decision, the
-  auto-approved gate count, and every pending human review item (`NEEDS_HUMAN`,
-  an unresolved circuit-breaker) go in the PR description. None of them blocks
-  delivery.
+  auto-approved gate count, and every pending human review item (an unresolved
+  circuit-breaker) go in the PR description. None of them blocks delivery.
 - **Never** merge. Assign the PR to the invoking user.
 
 Before the push, sync the remote head and base branch (merge, never rebase,
@@ -252,20 +239,19 @@ inventory.
   plan Draft decisions, plan `PLAN_READY` verification, plan and spec
   **approve and execute**, mode-change re-approval, per-phase
   `READY_FOR_REVIEW`, `task-gate`, per-task council ban, `docs validate`,
-  `docs drift`, verdict rules 1–3 and 6, hard stops, always-human paths,
-  `KW-REVIEW-008` and `KW-REVIEW-009` (the engine still returns
-  `NEEDS_HUMAN`), and blocking gates. Every keep above carries its
-  irreversible-action justification: without the gate, the run would execute,
-  publish, or approve past missing evidence, reserved paths, unreviewable
-  size, or failed blocking gates.
-- **reduce** — verdict rules 4–5: gate only on Critical and Major findings;
+  `docs drift`, verdict rules 1–4, hard stops, and blocking gates.
+  Every keep above carries its irreversible-action justification: without the
+  gate, the run would execute, publish, or approve past missing evidence or
+  failed blocking gates.
+- **reduce** — verdict rules 2–3: gate only on Critical and Major findings;
   Minor/Info are reported but never block, never force remediation loops, and
-  never force `NEEDS_HUMAN`. Autonomous `NEEDS_HUMAN` from the council,
-  `KW-REVIEW-008`/`KW-REVIEW-009` escalations, and unresolved circuit-breakers
-  are reported in the draft pull request and no longer hold back delivery.
-  Circuit-breaker and `NEEDS_HUMAN` items, the whole-change council, and
-  pre-push self-review report into the PR description rather than gating the
-  push. A failing blocking gate still forces `REQUEST_CHANGES` in the verdict.
+  never force `REQUEST_CHANGES`. Unresolved circuit-breakers are reported in the
+  draft pull request and no longer hold back delivery. Circuit-breaker items,
+  the whole-change council, and pre-push self-review report into the PR
+  description rather than gating the push. A failing blocking gate still forces
+  `REQUEST_CHANGES` in the verdict. `NEEDS_HUMAN`, `always-human` paths
+  (`KW-REVIEW-008`), and `max-reviewable-lines` (`KW-REVIEW-009`) are retired,
+  yielding a binary `APPROVE` or `REQUEST_CHANGES` verdict.
 - **collapse** — `tasks approval` + **approve and execute** merge into one
   consolidated presentation (max 2 gates total in the happy spec path) when
   there are no gaps and no open questions; any gap or question reopens
@@ -275,7 +261,7 @@ inventory.
 ## Related
 
 - [Reduce autonomous gates plan](../archive/plans/2026-10-24-issue-386-reduce-autonomous-gates.md) — items A–E, decisions Q1–Q5 and D1–D5
-- [Review council architecture](../code-review/architecture.md) — three layers, task gates, verdict rules 1–6
+- [Review council architecture](../code-review/architecture.md) — three layers, task gates, verdict rules 1–4
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-REVIEW-*` id
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — conductor delivery and rendering
 - [Configuration](../configuration.md) — `review:` and `task-gates:` host configuration

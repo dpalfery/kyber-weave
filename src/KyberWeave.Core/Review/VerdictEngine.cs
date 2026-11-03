@@ -5,7 +5,8 @@ using KyberWeave.Core.Diagnostics;
 namespace KyberWeave.Core.Review;
 
 /// <summary>
-/// Turns findings and gate results into a verdict by fixed rule, with no model in the loop.
+/// Turns findings and gate results into a binary Approve or RequestChanges verdict by fixed rule,
+/// with no model in the loop.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,17 +45,8 @@ public static class VerdictEngine
     /// <summary>Surviving major findings at or above the configured threshold.</summary>
     public const string MajorFindingThreshold = "KW-REVIEW-007";
 
-    /// <summary>A changed path the policy reserves for human review.</summary>
-    public const string ReservedPath = "KW-REVIEW-008";
-
-    /// <summary>A change larger than the configured attention ceiling.</summary>
-    public const string ChangeTooLarge = "KW-REVIEW-009";
-
     /// <summary>Measured coverage below the declared floor.</summary>
     public const string CoverageBelowFloor = "KW-REVIEW-010";
-
-    /// <summary>No reserved paths are declared, so nothing can escalate.</summary>
-    public const string NoReservedPathsDeclared = "KW-REVIEW-011";
 
     /// <summary>A coverage floor is declared but no coverage report was produced.</summary>
     public const string CoverageMissing = "KW-REVIEW-012";
@@ -62,21 +54,18 @@ public static class VerdictEngine
     private const string Subject = "review";
 
     /// <summary>Computes the verdict for one change.</summary>
-    /// <param name="scope">What the change touches.</param>
     /// <param name="findings">Findings reported by the council, after its own confirmation pass.</param>
     /// <param name="gates">Results from the deterministic gate suite.</param>
     /// <param name="config">The host's review configuration.</param>
     /// <param name="today">The date suppression expiry is evaluated against.</param>
     /// <param name="coverage">Measured coverage, when the coverage gate produced any.</param>
     public static ReviewOutcome Evaluate(
-        ReviewScope scope,
         IReadOnlyList<ReviewFinding> findings,
         IReadOnlyList<GateResult> gates,
         ReviewConfig config,
         DateOnly today,
         CoverageResult? coverage = null)
     {
-        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(config);
@@ -90,19 +79,17 @@ public static class VerdictEngine
 
         ReportCoverage(coverage, config.Coverage, diagnostics);
 
-        // Evaluation order is the whole contract. The two escalation rules run before any
-        // finding is weighed, because a reserved path and an unreviewable diff are both
-        // statements that this change is not the engine's to settle — regardless of how
-        // clean, or how filthy, the council's report happens to be.
-        ReviewVerdict? verdict =
-            EvaluateReservedPaths(scope, policy, diagnostics)
-            ?? EvaluateSize(scope, policy, diagnostics)
-            ?? EvaluateGates(gates, diagnostics)
-            ?? EvaluateFindings(accepted, policy, diagnostics);
+        // Evaluation order is the whole contract. Blocking gates run before findings
+        // are weighed; if all gates pass and findings are below blocking thresholds,
+        // the change is approved.
+        ReviewVerdict verdict =
+            EvaluateGates(gates, diagnostics)
+            ?? EvaluateFindings(accepted, policy, diagnostics)
+            ?? ReviewVerdict.Approve;
 
         return new ReviewOutcome(
-            verdict ?? ReviewVerdict.Approve,
-            GradeRisk(verdict, accepted, gates),
+            verdict,
+            GradeRisk(accepted, gates),
             [.. accepted.OrderByDescending(f => f.Severity).ThenByDescending(f => f.Confidence)],
             dropped,
             diagnostics);
@@ -222,62 +209,6 @@ public static class VerdictEngine
         return null;
     }
 
-    private static ReviewVerdict? EvaluateReservedPaths(
-        ReviewScope scope,
-        ReviewPolicy policy,
-        List<Diagnostic> diagnostics)
-    {
-        if (policy.AlwaysHuman.Count == 0)
-        {
-            diagnostics.Add(new Diagnostic(
-                NoReservedPathsDeclared,
-                Severity.Info,
-                "No paths are reserved for human review, so nothing can escalate on path alone.",
-                Subject,
-                Hint: "Declare review.policy.always-human for authentication, secrets, " +
-                      "cryptography, and the review configuration itself."));
-            return null;
-        }
-
-        bool escalated = false;
-        foreach (string path in scope.ChangedPaths)
-        {
-            string? pattern = PathGlob.FirstMatch(policy.AlwaysHuman, path);
-            if (pattern is null)
-                continue;
-
-            escalated = true;
-            diagnostics.Add(new Diagnostic(
-                ReservedPath,
-                Severity.Error,
-                $"'{path}' matches the reserved pattern '{pattern}' and requires human review.",
-                Subject,
-                path,
-                "This rule is policy and the engine cannot override it."));
-        }
-
-        return escalated ? ReviewVerdict.NeedsHuman : null;
-    }
-
-    private static ReviewVerdict? EvaluateSize(
-        ReviewScope scope,
-        ReviewPolicy policy,
-        List<Diagnostic> diagnostics)
-    {
-        if (scope.EffectiveChangedLines <= policy.MaxReviewableLines)
-            return null;
-
-        diagnostics.Add(new Diagnostic(
-            ChangeTooLarge,
-            Severity.Error,
-            $"{scope.EffectiveChangedLines} changed lines exceeds the reviewable ceiling of " +
-            $"{policy.MaxReviewableLines}.",
-            Subject,
-            Hint: "This is an attention limit, not a risk grade. Split the change or have a " +
-                  "human review it."));
-        return ReviewVerdict.NeedsHuman;
-    }
-
     private static ReviewVerdict? EvaluateGates(
         IReadOnlyList<GateResult> gates,
         List<Diagnostic> diagnostics)
@@ -379,12 +310,10 @@ public static class VerdictEngine
     }
 
     private static RiskGrade GradeRisk(
-        ReviewVerdict? verdict,
         List<ReviewFinding> accepted,
         IReadOnlyList<GateResult> gates)
     {
-        if (verdict is ReviewVerdict.NeedsHuman ||
-            accepted.Exists(f => f.Severity == ReviewSeverity.Critical) ||
+        if (accepted.Exists(f => f.Severity == ReviewSeverity.Critical) ||
             gates.Any(g => g is { Blocking: true, Passed: false, NotApplicableReason: null }))
         {
             return RiskGrade.High;
