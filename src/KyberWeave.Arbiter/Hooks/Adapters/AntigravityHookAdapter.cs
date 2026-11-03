@@ -306,12 +306,20 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                     "Malformed Antigravity hook event: a Subagents element is not an object.");
             }
 
-            string prompt = GetString(subagent, "Prompt")
-                ?? throw new InvalidOperationException(
+            string? prompt = GetString(subagent, "Prompt");
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new InvalidOperationException(
                     "Malformed Antigravity hook event: a Subagents element carries no Prompt.");
-            string target = GetString(subagent, "TypeName")
-                ?? throw new InvalidOperationException(
+            }
+
+            string? target = GetString(subagent, "TypeName");
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                throw new InvalidOperationException(
                     "Malformed Antigravity hook event: a Subagents element carries no TypeName.");
+            }
+
             dispatches.Add(new Dispatch(target, prompt));
         }
 

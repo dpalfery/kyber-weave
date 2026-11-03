@@ -420,6 +420,24 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
+    public void TrustedDecision_NotReusedWhenTheWorkingDirectoryChanges()
+    {
+        ScriptedEngine engine = new();
+        string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
+            "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-reuse-3", StringComparison.Ordinal);
+
+        (int firstExit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        Assert.Equal(0, firstExit);
+        Assert.Equal(1, engine.PreCalls);
+
+        string changed = stdin.Replace("\"cwd\": \"/repo\"", "\"cwd\": \"/other\"", StringComparison.Ordinal);
+        (int secondExit, _, _) = Run(CopilotHookAdapter.CliToken, changed, null, engine);
+
+        Assert.Equal(0, secondExit);
+        Assert.Equal(2, engine.PreCalls);
+    }
+
+    [Fact]
     public void InternalError_LocalSchema_WritesLocalBlock()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };

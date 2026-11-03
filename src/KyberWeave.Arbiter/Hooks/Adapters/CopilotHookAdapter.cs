@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
@@ -232,9 +234,11 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             // A trusted decision is valid only for the exact dispatch it decided. The
             // project-wide re-fire repeats the same tool_use_id and payload; a different
             // payload under a reused id must be evaluated, not answered from the cache.
+            string promptDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prompt)));
+            string? cwd = GetString(payload, "cwd");
             TrustedDecisionKey? key = string.IsNullOrWhiteSpace(toolUseId)
                 ? null
-                : new TrustedDecisionKey(toolUseId, agentName, prompt);
+                : new TrustedDecisionKey(toolUseId, agentName, promptDigest, tool ?? string.Empty, cwd);
             if (key is not null && TrustedDecisions.TryGetValue(key.Value, out string? stored))
             {
                 context.Log.WriteLine(
@@ -756,7 +760,12 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             },
         }.ToJsonString();
 
-    internal readonly record struct TrustedDecisionKey(string ToolUseId, string? AgentName, string Prompt);
+    internal readonly record struct TrustedDecisionKey(
+        string ToolUseId,
+        string? AgentName,
+        string PromptDigest,
+        string Tool,
+        string? Cwd);
 
     private static string RenderLocalPreAllowStrip(JsonElement toolInput, string prompt) =>
         RenderLocalPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject

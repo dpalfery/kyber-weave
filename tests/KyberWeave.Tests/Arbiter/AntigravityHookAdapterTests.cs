@@ -168,6 +168,23 @@ public sealed class AntigravityHookAdapterTests
     }
 
     [Fact]
+    public void PreInvoke_EmptyPromptAndTypeName_FailsClosed()
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", "/repo"))!.AsObject();
+        JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
+        subagent["Prompt"] = string.Empty;
+        subagent["TypeName"] = string.Empty;
+
+        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("deny", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Empty(engine.SeenPre);
+    }
+
+    [Fact]
     public void PreInvoke_MissingTypeName_FailsClosedInsteadOfEvaluatingATargetlessDispatch()
     {
         ContextualEngine engine = new();

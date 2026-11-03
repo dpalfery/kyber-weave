@@ -52,8 +52,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             // absent key; every other failure must surface, or a reviewer silently
             // loses its key and the Arbiter fails open.
             if (result.ExitCode == 1
-                && (string.IsNullOrWhiteSpace(result.StandardError)
-                    || result.StandardError.Contains("no match", StringComparison.OrdinalIgnoreCase)
+                && (result.StandardError.Contains("no match", StringComparison.OrdinalIgnoreCase)
                     || result.StandardError.Contains("no such secret", StringComparison.OrdinalIgnoreCase)))
             {
                 return null;

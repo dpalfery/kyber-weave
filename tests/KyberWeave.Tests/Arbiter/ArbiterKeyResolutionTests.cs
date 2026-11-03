@@ -282,6 +282,17 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void LinuxReadWithEmptyStderrIsAFailureNotAnAbsentKey()
+    {
+        FakeCredentialProcessRunner failing = new();
+        failing.NextResult = new ProcessResult(1, string.Empty, string.Empty);
+        SecretServiceCredentialStore store = new(failing);
+
+        Assert.Throws<SecretServiceUnavailableException>(
+            () => store.Read("https://api.typesafe.ai"));
+    }
+
+    [Fact]
     public void LinuxReadSurfacesALookupFailureInsteadOfReportingAnAbsentKey()
     {
         FakeCredentialProcessRunner failing = new();
