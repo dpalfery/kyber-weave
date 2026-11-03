@@ -176,7 +176,7 @@ public static class TestGitRepositoryTemplate
                 {
                     file.CopyTo(targetPath, true);
                 }
-                catch (IOException) when (!File.Exists(file.FullName))
+                catch (IOException) when (IsTransientGitLock(file.FullName) && !File.Exists(file.FullName))
                 {
                     // Git background maintenance can remove a transient lock between the
                     // directory enumeration and the copy. The template does not need it.
@@ -289,6 +289,17 @@ public static class TestGitRepositoryTemplate
         string path = Path.Combine(repo, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
+    }
+
+    /// <summary>
+    ///     Whether a path is a transient git lock file. Only these may vanish during a template
+    ///     copy; a missing tracked file is real corruption and must still fail the copy.
+    /// </summary>
+    internal static bool IsTransientGitLock(string path)
+    {
+        string normalized = path.Replace('\\', '/');
+        return normalized.Contains("/.git/", StringComparison.Ordinal) &&
+               normalized.EndsWith(".lock", StringComparison.Ordinal);
     }
 
     /// <summary>
