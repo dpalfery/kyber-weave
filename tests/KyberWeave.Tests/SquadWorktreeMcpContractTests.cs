@@ -280,7 +280,8 @@ public sealed class SquadWorktreeMcpContractTests
     [Fact]
     public void WorktreeMcpHelper_WhenSymlinkCannotBeResolved_ThrowsArgumentException()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Self-referential symlinks are not created on Windows without developer mode.");
 
         using TempDirectory canonicalRoot = new();
         string loopPath = Path.Combine(canonicalRoot.Path, "loop");

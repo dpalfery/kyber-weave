@@ -33,9 +33,24 @@ public sealed class ReviewVerdictCliCommandTests
             : program[verdictIndex..];
 
         Assert.DoesNotContain("needs-human", verdictRegistration, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ReviewVerdictCommand.Description", verdictRegistration, StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithDescription(ReviewVerdictCommand.Description)",
+            verdictRegistration,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("needs-human", ReviewVerdictCommand.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approve / request-changes", ReviewVerdictCommand.Description, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An undefined verdict must produce a readable summary so the command can finish and return the
+    /// defensive exit code instead of throwing out of <c>Execute</c>.
+    /// </summary>
+    [Fact]
+    public void DescribeForSummary_WhenVerdictIsUndefined_ReturnsInvalidLabel()
+    {
+        Assert.Equal(
+            "INVALID VERDICT (99)",
+            ReviewVerdictCommand.DescribeForSummary((ReviewVerdict)99));
     }
 
     /// <summary>

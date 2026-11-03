@@ -59,7 +59,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         report.Add(new Diagnostic(
             Verdict,
             outcome.Verdict == ReviewVerdict.Approve ? Severity.Info : Severity.Error,
-            $"{Describe(outcome.Verdict)} — risk {outcome.Risk.ToString().ToUpperInvariant()}, " +
+            $"{DescribeForSummary(outcome.Verdict)} — risk {outcome.Risk.ToString().ToUpperInvariant()}, " +
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             "review"));
 
@@ -73,6 +73,20 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     }
 
     /// <summary>The verdict as printed in the console summary.</summary>
+    internal static string DescribeForSummary(ReviewVerdict verdict)
+    {
+        try
+        {
+            return Describe(verdict);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The exit code already carries the invalid-verdict signal (2). Returning a
+            // readable summary keeps Finish and the exit code reachable instead of crashing.
+            return $"INVALID VERDICT ({verdict})";
+        }
+    }
+
     private static string Describe(ReviewVerdict verdict) => verdict switch
     {
         ReviewVerdict.Approve => "APPROVE",
