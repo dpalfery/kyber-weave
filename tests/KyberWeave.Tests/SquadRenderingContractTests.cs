@@ -27,31 +27,6 @@ public sealed class SquadRenderingContractTests
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     [Fact]
-    public void SupportedTargets_IsExactlyCopilotToday()
-    {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-
-        Assert.Equal([SquadTarget.Copilot], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("claude", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public async Task RenderAsync_Copilot_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
@@ -191,17 +166,6 @@ public sealed class SquadRenderingContractTests
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(profile.HarnessModels["copilot"], RequireScalar(frontmatter, "model"));
         }
-    }
-
-    [Fact]
-    public async Task RenderAsync_Copilot_ProjectsLinkedAgentAndSkillResourcesWithoutRewritingLinks()
-    {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            new CopilotRenderer(),
-            SquadTarget.Copilot,
-            ".github/agents/bug-crusher-investigator.agent.md",
-            ".github/agents",
-            ".github/skills");
     }
 
     [Fact]

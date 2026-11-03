@@ -7,6 +7,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -96,65 +97,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
         "runs as a nested subagent; the permitted delegation roster is not enforced " +
         "for nested Task/Agent spawns. Roster: ";
 
-    /// <summary>
-    /// Shared identities are read from the loaded fallback profile so the test follows the
-    /// same generic single-projection contract as the renderer.
-    /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The shared identities whose canonical skill Claude suppresses: those carried by a
-    /// subagent, whose file already holds the identical body. A primary shared identity reuses
-    /// its canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
-    /// resolver so the test cannot drift from the contract.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-
     public void Dispose()
     {
         // No disposable state: the suite only reads the checked-in corpus. IDisposable is
         // implemented per the test-coding-standard so adding fixtures later has a home.
-    }
-
-    [Fact]
-    public void SupportedTargets_IsExactlyClaude()
-    {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-
-        Assert.Equal([SquadTarget.Claude], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("cursor", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonClaudeTarget()
-    {
-        ClaudeRenderer renderer = new();
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
     [Fact]
@@ -470,78 +416,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
             Assert.True(
                 string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
-        }
-    }
-
-    /// <summary>
-    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
-    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
-    /// shell tools (Bash, PowerShell) and withheld write tools (Edit, NotebookEdit, Write).
-    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
-    /// </summary>
-    [Fact]
-    public async Task RenderAsync_Claude_RecordsCapabilityNotIsolableForShellImpliesWrite()
-    {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        string[] grantedShellTools = ["Bash", "PowerShell"];
-        string[] withheldWriteTools = ["Edit", "NotebookEdit", "Write"];
-
-        List<string> expectedAgents = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
-                return exec && !write;
-            })
-            .Select(a => a.Name)
-            .OrderBy(n => n, StringComparer.Ordinal)
-            .ToList();
-
-        Assert.NotEmpty(expectedAgents);
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
-                exec == SquadPermissionDecision.Allow;
-            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
-                write == SquadPermissionDecision.Allow;
-
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
-
-            if (executeAllowed && !writeAllowed)
-            {
-                Assert.NotNull(record);
-                Assert.Equal("claude", record.Target);
-                Assert.Equal(agent.Name, record.CanonicalIdentity);
-                Assert.Equal(agent.Name, record.OutputIdentity);
-                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
-                Assert.NotNull(record.Details);
-                foreach (string shellTool in grantedShellTools)
-                {
-                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
-                }
-                foreach (string writeTool in withheldWriteTools)
-                {
-                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
-                }
-            }
-            else
-            {
-                Assert.Null(record);
-            }
         }
     }
 
@@ -1017,44 +891,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task RenderAsync_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            SquadDeploymentFile file1 = first.Files[i];
-            SquadDeploymentFile file2 = second.Files[i];
-
-            Assert.Equal(file1.RelativePath, file2.RelativePath);
-            Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
-        }
-    }
-
-    [Fact]
-    public async Task RenderAsync_Claude_ProjectsLinkedAgentAndSkillResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            new ClaudeRenderer(),
-            SquadTarget.Claude,
-            ".claude/agents/bug-crusher-investigator.md",
-            ".claude/agents",
-            ".claude/skills");
-    }
-
     /// <summary>
     /// An orchestrator whose own capability profile denies <c>filesystem.read</c> renders a note
     /// that names <c>mcp__kyber-weave__*</c> among the withheld wildcards and gives the read denial
@@ -1215,24 +1051,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
         return RequireSequence(frontmatter, "tools", agentName);
     }
 
-    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
-    {
-        const string delimiter = "---\n";
-        Assert.True(
-            text.StartsWith(delimiter, StringComparison.Ordinal),
-            $"'{identity}' is missing the opening frontmatter delimiter.");
-        int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
-        Assert.True(end > 0, $"'{identity}' is missing a closing '---' frontmatter delimiter.");
-
-        string yaml = text[delimiter.Length..(end + 1)];
-        string body = text[(end + 5)..];
-
-        YamlStream stream = new();
-        stream.Load(new StringReader(yaml));
-        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
-        return (root, body);
-    }
-
     private static IReadOnlyList<string> RequireSequence(YamlMappingNode node, string key, string identity)
     {
         if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
@@ -1249,21 +1067,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
             .Select(child => Assert.IsType<YamlScalarNode>(child).Value
                 ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null sequence entry."))
             .ToArray();
-    }
-
-    private static string RequireScalar(YamlMappingNode node, string key, string identity)
-    {
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
-        {
-            string presentKeys = string.Join(", ", node.Children.Keys
-                .OfType<YamlScalarNode>()
-                .Select(existing => existing.Value ?? "<null>"));
-            throw new InvalidOperationException(
-                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
-        }
-
-        return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }
 

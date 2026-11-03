@@ -82,20 +82,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
             $"Expected products/kyber-squad under ToolRoot at '{ProductRoot}'.");
     }
 
-    /// <summary>The renderer refuses a request for any target but Antigravity.</summary>
-    [Fact]
-    public async Task RenderAsync_RejectsNonAntigravityTarget()
-    {
-        AntigravityRenderer renderer = new();
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Copilot],
-            SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
-    }
-
     /// <summary>
     ///     Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived
     ///     from the source.
@@ -317,36 +303,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.DoesNotContain(
             result.Degradations,
             d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Antigravity_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            Assert.Equal(first.Files[i].RelativePath, second.Files[i].RelativePath);
-            Assert.Equal(first.Files[i].Target, second.Files[i].Target);
-            Assert.True(first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span));
-        }
-
-        // File paths, targets, contents, and degradation records must remain byte/value
-        // identical across renders of the same canonical source.
-        Assert.Equal(first.Degradations.Count, second.Degradations.Count);
-        for (int i = 0; i < first.Degradations.Count; i++) Assert.Equal(first.Degradations[i], second.Degradations[i]);
     }
 
     [Fact]

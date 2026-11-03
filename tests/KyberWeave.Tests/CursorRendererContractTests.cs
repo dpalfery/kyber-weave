@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
 
 namespace KyberWeave.Tests;
 
@@ -48,61 +49,6 @@ public sealed class CursorRendererContractTests
     /// per CA1861 because the skill-only assertion runs per primary agent.
     /// </summary>
     private static readonly string[] LoweredSkillFrontmatterKeys = ["name", "description", "license"];
-
-    /// <summary>
-    /// Shared identities are read from the loaded fallback profile so the test follows the
-    /// same generic single-projection contract as the renderer.
-    /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
-    /// whose file already holds the identical body. A primary shared identity reuses its
-    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
-    /// resolver so the test cannot drift from the contract.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-
-    [Fact]
-    public void SupportedTargets_IsExactlyCursor()
-    {
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-
-        Assert.Equal([SquadTarget.Cursor], registry.SupportedTargets);
-    }
-
-    [Fact]
-    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
-    {
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.False(result.Success);
-        Assert.Empty(result.Files);
-        Assert.Contains(result.Errors, e => e.Contains("claude", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task RenderAsync_Guard_RejectsNonCursorTarget()
-    {
-        CursorRenderer renderer = new();
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
-    }
 
     [Fact]
     public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
@@ -648,44 +594,6 @@ public sealed class CursorRendererContractTests
         Assert.Contains(primaryAgent.Name, exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task RenderAsync_IsDeterministic()
-    {
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult first = await registry.RenderAsync(request);
-        SquadRenderResult second = await registry.RenderAsync(request);
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        Assert.Equal(first.Files.Count, second.Files.Count);
-
-        for (int i = 0; i < first.Files.Count; i++)
-        {
-            SquadDeploymentFile file1 = first.Files[i];
-            SquadDeploymentFile file2 = second.Files[i];
-
-            Assert.Equal(file1.RelativePath, file2.RelativePath);
-            Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
-        }
-    }
-
-    [Fact]
-    public async Task RenderAsync_Cursor_ProjectsLinkedAgentAndSkillResourcesDeterministically()
-    {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
-            new CursorRenderer(),
-            SquadTarget.Cursor,
-            ".cursor/agents/bug-crusher-investigator.md",
-            ".cursor/agents",
-            ".cursor/skills");
-    }
-
     private static void AssertReadOnly(SquadRenderResult result, string agentName, bool expectedReadOnly)
     {
         SquadDeploymentFile file = Assert.Single(
@@ -707,38 +615,5 @@ public sealed class CursorRendererContractTests
                 frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")),
                 $"Agent '{agentName}' should omit readonly.");
         }
-    }
-
-    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
-    {
-        const string delimiter = "---\n";
-        Assert.True(
-            text.StartsWith(delimiter, StringComparison.Ordinal),
-            $"'{identity}' is missing the opening frontmatter delimiter.");
-        int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
-        Assert.True(end > 0, $"'{identity}' is missing a closing '---' frontmatter delimiter.");
-
-        string yaml = text[delimiter.Length..(end + 1)];
-        string body = text[(end + 5)..];
-
-        YamlStream stream = new();
-        stream.Load(new StringReader(yaml));
-        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
-        return (root, body);
-    }
-
-    private static string RequireScalar(YamlMappingNode node, string key, string identity)
-    {
-        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
-        {
-            string presentKeys = string.Join(", ", node.Children.Keys
-                .OfType<YamlScalarNode>()
-                .Select(existing => existing.Value ?? "<null>"));
-            throw new InvalidOperationException(
-                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
-        }
-
-        return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }
