@@ -29,6 +29,34 @@ public sealed partial class McpProcessProbe
     private static partial Regex McpVersionRegex();
 }
 
+/// <summary>Checks the PATH-resolved Kyber-Weave Arbiter version.</summary>
+/// <remarks>
+/// Follows <see cref="McpProcessProbe"/>: runs only <c>kyber-weave-arbiter --version</c>
+/// and parses its exact output envelope.
+/// </remarks>
+public sealed partial class ArbiterProcessProbe
+{
+    private readonly IProcessExecutor _executor;
+
+    /// <summary>Creates an Arbiter probe over an injectable process boundary.</summary>
+    public ArbiterProcessProbe(IProcessExecutor executor)
+    {
+        ArgumentNullException.ThrowIfNull(executor);
+        _executor = executor;
+    }
+
+    /// <summary>Runs only <c>kyber-weave-arbiter --version</c> and parses its exact output envelope.</summary>
+    public ToolProbeResult Probe() => ProcessProbe.Probe(
+        _executor,
+        "kyber-weave-arbiter",
+        ArbiterVersionRegex());
+
+    [GeneratedRegex(
+        "\\Akyber-weave-arbiter (?<version>" + SemanticVersionPattern.Value + ")(?:\\r?\\n)?\\z",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex ArbiterVersionRegex();
+}
+
 internal static class SemanticVersionPattern
 {
     // Numeric prerelease identifiers disallow leading zeroes; identifiers containing a

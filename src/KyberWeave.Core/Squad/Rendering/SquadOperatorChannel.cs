@@ -28,6 +28,9 @@ internal static class SquadOperatorChannel
 
     internal const string ConductorAgentName = "conductor";
 
+    /// <summary>The review council's root agent, the second Arbiter fallback caller.</summary>
+    internal const string CodeReviewerAgentName = "code-reviewer";
+
     /// <summary>The overlay file, relative to the canonical Squad source root.</summary>
     internal const string OverlayRelativePath = "agents/conductor/overlays/operator-channel.md";
 

@@ -66,3 +66,7 @@ When the input is a todo, preserve provenance as the successor is created:
 4. Archive the todo only after the successor reaches Ready.
 
 Assign `docs-dev` an explicit promotion task to perform these todo and index writes after the successor author has created the linked artifact. The conductor tracks and verifies the reported status; it does not edit the artifacts itself.
+
+## Planner dispatches
+
+Unless you hold `arbiter_evaluate` (see Arbiter fallback), the intake assessment dispatch to `architect` carries `KYBER-ARBITER: true` and the `INTAKE:` marker with the todo path or open request, and never `TASK:`.

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -97,7 +98,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
         string? unknownReason = null;
-        if (!settings.All && config.Review.Gates.Any(gate => gate.Include.Count > 0))
+        if (!settings.All && NeedsChangedSet(config.Review.Gates))
         {
             (changed, unknownReason) = ResolveCouncilChangedSet(root, settings);
             if (changed is null)
@@ -131,22 +132,33 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 skip.Id));
 
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
-        // configuration of their own and the runner itself stays unchanged.
-        GateReport gates = GateRunner.Run(new ReviewConfig { Gates = plan.Run }, root, settings.StopOnFailure);
+        // configuration of their own and the runner itself stays unchanged. The changed set and base
+        // are still passed so applies-when is evaluated from the same facts include was selected on.
+        GateReport gates = GateRunner.Run(
+            new ReviewConfig { Gates = plan.Run },
+            root,
+            settings.StopOnFailure,
+            changed,
+            BaseRef(settings.BaseRef));
 
         foreach (GateResult gate in gates.Gates)
             AddGateDiagnostic(report, gate);
 
         report.AddMetric("gates", gates.Gates.Count);
-        report.AddMetric("failed", gates.Gates.Count(g => !g.Passed));
+        report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null));
+        report.AddMetric("not-applicable", gates.Gates.Count(g => g.NotApplicableReason is not null));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(gates), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         // Blocking failures are already Error diagnostics; a failed --out write is too.
-        // Non-blocking gate failures stay Warning and do not fail the process.
+        // Non-blocking gate failures stay Warning and do not fail the process. Gates that
+        // did not apply are Info and never fail it either.
         return report.HasErrors ? 1 : 0;
     }
+
+    private static string? BaseRef(string? baseRef) =>
+        string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
 
     private static int ExecuteAgentGates(ReviewGatesSettings settings, string agent)
     {
@@ -302,6 +314,16 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         string detail = $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)";
 
+        if (gate.NotApplicableReason is not null)
+        {
+            report.Add(new Diagnostic(
+                ReviewGateOutcome.NotApplicable,
+                Severity.Info,
+                detail,
+                gate.Id));
+            return;
+        }
+
         if (gate.Outcome == GateOutcome.NotStarted)
         {
             report.Add(new Diagnostic(
@@ -324,6 +346,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         AnsiConsole.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
     }
 
+    /// <summary>
+    /// Whether the changed set must be computed before gates run. A gate can be scoped
+    /// either by <c>include</c> or by <c>applies-when.paths</c>; either one makes a null
+    /// changed set mean "run everything".
+    /// </summary>
+    internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
+        gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
+
     private static string CurrentOs()
     {
         return OperatingSystem.IsWindows() ? "windows" : "unix";
@@ -338,4 +368,7 @@ public static class ReviewGateOutcome
 
     /// <summary>A gate that did not succeed.</summary>
     public const string Failed = "KW-REVIEW-022";
+
+    /// <summary>A gate that does not apply to the change and was not executed.</summary>
+    public const string NotApplicable = "KW-REVIEW-026";
 }

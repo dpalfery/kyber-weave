@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using JetBrains.Annotations;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -45,6 +46,9 @@ public interface ISquadRenderer
 /// <param name="EnvironmentReader">
 /// Optional environment variable reader delegate, avoiding process-level environment mutation.
 /// </param>
+/// <param name="Arbiter">
+/// Optional Arbiter enforcement settings; hooks render only when enabled and project-scoped.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -65,7 +69,8 @@ public sealed record SquadRenderRequest(
     ISquadGlobalRootResolver? GlobalRoots = null,
     IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null,
     SquadSource? PreloadedSource = null,
-    Func<string, string?>? EnvironmentReader = null)
+    Func<string, string?>? EnvironmentReader = null,
+    SquadArbiterWiring? Arbiter = null)
 {
     /// <summary>
     /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
@@ -84,10 +89,22 @@ public sealed record SquadRenderRequest(
             null,
             ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets),
             null,
+            null,
             null)
     {
     }
 }
+
+/// <summary>The host's Arbiter enforcement settings carried into a render.</summary>
+/// <remarks>
+/// Carried as render parameters rather than read from host configuration at render time so
+/// a render stays a pure function of its request, and so a request that omits the field
+/// renders byte for byte as it did before the field existed. Hook production keys off
+/// <see cref="ArbiterHookWiring"/>: hooks are produced only when <see cref="Enabled"/> is
+/// true and the scope is <see cref="SquadDeploymentScope.Project"/> (Req 22.4), and
+/// <see cref="HookTimeoutSeconds"/> becomes every produced hook's command timeout.
+/// </remarks>
+public sealed record SquadArbiterWiring(bool Enabled, int HookTimeoutSeconds);
 
 /// <summary>The structured result of a Squad render operation.</summary>
 public sealed record SquadRenderResult(
@@ -95,7 +112,37 @@ public sealed record SquadRenderResult(
     IReadOnlyList<SquadDeploymentFile> Files,
     IReadOnlyList<SquadDegradationRecord> Degradations,
     IReadOnlyList<SquadRenderWarning> Warnings,
-    IReadOnlyList<string> Errors);
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<SquadRenderedBlock>? Blocks = null);
+
+/// <summary>
+/// One managed entry a renderer wants spliced into a shared hook file: the hook
+/// container it belongs to and the entry payload.
+/// </summary>
+/// <remarks>
+/// <see cref="Container"/> names the hook container case-insensitively —
+/// <c>preToolUse</c>/<c>PreToolUse</c> for the pre container and
+/// <c>postToolUse</c>/<c>PostToolUse</c> for the post container — because Cursor's
+/// containers are camelCase while every other shared-file format's are PascalCase.
+/// Anything else is a renderer bug and the deployment plan refuses it.
+/// </remarks>
+public sealed record SquadRenderedBlockEntry(string Container, JsonNode Entry);
+
+/// <summary>
+/// A block fragment a renderer emits for a shared hook file the user also owns: the
+/// target, the portable path, the file's shape, and the managed entries to splice.
+/// </summary>
+/// <remarks>
+/// Unlike <see cref="SquadDeploymentFile"/>, a block never claims the whole file —
+/// <see cref="SquadDeploymentPlan"/> splices <see cref="Entries"/> into whatever the
+/// user already has at <see cref="RelativePath"/> at plan time, so an existing user
+/// file is content to merge with rather than an unmanaged collision.
+/// </remarks>
+public sealed record SquadRenderedBlock(
+    string Target,
+    string RelativePath,
+    SquadHookBlockFormat Format,
+    IReadOnlyList<SquadRenderedBlockEntry> Entries);
 
 /// <summary>A structured record of an agent-to-role lowering or capability degradation.</summary>
 public sealed record SquadDegradationRecord(

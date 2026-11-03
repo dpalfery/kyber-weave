@@ -1,0 +1,11 @@
+{
+  "session_id": "session-factory-4",
+  "transcript_path": "/repo/.factory/transcripts/session-factory-4.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "docs/plans/x.md"
+  }
+}

@@ -33,4 +33,8 @@ required-mcp-tools:
     - docs_glossary
     - docs_status
     - docs_validate
+  kyber-weave-arbiter:
+    - arbiter_evaluate
+    - arbiter_rules
+    - arbiter_status
 validated-release: null

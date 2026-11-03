@@ -196,6 +196,16 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private const string CommandsDirectory = ".zcode/commands";
 
     /// <summary>
+    /// The Arbiter's MCP server. It is excluded from the standard MCP grant and granted only
+    /// through <see cref="GrantsArbiter"/>, so a capability profile that allows
+    /// <c>decision.query</c> reaches <c>arbiter_evaluate</c> without also gaining the
+    /// documentation and code-graph servers.
+    /// </summary>
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
+    private const string ArbiterDecisionCapability = "decision.query";
+
+    /// <summary>
     /// ZCode drops a skill whose description exceeds this length outright rather than
     /// truncating it (<c>skill_description_too_long</c> is an <c>error</c> severity and
     /// <c>parseSkill</c> returns null), so a canonical description over the cap must fail the
@@ -287,12 +297,20 @@ public sealed class ZCodeRenderer : ISquadRenderer
         // upstream is a source edit, and so the doctor check reads the same roster. The split
         // into entitlement classes, and the order each class is emitted in, live in
         // CapabilityDegradations: the partition is the one thing two targets must not each decide.
+        // The Arbiter server is granted separately, only to the principals that call it.
+        IReadOnlyDictionary<string, IReadOnlyList<string>> standardMcpTools =
+            source.Toolchain.RequiredMcpTools
+                .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
         IReadOnlyList<string> orchestratorExcludedMcpToolNames =
-            CapabilityDegradations.OrchestratorExcludedMcpToolNames(source.Toolchain.RequiredMcpTools);
+            CapabilityDegradations.OrchestratorExcludedMcpToolNames(standardMcpTools);
         IReadOnlyList<string> universalMcpToolNames =
-            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
+            CapabilityDegradations.UniversalMcpToolNames(standardMcpTools);
+        IReadOnlyList<string> arbiterMcpToolNames = ArbiterEnforced(request)
+            ? ArbiterMcpToolNames(source)
+            : [];
         IReadOnlyList<string> mcpServerNames =
-            CapabilityDegradations.DeclaredMcpServerNames(source.Toolchain.RequiredMcpTools);
+            CapabilityDegradations.DeclaredMcpServerNames(standardMcpTools);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -308,6 +326,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                     skillIdentities,
                     orchestratorExcludedMcpToolNames,
                     universalMcpToolNames,
+                    arbiterMcpToolNames,
                     mcpServerNames,
                     files,
                     degradations);
@@ -322,6 +341,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 capabilityVocabulary,
                 orchestratorExcludedMcpToolNames,
                 universalMcpToolNames,
+                arbiterMcpToolNames,
                 mcpServerNames,
                 files,
                 degradations);
@@ -361,6 +381,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         IReadOnlySet<string> skillIdentities,
         IReadOnlyList<string> orchestratorExcludedMcpToolNames,
         IReadOnlyList<string> universalMcpToolNames,
+        IReadOnlyList<string> arbiterMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -383,7 +404,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             agent,
             source.CapabilityProfiles.Profiles,
             orchestratorExcludedMcpToolNames,
-            universalMcpToolNames);
+            universalMcpToolNames,
+            arbiterMcpToolNames);
 
         string agentsDirectory = ResolvePrefixedDirectory(AgentsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -406,6 +428,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         IReadOnlyList<string> capabilityVocabulary,
         IReadOnlyList<string> orchestratorExcludedMcpToolNames,
         IReadOnlyList<string> universalMcpToolNames,
+        IReadOnlyList<string> arbiterMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -476,7 +499,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             agent,
             source.CapabilityProfiles.Profiles,
             orchestratorExcludedMcpToolNames,
-            universalMcpToolNames);
+            universalMcpToolNames,
+            arbiterMcpToolNames);
 
         string commandsDirectory = ResolvePrefixedDirectory(CommandsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -800,7 +824,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames)
+        IReadOnlyList<string> universalMcpToolNames,
+        IReadOnlyList<string> arbiterMcpToolNames)
     {
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
 
@@ -829,7 +854,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 agent.CapabilityProfile,
                 capabilityProfiles,
                 orchestratorExcludedMcpToolNames,
-                universalMcpToolNames)
+                universalMcpToolNames),
+            .. GrantsArbiter(agent, capabilityProfiles) ? arbiterMcpToolNames : []
         ];
         if (resolved.Count == 0)
         {
@@ -998,6 +1024,45 @@ public sealed class ZCodeRenderer : ISquadRenderer
                     agent.CapabilityProfile, withheldServerNames, capabilityProfiles)
                 : string.Empty));
     }
+
+    /// <summary>
+    /// The Arbiter server's declared tools in the same qualified form, granted only to a
+    /// principal that <see cref="GrantsArbiter"/> admits.
+    /// </summary>
+    private static IReadOnlyList<string> ArbiterMcpToolNames(SquadSource source) =>
+    [
+        .. source.Toolchain.RequiredMcpTools
+            .Where(entry => string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+            .SelectMany(entry => entry.Value
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"mcp__{entry.Key}__{tool}"))
+    ];
+
+    /// <summary>
+    /// Whether the Arbiter's MCP tools are granted at all: only an enabled,
+    /// project-scope wiring grants them (review 20.1, Major 3). ZCode fails an agent
+    /// whose granted server is not connected, so a grant without an enforced Arbiter
+    /// would make every render require a server the deployment never uses.
+    /// </summary>
+    private static bool ArbiterEnforced(SquadRenderRequest request) =>
+        request.Arbiter is { Enabled: true }
+        && request.Scope == SquadDeploymentScope.Project;
+
+    /// <summary>
+    /// Whether a principal is entitled to the Arbiter's tools. Two gates: the render
+    /// must carry an enabled, project-scope wiring (<see cref="ArbiterEnforced"/>,
+    /// decided upstream by the empty tool list), and the agent must be the conductor or
+    /// the code-reviewer — the two whose contracts call <c>arbiter_evaluate</c>. Holding
+    /// <c>decision.query</c> alone does not grant the server.
+    /// </summary>
+    private static bool GrantsArbiter(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
+        (string.Equals(agent.Name, SquadOperatorChannel.ConductorAgentName, StringComparison.Ordinal)
+            || string.Equals(agent.Name, SquadOperatorChannel.CodeReviewerAgentName, StringComparison.Ordinal)) &&
+        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+        profile.Permissions.TryGetValue(ArbiterDecisionCapability, out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
 
     private static string CollapseToSingleLine(string value)
     {

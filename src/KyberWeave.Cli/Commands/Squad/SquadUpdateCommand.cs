@@ -438,6 +438,11 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             return decision.ExitCode ?? 2;
         }
 
+        // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
+        // verbatim, timeout-ms as whole hook seconds with headroom.
+        SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
+
         SquadUpdateRequest updateRequest = new(
             run.TargetRoot,
             run.Scope,
@@ -445,7 +450,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             run.ExplicitExclusions,
             run.Version,
             ReplaceManaged: run.ReplaceManaged,
-            DryRun: run.DryRun);
+            DryRun: run.DryRun,
+            Arbiter: arbiterWiring);
 
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. Resolve the roots through the same resolver the
@@ -498,6 +504,10 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 {
                     SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot);
                 }
+
+                // Until trust is granted the hooks stay off (§10.7), so the update names
+                // each selected target's trust gate where the audit cannot observe the gap.
+                SquadInstallCommand.WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
 
                 return 0;
             }

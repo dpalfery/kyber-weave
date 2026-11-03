@@ -1,3 +1,5 @@
+using KyberWeave.Core.Arbiter;
+
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Combined Kyber-Weave host configuration.</summary>
@@ -14,6 +16,8 @@ public sealed class KyberWeaveConfig
     public ConfigRegConfig ConfigReg { get; init; } = ConfigRegConfig.ProductDefaults;
 
     public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
+
+    public ArbiterConfig Arbiter { get; init; } = ArbiterConfig.ProductDefaults;
 
     public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
 
@@ -62,6 +66,7 @@ public sealed class KyberWeaveConfig
         SquadConfig? squad = null,
         ConfigRegConfig? configReg = null,
         ReviewConfig? review = null,
+        ArbiterConfig? arbiter = null,
         McpConfig? mcp = null) =>
         new()
         {
@@ -71,6 +76,7 @@ public sealed class KyberWeaveConfig
             Squad = squad ?? Squad,
             ConfigReg = configReg ?? ConfigReg,
             Review = review ?? Review,
+            Arbiter = arbiter ?? Arbiter,
             Mcp = mcp ?? Mcp
         };
 }

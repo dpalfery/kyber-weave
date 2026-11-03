@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -57,6 +58,24 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// so relative paths strip the <c>.factory/</c> prefix.
 /// </para>
 /// <para>
+/// <b>Arbiter block (Req 8.1, 8.2, 22.2).</b> When the render request carries an enabled
+/// <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>, the
+/// renderer returns a <c>factory</c> <see cref="SquadRenderedBlock"/> for
+/// <c>.factory/hooks.json</c> holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher
+/// groups with matcher <c>Task</c>, each with one <c>kyber-weave-arbiter hook --harness
+/// factory</c> command hook carrying the wiring timeout ([F11]). Factory reads event
+/// names at the top level of <c>hooks.json</c> — no <c>hooks</c> wrapper — so each entry
+/// <em>is</em> one matcher group and the block splices under the event containers. The
+/// command carries no <c>--caller</c>: a shared hook file gates project-wide, not per
+/// agent (design §10.4), and only documented fields are written. A null or disabled
+/// wiring, or Global scope (no project configuration to enforce from, Req 22.4), renders
+/// no block. Rendering the block is still not enough to splice it: when the user keeps
+/// hooks under the <c>hooks</c> key of <c>.factory/settings.json</c> and
+/// <c>.factory/hooks.json</c> is absent, creating one would silently disable them, so
+/// <see cref="FactoryHooksShadowing"/> has the lifecycle drop the block and record
+/// <c>arbiter-not-enforced</c> (§10.8, R18).
+/// </para>
+/// <para>
 /// <strong>Primary-agent entry point:</strong> the Factory app dispatches custom droids as
 /// subagents and offers no session-parent selector to start a conversation as one, so a
 /// primary agent with a fallback profile declaring <c>no-primary-agent: skill</c> renders as
@@ -75,6 +94,10 @@ public sealed class FactoryRenderer : ISquadRenderer
 {
     private const string DroidsDirectory = ".factory/droids";
     private const string SkillsDirectory = ".factory/skills";
+    private const string ArbiterCommand = "kyber-weave-arbiter hook --harness factory";
+
+    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterMatcher = "Task";
 
     /// <summary>
     /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
@@ -299,8 +322,62 @@ public sealed class FactoryRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+        // Absence and emptiness are different claims here: FactoryHooksShadowing reads
+        // null as "no block was rendered" and an empty list as "a block was rendered
+        // and it held nothing", and only the first is true when the wiring is absent.
+        // Antigravity and Devin normalise the same way; this renderer's own byte-for-byte
+        // claim is about Files, which is untouched either way.
+        IReadOnlyList<SquadRenderedBlock> blocks = BuildArbiterBlocks(request);
+        return Task.FromResult(new SquadRenderResult(
+            true,
+            files,
+            degradations,
+            [],
+            [],
+            blocks.Count > 0 ? blocks : null));
     }
+
+    /// <summary>
+    /// Builds Squad's owned <c>.factory/hooks.json</c> block, or nothing when the Arbiter
+    /// is not enforced at project scope. The render stays byte-identical without the
+    /// wiring because files are untouched either way: the block travels separately for the
+    /// deployment plan to splice. Whether the plan may splice it at all is decided later,
+    /// by <see cref="FactoryHooksShadowing"/> at plan-build time.
+    /// </summary>
+    private static IReadOnlyList<SquadRenderedBlock> BuildArbiterBlocks(SquadRenderRequest request)
+    {
+        if (request.Arbiter is null || !request.Arbiter.Enabled || request.Scope != SquadDeploymentScope.Project)
+        {
+            return [];
+        }
+
+        return [BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds)];
+    }
+
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+        new(
+            SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Factory),
+            SquadHookBlockFormat.Factory,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(timeoutSeconds)),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(timeoutSeconds)),
+            ]);
+
+    /// <summary>One F11 matcher group: event names are the file's top level, so the
+    /// entry carries no <c>hooks</c> wrapper around the group itself.</summary>
+    private static JsonObject MatcherGroup(int timeoutSeconds) =>
+        new()
+        {
+            ["matcher"] = ArbiterMatcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = ArbiterCommand,
+                    ["timeout"] = timeoutSeconds,
+                }),
+        };
 
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
@@ -546,6 +623,7 @@ public sealed class FactoryRenderer : ISquadRenderer
         [
             .. servers.EnumerateObject()
                 .Select(server => server.Name)
+                .Where(name => !string.Equals(name, ArbiterServer, StringComparison.Ordinal))
                 .OrderBy(name => name, StringComparer.Ordinal)
         ];
     }
