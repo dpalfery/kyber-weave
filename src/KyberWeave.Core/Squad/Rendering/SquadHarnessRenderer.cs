@@ -195,6 +195,60 @@ internal sealed class SquadHarnessRenderContext
         new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
 
     /// <summary>
+    /// The record for capability decisions a harness cannot express, or null when none are
+    /// constrained. <paramref name="reason"/> completes "but …" and names why the harness cannot
+    /// express them.
+    /// </summary>
+    public SquadDegradationRecord? CapabilitiesNotExpressible(
+        SquadAgent agent,
+        IReadOnlyList<string> constrained,
+        string reason,
+        string artifact = "agent") =>
+        constrained.Count == 0
+            ? null
+            : Degradation(
+                agent,
+                "permission-not-expressible",
+                $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", constrained)} " +
+                $"but {reason}; the deployed {artifact}'s behaviour is governed by the harness default, not " +
+                "the canonical profile.");
+
+    /// <summary>
+    /// Adds an agent file whose in-closure <c>.md</c> links are rewritten to <c>.markdown</c>, and
+    /// projects its resources under that guard, for a harness whose agent loader scans
+    /// <paramref name="discoveryGlob"/> and would register a projected <c>.md</c> resource as an
+    /// agent (ADR 0040).
+    /// </summary>
+    public void AddDiscoveryGuardedAgent(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, object?> frontmatter,
+        SquadYamlEmitter emitter,
+        string discoveryGlob)
+    {
+        SquadDeploymentFile principal = CreateFile(
+            $"{AgentsDirectory}/{agent.Name}.md",
+            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent)));
+        Files.Add(principal);
+        SquadAgentResourceDiscoveryGuard.Append(
+            Files,
+            agent,
+            principal,
+            agent.Resources,
+            Degradations,
+            Token,
+            discoveryGlob);
+    }
+
+    /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
+    public void AddArbiterPluginShim(string relativePath)
+    {
+        if (EnabledArbiter is not null)
+        {
+            Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token)));
+        }
+    }
+
+    /// <summary>
     /// The skill document every harness shares: <c>name</c>, a single-line <c>description</c> and
     /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>. No model or
     /// permission keys: a skill cannot express the capability lattice.

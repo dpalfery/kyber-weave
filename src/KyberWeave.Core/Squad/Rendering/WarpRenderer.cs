@@ -183,18 +183,11 @@ public sealed class WarpRenderer : SquadHarnessRenderer
                 decision != SquadPermissionDecision.Deny)
             .ToList();
 
-        if (constrained.Count == 0)
-        {
-            return null;
-        }
-
-        return context.Degradation(
+        return context.CapabilitiesNotExpressible(
             agent,
-            "permission-not-expressible",
-            $"Capability profile '{agent.CapabilityProfile}' constrains " +
-            $"{string.Join(", ", constrained)} but Warp skills cannot express " +
-            "capability permissions; the deployed skill's behaviour is governed by the " +
-            "harness default, not the canonical profile.");
+            constrained,
+            "Warp skills cannot express capability permissions",
+            "skill");
     }
 
     private enum WarpLowering
