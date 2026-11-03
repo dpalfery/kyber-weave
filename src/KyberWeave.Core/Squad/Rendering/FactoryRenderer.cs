@@ -38,13 +38,17 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         documents the key as an exclusion that is only honoured when it is present: <c>[]</c>
 ///         excludes every server, an absent key keeps the parent's availability, and a scalar is
 ///         rejected. This renderer therefore never omits the key and never emits a scalar. Its value
-///         is the whitelist the droid is entitled to — exactly the servers the squad's own
-///         <c>mcp.json</c> declares, in ordinal order — for a droid whose capability profile resolves
-///         and allows <c>filesystem.read</c>, the pure orchestrator (profile id <c>orchestrator</c>)
-///         included, and <c>[]</c> for every other droid. The orchestrator keeps its grant because the
-///         declared server carries <c>agent_coding_standards</c>, the tool that hands an agent the
-///         standards it is held to, and the role that assigns work is the role deciding which standards
-///         apply to whom (ADR 0050).
+///         is the whitelist the droid is entitled to — the servers the squad's own <c>mcp.json</c>
+///         declares (excluding the <c>kyber-weave-arbiter</c> hook server), in ordinal order — for a
+///         droid whose capability profile resolves and allows <c>filesystem.read</c>, and <c>[]</c>
+///         for every other droid. The declaration is partitioned by the same entitlement classes every
+///         renderer uses: universal servers (<c>kyber-weave</c>) are granted to the pure orchestrator
+///         (profile id <c>orchestrator</c>) as well, while orchestrator-excluded servers (today
+///         <c>codegraph</c>) are granted to the same read-entitled specialists but withheld from the
+///         orchestrator. The orchestrator keeps the universal grant because that server carries
+///         <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to,
+///         and the role that assigns work is the role deciding which standards apply to whom
+///         (ADR 0050); it loses only the research surface its profile is not written for.
 ///         Squad does not invent Factory MCP server names: a name that reaches a droid came from the
 ///         squad's own declaration, and a squad that declares none grants none. Only an empty whitelist
 ///         records <c>permission-not-expressible</c> saying parent MCP was not inherited; a deliberately
@@ -365,6 +369,7 @@ public sealed class FactoryRenderer : ISquadRenderer
                     ["timeout"] = timeoutSeconds,
                 }),
         };
+
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,

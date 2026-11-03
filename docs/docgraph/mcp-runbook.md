@@ -1426,6 +1426,12 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 - **Canonical binding and argument splicing**: Worktree configurations must bind MCP servers to the
   canonical repository root rather than ephemeral worktree directories. The configuration helper
   splices `--repo-root` and `--path` to absolute canonical paths.
+- **Tracked configuration restoration**: Worktree setup must use isolated per-task scratch paths for
+  every tracked MCP configuration it touches; never rewrite a tracked configuration in place. If one
+  is touched anyway, restore it (`git checkout -- <path>`) before integration. The project-scope
+  files are `.mcp.json`, `.factory/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`,
+  `.agents/mcp_config.json`, `opencode.json`, `zcode.json`, `.zcode/config.json`, and `kilo.jsonc`;
+  a harness with no project-scope file has nothing to restore.
 - **Symlink prohibition**: Worktree setup protocols strictly prohibit .codegraph symlinks.
   Never symlink `.codegraph/` into a worktree; background file watchers and concurrent writes can
   corrupt the canonical database or trigger cross-process lock contention. Worktrees must fail closed

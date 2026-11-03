@@ -93,20 +93,11 @@ public sealed class AntigravityRenderer : ISquadRenderer
     private const string AgentsDirectory = ".agents/agents";
     private const string SkillsDirectory = ".agents/skills";
 
+    private const string ArbiterServer = "kyber-weave-arbiter";
     private const string ArbiterMatcher = "^invoke_subagent$";
     private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness antigravity";
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
-
-    /// <summary>
-    ///     The server every read-entitled agent gets, and the only one this target declares. Named here
-    ///     because the grant is a property of the squad's own <c>mcp.json</c> entry whose launch
-    ///     definition is emitted verbatim; a second server would need its own declaration and its own
-    ///     probe before it could be rendered (ADR 0050 decision 7).
-    /// </summary>
-    private const string UniversalMcpServer = "kyber-weave";
-
-    private const string CodegraphMcpServer = "codegraph";
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -147,10 +138,10 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
 
-        // Read once: the launch definition comes from the squad's own declaration, so no renderer
-        // holds a second copy of the command line that could drift from mcp.json.
-        McpServerDeclaration? kyberWeaveServer = ResolveUniversalMcpServer(source);
-        McpServerDeclaration? codegraphServer = ResolveMcpServer(source, CodegraphMcpServer);
+        // Read once: the launch definitions come from the squad's own declaration, so no renderer
+        // holds a second copy of a command line that could drift from mcp.json. The list is ordinal
+        // and excludes the Arbiter hook server, which is not an agent-facing MCP server.
+        IReadOnlyList<McpServerDeclaration> declaredMcpServers = ResolveDeclaredMcpServers(source);
 
         // A null server has two causes that must not be conflated: the squad never declared the key,
         // or it declared it in a form the loader rejects. The roster names the tools either way, so
@@ -171,8 +162,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 agent,
                 source.CapabilityProfiles,
                 source.ModelProfiles,
-                kyberWeaveServer,
-                codegraphServer,
+                declaredMcpServers,
                 request.Scope));
 
         // Degrade agents only for capability constraints that cannot be expressed in
@@ -185,8 +175,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 agent,
                 source.CapabilityProfiles.Profiles,
                 capabilityVocabulary,
-                kyberWeaveServer,
-                codegraphServer,
+                declaredMcpServers,
                 mcpShape,
                 universalToolsDeclared);
             if (permission is not null) degradations.Add(permission);
@@ -333,8 +322,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         SquadAgent agent,
         SquadCapabilityProfiles capabilityProfiles,
         SquadModelProfiles modelProfiles,
-        McpServerDeclaration? kyberWeaveServer,
-        McpServerDeclaration? codegraphServer,
+        IReadOnlyList<McpServerDeclaration> declaredMcpServers,
         SquadDeploymentScope scope)
     {
         ValidateCanonicalName(agent.Name);
@@ -388,21 +376,28 @@ public sealed class AntigravityRenderer : ISquadRenderer
         if (!string.IsNullOrEmpty(reasoningEffort)) frontmatter.Add("reasoning_effort", reasoningEffort);
 
         // mcpServers: the grant vehicle this harness actually reads. Universal servers (kyber-weave)
-        // are granted to any read-entitled profile (conductor included, per ADR 0050). Orchestrator-
-        // excluded servers (codegraph) are granted to read-entitled specialists while withheld from
-        // the conductor.
-        List<McpServerDeclaration> mcpServers = [];
-        if (kyberWeaveServer is not null &&
-            CapabilityDegradations.GrantsUniversalMcpServers(
-                agent.CapabilityProfile,
-                capabilityProfiles.Profiles))
-            mcpServers.Add(kyberWeaveServer);
+        // are granted to any read-entitled profile (conductor included, per ADR 0050). Every other
+        // declared server is orchestrator-excluded: granted to read-entitled specialists and withheld
+        // from the pure orchestrator. The declaration list is ordinal, so the emitted order is too.
+        bool grantsUniversal = CapabilityDegradations.GrantsUniversalMcpServers(
+            agent.CapabilityProfile,
+            capabilityProfiles.Profiles);
+        bool grantsOrchestratorExcluded = CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+            agent.CapabilityProfile,
+            capabilityProfiles.Profiles);
 
-        if (codegraphServer is not null &&
-            CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
-                agent.CapabilityProfile,
-                capabilityProfiles.Profiles))
-            mcpServers.Add(codegraphServer);
+        List<McpServerDeclaration> mcpServers = [];
+        foreach (McpServerDeclaration server in declaredMcpServers)
+        {
+            bool granted = string.Equals(
+                server.Name,
+                CapabilityDegradations.UniversalMcpServer,
+                StringComparison.Ordinal)
+                ? grantsUniversal
+                : grantsOrchestratorExcluded;
+
+            if (granted) mcpServers.Add(server);
+        }
 
         if (mcpServers.Count > 0) frontmatter.Add("mcpServers", BuildMcpServersNode(mcpServers));
 
@@ -490,12 +485,26 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     /// <summary>
-    ///     The launch definition the squad's own <c>mcp.json</c> declares for
-    ///     <see cref="UniversalMcpServer" />, or <see langword="null" /> when it declares none.
+    ///     The launch definitions the squad's own <c>mcp.json</c> declares, in ordinal order, minus
+    ///     the Arbiter hook server, which is not an agent-facing MCP server.
     /// </summary>
-    private static McpServerDeclaration? ResolveUniversalMcpServer(SquadSource source)
+    private static IReadOnlyList<McpServerDeclaration> ResolveDeclaredMcpServers(SquadSource source)
     {
-        return ResolveMcpServer(source, UniversalMcpServer);
+        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object)
+            return [];
+
+        List<McpServerDeclaration> declarations = [];
+        foreach (string name in servers.EnumerateObject()
+                     .Select(server => server.Name)
+                     .Where(name => !string.Equals(name, ArbiterServer, StringComparison.Ordinal))
+                     .OrderBy(name => name, StringComparer.Ordinal))
+        {
+            McpServerDeclaration? declaration = ResolveMcpServer(source, name);
+            if (declaration is not null) declarations.Add(declaration);
+        }
+
+        return declarations;
     }
 
     /// <summary>
@@ -640,8 +649,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary,
-        McpServerDeclaration? kyberWeaveServer,
-        McpServerDeclaration? codegraphServer,
+        IReadOnlyList<McpServerDeclaration> declaredMcpServers,
         McpDeclarationShape mcpShape,
         bool universalToolsDeclared)
     {
@@ -694,8 +702,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
             string? withheldMcp = DescribeWithheldMcp(
                 agent.CapabilityProfile,
                 capabilityProfiles,
-                kyberWeaveServer,
-                codegraphServer,
+                declaredMcpServers,
                 mcpShape,
                 universalToolsDeclared);
 
@@ -727,8 +734,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         string? withheld = DescribeWithheldMcp(
             agent.CapabilityProfile,
             capabilityProfiles,
-            kyberWeaveServer,
-            codegraphServer,
+            declaredMcpServers,
             mcpShape,
             universalToolsDeclared);
         if (withheld is not null) details.Add(withheld);
@@ -759,12 +765,16 @@ public sealed class AntigravityRenderer : ISquadRenderer
     private static string? DescribeWithheldMcp(
         string profileName,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        McpServerDeclaration? kyberWeaveServer,
-        McpServerDeclaration? codegraphServer,
+        IReadOnlyList<McpServerDeclaration> declaredMcpServers,
         McpDeclarationShape mcpShape,
         bool universalToolsDeclared)
     {
-        if (kyberWeaveServer is null)
+        bool declaresUniversalServer = declaredMcpServers.Any(server => string.Equals(
+            server.Name,
+            CapabilityDegradations.UniversalMcpServer,
+            StringComparison.Ordinal));
+
+        if (!declaresUniversalServer)
         {
             string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
             if (missingServer is not null)
@@ -779,11 +789,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
             return EntitlementGapSentence(profileName, capabilityProfiles);
         }
 
-        List<string> declaredServerNames = [kyberWeaveServer.Name];
-        if (codegraphServer is not null)
-        {
-            declaredServerNames.Add(codegraphServer.Name);
-        }
+        IReadOnlyList<string> declaredServerNames = [.. declaredMcpServers.Select(server => server.Name)];
 
         IReadOnlyList<string> withheldServerNames = CapabilityDegradations.WithheldMcpServerNames(
             profileName,
@@ -888,7 +894,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// <param name="IsObject">Whether <c>mcpServers</c> exists and is a JSON object.</param>
     /// <param name="DeclaresUniversalServer">Whether that object carries the <c>kyber-weave</c> key.</param>
     /// <remarks>
-    ///     <see cref="ResolveUniversalMcpServer" /> answers null for a missing key, a missing <c>mcpServers</c>
+    ///     <see cref="ResolveMcpServer" /> answers null for a missing key, a missing <c>mcpServers</c>
     ///     object, and an unusable entry alike. Only the first is an operator-visible misconfiguration: a source
     ///     that declares no <c>mcpServers</c> object at all, or one whose entry the loader rejects, has nothing to
     ///     report to the agent, because the loader rejects those states before a real source reaches this renderer.

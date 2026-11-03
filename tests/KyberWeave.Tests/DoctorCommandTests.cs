@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
@@ -11,6 +12,7 @@ namespace KyberWeave.Tests;
 ///     a specified canonical repository path when invoked with an explicit path argument from within an
 ///     arbitrary directory (simulating a worktree checking its canonical parent) (T3).
 /// </summary>
+[Collection(DoctorCommandWorkingDirectoryCollection.Name)]
 public sealed class DoctorCommandTests : IDisposable
 {
     private readonly TempDirectory _arbitraryWorktree = new();
@@ -91,14 +93,16 @@ public sealed class DoctorCommandTests : IDisposable
 
         string stubPath = DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath);
 
-        string relativePath = Path.GetRelativePath(Environment.CurrentDirectory, CanonicalPath);
+        string relativePath = Path.GetRelativePath(WorktreePath, CanonicalPath);
+        string originalDirectory = Environment.CurrentDirectory;
+        string expectedCanonicalPath = string.Empty;
 
         bool gitInvokedOnCanonical = false;
         ScriptedProcessExecutor executor = new(startInfo =>
         {
             if (startInfo.FileName == "git")
             {
-                Assert.Equal(CanonicalPath, startInfo.WorkingDirectory);
+                Assert.Equal(expectedCanonicalPath, startInfo.WorkingDirectory);
                 gitInvokedOnCanonical = true;
                 return new ProcessResult(0, CanonicalPath + "\n", string.Empty);
             }
@@ -122,12 +126,22 @@ public sealed class DoctorCommandTests : IDisposable
             Check = true
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, settings, CancellationToken.None));
+        try
+        {
+            Environment.CurrentDirectory = WorktreePath;
+            expectedCanonicalPath = Path.GetFullPath(relativePath);
 
-        Assert.Equal(0, execution.Result);
-        Assert.True(gitInvokedOnCanonical,
-            "Git rev-parse must be invoked with WorkingDirectory pointing to the canonical repository.");
+            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+                command.Execute(null!, settings, CancellationToken.None));
+
+            Assert.Equal(0, execution.Result);
+            Assert.True(gitInvokedOnCanonical,
+                "Git rev-parse must be invoked with WorkingDirectory pointing to the canonical repository.");
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+        }
     }
 
     /// <summary>
@@ -191,4 +205,19 @@ public sealed class DoctorCommandTests : IDisposable
 
         Assert.Equal(2, execution.Result);
     }
+}
+
+/// <summary>
+///     Serializes the one test that changes <see cref="Environment.CurrentDirectory" /> so it cannot
+///     race a parallel test that resolves a relative path.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+[SuppressMessage(
+    "Naming",
+    "CA1711:Identifiers should not have incorrect suffix",
+    Justification = "xUnit collection definitions are named <Name>Collection by convention; "
+        + "the suffix is the framework idiom, not a claim to be a collection type.")]
+public sealed class DoctorCommandWorkingDirectoryCollection
+{
+    public const string Name = "DoctorCommandWorkingDirectory";
 }

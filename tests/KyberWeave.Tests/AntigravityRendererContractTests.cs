@@ -1307,24 +1307,24 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     A squad that declares MCP servers but not <c>kyber-weave</c> grants it to nobody: every
-    ///     entitled agent renders no <c>mcpServers</c> key, and no record claims a server was withheld.
+    ///     A squad that declares MCP servers but not <c>kyber-weave</c> grants no universal server:
+    ///     the orchestrator and read-denied agents render no <c>mcpServers</c> key, while read-entitled
+    ///     specialists receive only the orchestrator-excluded servers the declaration names. No record
+    ///     claims a server was withheld.
     /// </summary>
     /// <remarks>
     ///     This is the declaration half of the fail-closed rule, and it is a different question from
     ///     the profile half the read-denied test above covers. The profiles here entitle every agent;
-    ///     only the <c>mcp.json</c> is short of the server. Without this case a renderer that resolved
-    ///     whichever server the declaration happened to name first — or one that emitted an empty
-    ///     <c>mcpServers: []</c> rather than omitting the key — would satisfy every other Antigravity
-    ///     assertion in this file, and on this harness an explicit empty list reads as "exclude every
-    ///     MCP server" rather than as an absent key.
-    ///     Nothing is reported as withheld, because nothing was there to withhold: the profiles entitled
-    ///     every agent and only the declaration was short. What is reported is the configuration gap
-    ///     itself, in one record per agent, naming the missing server. Without that sentence a renamed or
-    ///     dropped `mcp.json` entry would cost every agent the grant in silence.
+    ///     only the <c>mcp.json</c> is short of the universal server. The declared non-universal server
+    ///     follows the orchestrator-excluded partition, which is the same rule Factory applies to its
+    ///     whitelist, so a specialist receives it and the pure orchestrator does not. Nothing is
+    ///     reported as withheld, because nothing was there to withhold: the profiles entitled every
+    ///     agent and only the universal declaration was short. What is reported is the configuration
+    ///     gap itself, in one record per agent, naming the missing server. Without that sentence a
+    ///     renamed or dropped `mcp.json` entry would cost every agent the grant in silence.
     /// </remarks>
     [Fact]
-    public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsItToNobodyAndClaimsNoWithholding()
+    public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsOnlyOrchestratorExcludedServers()
     {
         using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("other-server");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
@@ -1349,11 +1349,27 @@ public sealed class AntigravityRendererContractTests : IDisposable
             YamlMappingNode frontmatter = ReadFrontmatter(Assert.Single(
                 result.Files,
                 file => file.RelativePath == $".agents/agents/{agent.Name}/agent.md"));
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
-                $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
-                + "'kyber-weave' server. An omitted key is the only fail-closed answer: on Antigravity "
-                + "an explicit empty list excludes every server rather than inheriting nothing.");
+
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    source.CapabilityProfiles.Profiles))
+            {
+                YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(
+                    RequireNode(frontmatter, "mcpServers"));
+                Assert.Equal(
+                    ["other-server"],
+                    entries.Children.Select(child =>
+                        RequireScalar(Assert.IsType<YamlMappingNode>(child), "name")));
+            }
+            else
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+                    $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
+                    + "'kyber-weave' server and the agent is not entitled to an orchestrator-excluded "
+                    + "server. An omitted key is the only fail-closed answer: on Antigravity an explicit "
+                    + "empty list excludes every server rather than inheriting nothing.");
+            }
         }
 
         Assert.All(
