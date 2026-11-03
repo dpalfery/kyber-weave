@@ -232,12 +232,13 @@ public sealed class SquadRendererSharedContractTests
 
     /// <summary>
     /// The skill document is the pipeline's, not the harness's: each canonical skill a harness does
-    /// not suppress ships once, under the harness's skills directory, with its name, its description
-    /// lowered by the spec's line-break rule, the spec's license, and its body verbatim.
+    /// not suppress ships once, under the harness's skills directory, with its keys in order, its
+    /// name, its description lowered by the spec's line-break rule, the spec's license, and its body
+    /// verbatim.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShippedTargetsAtEachScope))]
-    public async Task EachRendererEmitsEachCanonicalSkillOnceWithItsNameDescriptionLicenseAndBodyIntact(
+    public async Task EachRendererEmitsEachCanonicalSkillOnceAsTheSharedSkillDocument(
         SquadTarget target,
         SquadDeploymentScope scope)
     {
@@ -263,6 +264,10 @@ public sealed class SquadRendererSharedContractTests
             (YamlMappingNode frontmatter, string body) =
                 SquadRenderedOutput.SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), skill.Name);
 
+            // An ordered mapping, not a sequence: a serializer change must not reorder the keys.
+            Assert.Equal(
+                spec.SkillLicense is null ? ["name", "description"] : ["name", "description", "license"],
+                frontmatter.Children.Keys.OfType<YamlScalarNode>().Select(key => key.Value));
             Assert.Equal(skill.Name, SquadRenderedOutput.RequireScalar(frontmatter, "name", skill.Name));
             Assert.Equal(
                 SquadHarnessLowering.SingleLine(skill.Description, spec.DescriptionLineBreaks),

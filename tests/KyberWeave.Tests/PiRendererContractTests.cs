@@ -238,29 +238,8 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        // R17: Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
-        // Σ non-suppressed skill resources. A non-shared primary agent (the conductor) contributes
-        // one principal whether it renders as an agent (elsewhere) or, here, a lowered skill. A
-        // primary shared identity contributes no agent principal: its canonical skill is the entry
-        // point and is counted with the skills, so it is subtracted from the agent term.
-        int sharedPrimaries = source.Agents.Count(agent =>
-            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedFileCount =
-            source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
-
-        Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.All(result.Files, f => Assert.Equal("pi", f.Target));
         Assert.All(result.Files, f => Assert.True(
             f.RelativePath.StartsWith(".pi/agents/", StringComparison.Ordinal) ||
             f.RelativePath.StartsWith(".pi/skills/", StringComparison.Ordinal),

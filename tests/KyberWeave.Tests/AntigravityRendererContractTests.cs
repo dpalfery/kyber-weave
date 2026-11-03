@@ -183,33 +183,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     first.Files,
                     f => f.RelativePath == $".agents/skills/{skill.Name}/{resource.RelativePath}");
     }
-
-    [Fact]
-    public async Task RenderSkill_FrontmatterKeyOrderIsStable()
-    {
-        // The frontmatter contract is name, description, license — an ordered mapping, not
-        // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
-        // a list-of-pairs shape.
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        string probe = source.Skills
-                           .Select(skill => skill.Name)
-                           .OrderBy(name => name, StringComparer.Ordinal)
-                           .FirstOrDefault()
-                       ?? throw new InvalidOperationException($"Corpus at '{ProductRoot}' declares no skills.");
-
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
-
-        SquadDeploymentFile rendered = Assert.Single(
-            result.Files,
-            f => f.RelativePath == $".agents/skills/{probe}/SKILL.md");
-        YamlMappingNode frontmatter = ReadFrontmatter(rendered);
-        string[] keys = frontmatter.Children.Keys
-            .OfType<YamlScalarNode>()
-            .Select(key => key.Value ?? string.Empty)
-            .ToArray();
-        Assert.Equal(["name", "description", "license"], keys);
-    }
-
     private static string NormalizeBody(string body)
     {
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -284,23 +257,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 result.Files.Any(f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md" &&
                                       f.Target == "antigravity"),
                 $"Agent '{agent.Name}' must render to .agents/agents/{agent.Name}/agent.md");
-    }
-
-    /// <summary>Every canonical skill still emits its <c>SKILL.md</c> under native rendering.</summary>
-    [Fact]
-    public async Task RenderAsync_Antigravity_Native_EmitsCanonicalSkillFiles()
-    {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        // Every canonical skill must still emit a SKILL.md file (native both pattern)
-        foreach (SquadSkill skill in source.Skills)
-            Assert.True(
-                result.Files.Any(f => f.RelativePath == $".agents/skills/{skill.Name}/SKILL.md" &&
-                                      f.Target == "antigravity"),
-                $"Skill '{skill.Name}' must render to .agents/skills/{skill.Name}/SKILL.md");
     }
 
     /// <summary>Native rendering emits no role-prefixed collision files.</summary>
