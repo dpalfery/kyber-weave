@@ -1290,10 +1290,10 @@ describe('ingestBatch — the withdrawn native Factory claim', () => {
 // holds the text.
 //
 // THE RULES:
-//   1. The gate covers the native route only, and it strips exactly the
-//      content-bearing attributes. The correlation and usage metadata — the
-//      session, the conversation, the model, the counters — is not content and
-//      survives.
+//   1. The gate covers BOTH of Factory's routes — the native export and the
+//      plugin envelope — and it strips exactly the content-bearing attributes.
+//      The correlation and usage metadata — the session, the conversation, the
+//      model, the counters — is not content and survives.
 //   2. Another harness's content is untouched. The gate is scoped to Factory's own
 //      spans, so Copilot's and pi's `gen_ai.input.messages` still reach their
 //      records.
