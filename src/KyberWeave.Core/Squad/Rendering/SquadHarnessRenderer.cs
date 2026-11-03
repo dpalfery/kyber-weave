@@ -64,10 +64,11 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
 
         // Canonical names become directory and file names in every harness's tree, so a name carrying
         // path syntax is rejected here, before any file is built from it, rather than left to the
-        // registry's portable-path check after the render.
+        // registry's portable-path check after the render. Only path syntax is rejected: a name such
+        // as "a..b" is one portable segment and renders as it always has.
         foreach (string name in source.Agents.Select(agent => agent.Name).Concat(source.Skills.Select(skill => skill.Name)))
         {
-            SquadHarnessRenderContext.ValidateCanonicalName(name);
+            SquadHarnessRenderContext.ValidatePathSegment(name);
         }
 
         return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
@@ -520,8 +521,24 @@ internal sealed class SquadHarnessRenderContext
         };
 
     /// <summary>
-    /// Rejects a canonical name that is not a single portable path segment, before any file is
-    /// built from it.
+    /// Rejects a canonical name that would not stay one path segment: blank, carrying a separator, or
+    /// made only of dots (<c>.</c>, <c>..</c>).
+    /// </summary>
+    public static void ValidatePathSegment(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) ||
+            name.Contains('/', StringComparison.Ordinal) ||
+            name.Contains('\\', StringComparison.Ordinal) ||
+            name.Trim('.').Length == 0)
+        {
+            throw new SquadRenderValidationException(
+                $"Canonical name '{name}' is not a valid single-segment path for rendering.");
+        }
+    }
+
+    /// <summary>
+    /// The stricter name check Warp and Antigravity have always applied: everything
+    /// <see cref="ValidatePathSegment"/> rejects, plus any name containing <c>..</c>.
     /// </summary>
     public static void ValidateCanonicalName(string name)
     {

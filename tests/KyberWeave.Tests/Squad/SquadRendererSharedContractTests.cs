@@ -342,10 +342,37 @@ public sealed class SquadRendererSharedContractTests
         SquadRenderResult project = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Project);
         SquadRenderResult global = await TestSquadCorpus.GetDefaultRenderAsync(target, SquadDeploymentScope.Global);
 
+        Assert.NotEmpty(project.Files);
         Assert.All(project.Files, file => Assert.StartsWith(root, file.RelativePath, StringComparison.Ordinal));
         Assert.Equal(
             project.Files.Select(file => file.RelativePath[root.Length..]).Order(StringComparer.Ordinal),
             global.Files.Select(file => file.RelativePath).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// The pipeline's name gate rejects only what would not stay one path segment, so a name that
+    /// merely contains dots still renders on every harness that accepted it before the gate existed.
+    /// </summary>
+    [Theory]
+    [InlineData("a..b", true)]
+    [InlineData("v1.2", true)]
+    [InlineData("a/b", false)]
+    [InlineData("a\\b", false)]
+    [InlineData("..", false)]
+    [InlineData(".", false)]
+    [InlineData(" ", false)]
+    public void ThePipelineRejectsOnlyCanonicalNamesThatAreNotOnePathSegment(string name, bool accepted)
+    {
+        Exception? thrown = Record.Exception(() => SquadHarnessRenderContext.ValidatePathSegment(name));
+
+        if (accepted)
+        {
+            Assert.Null(thrown);
+        }
+        else
+        {
+            Assert.IsType<SquadRenderValidationException>(thrown);
+        }
     }
 
     /// <summary>
