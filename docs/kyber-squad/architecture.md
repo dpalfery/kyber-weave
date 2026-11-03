@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-03
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -18,6 +18,7 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0034-factory-droid-entry-point-skill
+  - adr/0055-squad-renderers-share-one-render-pipeline
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
@@ -794,6 +795,15 @@ and validates.
   requested target against `ISquadRenderer.SupportedTargets`. Any target with no registered
   renderer fails the whole request — install and update are all-or-nothing across the
   requested target set, never a partial render of the targets that happen to be covered.
+- **One pipeline** ([ADR 0055](../adr/0055-squad-renderers-share-one-render-pipeline.md)): every
+  shipped renderer derives from `SquadHarnessRenderer`, which owns the guard, source load and
+  result. A harness supplies a `SquadHarnessSpec` (target, project root, agent directory, model
+  policy, description line-break rule, skill license) and a `RenderAgent`; the shared skill
+  document, skill loop, primary-agent lowering, discovery-guarded agent file and Arbiter hook
+  block live on `SquadHarnessRenderContext`. Native versus fallback is
+  `SquadTargetCatalog.GetAgentProjection`, which the registry's validation reads, so adding a
+  harness is not a registry edit. `SquadRendererSharedContractTests` checks the shared steps once
+  for every renderer against its spec.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
   owns it — `ClaudeRenderer` for `.claude/agents/*.md` and a primary-agent entry-point skill at
   `.claude/skills/conductor/SKILL.md`, `CopilotRenderer` for `.github/agents/*.agent.md` and
