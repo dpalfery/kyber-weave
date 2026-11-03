@@ -54,21 +54,18 @@ public static class VerdictEngine
     private const string Subject = "review";
 
     /// <summary>Computes the verdict for one change.</summary>
-    /// <param name="scope">What the change touches.</param>
     /// <param name="findings">Findings reported by the council, after its own confirmation pass.</param>
     /// <param name="gates">Results from the deterministic gate suite.</param>
     /// <param name="config">The host's review configuration.</param>
     /// <param name="today">The date suppression expiry is evaluated against.</param>
     /// <param name="coverage">Measured coverage, when the coverage gate produced any.</param>
     public static ReviewOutcome Evaluate(
-        ReviewScope scope,
         IReadOnlyList<ReviewFinding> findings,
         IReadOnlyList<GateResult> gates,
         ReviewConfig config,
         DateOnly today,
         CoverageResult? coverage = null)
     {
-        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(config);

@@ -55,11 +55,9 @@ public class ReviewVerdictTests
     private static ReviewOutcome Evaluate(
         IReadOnlyList<ReviewFinding>? findings = null,
         IReadOnlyList<GateResult>? gates = null,
-        ReviewScope? scope = null,
         ReviewConfig? config = null,
         CoverageResult? coverage = null) =>
         VerdictEngine.Evaluate(
-            scope ?? Scope(),
             findings ?? [],
             gates ?? [],
             config ?? Config(),
@@ -196,8 +194,7 @@ public class ReviewVerdictTests
     public void TouchToAuthPathWithCleanGatesAndNoFindingsIsApproved()
     {
         ReviewOutcome outcome = Evaluate(
-            gates: [new GateResult("test", true, 0, "passed")],
-            scope: Scope(10, "src/auth/TokenIssuer.cs"));
+            gates: [new GateResult("test", true, 0, "passed")]);
 
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
         Assert.Equal(RiskGrade.Low, outcome.Risk);
@@ -224,8 +221,7 @@ public class ReviewVerdictTests
     public void LargeChangeWithCleanGatesAndNoFindingsIsApproved()
     {
         ReviewOutcome outcome = Evaluate(
-            gates: [new GateResult("test", true, 0, "passed")],
-            scope: Scope(10_001));
+            gates: [new GateResult("test", true, 0, "passed")]);
 
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
         Assert.Equal(RiskGrade.Low, outcome.Risk);
@@ -240,8 +236,11 @@ public class ReviewVerdictTests
     [Fact]
     public void SizeAloneDoesNotRaiseTheRiskGrade()
     {
-        Assert.Equal(RiskGrade.Low, Evaluate(scope: Scope(9_999)).Risk);
-        Assert.Equal(RiskGrade.High, Evaluate([Finding(ReviewSeverity.Critical)], scope: Scope(3)).Risk);
+        ReviewScope large = Scope(9_999);
+        Assert.Equal(9_999, large.EffectiveChangedLines);
+
+        Assert.Equal(RiskGrade.Low, Evaluate().Risk);
+        Assert.Equal(RiskGrade.High, Evaluate([Finding(ReviewSeverity.Critical)]).Risk);
     }
 
     [Theory]

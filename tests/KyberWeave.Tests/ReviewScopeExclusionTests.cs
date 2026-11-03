@@ -22,9 +22,9 @@ public sealed class ReviewScopeExclusionTests
     private const int SourceOnlyLines = 200;
     private const int ExcludedLines = 18_000;
 
-    private static ReviewOutcome Evaluate(ReviewScope scope)
+    private static ReviewOutcome Evaluate()
     {
-        return VerdictEngine.Evaluate(scope, [], [], new ReviewConfig(), Today);
+        return VerdictEngine.Evaluate([], [], new ReviewConfig(), Today);
     }
 
     private static ReviewScope ScopeWithExcludedCounts(string excludedPath)
@@ -50,7 +50,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(lockfile);
 
-        ReviewOutcome outcome = Evaluate(scope);
+        ReviewOutcome outcome = Evaluate();
 
         Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
@@ -65,7 +65,7 @@ public sealed class ReviewScopeExclusionTests
     {
         ReviewScope scope = ScopeWithExcludedCounts(scratchPath);
 
-        ReviewOutcome outcome = Evaluate(scope);
+        ReviewOutcome outcome = Evaluate();
 
         Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
@@ -154,7 +154,7 @@ public sealed class ReviewScopeExclusionTests
         };
         ReviewScope scope = new(["src/A.cs", "src/B.cs"], 21_000, pathLineCounts);
 
-        ReviewOutcome outcome = Evaluate(scope);
+        ReviewOutcome outcome = Evaluate();
 
         Assert.Equal(21_000, scope.EffectiveChangedLines);
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);

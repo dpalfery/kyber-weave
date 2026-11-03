@@ -48,8 +48,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         }
 
         ReviewOutcome outcome = VerdictEngine.Evaluate(
-            findings!.ToScope(),
-            findings.Findings,
+            findings!.Findings,
             gates?.Gates ?? [],
             config.Review,
             DateOnly.FromDateTime(DateTime.UtcNow),
