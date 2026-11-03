@@ -1,0 +1,13 @@
+{
+  "session_id": "sess-codex-3",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "codex-1",
+  "turn_id": "turn-3",
+  "tool_name": "shell",
+  "tool_use_id": "toolu-codex-nondispatch-1",
+  "tool_input": {
+    "command": "ls docs/plans/x.md"
+  }
+}

@@ -18,7 +18,7 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
-        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output"];
+        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output", "applies-when"];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] TaskGateKeys =
@@ -105,7 +105,8 @@ public static class ReviewConfigLoader
                 gate.Blocking ?? true,
                 timeoutSeconds,
                 os,
-                workingDirectory)
+                workingDirectory,
+                ParseAppliesWhen(gate.Id!, gate.AppliesWhen))
             {
                 Include = include,
                 FailOnOutput = gate.FailOnOutput ?? false
@@ -113,6 +114,25 @@ public static class ReviewConfigLoader
         }
 
         return parsed;
+    }
+
+    private static ReviewGateAppliesWhen? ParseAppliesWhen(string id, ReviewAppliesWhenYaml? yaml)
+    {
+        if (yaml is null)
+            return null;
+
+        // An applies-when that matches nothing would skip its gate on every change, which
+        // is a gate that never runs wearing the uniform of one that does.
+        if (yaml.Paths is null || yaml.Paths.Count == 0)
+        {
+            throw new YamlException(
+                $"review.gates '{id}' applies-when.paths must list at least one path pattern.");
+        }
+
+        if (yaml.Paths.Exists(string.IsNullOrWhiteSpace))
+            throw new YamlException($"review.gates '{id}' applies-when.paths has an empty path pattern.");
+
+        return new ReviewGateAppliesWhen([.. yaml.Paths]);
     }
 
     /// <summary>

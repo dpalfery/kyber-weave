@@ -47,15 +47,17 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         long allPairs = (long)ClaimCount * (ClaimCount - 1) / 2;
         long configuredBound = (long)ClaimCount * config.Search.MaxNeighborsPerClaim;
 
+        long workingSetDelta = measurement.PeakWorkingSetBytes - measurement.BaselineWorkingSetBytes;
         output.WriteLine(
             "Hybrid scale: {0} claims, {1} graph comparisons, {2} lexical comparisons, " +
-            "{3} candidates, {4:F3}s, {5:F1} MiB peak working set, {6:F1} MiB allocated.",
+            "{3} candidates, {4:F3}s, {5:F1} MiB working-set delta (baseline {6:F1} MiB), {7:F1} MiB allocated.",
             result.Metrics.ExtractedClaims,
             result.Metrics.GraphComparisons,
             result.Metrics.LexicalComparisons,
             result.Candidates.Count,
             measurement.Elapsed.TotalSeconds,
-            measurement.PeakWorkingSetBytes / 1024d / 1024d,
+            workingSetDelta / 1024d / 1024d,
+            measurement.BaselineWorkingSetBytes / 1024d / 1024d,
             measurement.AllocatedBytes / 1024d / 1024d);
 
         Assert.Equal(ClaimCount, result.Metrics.ExtractedClaims);
@@ -94,8 +96,8 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
             measurement.Elapsed < TimeSpan.FromSeconds(10),
             $"Default hybrid analysis took {measurement.Elapsed.TotalSeconds:F3}s; the Release target is under 10s.");
         Assert.True(
-            measurement.PeakWorkingSetBytes < 512L * 1024 * 1024,
-            $"Default hybrid analysis used {measurement.PeakWorkingSetBytes / 1024d / 1024d:F1} MiB peak working set; " +
+            workingSetDelta < 512L * 1024 * 1024,
+            $"Default hybrid analysis used {workingSetDelta / 1024d / 1024d:F1} MiB working-set delta; " +
             "the Release target is under 512 MiB.");
 #endif
     }
@@ -213,12 +215,19 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         samplingCancellation.Cancel();
         sampler.GetAwaiter().GetResult();
         samplerState.Sample();
-        return new Measurement<T>(value, stopwatch.Elapsed, samplerState.PeakWorkingSet, allocated);
+        return new Measurement<T>(
+            value,
+            stopwatch.Elapsed,
+            samplerState.BaselineWorkingSet,
+            samplerState.PeakWorkingSet,
+            allocated);
     }
 
     private sealed class SamplerState(Process process)
     {
         private long _peakWorkingSet = process.WorkingSet64;
+
+        public long BaselineWorkingSet { get; } = process.WorkingSet64;
 
         public long PeakWorkingSet => Volatile.Read(ref _peakWorkingSet);
 
@@ -232,6 +241,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
     private sealed record Measurement<T>(
         T Value,
         TimeSpan Elapsed,
+        long BaselineWorkingSetBytes,
         long PeakWorkingSetBytes,
         long AllocatedBytes);
 

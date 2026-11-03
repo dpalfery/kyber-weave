@@ -7,6 +7,10 @@
     "codegraph": {
       "command": "codegraph",
       "args": ["serve", "--mcp", "--path", "."]
+    },
+    "kyber-weave-arbiter": {
+      "command": "kyber-weave-arbiter",
+      "args": ["serve", "--repo-root", "."]
     }
   }
 }

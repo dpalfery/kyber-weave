@@ -151,6 +151,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return decision.ExitCode ?? 2;
         }
 
+        // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
+        // verbatim, timeout-ms as whole hook seconds with headroom.
+        SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. The same injected resolver the lifecycle plans with
         // names the roots, so the confirmation shows the real destinations.
@@ -174,7 +178,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             settings.Exclusions,
             pinnedVersion,
             Adopt: settings.Adopt,
-            DryRun: settings.DryRun);
+            DryRun: settings.DryRun,
+            Arbiter: arbiterWiring);
 
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
@@ -209,6 +214,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                     SquadCommandComposition.WriteLine(
                         $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
                 }
+
+                // Until trust is granted the hooks stay off (§10.7), so the install names
+                // each selected target's trust gate where the audit cannot observe the gap.
+                WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
 
@@ -256,5 +265,38 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     public int Execute(CommandContext context, SquadInstallSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Prints the Arbiter trust gate for each selected target that has one.
+    /// </summary>
+    /// <remarks>
+    /// Only when the Arbiter is enabled: a disabled wiring renders no hooks, so there is
+    /// no gate to grant. Each line carries the target token and the step verbatim from
+    /// <see cref="ArbiterHookWiring.TrustSteps"/> so the operator can copy it.
+    /// </remarks>
+    internal static void WriteArbiterTrustSteps(
+        IReadOnlyList<SquadTarget> targets,
+        SquadArbiterWiring wiring)
+    {
+        if (!wiring.Enabled)
+        {
+            return;
+        }
+
+        // Unfolded: a redirected console folds at 80 columns, splitting the step
+        // mid-phrase — corrupting the one thing the line exists for: a copy-pastable
+        // gate the operator must grant where the audit cannot observe the gap.
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            foreach (SquadTarget target in targets)
+            {
+                if (ArbiterHookWiring.TrustSteps.TryGetValue(target, out string? step))
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]Arbiter trust ({Markup.Escape(SquadTargetCatalog.GetToken(target))}):[/] {Markup.Escape(step)}");
+                }
+            }
+        });
     }
 }

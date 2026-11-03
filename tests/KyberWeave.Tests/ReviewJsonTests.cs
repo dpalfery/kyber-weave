@@ -74,9 +74,9 @@ public sealed class ReviewJsonTests
         GateReport report = new(
             GateReport.CurrentSchema,
             [
-                new GateResult("missing-tool", true, -1, "could not start 'kw-tool'", 3, GateOutcome.NotStarted),
-                new GateResult("slow-gate", true, -1, "timed out after 5 seconds", 5000, GateOutcome.TimedOut),
-                new GateResult("tests", true, 1, "2 failed", 900, GateOutcome.Completed)
+                new GateResult("missing-tool", true, -1, "could not start 'kw-tool'", 3, Outcome: GateOutcome.NotStarted),
+                new GateResult("slow-gate", true, -1, "timed out after 5 seconds", 5000, Outcome: GateOutcome.TimedOut),
+                new GateResult("tests", true, 1, "2 failed", 900, Outcome: GateOutcome.Completed)
             ]);
 
         using JsonDocument document = JsonDocument.Parse(ReviewJson.Write(report));
@@ -113,7 +113,7 @@ public sealed class ReviewJsonTests
     {
         GateReport report = new(
             GateReport.CurrentSchema,
-            [new GateResult("missing-tool", true, -1, "could not start 'kw-tool'", 3, GateOutcome.NotStarted)]);
+            [new GateResult("missing-tool", true, -1, "could not start 'kw-tool'", 3, Outcome: GateOutcome.NotStarted)]);
 
         GateReport read = ReviewJson.ReadGates(ReviewJson.Write(report));
 

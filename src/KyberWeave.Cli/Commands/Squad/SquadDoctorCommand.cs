@@ -1,5 +1,7 @@
 using System.Reflection;
+using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -16,6 +18,8 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
     private readonly IProcessExecutor? _executor;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadRenderer? _renderer;
@@ -39,9 +43,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         SquadStateStore? stateStore = null,
         Func<string, string?>? environmentReader = null)
     {
+        _executor = executor;
         _userPaths = userPaths;
         _stateStore = stateStore;
-        _executor = executor;
         _workingDirectory = workingDirectory;
         _globalRoots = globalRoots;
         _renderer = renderer;
@@ -124,6 +128,13 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
+        // 3b. Arbiter Probe — only when the host enabled the Arbiter. A missing binary or
+        // a version that differs from the CLI's is KW-ARB-BIN-001.
+        if (ReportArbiterBinary(workingDirectory))
+        {
+            hasIssues = true;
+        }
+
         // 4. Canonical Source (Maintainer check - only when inside repository root)
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
@@ -135,7 +146,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     $"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
 
-                if (ReportZCodeMcpConfiguration(source, workingDirectory)) hasIssues = true;
+                if (ReportZCodeMcpConfiguration(source, workingDirectory, settings.Global))
+                {
+                    hasIssues = true;
+                }
             }
             catch (SquadSourceValidationException ex)
             {
@@ -175,6 +189,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
+        if (ReportOwnedBlockDrift(workingDirectory, settings.Global))
+        {
+            hasIssues = true;
+        }
+
         if (settings.Global &&
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
             hasIssues = true;
@@ -196,8 +215,66 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    ///     Reports whether the ZCode installation declares the MCP servers the canonical toolchain
-    ///     requires.
+    /// Probes the <c>kyber-weave-arbiter</c> binary when the host enabled the Arbiter.
+    /// </summary>
+    /// <remarks>
+    /// <c>KW-ARB-BIN-001</c> is a warning that the binary is missing from <c>PATH</c> or its
+    /// version differs from the CLI's. A disabled Arbiter needs no binary, so it is reported
+    /// as skipped rather than failed. An unreadable configuration also skips: doctor already
+    /// reports genuine canonical-source defects elsewhere, and a missing config means the
+    /// product-default disabled Arbiter.
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportArbiterBinary(string workingDirectory)
+    {
+        if (!ArbiterEnabled(workingDirectory))
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Kyber-Weave Arbiter: not checked (Arbiter is not enabled)");
+            return false;
+        }
+
+        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_executor);
+        ToolProbeResult arbiterResult = arbiterProbe.Probe();
+        string cliVersion = NormalizeCliVersion(GetCliVersion());
+
+        if (arbiterResult is { IsAvailable: true, Version: not null }
+            && string.Equals(arbiterResult.Version, cliVersion, StringComparison.Ordinal))
+        {
+            AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave Arbiter: [bold]kyber-weave-arbiter {Markup.Escape(arbiterResult.Version)}[/]");
+            return false;
+        }
+
+        string reason = arbiterResult.FailureReason
+            ?? (arbiterResult.Version is null
+                ? "The 'kyber-weave-arbiter' executable is not available on PATH."
+                : $"The 'kyber-weave-arbiter' version '{arbiterResult.Version}' differs from the CLI version '{cliVersion}'.");
+        AnsiConsole.MarkupLine($"  [red]fail[/] Kyber-Weave Arbiter [bold]KW-ARB-BIN-001[/]: {Markup.Escape(reason)}");
+        return true;
+    }
+
+    /// <summary>Whether the repository configuration enables the Arbiter. An unreadable
+    /// configuration reads as disabled, the product default.</summary>
+    private static bool ArbiterEnabled(string workingDirectory)
+    {
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        return configResult.Success && configResult.Config?.Arbiter.Enabled == true;
+    }
+
+    /// <summary>
+    /// Normalizes the CLI version for comparison against the probe's semver: the assembly
+    /// informational version may carry <c>+build</c> metadata the probe never emits.
+    /// </summary>
+    private static string NormalizeCliVersion(string version)
+    {
+        int plus = version.IndexOf('+', StringComparison.Ordinal);
+        string normalized = plus > 0 ? version[..plus] : version;
+        return normalized.Trim().TrimStart('v');
+    }
+
+    /// <summary>
+    /// Reports whether the ZCode installation declares the MCP servers the canonical toolchain
+    /// requires.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -214,11 +291,22 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     ///         servers of someone who does not use the harness would make doctor useless to them.
     ///     </para>
     /// </remarks>
-    /// <returns><see langword="true" /> when doctor should exit non-zero.</returns>
-    private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory)
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory, bool isGlobal)
     {
-        IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys.ToArray();
-        if (required.Count == 0) return false;
+        // The render grants the Arbiter server only to an enabled project-scope wiring
+        // (ZCodeRenderer.ArbiterEnforced), so doctor requires it only for a project deployment
+        // with the Arbiter enabled. The scope is the one the deployment is inspected at: the same
+        // scope ReportOwnedBlockDrift reads the receipt for, so it is never unknowable here.
+        bool arbiterGranted = SquadCommandComposition.ResolveScope(isGlobal) == SquadDeploymentScope.Project
+            && ArbiterEnabled(workingDirectory);
+        IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys
+            .Where(server => arbiterGranted || !string.Equals(server, ArbiterServer, StringComparison.Ordinal))
+            .ToArray();
+        if (required.Count == 0)
+        {
+            return false;
+        }
 
         string marker = Path.Combine(workingDirectory, ".zcode");
         if (!Directory.Exists(marker))
@@ -607,6 +695,171 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
 
         return invalidGlobalRoot;
+    }
+
+    /// <summary>
+    /// Reports receipt-owned hook blocks whose entries no longer match the file on disk:
+    /// a hand-edited or missing owned entry is drift (Req 8.4), naming the file and the
+    /// container.
+    /// </summary>
+    /// <remarks>
+    /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
+    /// it should carry rather than reading as a whole-file miss. A deployment without a
+    /// receipt, or a receipt without blocks, is reported as skipped rather than failed:
+    /// there is nothing owned to drift. The format is resolved from the recorded relative
+    /// path the same way uninstall resolves it, so diagnosis never depends on a render
+    /// that may no longer exist.
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
+    {
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(workingDirectory, scope);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or System.Text.Json.JsonException
+            or IOException or UnauthorizedAccessException)
+        {
+            AnsiConsole.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
+            return false;
+        }
+
+        if (receipt is null)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Owned blocks: not checked (no Kyber-Squad deployment found)");
+            return false;
+        }
+
+        if (receipt.Blocks.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Owned blocks: none");
+            return false;
+        }
+
+        bool hasDrift = false;
+        foreach (SquadOwnedBlock block in receipt.Blocks)
+        {
+            string suffix = scope == SquadDeploymentScope.Global ? $" ({block.Target})" : string.Empty;
+            string fileLabel = $"{Markup.Escape(block.RelativePath)}{suffix}";
+
+            string fullPath;
+            try
+            {
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+                    receipt,
+                    workingDirectory,
+                    globalRoots,
+                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [red]fail[/] Owned block drift: {fileLabel} ({Markup.Escape(ex.Message)})");
+                hasDrift = true;
+                continue;
+            }
+
+            if (!TryResolveBlockFormat(block, out SquadHookBlockFormat format))
+            {
+                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
+                hasDrift = true;
+                continue;
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
+                }
+
+                if (block.Entries.Count == 0)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            string currentJson;
+            try
+            {
+                currentJson = File.ReadAllText(fullPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
+                hasDrift = true;
+                continue;
+            }
+
+            Dictionary<string, string> expected = new(StringComparer.Ordinal);
+            foreach (SquadOwnedBlockEntry entry in block.Entries)
+            {
+                expected[entry.Container] = entry.Sha256;
+            }
+
+            IReadOnlyList<SquadHookDrift> drifts;
+            try
+            {
+                drifts = SquadHookJsonBlock.FindDrift(format, currentJson, expected);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            foreach (SquadHookDrift drift in drifts)
+            {
+                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
+                hasDrift = true;
+            }
+        }
+
+        if (!hasDrift)
+        {
+            int entryCount = receipt.Blocks.Sum(block => block.Entries.Count);
+            string entryWord = entryCount == 1 ? "entry" : "entries";
+            AnsiConsole.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
+        }
+
+        return hasDrift;
+    }
+
+    /// <summary>
+    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
+    /// path, so diagnosis never depends on a render that may no longer exist.
+    /// </summary>
+    private static bool TryResolveBlockFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
+    {
+        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
+        {
+            if (string.Equals(
+                    SquadHookJsonBlock.RelativePath(candidate),
+                    block.RelativePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                format = candidate;
+                return true;
+            }
+        }
+
+        format = default;
+        return false;
     }
 
     private static string GetCliVersion()

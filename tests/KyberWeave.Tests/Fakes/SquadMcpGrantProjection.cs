@@ -36,6 +36,13 @@ internal static class SquadMcpGrantProjection
     internal const string KyberWeaveServer = "kyber-weave";
 
     /// <summary>
+    /// The Arbiter server. It is never part of the standard MCP grant: a target that
+    /// enforces the Arbiter uses hooks, and the fallback-only targets grant its tools
+    /// separately only to the conductor and code-reviewer.
+    /// </summary>
+    internal const string ArbiterServer = "kyber-weave-arbiter";
+
+    /// <summary>
     /// The permission key Kilo gates the whole server on. Kilo sanitizes a server name only for
     /// characters outside <c>[a-zA-Z0-9_-]</c>, so the hyphen survives and this key matches
     /// <c>kyber-weave_docs_status</c>.
@@ -186,7 +193,9 @@ internal static class SquadMcpGrantProjection
     /// </summary>
     internal static IReadOnlyList<string> OrchestratorExcludedToolNames(SquadSource source)
     {
-        return QualifiedToolNames(source, server => !string.Equals(server, KyberWeaveServer, StringComparison.Ordinal));
+        return QualifiedToolNames(source, server =>
+            !string.Equals(server, KyberWeaveServer, StringComparison.Ordinal) &&
+            !string.Equals(server, ArbiterServer, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -237,10 +246,12 @@ internal static class SquadMcpGrantProjection
         bool grantsOthers = GrantsOrchestratorExcludedServers(source, agent, target);
         return
         [
-            .. DeclaredServers(source).Where(server =>
-                string.Equals(server, KyberWeaveServer, StringComparison.Ordinal)
-                    ? !grantsKyberWeave
-                    : !grantsOthers)
+            .. DeclaredServers(source)
+                .Where(server => !string.Equals(server, ArbiterServer, StringComparison.Ordinal))
+                .Where(server =>
+                    string.Equals(server, KyberWeaveServer, StringComparison.Ordinal)
+                        ? !grantsKyberWeave
+                        : !grantsOthers)
         ];
     }
 

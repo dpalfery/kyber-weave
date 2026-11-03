@@ -1,0 +1,14 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-bash-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-worker-3",
+  "agent_type": "test-dev",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat docs/specs/spec.md"
+  },
+  "tool_use_id": "toolu-bash-1"
+}
