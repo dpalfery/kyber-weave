@@ -98,7 +98,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
         string? unknownReason = null;
-        if (!settings.All && config.Review.Gates.Any(gate => gate.Include.Count > 0))
+        if (!settings.All && NeedsChangedSet(config.Review.Gates))
         {
             (changed, unknownReason) = ResolveCouncilChangedSet(root, settings);
             if (changed is null)
@@ -345,6 +345,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         AnsiConsole.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
     }
+
+    /// <summary>
+    /// Whether the changed set must be computed before gates run. A gate can be scoped
+    /// either by <c>include</c> or by <c>applies-when.paths</c>; either one makes a null
+    /// changed set mean "run everything".
+    /// </summary>
+    internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
+        gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
 
     private static string CurrentOs()
     {

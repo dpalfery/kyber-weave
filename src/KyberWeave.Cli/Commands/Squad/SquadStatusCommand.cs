@@ -170,21 +170,16 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         if (hasIssues || hasMissingPreset || hasLockError || registryUnreadable)
         {
             AnsiConsole.WriteLine();
-            string summary = hasLockError
-                ? "Error detected in Kyber-Squad deployment lock."
-                : hasMissing
-                    ? "Drift or missing files detected in Kyber-Squad deployment."
-                    : hasMissingPreset
-                        ? "Missing model preset detected in Kyber-Squad deployment."
-                        : "Drift detected in Kyber-Squad deployment.";
+            string summary = registryUnreadable
+                ? "The Kyber-Squad project registry is unreadable."
+                : hasLockError
+                    ? "Error detected in Kyber-Squad deployment lock."
+                    : hasMissing
+                        ? "Drift or missing files detected in Kyber-Squad deployment."
+                        : hasMissingPreset
+                            ? "Missing model preset detected in Kyber-Squad deployment."
+                            : "Drift detected in Kyber-Squad deployment.";
             AnsiConsole.MarkupLine($"[red]{summary}[/]");
-            return 1;
-        }
-
-        if (registryUnreadable)
-        {
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
             return 1;
         }
 
@@ -260,7 +255,19 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return;
         }
 
-        string currentJson = File.ReadAllText(fullPath);
+        string currentJson;
+        try
+        {
+            currentJson = File.ReadAllText(fullPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [red]drift  [/] {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
+            hasIssues = true;
+            return;
+        }
+
         Dictionary<string, string> expected = new(StringComparer.Ordinal);
         foreach (SquadOwnedBlockEntry entry in block.Entries)
         {

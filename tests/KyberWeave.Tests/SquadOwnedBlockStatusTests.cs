@@ -54,6 +54,49 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
+    public void Status_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            blocks: [CursorBlock("cursor-one")]);
+        new SquadTransaction(store).Execute(plan);
+        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+
+        try
+        {
+            SquadStatusCommand command = new(stateStore: store);
+            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+                null!,
+                new SquadStatusSettings
+                {
+                    Path = fixture.Path,
+                    Global = false,
+                }));
+
+            Assert.Equal(1, execution.Result);
+            Assert.Contains("unreadable", execution.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public void Status_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
     {
         using TempDirectory fixture = new TempDirectory();
@@ -154,6 +197,53 @@ public sealed class SquadOwnedBlockStatusTests
         Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(".cursor/hooks.json", execution.Output, StringComparison.Ordinal);
         Assert.Contains("/hooks/preToolUse/0", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TempDirectory fixture = new TempDirectory();
+        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
+        SquadStateStore store = new(userPaths);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            blocks: [CursorBlock("cursor-one")]);
+        new SquadTransaction(store).Execute(plan);
+        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+
+        try
+        {
+            FakeProcessExecutor executor = new FakeProcessExecutor()
+                .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+            SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
+
+            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+                null!,
+                new SquadDoctorSettings
+                {
+                    Path = fixture.Path,
+                    Global = false,
+                }));
+
+            Assert.Equal(1, execution.Result);
+            Assert.Contains("unreadable", execution.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     [Fact]

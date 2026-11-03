@@ -45,6 +45,17 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     }
 
     [Fact]
+    public void AChangedSetIsNeededWhenOnlyAppliesWhenIsDeclared()
+    {
+        ReviewGate gate = new(
+            "e2e",
+            ["dotnet"],
+            AppliesWhen: new ReviewGateAppliesWhen(["e2e/**"]));
+
+        Assert.True(ReviewGatesCommand.NeedsChangedSet([gate]));
+    }
+
+    [Fact]
     public void AppliesWhenWithNoPathsIsRejected()
     {
         YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(

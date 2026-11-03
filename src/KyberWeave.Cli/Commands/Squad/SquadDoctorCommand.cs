@@ -722,7 +722,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             receipt = stateStore.ReadReceipt(workingDirectory, scope);
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or System.Text.Json.JsonException
+            or IOException or UnauthorizedAccessException)
         {
             AnsiConsole.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
             return false;
@@ -756,9 +757,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     globalRoots,
                     new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
-                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (outside the deployment root)");
+                AnsiConsole.MarkupLine(
+                    $"  [red]fail[/] Owned block drift: {fileLabel} ({Markup.Escape(ex.Message)})");
                 hasDrift = true;
                 continue;
             }
@@ -786,7 +788,19 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 continue;
             }
 
-            string currentJson = File.ReadAllText(fullPath);
+            string currentJson;
+            try
+            {
+                currentJson = File.ReadAllText(fullPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
+                hasDrift = true;
+                continue;
+            }
+
             Dictionary<string, string> expected = new(StringComparer.Ordinal);
             foreach (SquadOwnedBlockEntry entry in block.Entries)
             {
