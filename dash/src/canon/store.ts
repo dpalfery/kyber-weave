@@ -194,7 +194,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 22
+export const SCHEMA_VERSION = 23
 
 /**
  * The refusal a store written by a newer KyberDash earns.
@@ -582,7 +582,10 @@ CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
 -- EXISTS the store applies on every open covers a store already stamped at
 -- SCHEMA_VERSION: landing it cost no version bump and needs no migration
 -- step -- the model_context_window_catalog precedent. A store that predates
--- the table opens unchanged and grows the table on the next open.
+-- the table opens unchanged and grows the table on the next open. A COLUMN
+-- added to the table afterwards is a different matter: the same IF NOT EXISTS
+-- leaves an existing table without it, so a column costs a version bump and a
+-- migration step.
 --
 -- A metric point has no span, so the row carries no harness and no adapter
 -- fingerprint: the exporter's service.name is its source, and a row is never
@@ -593,7 +596,13 @@ CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
 -- point_key is the point's identity: a digest of everything the row carries.
 -- A metric point has no span id to key on, so the content digest is what
 -- makes a re-delivered point land on the row it already occupies instead of
--- beside it.
+-- beside it. The interval the point's measurement covers is part of that
+-- digest: the same measurement over a different window is a different point.
+--
+-- start_time_unix_nano is the start of that interval. The column landed with
+-- the v22 -> v23 migration, because every statement in this schema is IF NOT
+-- EXISTS: a store that already carries the table never gained the column from
+-- the CREATE TABLE, so the migration is what adds it to an existing store.
 CREATE TABLE IF NOT EXISTS metric_point (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   point_key TEXT NOT NULL UNIQUE,
@@ -602,6 +611,7 @@ CREATE TABLE IF NOT EXISTS metric_point (
   unit TEXT,
   aggregation_temporality INTEGER,
   time_unix_nano TEXT,
+  start_time_unix_nano TEXT,
   timestamp TEXT,
   value REAL,
   point_count INTEGER,
@@ -1212,6 +1222,35 @@ export const MIGRATIONS: Record<
     }
     return runYieldingSessionTurnBackfill(db, options.yield)
   },
+  // v22 -> v23: the metric point's interval start.
+  //
+  // A metric point's identity is its content digest, and the digest did not
+  // carry the interval the point's measurement covers. Two points that differed
+  // ONLY in that interval -- the same name, kind, unit, temporality,
+  // observation time, value and attributes, over a different window -- so
+  // collided onto one point_key, and the second upserted onto the first row.
+  //
+  // The column lands the interval on the row, and the digest carries it, so
+  // the interval is part of the point's identity and a reader can recover the
+  // window a measurement covers.
+  //
+  // The ADD COLUMN is presence-guarded, as migration 19's and 20's are:
+  // re-running the step, or opening a store an off-main build already stamped
+  // 23, must not die on "duplicate column name". A store that has no
+  // `metric_point` table at all gains the table WITH the column from the
+  // schema, so there is nothing to add there.
+  22: (db: Database) => {
+    const hasTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='metric_point'")
+      .get()
+    if (!hasTable) return
+    const cols = (db.prepare('PRAGMA table_info(metric_point)').all() as { name: string }[]).map(
+      (c) => c.name,
+    )
+    if (!cols.includes('start_time_unix_nano')) {
+      db.exec('ALTER TABLE metric_point ADD COLUMN start_time_unix_nano TEXT')
+    }
+  },
 }
 
 /**
@@ -1668,6 +1707,15 @@ export type MetricPointRow = {
   timestamp: string | null
   /** The point's timestamp in Unix nanoseconds, verbatim; null when it carried none. */
   timeUnixNano: string | null
+  /**
+   * The start of the interval the point's measurement covers, in Unix
+   * nanoseconds, verbatim; null when the point declared none.
+   *
+   * The interval is part of the point's IDENTITY: two points that differ only
+   * in the window they cover are two measurements, not one measurement seen
+   * twice, so the interval travels in the point's digest and lands on the row.
+   */
+  startTimeUnixNano: string | null
   /** The point's own value, for a gauge or a sum; null when the point carried none. */
   value: number | null
   /** The point's count, for a histogram or a summary; null when the point carried none. */
@@ -1699,6 +1747,12 @@ type MetricPointDraft = {
   unit: string | null
   aggregationTemporality: number | null
   timeUnixNano: string | null
+  /**
+   * The start of the interval the point's measurement covers; null when the
+   * point declared none. It is part of the point's identity, so it travels in
+   * the digest and lands on the row.
+   */
+  startTimeUnixNano: string | null
   timestamp: string | null
   value: number | null
   count: number | null
@@ -1758,6 +1812,12 @@ function metricInstant(nanos: string | null): string | null {
  * key on. The content digest is the identity: a point re-delivered lands on
  * the row it already occupies instead of beside it, which is what makes the
  * write an upsert rather than an append.
+ *
+ * The interval the point's measurement covers is part of that digest, and it
+ * has to be: the same name, kind, unit, temporality, observation time, value
+ * and attributes over a DIFFERENT window is a different measurement, and
+ * without the interval in the digest the two collided onto one row and the
+ * second upserted onto the first.
  */
 function metricPointKey(draft: Omit<MetricPointDraft, 'pointKey'>): string {
   return createHash('sha256')
@@ -1768,6 +1828,7 @@ function metricPointKey(draft: Omit<MetricPointDraft, 'pointKey'>): string {
         draft.unit,
         draft.aggregationTemporality,
         draft.timeUnixNano,
+        draft.startTimeUnixNano,
         draft.value,
         draft.count,
         draft.sum,
@@ -1801,6 +1862,10 @@ function metricPointDrafts(metrics: readonly OtlpMetric[]): MetricPointDraft[] {
         unit,
         aggregationTemporality,
         timeUnixNano: point.timeUnixNano,
+        // The interval the measurement covers is part of the point, so it is
+        // part of the point's identity. A point that declared none carries
+        // none: the absence is the fact.
+        startTimeUnixNano: point.startTimeUnixNano,
         timestamp: metricInstant(point.timeUnixNano),
         // A point that reported no value keeps it absent: the absence is the
         // fact, and it must never read as a measured zero.
@@ -1851,6 +1916,7 @@ function toMetricPointRow(row: Record<string, unknown>): MetricPointRow {
     aggregationTemporality: metricNumber(row.aggregation_temporality),
     timestamp: metricText(row.timestamp),
     timeUnixNano: metricText(row.time_unix_nano),
+    startTimeUnixNano: metricText(row.start_time_unix_nano),
     value: metricNumber(row.value),
     count: metricNumber(row.point_count),
     sum: metricNumber(row.point_sum),
@@ -3040,15 +3106,17 @@ INSERT OR REPLACE INTO records (
  */
 const UPSERT_METRIC_POINT_SQL = `
 INSERT INTO metric_point (
-  point_key, name, kind, unit, aggregation_temporality, time_unix_nano, timestamp,
-  value, point_count, point_sum, attributes_json, resource_json, scope_json, source
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  point_key, name, kind, unit, aggregation_temporality, time_unix_nano,
+  start_time_unix_nano, timestamp, value, point_count, point_sum,
+  attributes_json, resource_json, scope_json, source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(point_key) DO UPDATE SET
   name = excluded.name,
   kind = excluded.kind,
   unit = excluded.unit,
   aggregation_temporality = excluded.aggregation_temporality,
   time_unix_nano = excluded.time_unix_nano,
+  start_time_unix_nano = excluded.start_time_unix_nano,
   timestamp = excluded.timestamp,
   value = excluded.value,
   point_count = excluded.point_count,
@@ -6349,6 +6417,7 @@ export class CanonStore {
           draft.unit,
           draft.aggregationTemporality,
           draft.timeUnixNano,
+          draft.startTimeUnixNano,
           draft.timestamp,
           draft.value,
           draft.count,
@@ -6378,9 +6447,9 @@ export class CanonStore {
       limit === undefined || !Number.isFinite(limit) || limit < 0 ? null : Math.floor(limit)
     const rows = this.db
       .prepare(
-        `SELECT name, kind, unit, aggregation_temporality, time_unix_nano, timestamp,
-                value, point_count, point_sum, attributes_json, resource_json,
-                scope_json, source
+        `SELECT name, kind, unit, aggregation_temporality, time_unix_nano,
+                start_time_unix_nano, timestamp, value, point_count, point_sum,
+                attributes_json, resource_json, scope_json, source
          FROM metric_point ORDER BY id${cap === null ? '' : ' LIMIT ?'}`,
       )
       .all(...(cap === null ? [] : [cap])) as Record<string, unknown>[]

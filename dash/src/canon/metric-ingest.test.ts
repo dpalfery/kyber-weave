@@ -20,9 +20,12 @@
 //   * THE SOURCE, NOT A HARNESS — the exporter's `service.name` is the row's
 //     source. A metric point has no span, so it carries no adapter
 //     fingerprint and no harness id.
-//   * THE SCHEMA VERSION DOES NOT MOVE — the table is created by the store's
-//     schema, which the store applies on every open, so no migration step is
-//     needed (the `model_context_window_catalog` precedent).
+//   * THE TABLE NEEDS NO MIGRATION STEP OF ITS OWN — it is created by the
+//     store's schema, which the store applies on every open, so it costs no
+//     migration (the `model_context_window_catalog` precedent). The schema
+//     version DID move once, for the point's interval column: a column
+//     cannot be added by the schema's IF NOT EXISTS, so it costs a migration
+//     step of its own (v22 -> v23).
 //   * THE WIPE — the full corpus wipe clears the rows; a scoped per-harness
 //     wipe does not, because their attribution is unknown.
 //
@@ -400,15 +403,18 @@ describe('the canon store as the native OTLP metrics destination', () => {
     }
   })
 
-  it('adds the metrics table without moving the schema version', () => {
+  it('adds the metrics table without a migration step of its own', () => {
     const store = new CanonStore(':memory:')
     try {
       // The table is created by the store's schema, which the store applies on
       // every open with IF NOT EXISTS — the `model_context_window_catalog`
-      // precedent. A table that needs no migration step costs no version bump.
+      // precedent. A table that needs no migration step costs no version bump
+      // of its own. The version moved once, for the point's interval column:
+      // a column cannot be added by the schema's IF NOT EXISTS, so it costs a
+      // migration step of its own (v22 -> v23).
       expect(SCHEMA_SQL).toMatch(/CREATE TABLE IF NOT EXISTS\s+\w*metric/i)
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(22)
+      expect(SCHEMA_VERSION).toBe(23)
     } finally {
       store.close()
     }
