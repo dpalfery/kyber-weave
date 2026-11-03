@@ -4,7 +4,7 @@ title: Kyber Arbiter
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-11-02
 ---
 
 # Kyber Arbiter

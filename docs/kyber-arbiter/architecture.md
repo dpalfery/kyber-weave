@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-11-02
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates

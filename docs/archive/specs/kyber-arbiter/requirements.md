@@ -6,6 +6,8 @@ status: archived
 owner: dpalfery
 last-reviewed: 2026-10-10
 component: KyberSquad
+documentation-impact: new-component
+impact-components: [KyberArbiter]
 keywords:
   - arbiter
   - decision engine
@@ -411,6 +413,27 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 *Provenance: GitHub issue #278 (conductor workers read the whole plan), design-phase input.*
 
+## Decisions
+
+These are the requirements-phase decisions. D1–D23 are recorded in the
+[archived plan](../../plans/2026-10-01-kyber-arbiter.md#approved-decisions); the rows below
+index the decisions this document owns, with their detail sections following.
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| D24 | Marker header for project-wide hook harnesses | Gate only dispatches carrying `KYBER-ARBITER: true`; other dispatches pass and are logged with `caller: unidentified` | Owner, 2026-10-03 |
+| D25 | Command signature identification of owned blocks | Identify Squad entries by `kyber-weave-arbiter hook --harness <harness> --caller <agent>`; Antigravity uses a named hook group | Owner, 2026-10-03 |
+| D26 | Three delivery phases sequenced by harness (amended) | The specification, design, and tasks cover all three phases; each phase is justified by size | Owner, 2026-10-03 |
+| D27 | Review routing headers | Lens spawns carry `LENS: <name>`; refutation spawns carry `REFUTE: <finding-id>`, both alongside the marker | Owner, 2026-10-03 |
+| D28 | Three delivery phases by harness group | Phase 1: Claude, Copilot VS Code, Copilot CLI, OpenCode. Phase 2: Pi, Codex, Cursor. Phase 3: Kilo, Antigravity, Factory, Devin, Warp, ZCode | Owner, 2026-10-03 |
+| D29 | Build it right first | Completeness and correctness come before line-count targets; the design states each fact once | Owner, 2026-10-03 |
+| D30 | Spec task parsing, the 80/20 version | The plan parser also reads a spec's checkbox task list; a task with no files skips file-scope checks and logs the skip | Owner, 2026-10-03 |
+| D31 | Attestation after ledger loss | `architect` attests only after user confirmation; the hook reads the attestation and records it | Owner, 2026-10-03 |
+| D32 | Each delivery phase ships as its own PR | Each phase ships as its own PR; where each PR merges is Q16 | Owner, 2026-10-03 |
+| D34 | The specification covers all three phases | The task list covers Phases 1–3; no phase is deferred to a todo; one closeout follows Phase 3 | Owner, 2026-10-04 |
+| D33 | 80/20, no speculative mechanisms | No `FILES:` routing header and no mechanism for a problem that has not occurred | Owner, 2026-10-03 |
+| Q12 | Delivery sequence per phase | Each phase is a separate PR; D32 answers this and D34 supersedes option (a)'s Phase-1-only wording | Answered, 2026-10-03 |
+
 ## Approved decisions resolving open questions
 
 ### Decision D24: Marker header for project-wide hook harnesses
@@ -473,7 +496,7 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 **D28 constraints:**
 
 - **Phase 1:** Claude, Copilot in VS Code, Copilot CLI, OpenCode. These harnesses use agent frontmatter or own hook files; no shared JSON files are involved.
-- **Phase 2:** Pi, Codex, Cursor. These harnesses use owned blocks in shared JSON hook files, so Phase 2 includes the owned-block work (D8, D25, receipt changes, ADR 0054).
+- **Phase 2:** Pi, Codex, Cursor. These harnesses use owned blocks in shared JSON hook files, so Phase 2 includes the owned-block work (D8, D25, receipt changes, ADR 0029).
 - **Phase 3:** Kilo, Antigravity, Factory, Devin, Warp, ZCode. The MCP fallback server is needed for Warp and ZCode (Phase 3), and for review on any harness whose hooks do not fire inside sub-agents.
 
 *Provenance: Owner, conversation 2026-10-03, answer to Q9: "let's split the work into 3 phases by harnesses. phase 1, claude, github copilot extension and cli and opencode, phase 2: PI, codex, cursor, phase 3: all the rest".*
@@ -565,8 +588,52 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 *Status: ANSWERED. D32 (owner, 2026-10-03): each phase ships as its own PR. Option (a)'s wording, which said the specification covers only Phase 1, was not part of the answer, and D34 supersedes it.*
 
+## Design harvest
+
+Scale: `documentation-impact: new-component`, `impact-components: [KyberArbiter]`.
+
+| ID | Design item | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Three-step evaluation model, trigger families, and the fixed `undecidable` mapping (D1, D6, D10, D11) | KyberArbiter | architecture |
+| H2 | Rule model, the 18 permanent `KW-ARB-*` rules, host overrides, and the closed predicate set (D14, D30, D33) | KyberArbiter | architecture |
+| H3 | Surfaces: the Core engine, the `kyber-weave-arbiter` binary (`hook`, `serve`), and the `arbiter` CLI (D2, D16, D22) | KyberArbiter | architecture |
+| H4 | Facts, plan parser, header grammar, and trigger classification (D9, D21, D24, D25, D27) | KyberArbiter | architecture |
+| H5 | Provider, credentials, configuration, and diagnostics (D17, D18, D19, D23) | KyberArbiter | architecture |
+| H6 | Ledger, decision log, audit, escalation envelope, and review notes (D5, D15, D31) | KyberArbiter | architecture |
+| H7 | Harness hooks, owned blocks, rendering, fail-closed behaviour, and the MCP fallback (D3, D4, D6, D7, D8, D12, D13) | KyberArbiter | architecture |
+| H8 | Delivery phases, distribution, and size per phase (D20, D26, D28, D29, D32, D34) | KyberArbiter | architecture |
+
+## Closeout mapping
+
+The durable requirements and design are harvested into the canonical
+[Kyber Arbiter architecture](../../../kyber-arbiter/architecture.md) at `new-component` scale,
+component KyberSquad. ADRs 0053 (three-step decision gates) and 0054 (owned blocks in shared hook files) record the durable architectural decisions.
+
+| ID | Destination |
+|---|---|
+| D24 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| D25 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| D26 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| D27 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| D28 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| D29 | [Status](../../../kyber-arbiter/README.md#scope) |
+| D30 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| D31 | [Ledger, audit, and escalation](../../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| D32 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| D34 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| D33 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| Q12 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| H1 | [Three-step evaluation](../../../kyber-arbiter/architecture.md#the-engine) |
+| H2 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| H3 | [Surfaces](../../../kyber-arbiter/architecture.md#the-engine) |
+| H4 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| H5 | [Configuration](../../../kyber-arbiter/architecture.md#configuration) |
+| H6 | [Ledger, audit, and escalation](../../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| H7 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| H8 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+
 ## Design inputs
 
-**Phase 1 harness work.** No Phase 1 harness needs a shared hook file. Claude and Copilot in VS Code use agent frontmatter; Copilot CLI uses its own `.github/hooks/kyber-arbiter.json`; OpenCode uses its own plugin file. Therefore, the owned-block work for shared JSON files (D8, D25, receipt changes for blocks, ADR 0054) can land in Phase 2 with Cursor and Codex.
+**Phase 1 harness work.** No Phase 1 harness needs a shared hook file. Claude and Copilot in VS Code use agent frontmatter; Copilot CLI uses its own `.github/hooks/kyber-arbiter.json`; OpenCode uses its own plugin file. Therefore, the owned-block work for shared JSON files (D8, D25, receipt changes for blocks, ADR 0029) can land in Phase 2 with Cursor and Codex.
 
 **Phase 3 fallback and review.** The MCP fallback server is needed for Warp and ZCode (Phase 3). The server is also needed for review on any harness whose hooks do not fire inside sub-agents (e.g., on harnesses without sub-agent hook support, code-reviewer calls `arbiter_evaluate` before lens fan-out).

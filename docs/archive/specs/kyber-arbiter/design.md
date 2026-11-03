@@ -6,6 +6,8 @@ status: archived
 owner: dpalfery
 last-reviewed: 2026-10-10
 component: KyberSquad
+documentation-impact: new-component
+impact-components: [KyberArbiter]
 ---
 
 # Kyber Arbiter design
@@ -846,13 +848,13 @@ Hooks are rendered only when the project's `arbiter.enabled` is `true` (Req 22.2
   - **Fields.** Only documented fields are written, and no sentinel key. JSON hook files carry no comments, so markers in the style of the Config Reg block cannot be used.
 - **Receipt v3.**
   - `kyber-squad.receipt/v3` adds `blocks`: for each owned entry, the file, its JSON pointer and its canonical digest.
-  - It is written only when a receipt carries a block. Receipts without blocks stay byte-identical v1 or v2, following the precedent of [ADR 0024](../../adr/0024-squad-global-receipt-layout-marker.md).
+  - It is written only when a receipt carries a block. Receipts without blocks stay byte-identical v1 or v2, following the precedent of [ADR 0024](../../../adr/0024-squad-global-receipt-layout-marker.md).
   - Older CLIs refuse a v3 receipt with exit 1.
 - **Update, uninstall and drift.**
   - Update rewrites the block.
   - An owned entry edited by hand is drift. `squad status` and `squad doctor` report it (Req 8.4), and update preserves it unless `--replace-managed` is given.
   - Uninstall removes only the owned entries. It deletes the file only if Squad created it and no hook remains.
-- **ADR 0054** records the exception to the rule that Squad does not own settings files ([ADR 0026](../../adr/0026-kyber-utilities-owned-files-not-settings.md)) (Req 8.3).
+- **ADR 0029** records the exception to the rule that Squad does not own settings files ([ADR 0026](../../../adr/0026-kyber-utilities-owned-files-not-settings.md)) (Req 8.3).
 
 ### 10.5 Degradations
 
@@ -997,8 +999,8 @@ The packet is a worker's whole context (Req 25.1). There are two mechanisms (Req
 | Distribution of the third binary (§1.11) | 1 | Phase 1 hooks call it |
 | Squad wiring for Claude, Copilot and OpenCode; `squad` CLI plumbing; the `global-scope` degradation | 1 | These targets use frontmatter or their own files only, so the receipt schema does not change |
 | Agent and skill contracts (§10.9, Phase 1 rows) | 1 | Every hooked harness depends on the headers, markers and envelope handling |
-| ADR 0053 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D34 and the identifiers as shipped. Later phases extend these documents with what they deliver |
-| Owned blocks, receipt v3, block drift, ADR 0054 | 2 | Codex and Cursor are the first targets whose hook file is shared (D28) |
+| ADR 0028 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D34 and the identifiers as shipped. Later phases extend these documents with what they deliver |
+| Owned blocks, receipt v3, block drift, ADR 0029 | 2 | Codex and Cursor are the first targets whose hook file is shared (D28) |
 | Cursor and Codex adapters and renderers; the Pi renderer, reusing the plugin envelope | 2 | D28 |
 | Kilo, Antigravity, Factory and Devin adapters and renderers; the Factory shadowing check | 3 | D28 |
 | `serve`, `decision.query` in all ten profiles, MCP grants and renderer filters, the fallback contract text | 3 | Only Warp and ZCode need the fallback, and they are Phase 3. No Phase 1 harness needs it (see below) |
@@ -1047,7 +1049,7 @@ The Tests area of Req 24 is the sum of the test columns: 6,750, 1,650 and 1,710,
 | Review | Four existing types gain a not-applicable state (§11) |
 | Agent text | Contract lines in eleven canonical files, plus one new `architect` reference (§10.9) |
 | Distribution | A third binary in every release list: five archives, and 20 → 25 checksummed assets. Also the installer, the self-updater, Homebrew and npm (§1.11) |
-| Documentation | Phase 1: ADR 0053, the Arbiter README, architecture and runbook, the rule reference and the configuration page. Phase 2: ADR 0054 and the Squad architecture amendment. Phase 3: the fallback runbook and the remaining harness rows |
+| Documentation | Phase 1: ADR 0028, the Arbiter README, architecture and runbook, the rule reference and the configuration page. Phase 2: ADR 0029 and the Squad architecture amendment. Phase 3: the fallback runbook and the remaining harness rows |
 | Tests | Every row of the test-first contract. Archived plans are read in place from `docs/archive/plans/` rather than copied as fixtures (4,065 lines for the eight named in §15). The reason is correctness: Req 9.3 names the archive itself as the conformance set, so a later edit that breaks parsing should fail the test |
 
 - **Phase 1 exceeds the review ceiling.** At about 17,900 lines it is over `review.policy.max-reviewable-lines: 10000`, so `review verdict` returns `NEEDS_HUMAN` on size (`KW-REVIEW-009`) as well as on reserved paths (`KW-REVIEW-008`, D13).
@@ -1142,7 +1144,7 @@ All read at `rev=13dcb73`.
 | `SquadRenderRequest` (37 callers) and `SquadRenderResult` are positional records | New members are optional and trailing |
 | `SquadDegradationRecord` has `Details`. The receipt's `SquadDegradation(Target, Subject, Code)` does not | The reason lives in `Details` |
 | `HotshotGoldenContractTests` pins every agent body except architect, code-reviewer, conductor, product-owner and task-reviewer, and every skill outside its evolved list | §10.9 |
-| Release lists its assets explicitly, and the checksum verifier enumerates every one ([ADR 0027](../../adr/0027-release-integrity-checksums-signing-deferred.md)) | §1.11 |
+| Release lists its assets explicitly, and the checksum verifier enumerates every one ([ADR 0027](../../../adr/0027-release-integrity-checksums-signing-deferred.md)) | §1.11 |
 | `OpenAiCompatibleEmbeddingGenerator` takes an injected `HttpMessageHandler` | The provider precedent |
 | `artifacts/` is ignored by git here, but not necessarily in a host | `KW-ARB-LOG-001` |
 | The `code-review` skill writes `findings.json` at the repository root | §10.9 moves it under `artifacts/` |
@@ -1179,7 +1181,7 @@ All read at `rev=13dcb73`.
 
 ## 20. Open questions
 
-None from the design phase. The tasks phase raised Q15 (Claude return observation), Q16 (phase PRs and the open-specification rule) and Q17 (Antigravity return observation). The [task list](tasks.md#pending-decisions) records all three. Q15 and Q17, once answered, amend §9.2, §10.2 and §10.5.
+None from the design phase. The tasks phase raised Q15 (Claude return observation), Q16 (phase PRs and the open-specification rule) and Q17 (Antigravity return observation). The [task list](tasks.md#decisions-on-design-gaps) records all three. Q15 and Q17, once answered, amend §9.2, §10.2 and §10.5.
 
 The owner answered every design-phase question on 2026-10-03:
 
@@ -1246,3 +1248,68 @@ Vendor pages were read on the dates shown. Under D7 they are the support claim, 
 | WA-7834 | [Warp #7834](https://github.com/warpdotdev/Warp/issues/7834) | 2026-10-01 | No hooks: a feature request |
 | ZC-hooks | [ZCode hooks](https://zcode.z.ai/en/docs/hooks) | 2026-10-01 | Project-level hooks are not executed in the current version |
 | ZC-32 | [zai-org/feedback#32](https://github.com/zai-org/feedback/issues/32) | 2026-10-01 | The same |
+
+## Decisions
+
+D1–D34 are recorded in the [archived plan](../../plans/2026-10-01-kyber-arbiter.md#approved-decisions)
+and [requirements](requirements.md#decisions). The design-phase decisions below are the
+durable choices this document makes.
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| DD1 | Where does the engine live? | `src/KyberWeave.Core/Arbiter/`; the CLI and the `kyber-weave-arbiter` binary are thin hosts | Design, approved 2026-10-03 |
+| DD2 | What is the evaluation flow? | Classify, append the ledger event, build facts, step 0, one batched step 1, combine, record, then answer | Design, approved 2026-10-03 |
+| DD3 | How are facts labelled? | Derived facts come from the repository and embedded catalog; asserted facts come from the dispatch input or lens output | Design, approved 2026-10-03 |
+| DD4 | What is the rule model? | A closed step-0 predicate set, an optional step-1 `ask`, and per-family effects; host overrides are limited by id | Design, approved 2026-10-03 |
+| DD5 | Which provider? | One `systemone` client for TypeSafe JEV and local Ollama; `none` by default; a state budget per model | Design, approved 2026-10-03 |
+| DD6 | How is the key resolved? | `TYPESAFE_API_KEY` for the TypeSafe origin, then the origin-bound OS credential store; never in configuration, argv, or logs | Design, approved 2026-10-03 |
+| DD7 | Who writes the ledger? | Only `hook` and `serve`; the CLI never appends; `audit` reports gaps | Design, approved 2026-10-03 |
+| DD8 | How does a hook behave? | One `hook` command with per-harness adapters, a plugin envelope for plugin harnesses, and a fail-closed top-level catch | Design, approved 2026-10-03 |
+| DD9 | What does the CLI expose? | `validate`, `rules`, `plan`, `eval`, `audit`, `setup`, `status`, `doctor`; `eval` is a dry run | Design, approved 2026-10-03 |
+| DD10 | What is the MCP fallback? | `serve` with `arbiter_evaluate`, `arbiter_rules`, `arbiter_status`; asserted routing facts; Phase 3 | Design, approved 2026-10-03 |
+| DD11 | How are non-allow outcomes delivered? | A fixed-order escalation envelope with `REPEAT` and `NEXT`; review notes `ARBITER_SKIP`, `ARBITER_VERIFIED`, `ARBITER_ANNOTATION` | Design, approved 2026-10-03 |
+| DD12 | How is the binary distributed? | Five release archives, `--no-arbiter`, Homebrew and npm resources, self-updater support, and a version probe | Design, approved 2026-10-03 |
+
+## Design harvest
+
+Scale: `documentation-impact: new-component`, `impact-components: [KyberArbiter]`.
+
+| ID | Design item | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Three-step evaluation model, trigger families, and the fixed `undecidable` mapping (D1, D6, D10, D11) | KyberArbiter | architecture |
+| H2 | Rule model, the 18 permanent `KW-ARB-*` rules, host overrides, and the closed predicate set (D14, D30, D33) | KyberArbiter | architecture |
+| H3 | Surfaces: the Core engine, the `kyber-weave-arbiter` binary (`hook`, `serve`), and the `arbiter` CLI (D2, D16, D22) | KyberArbiter | architecture |
+| H4 | Facts, plan parser, header grammar, and trigger classification (D9, D21, D24, D25, D27) | KyberArbiter | architecture |
+| H5 | Provider, credentials, configuration, and diagnostics (D17, D18, D19, D23) | KyberArbiter | architecture |
+| H6 | Ledger, decision log, audit, escalation envelope, and review notes (D5, D15, D31) | KyberArbiter | architecture |
+| H7 | Harness hooks, owned blocks, rendering, fail-closed behaviour, and the MCP fallback (D3, D4, D6, D7, D8, D12, D13) | KyberArbiter | architecture |
+| H8 | Delivery phases, distribution, and size per phase (D20, D26, D28, D29, D32, D34) | KyberArbiter | architecture |
+
+## Closeout mapping
+
+The durable design is harvested into the canonical
+[Kyber Arbiter architecture](../../../kyber-arbiter/architecture.md) at `new-component` scale,
+component KyberSquad. ADRs 0053 (three-step decision gates) and 0054 (owned blocks in shared hook files) record the durable architectural decisions.
+
+| ID | Destination |
+|---|---|
+| DD1 | [Surfaces](../../../kyber-arbiter/architecture.md#the-engine) |
+| DD2 | [Three-step evaluation](../../../kyber-arbiter/architecture.md#the-engine) |
+| DD3 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| DD4 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| DD5 | [Configuration](../../../kyber-arbiter/architecture.md#configuration) |
+| DD6 | [Configuration](../../../kyber-arbiter/architecture.md#configuration) |
+| DD7 | [Ledger, audit, and escalation](../../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| DD8 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| DD9 | [Surfaces](../../../kyber-arbiter/architecture.md#the-engine) |
+| DD10 | [Surfaces](../../../kyber-arbiter/architecture.md#the-engine) |
+| DD11 | [Ledger, audit, and escalation](../../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| DD12 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
+| H1 | [Three-step evaluation](../../../kyber-arbiter/architecture.md#the-engine) |
+| H2 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| H3 | [Surfaces](../../../kyber-arbiter/architecture.md#the-engine) |
+| H4 | [Decision points and rules](../../../kyber-arbiter/architecture.md#the-rules) |
+| H5 | [Configuration](../../../kyber-arbiter/architecture.md#configuration) |
+| H6 | [Ledger, audit, and escalation](../../../kyber-arbiter/runbook.md#setup-doctor-audit) |
+| H7 | [Harness support](../../../kyber-arbiter/runbook.md#hooks) |
+| H8 | [Delivery](../../../kyber-arbiter/architecture.md#delivery-and-caller-notes) |
