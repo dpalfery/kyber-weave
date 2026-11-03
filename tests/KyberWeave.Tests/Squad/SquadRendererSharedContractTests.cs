@@ -85,16 +85,27 @@ public sealed class SquadRendererSharedContractTests
         new(ShellWithoutWriteContracts.Keys);
 
     /// <summary>
-    /// Asserted over the renderers themselves, not over the targets they claim: a renderer that
-    /// claims no target contributes no row to <see cref="ShippedTargets"/>, so every per-target
-    /// check below would silently skip it.
+    /// Asserted over the renderers themselves, not over the targets they claim. A renderer that
+    /// claims no target contributes no row to <see cref="ShippedTargets"/>, and one that copies
+    /// another's target leaves its own with none, so either way every per-target check below would
+    /// silently skip it.
     /// </summary>
     [Fact]
-    public void EveryShippedRendererClaimsExactlyOneTarget()
+    public void EveryShippedRendererClaimsExactlyOneTargetNoOtherRendererClaims()
     {
-        Assert.All(SquadCommandComposition.CreateRenderers(), renderer => Assert.True(
+        IReadOnlyList<ISquadRenderer> renderers = SquadCommandComposition.CreateRenderers();
+
+        Assert.All(renderers, renderer => Assert.True(
             renderer.SupportedTargets.Count == 1,
             $"{renderer.GetType().Name} claims {renderer.SupportedTargets.Count} targets; expected exactly one."));
+
+        string[] claimedTwice = renderers
+            .SelectMany(renderer => renderer.SupportedTargets, (renderer, target) => (Renderer: renderer, Target: target))
+            .GroupBy(claim => claim.Target)
+            .Where(group => group.Count() > 1)
+            .Select(group => $"{SquadTargetCatalog.GetToken(group.Key)} ({string.Join(", ", group.Select(claim => claim.Renderer.GetType().Name))})")
+            .ToArray();
+        Assert.True(claimedTwice.Length == 0, $"Targets claimed by more than one renderer: {string.Join("; ", claimedTwice)}.");
     }
 
     [Theory]
