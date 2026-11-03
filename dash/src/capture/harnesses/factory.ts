@@ -202,11 +202,14 @@ function nativeExportConsequenceLine(consent: ConsentState): string {
 /**
  * The routes that carry Factory content, and which of them KyberDash's consent governs.
  *
- * The consent file is read in one place — the capture plugin's own hook runner — and it
- * reaches one emission: the plugin's prompt text. The FILE source reads the owner's own
- * transcript without consulting any consent file, and the native route's content is the
- * harness's own switch to decide. The row names all three, because a row that named only
- * the consent's reach reads as a claim about the whole store that was never true.
+ * The consent file is read in two places — the capture plugin's own hook runner and the
+ * canon seam's gate — and it reaches one emission: the plugin's prompt text. The canon gate
+ * applies the same verdict to a claimed Factory envelope, so a prompt span parked while the
+ * consent was on and re-delivered after the owner turned it off is not stored with the text.
+ * The FILE source reads the owner's own transcript without consulting any consent file, and
+ * the native route's content is the harness's own switch to decide. The row names all three,
+ * because a row that named only the consent's reach reads as a claim about the whole store
+ * that was never true.
  */
 function nativeExportContentRoutesLine(): string {
   return "native OpenTelemetry export content routes: KyberDash's consent governs the capture plugin's prompt text only; the Factory file source stores the owner's first message fragment whatever the consent says; the native route's content follows Factory's own message-content switch"
