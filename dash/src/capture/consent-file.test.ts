@@ -78,7 +78,10 @@ describe('the shared consent writer', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: true })
   })
 
-  it('replaces the file in one step, so a reader never sees half a file', async () => {
+  // POSIX-only: Windows forbids replacing a file that a reader holds open (the rename
+  // fails with EPERM), so the guarantee this case asserts — a reader keeps the whole old
+  // file while the writer replaces the file in one step — cannot be exercised there.
+  it.skipIf(process.platform === 'win32')('replaces the file in one step, so a reader never sees half a file', async () => {
     const { writeContentConsent } = await sharedWriter()
     const path = consentPathIn(tempDir())
     writeContentConsent(path, false)

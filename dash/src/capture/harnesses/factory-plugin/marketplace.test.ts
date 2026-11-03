@@ -648,6 +648,9 @@ describe('the harness prints a wrapped table', () => {
 })
 
 describe('the driver that runs the harness', () => {
+  // The two cases below drive a REAL child, and the child is a POSIX shell script.
+  const POSIX_ONLY = process.platform === 'win32'
+
   it('refuses to start the real CLI when the spawn guard forbids it', () => {
     // The guard's deny mode is set for every test file, so the driver must not reach the
     // developer's own Factory installation.
@@ -665,7 +668,11 @@ describe('the driver that runs the harness', () => {
     expect(cli.unavailable).toMatch(/spawn guard/i)
   })
 
-  it('reports a timeout as a timeout, and not as a missing executable', () => {
+  // POSIX-only: the fake harness CLI is a `#!/bin/sh` script, so the case needs a POSIX
+  // shell to run it and a POSIX executable bit (Windows has neither, and `chmod` is a
+  // no-op there). The driver's timeout exit code is the GNU `timeout` convention (124),
+  // and a Windows child that never starts reports the killed-by-a-signal code instead.
+  it.skipIf(POSIX_ONLY)('reports a timeout as a timeout, and not as a missing executable', () => {
     // A real child, because only a real child can time out. It sleeps past the cap.
     allowRealSpawns('the driver timeout case needs a real child that outlives the cap')
     const dir = temp('factory-driver-timeout-')
@@ -684,7 +691,10 @@ describe('the driver that runs the harness', () => {
     expect(answer.stderr).toMatch(/timed out after 250 ms/)
   })
 
-  it('bounds the command\'s output, not one stream of it', () => {
+  // POSIX-only: the fake harness CLI is a `#!/bin/sh` script that writes to both
+  // streams, so the case needs a POSIX shell to run it and a POSIX executable bit
+  // (Windows has neither, and `chmod` is a no-op there), so the child never runs.
+  it.skipIf(POSIX_ONLY)('bounds the command\'s output, not one stream of it', () => {
     const dir = temp('factory-driver-output-')
     const script = join(dir, 'droid')
     writeFileSync(script, '#!/bin/sh\necho aaaaaaaaaaaaaaaaaaaa\necho bbbbbbbbbbbbbbbbbbbb 1>&2\n')
@@ -727,7 +737,14 @@ describe('the tree writer', () => {
 
     // The writer must not swallow the I/O failure.
     expect(thrown, 'the writer must not swallow the I/O failure').toBeDefined()
-    expect(thrown?.code, "the failure is the filesystem's own errno").toMatch(/^EISDIR$|^ENOTEMPTY$/)
+    // The failure is the FILESYSTEM's own errno, not one KyberDash invents, and every
+    // platform names its own refusal of a rename onto a directory: Linux and macOS answer
+    // EISDIR (or ENOTEMPTY), Windows answers EPERM (or EEXIST, or ENOTEMPTY). The point of
+    // the assertion is the errno's origin, so every errno these platforms produce for the
+    // same refusal is accepted.
+    expect(thrown?.code, "the failure is the filesystem's own errno").toMatch(
+      /^EISDIR$|^ENOTEMPTY$|^EPERM$|^EEXIST$/,
+    )
 
     // A staged sibling left behind is a file KyberDash did not write, and the classifier
     // reads any such file as a foreign tree: the owner's own tree could then neither be

@@ -662,8 +662,14 @@ describe('factory (droid) capture status', () => {
     writer.filePlugin.install(home, hostEnv(home), { dryRun: false, harnessCli: fakeHarness().harness })
 
     const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
-    // The directory the plugin resolves to is reported wherever the row carries it.
-    expect(JSON.stringify(factory)).toContain(writer.filePlugin.path(home, hostEnv(home)))
+    // The directory the plugin resolves to is reported wherever the row carries it. The row
+    // carries it as a plain line, so the path is compared as itself: a JSON copy of the row
+    // escapes the backslashes of a Windows path, and the raw path is not a substring of it.
+    const pluginDirectory = writer.filePlugin.path(home, hostEnv(home))
+    expect(
+      factory.statusLines.some((line) => line === `plugin directory: ${pluginDirectory}`),
+      'the row names the directory the plugin resolves to',
+    ).toBe(true)
     expect(factory.statusLines.some((line) => /consent/i.test(line))).toBe(true)
   })
 
