@@ -78,23 +78,40 @@ describe('the shared consent writer', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: true })
   })
 
-  it('replaces the file in one step, so a reader never sees half a file', async () => {
+  // POSIX-only: Windows forbids replacing a file that a reader holds open (the rename
+  // fails with EPERM), so the guarantee this case asserts — a reader keeps the whole old
+  // file while the writer replaces the file in one step — cannot be exercised there.
+  it.skipIf(process.platform === 'win32')('a reader that already opened the file keeps reading the whole old file', async () => {
     const { writeContentConsent } = await sharedWriter()
     const path = consentPathIn(tempDir())
     writeContentConsent(path, false)
     const before = readFileSync(path, 'utf8')
-    const beforeInode = statSync(path).ino
-    // A reader that already opened the file keeps reading the whole old file: the writer
+    // The reader opens the file BEFORE the write, so it holds the old file: the writer
     // replaces the file instead of truncating and rewriting it in place.
     const handle = openSync(path, 'r')
     try {
       writeContentConsent(path, true)
       expect(readFileSync(handle, 'utf8')).toBe(before)
-      expect(statSync(path).ino, 'the file is replaced, not rewritten in place').not.toBe(beforeInode)
-      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: true })
     } finally {
       closeSync(handle)
     }
+  })
+
+  it('replaces the file rather than rewriting it in place', async () => {
+    const { writeContentConsent } = await sharedWriter()
+    const path = consentPathIn(tempDir())
+    writeContentConsent(path, false)
+    const beforeInode = statSync(path).ino
+    writeContentConsent(path, true)
+    expect(statSync(path).ino, 'the file is replaced, not rewritten in place').not.toBe(beforeInode)
+  })
+
+  it('leaves the new content on disk', async () => {
+    const { writeContentConsent } = await sharedWriter()
+    const path = consentPathIn(tempDir())
+    writeContentConsent(path, false)
+    writeContentConsent(path, true)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ version: 1, content: true })
   })
 
   it('leaves no partial file and no temporary file behind when a write fails', async () => {

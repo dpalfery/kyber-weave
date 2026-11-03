@@ -55,7 +55,7 @@
 // as arguments, and it belongs in the leaf list of
 // `dash/src/architecture/factory-leaves.test.ts`.
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** The cached organisation settings in the harness's own directory. */
@@ -226,16 +226,40 @@ type SettingsFile =
 
 /**
  * The parsed contents of one settings file, or the state it could not be read in.
+ *
+ * The file is opened ONCE and then measured and read through that descriptor. A path that
+ * is checked and then read is a race: the file the path names may have changed in between,
+ * and the descriptor is the one thing that cannot change under the reader.
  */
 function readSettingsFile(path: string): SettingsFile {
-  if (!existsSync(path)) return { state: 'absent' }
+  let handle: number
   try {
-    const stat = statSync(path)
+    handle = openSync(path, 'r')
+  } catch (error) {
+    // The OPEN is the check: a path that names nothing at all is ABSENT, and one that
+    // cannot be opened for any other reason is UNREADABLE.
+    return { state: namesNothing(error) ? 'absent' : 'unreadable' }
+  }
+  try {
+    const stat = fstatSync(handle)
     if (!stat.isFile() || stat.size > MAX_SETTINGS_BYTES) return { state: 'unreadable' }
-    return { state: 'readable', document: JSON.parse(readFileSync(path, 'utf8')) as unknown }
+    return { state: 'readable', document: JSON.parse(readFileSync(handle, 'utf8')) as unknown }
   } catch {
     return { state: 'unreadable' }
+  } finally {
+    closeSync(handle)
   }
+}
+
+/**
+ * Whether an open failure means the path names nothing, rather than a file that is there
+ * and cannot be read. `ENOENT` is a path that names nothing — a missing file, or a broken
+ * symlink — and `ENOTDIR` is a path whose parent is not a directory, which names nothing
+ * either. Every other failure is a file that is there and cannot be read.
+ */
+function namesNothing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 /**
