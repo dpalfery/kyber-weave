@@ -124,6 +124,53 @@ internal static class SquadHarnessLowering
                 " ",
                 value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
+    /// <summary>
+    /// Splits a <c>&lt;model&gt;[reasoningEffort=&lt;level&gt;]</c> value into the bare model id and
+    /// the level, for a harness whose agent format carries reasoning effort as its own key.
+    /// </summary>
+    /// <exception cref="SquadRenderValidationException">
+    /// A malformed suffix, a level outside <paramref name="allowedLevels"/>, or a model id that is
+    /// blank, carries whitespace or brackets, or stacks suffixes.
+    /// </exception>
+    public static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(
+        string modelValue,
+        IReadOnlyList<string> allowedLevels,
+        string harnessDisplayName)
+    {
+        const string suffixPrefix = "[reasoningEffort=";
+        int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return (modelValue, null);
+        }
+
+        if (start == 0 || !modelValue.EndsWith(']'))
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed reasoningEffort suffix in model value '{modelValue}': expected '<model>[reasoningEffort=<level>]'.");
+        }
+
+        string level = modelValue[(start + suffixPrefix.Length)..^1];
+        if (!allowedLevels.Contains(level, StringComparer.Ordinal))
+        {
+            string accepted = $"{string.Join(", ", allowedLevels.Take(allowedLevels.Count - 1))}, or {allowedLevels[^1]}";
+            throw new SquadRenderValidationException(
+                $"Invalid reasoningEffort '{level}' in model value '{modelValue}': {harnessDisplayName} accepts {accepted}.");
+        }
+
+        string bareModel = modelValue[..start];
+        if (string.IsNullOrWhiteSpace(bareModel) ||
+            bareModel.Any(char.IsWhiteSpace) ||
+            bareModel.Contains('[', StringComparison.Ordinal) ||
+            bareModel.Contains(']', StringComparison.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
+        }
+
+        return (bareModel, level);
+    }
+
     private static string? OmitInherited(string value, SquadModelPolicy policy) =>
         string.Equals(value, Inherit, StringComparison.Ordinal) ||
         (policy == SquadModelPolicy.InheritOrBlankOmitted && string.IsNullOrWhiteSpace(value))

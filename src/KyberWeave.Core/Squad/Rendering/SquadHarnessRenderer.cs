@@ -239,6 +239,60 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>
+    /// The dual projection a harness uses when it renders a primary agent through an additional
+    /// entry-point form (ADR 0034): the agent file is already emitted, and a primary agent whose
+    /// profile declares <c>no-primary-agent: skill</c> also renders as an entry-point skill, unless
+    /// the same-name canonical skill already is the entry point. <paramref name="agentForm"/> names
+    /// the agent file's form in the fail-closed collision message, e.g. <c>a droid</c>.
+    /// </summary>
+    /// <param name="agent">The canonical agent, already emitted as an agent file.</param>
+    /// <param name="agentForm">How the collision message names the agent file's form.</param>
+    /// <param name="renderEntryPointSkill">Renders the entry-point skill.</param>
+    /// <param name="entryPointRecords">
+    /// The records for a primary agent with an entry point, given its fallback profile, the entry
+    /// point's path and whether it is the reused canonical skill.
+    /// </param>
+    /// <param name="agentRecords">The records for any other agent.</param>
+    public void AddEntryPointSkillProjection(
+        SquadAgent agent,
+        string agentForm,
+        Func<SquadDeploymentFile> renderEntryPointSkill,
+        Func<SquadFallbackProfile, string, bool, IEnumerable<SquadDegradationRecord>> entryPointRecords,
+        Func<IEnumerable<SquadDegradationRecord>> agentRecords)
+    {
+        if (agent.Invocation != SquadInvocation.Primary)
+        {
+            Degradations.AddRange(agentRecords());
+            return;
+        }
+
+        SquadPrimaryLowering lowering = ResolvePrimaryLowering(agent, () =>
+            $"Cannot render primary agent '{agent.Name}' as a {Spec.DisplayName} entry-point " +
+            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+            $"identity. {Spec.DisplayName} renders both {agentForm} and an entry-point skill, " +
+            "so this is a fail-closed condition rather than a naming collision " +
+            "this renderer can resolve on its own.");
+        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        switch (lowering)
+        {
+            case SquadPrimaryLowering.ReuseCanonicalSkill:
+                // A declared shared identity already has its canonical skill as the entry point, so
+                // emitting the entry-point skill too would project one identity twice.
+                Degradations.AddRange(entryPointRecords(fallbackProfile, $"{SkillsDirectory}/{agent.Name}/SKILL.md", true));
+                break;
+            case SquadPrimaryLowering.EntryPointSkill:
+                SquadDeploymentFile skill = renderEntryPointSkill();
+                AddPrincipal(skill, agent.Resources);
+                Degradations.AddRange(entryPointRecords(fallbackProfile, skill.RelativePath, false));
+                break;
+            default:
+                // Omit mode: the agent file renders exactly as before, with no entry-point skill.
+                Degradations.AddRange(agentRecords());
+                break;
+        }
+    }
+
+    /// <summary>
     /// The declared capabilities <paramref name="agent"/>'s profile does not deny, in vocabulary
     /// order; empty when the profile does not resolve.
     /// </summary>

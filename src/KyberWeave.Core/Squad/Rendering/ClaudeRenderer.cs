@@ -191,63 +191,41 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         ArbiterPlan arbiter = context.GetOrCreateState(ArbiterPlan.Create);
         context.AddPrincipal(RenderAgentFile(context, agent, arbiter), agent.Resources);
 
-        if (agent.Invocation != SquadInvocation.Primary)
-        {
-            context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles));
-            return;
-        }
+        context.AddEntryPointSkillProjection(
+            agent,
+            "a subagent",
+            () => RenderEntryPointSkill(context, agent, arbiter),
+            (fallbackProfile, path, reused) => BuildPrimaryAgentDegradationRecords(
+                agent,
+                fallbackProfile,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                reused,
+                reused ? path : ""),
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles));
+    }
 
-        // Not a declared shared identity: the canonical skill and the entry-point skill would both
-        // claim .claude/skills/<name>/SKILL.md, and a native target has no role-prefixed escape
-        // hatch, so this is a real collision that cannot be resolved here.
-        SquadPrimaryLowering lowering = context.ResolvePrimaryLowering(agent, () =>
-            $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
-            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-            "identity. Claude renders both a subagent and an entry-point skill, " +
-            "so this is a fail-closed condition rather than a naming collision " +
-            "this renderer can resolve on its own.");
-        SquadFallbackProfile fallbackProfile = context.Source.FallbackProfiles.Profiles[agent.Fallback];
-        switch (lowering)
-        {
-            case SquadPrimaryLowering.ReuseCanonicalSkill:
-                // A declared shared identity already has its canonical skill as the entry point, so
-                // emitting the entry-point skill too would project one identity twice.
-                context.Degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    context.CapabilityVocabulary,
-                    true,
-                    $"{context.SkillsDirectory}/{agent.Name}/SKILL.md"));
-                break;
-            case SquadPrimaryLowering.EntryPointSkill:
-                // The entry-point skill stays registered for the session, so a dispatching primary
-                // agent's skill carries the same dispatch hooks as its subagent file.
-                Dictionary<string, object?>? hooks = BuildArbiterHooks(
-                    agent,
-                    context.EnabledArbiter,
-                    arbiter.Dispatchers,
-                    arbiter.Guarded,
-                    arbiter.DispatchTargets);
-                context.AddPrincipal(
-                    context.RenderSkillDocument(
-                        agent.Name,
-                        agent.Description,
-                        agent.InstructionBody,
-                        Yaml,
-                        hooks is null ? null : new Dictionary<string, object?>(StringComparer.Ordinal) { ["hooks"] = hooks }),
-                    agent.Resources);
-                context.Degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    context.CapabilityVocabulary));
-                break;
-            default:
-                // Omit mode: render exactly as pre-T3 (no entry-point skill, byte-identical records).
-                context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles));
-                break;
-        }
+    /// <summary>
+    /// The entry-point skill stays registered for the session, so a dispatching primary agent's
+    /// skill carries the same dispatch hooks as its subagent file.
+    /// </summary>
+    private static SquadDeploymentFile RenderEntryPointSkill(
+        SquadHarnessRenderContext context,
+        SquadAgent agent,
+        ArbiterPlan arbiter)
+    {
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(
+            agent,
+            context.EnabledArbiter,
+            arbiter.Dispatchers,
+            arbiter.Guarded,
+            arbiter.DispatchTargets);
+        return context.RenderSkillDocument(
+            agent.Name,
+            agent.Description,
+            agent.InstructionBody,
+            Yaml,
+            hooks is null ? null : new Dictionary<string, object?>(StringComparer.Ordinal) { ["hooks"] = hooks });
     }
 
     private static SquadDeploymentFile RenderAgentFile(

@@ -170,50 +170,18 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
 
         context.AddPrincipal(RenderDroid(context, agent, mcpServers), agent.Resources);
 
-        if (agent.Invocation != SquadInvocation.Primary)
-        {
-            context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers));
-            return;
-        }
-
-        // Not a declared shared identity: Factory renders both a droid and an entry-point skill
-        // for the identity, and a native target has no role-prefixed escape hatch (ADR 0034).
-        SquadPrimaryLowering lowering = context.ResolvePrimaryLowering(agent, () =>
-            $"Cannot render primary agent '{agent.Name}' as a Factory entry-point " +
-            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-            "identity. Factory renders both a droid and an entry-point skill, " +
-            "so this is a fail-closed condition rather than a naming collision " +
-            "this renderer can resolve on its own.");
-        SquadFallbackProfile fallbackProfile = context.Source.FallbackProfiles.Profiles[agent.Fallback];
-        switch (lowering)
-        {
-            case SquadPrimaryLowering.ReuseCanonicalSkill:
-                // A declared shared identity already has its canonical skill as the entry point,
-                // so emitting the entry-point skill too would project one identity twice.
-                context.Degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    mcpServers,
-                    $"{context.SkillsDirectory}/{agent.Name}/SKILL.md",
-                    true));
-                break;
-            case SquadPrimaryLowering.EntryPointSkill:
-                SquadDeploymentFile skillPrincipal =
-                    context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml);
-                context.AddPrincipal(skillPrincipal, agent.Resources);
-                context.Degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    mcpServers,
-                    skillPrincipal.RelativePath));
-                break;
-            default:
-                // Omit mode: the droid renders exactly as before, with no entry-point skill.
-                context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers));
-                break;
-        }
+        context.AddEntryPointSkillProjection(
+            agent,
+            "a droid",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml),
+            (fallbackProfile, path, reused) => BuildPrimaryAgentDegradationRecords(
+                agent,
+                fallbackProfile,
+                context.CapabilityProfiles,
+                mcpServers,
+                path,
+                reused),
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers));
     }
 
     private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
@@ -269,31 +237,8 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.ai,
     ///     subagents), so any other level throws <see cref="SquadRenderValidationException" />.
     /// </summary>
-    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue)
-    {
-        const string suffixPrefix = "[reasoningEffort=";
-        int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
-        if (start < 0) return (modelValue, null);
-
-        if (start == 0 || !modelValue.EndsWith(']'))
-            throw new SquadRenderValidationException(
-                $"Malformed reasoningEffort suffix in model value '{modelValue}': expected '<model>[reasoningEffort=<level>]'.");
-
-        string level = modelValue[(start + suffixPrefix.Length)..^1];
-        if (Array.IndexOf(AllowedReasoningEfforts, level) < 0)
-            throw new SquadRenderValidationException(
-                $"Invalid reasoningEffort '{level}' in model value '{modelValue}': Factory accepts low, medium, or high.");
-
-        string bareModel = modelValue[..start];
-        if (string.IsNullOrWhiteSpace(bareModel) ||
-            bareModel.Any(char.IsWhiteSpace) ||
-            bareModel.Contains('[', StringComparison.Ordinal) ||
-            bareModel.Contains(']', StringComparison.Ordinal))
-            throw new SquadRenderValidationException(
-                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
-
-        return (bareModel, level);
-    }
+    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
+        SquadHarnessLowering.ParseReasoningEffortSuffix(modelValue, AllowedReasoningEfforts, HarnessSpec.DisplayName);
 
     /// <summary>
     ///     The MCP servers a droid is entitled to declare, filtered from the squad's declared servers
