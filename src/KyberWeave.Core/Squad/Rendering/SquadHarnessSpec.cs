@@ -125,3 +125,63 @@ internal static class SquadHarnessLowering
             ? null
             : value;
 }
+
+/// <summary>
+/// A harness's capability-to-tool lowering: which of its tool names each allowed capability
+/// grants, the tools every agent gets regardless, and the fixed order tools are emitted in.
+/// </summary>
+/// <remarks>
+/// An unresolvable profile grants nothing beyond <c>ungoverned</c>: falling back to "grant
+/// everything" would turn a source error into silent widening. Only <c>allow</c> grants a tool;
+/// what <c>ask</c> lowers to is the harness's own degradation decision, not this map's.
+/// </remarks>
+internal sealed class SquadToolMap
+{
+    private readonly (string Capability, string[] Tools)[] _capabilityTools;
+    private readonly string[] _ungoverned;
+
+    public SquadToolMap(
+        (string Capability, string[] Tools)[] capabilityTools,
+        string[] order,
+        string[]? ungoverned = null)
+    {
+        _capabilityTools = capabilityTools;
+        Order = order;
+        _ungoverned = ungoverned ?? [];
+    }
+
+    /// <summary>Emission order, fixed so a rendered file is byte-stable however the profile enumerates.</summary>
+    public IReadOnlyList<string> Order { get; }
+
+    /// <summary>The ungoverned tools plus every tool an allowed capability of the profile grants.</summary>
+    public HashSet<string> Grant(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        HashSet<string> granted = new(_ungoverned, StringComparer.Ordinal);
+        if (!capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
+        {
+            return granted;
+        }
+
+        foreach ((string capability, string[] tools) in _capabilityTools)
+        {
+            if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                decision == SquadPermissionDecision.Allow)
+            {
+                granted.UnionWith(tools);
+            }
+        }
+
+        return granted;
+    }
+
+    /// <summary>The granted tools in <see cref="Order"/>.</summary>
+    public string[] Resolve(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        HashSet<string> granted = Grant(profileName, capabilityProfiles);
+        return [.. Order.Where(granted.Contains)];
+    }
+}

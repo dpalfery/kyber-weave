@@ -330,14 +330,16 @@ internal sealed class SquadHarnessRenderContext
 
     /// <summary>
     /// The skill document every harness shares: <c>name</c>, a single-line <c>description</c> and
-    /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>. No model or
+    /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>, then any
+    /// <paramref name="additionalFrontmatter"/> a harness's entry-point skill carries. No model or
     /// permission keys: a skill cannot express the capability lattice.
     /// </summary>
     public SquadDeploymentFile RenderSkillDocument(
         string name,
         string description,
         string instructionBody,
-        SquadYamlEmitter? emitter = null)
+        SquadYamlEmitter? emitter = null,
+        IReadOnlyDictionary<string, object?>? additionalFrontmatter = null)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -345,6 +347,13 @@ internal sealed class SquadHarnessRenderContext
             ["description"] = SingleLine(description),
             ["license"] = "MIT"
         };
+        if (additionalFrontmatter is not null)
+        {
+            foreach ((string key, object? value) in additionalFrontmatter)
+            {
+                frontmatter[key] = value;
+            }
+        }
 
         return CreateFile(
             $"{SkillsDirectory}/{name}/SKILL.md",
