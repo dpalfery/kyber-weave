@@ -2659,7 +2659,7 @@ public sealed class ReleaseTests
         const string Script = """
             const d = require('./npm/lib/download.js');
             for (const name of ['kyber-weave', 'dir/file']) d.assertSafeArchiveEntry(name);
-            for (const name of ['../evil', '/abs', 'C:/Temp/pwn.txt', 'C:foo', 'a\\..\\..\\pwn.txt']) {
+            for (const name of ['../evil', '/abs', 'C:/Temp/pwn.txt', 'C:foo', 'a\\..\\..\\pwn.txt', '.. /evil.txt', 'a/.. /evil.txt']) {
               try { d.assertSafeArchiveEntry(name); process.exit(3); } catch {}
             }
             """;

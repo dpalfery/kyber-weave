@@ -183,16 +183,25 @@ function verifyArchiveSha256(archivePath, archiveName, sums) {
   }
 }
 
+function isParentSegment(segment) {
+  let trimmed = segment;
+  while (trimmed.length > 2 && (trimmed.endsWith(" ") || trimmed.endsWith("."))) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed === "..";
+}
+
 function assertSafeArchiveEntry(name) {
   if (!name) {
     throw new Error("Archive contains an empty member name");
   }
   const normalized = name.replace(/\\/g, "/");
+  const unsafeSegment = normalized.split("/").some(isParentSegment);
   if (
     normalized.startsWith("/") ||
     /^[A-Za-z]:/.test(normalized) ||
     normalized.includes("\0") ||
-    normalized.split("/").includes("..")
+    unsafeSegment
   ) {
     throw new Error(`Archive contains an unsafe member: ${name}`);
   }
@@ -206,7 +215,8 @@ function assertSafeArchive(archivePath, rid) {
         `$zip=[System.IO.Compression.ZipFile]::OpenRead('${escaped}'); ` +
         "try { $zip.Entries | ForEach-Object { " +
         "$name = $_.FullName -replace '\\','/'; " +
-        "if ($name -match '(^|/)\\.\\.(/|$)' -or [System.IO.Path]::IsPathRooted($name) -or $name -match '^[A-Za-z]:') { " +
+        "$unsafe = ($name -split '/') | Where-Object { $_ -match '^\\.\\.[ .]*$' }; " +
+        "if ($unsafe -or [System.IO.Path]::IsPathRooted($name) -or $name -match '^[A-Za-z]:') { " +
         "throw \"unsafe zip entry: $($_.FullName)\" } } } finally { $zip.Dispose() }";
       execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
         stdio: "inherit",
