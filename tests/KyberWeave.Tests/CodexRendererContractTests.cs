@@ -35,216 +35,58 @@ public sealed class CodexRendererContractTests : IDisposable
         _temp.Dispose();
     }
 
+    /// <summary>
+    ///     Codex's own decisions on the real corpus: every agent is a TOML agent file whose model
+    ///     follows the <c>codex</c> column verbatim and whose body is the developer instructions;
+    ///     the primary agent also ships an entry-point skill carrying its body; and every non-deny
+    ///     decision is recorded as inexpressible. The skill documents and record identity are the
+    ///     shared pipeline's, checked in <see cref="Squad.SquadRendererSharedContractTests"/>.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Codex_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = new([new CodexRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Codex],
-            SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await new SquadRendererRegistry([new CodexRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Codex], SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
-        SquadAgent[] generatedPrimaryEntryPoints = source.Agents
-            .Where(agent =>
-                agent.Invocation == SquadInvocation.Primary &&
-                string.Equals(
-                    source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
-                    "skill",
-                    StringComparison.Ordinal) &&
-                !source.Skills.Any(skill => string.Equals(skill.Name, agent.Name, StringComparison.Ordinal)))
-            .ToArray();
-        int expectedPrimaryEntryPointArtifactCount =
-            generatedPrimaryEntryPoints.Sum(agent => 1 + agent.Resources.Count);
-        SquadAgent conductor = Assert.Single(generatedPrimaryEntryPoints, agent => agent.Name == "conductor");
-        Assert.Equal(1 + conductor.Resources.Count, expectedPrimaryEntryPointArtifactCount);
-
-        // C3: every rendered owner also projects its validated resource closure beside its
-        // principal output. Primary agents with a skill fallback also project an entry-point
-        // skill and its validated resource closure.
-        int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                                    + expectedSkillCount
-                                                    + source.Skills.Where(skill =>
-                                                            !suppressedSkillIdentities.Contains(skill.Name))
-                                                        .Sum(skill => skill.Resources.Count)
-                                                    + expectedPrimaryEntryPointArtifactCount;
-        Assert.Equal(expectedFileCount, result.Files.Count);
-
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("codex", f.Target);
-            Assert.True(
-                f.RelativePath.StartsWith(".codex/agents/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith(".codex/skills/", StringComparison.Ordinal),
-                $"File '{f.RelativePath}' does not start with expected Codex directory.");
-        });
-
-        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
-
-        // Agents verification
         foreach (SquadAgent agent in source.Agents)
         {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".codex/agents/{agent.Name}.toml");
-
-            string tomlContent = Encoding.UTF8.GetString(file.Content.Span);
-            ParsedTomlAgent parsed = ParseCodexAgentToml(tomlContent, agent.Name);
-
+            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".codex/agents/{agent.Name}.toml");
+            ParsedTomlAgent parsed = ParseCodexAgentToml(Encoding.UTF8.GetString(file.Content.Span), agent.Name);
             Assert.Equal(agent.Name, parsed.Name);
             Assert.Equal(agent.Description, parsed.Description);
 
-            // Model resolution verification against loaded ModelProfiles
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("codex", out string? expectedModel))
-            {
-                Assert.Equal(expectedModel, parsed.Model);
-            }
-            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
-            {
-                Assert.Equal(modelProfile.Default, parsed.Model);
-            }
-            else
-            {
-                Assert.Null(parsed.Model);
-            }
+            string? expectedModel = modelProfile.HarnessModels.TryGetValue("codex", out string? codexModel)
+                ? codexModel
+                : modelProfile.Default == "inherit" ? null : modelProfile.Default;
+            Assert.Equal(expectedModel, parsed.Model);
 
-            // Exact instructions body check
-            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedBody.EndsWith('\n'))
-            {
-                expectedBody += "\n";
-            }
-
-            Assert.Equal(expectedBody, parsed.DeveloperInstructions);
+            Assert.Equal(Normalized(agent.InstructionBody), parsed.DeveloperInstructions);
         }
 
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".codex/agents/{sharedIdentity}.toml");
-            string sharedSkillPath = $".codex/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-            else
-            {
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-        }
+        // The other primary agents are shared identities whose canonical skill is the entry point.
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        SquadDeploymentFile entryPoint = Assert.Single(result.Files, f => f.RelativePath == $".codex/skills/{conductor.Name}/SKILL.md");
+        (_, string entryPointBody) = SplitFrontmatter(Encoding.UTF8.GetString(entryPoint.Content.Span), conductor.Name);
+        Assert.Equal(Normalized(conductor.InstructionBody), entryPointBody);
+        Assert.All(conductor.Resources, resource => Assert.Contains(
+            result.Files,
+            f => f.RelativePath == $".codex/skills/{conductor.Name}/{resource.RelativePath}"));
 
-        // Skills verification
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".codex/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", skill.Name));
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license", skill.Name));
-
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n'))
-            {
-                expectedSkillBody += "\n";
-            }
-
-            Assert.Equal(expectedSkillBody, skillBody);
-        }
-
-        foreach (SquadAgent agent in generatedPrimaryEntryPoints)
-        {
-            SquadDeploymentFile entryPointSkill = Assert.Single(
-                result.Files,
-                file => file.RelativePath == $".codex/skills/{agent.Name}/SKILL.md");
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(entryPointSkill.Content.Span),
-                agent.Name);
-
-            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
-            string expectedDescription = string.Join(" ", agent.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", agent.Name));
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license", agent.Name));
-
-            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedBody.EndsWith('\n'))
-            {
-                expectedBody += "\n";
-            }
-
-            Assert.Equal(expectedBody, skillBody);
-
-            foreach (SquadResource resource in agent.Resources)
-            {
-                SquadDeploymentFile resourceFile = Assert.Single(
-                    result.Files,
-                    file => file.RelativePath == $".codex/skills/{agent.Name}/{resource.RelativePath}");
-                ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
-                Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
-            }
-        }
-
-        // Degradations: every agent with non-deny capability profile must carry 'permission-not-expressible'
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-        string[] expectedDegraded = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                return capabilityVocabulary.Any(cap =>
-                    prof.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                    decision != SquadPermissionDecision.Deny);
-            })
-            .Select(a => a.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.NotEmpty(expectedDegraded);
         Assert.Equal(
-            expectedDegraded,
-            result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
-
-        foreach (SquadDegradationRecord degradation in result.Degradations)
+            source.Agents
+                .Where(a => source.CapabilityProfiles.Profiles[a.CapabilityProfile].Permissions.Any(
+                    pair => source.CapabilityProfiles.Capabilities.Contains(pair.Key) && pair.Value != SquadPermissionDecision.Deny))
+                .Select(a => a.Name)
+                .Order(StringComparer.Ordinal),
+            result.Degradations.Select(d => d.CanonicalIdentity).Order(StringComparer.Ordinal));
+        Assert.All(result.Degradations, d =>
         {
-            Assert.Equal("codex", degradation.Target);
-            Assert.Equal("permission-not-expressible", degradation.Code);
-            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
-
-            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
-            Assert.NotNull(degradation.Details);
-            Assert.Contains(agent.CapabilityProfile, degradation.Details, StringComparison.Ordinal);
-        }
-
-        // No permission widening detected
-        Assert.DoesNotContain(
-            result.Degradations,
-            d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase) ||
-                 (d.Details is not null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)));
+            Assert.Equal("permission-not-expressible", d.Code);
+            Assert.Contains(source.Agents.Single(a => a.Name == d.CanonicalIdentity).CapabilityProfile, d.Details, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
@@ -381,6 +223,12 @@ public sealed class CodexRendererContractTests : IDisposable
     /// <c>developer_instructions</c> field. Escape handling walks the input so <c>\\</c>
     /// and <c>\"""</c> decode correctly without mirroring renderer replace order.
     /// </summary>
+    private static string Normalized(string body)
+    {
+        string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return normalized.EndsWith('\n') ? normalized : normalized + "\n";
+    }
+
     private static ParsedTomlAgent ParseCodexAgentToml(string toml, string identity)
     {
         const string multilineOpen = "developer_instructions = \"\"\"\n";

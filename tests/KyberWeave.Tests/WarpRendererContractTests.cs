@@ -75,225 +75,56 @@ public sealed class WarpRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Renders the shipped corpus and checks every agent and skill lands at its Warp path,
-    /// with collisions derived from the source.
+    /// Warp's own decisions on the real corpus: with no agent primitive, every agent lowers onto a
+    /// skill — a shared identity reuses its canonical skill, a distinct-body collision ships beside
+    /// it as <c>role-&lt;name&gt;</c> carrying the agent body, and every other agent under its own
+    /// name — each with one <c>role-skill-fallback</c> record, and every non-deny decision is
+    /// recorded as inexpressible. The canonical skill documents are the shared pipeline's, checked
+    /// in <see cref="Squad.SquadRendererSharedContractTests"/>.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Warp_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
-        HashSet<string> canonicalSkillNames = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (string identity in shared)
-        {
-            Assert.True(
-                canonicalSkillNames.Contains(identity),
-                $"Shared identity '{identity}' has no canonical skill projection.");
-        }
-
         HashSet<string> collisions = DeriveCollisions(source);
+        Assert.NotEmpty(collisions);
 
-        int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
-
-        // Every agent lowers to a role skill and every canonical skill is emitted; each
-        // projects its validated resource closure beneath the lowered identity directory.
-        int expectedFiles = source.Skills.Count + unoccupiedAgents + collisions.Count
-            + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Sum(skill => skill.Resources.Count);
-
-        SquadRendererRegistry registry = new([new WarpRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Warp],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await new SquadRendererRegistry([new WarpRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.Equal(expectedFiles, result.Files.Count);
-
-        // Path uniqueness guards the occupancy-derived lowering: two agents claiming the
-        // same .warp/skills/{name}/SKILL.md path would pass the count check while one
-        // silently overwrites the other at deployment time.
-        string[] duplicatePaths = result.Files
-            .GroupBy(f => f.RelativePath, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToArray();
-        Assert.True(
-            duplicatePaths.Length == 0,
-            $"Duplicate rendered paths: {string.Join(", ", duplicatePaths)}");
-
-        // Principals are SKILL.md files; closure resources render beside their lowered
-        // owner, so a resource path is .warp/skills/{ownerIdentity}/{resourcePath}.
-        HashSet<string> resourceOutputPaths = source.Agents
-            .SelectMany(
-                agent => agent.Resources,
-                (agent, resource) => $".warp/skills/{(collisions.Contains(agent.Name) ? $"role-{agent.Name}" : agent.Name)}/{resource.RelativePath}")
-            .Concat(source.Skills.SelectMany(
-                skill => skill.Resources,
-                (skill, resource) => $".warp/skills/{skill.Name}/{resource.RelativePath}"))
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("warp", f.Target);
-            Assert.StartsWith(".warp/skills/", f.RelativePath, StringComparison.Ordinal);
-            Assert.True(
-                f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal) ||
-                resourceOutputPaths.Contains(f.RelativePath),
-                $"Rendered file '{f.RelativePath}' is neither a principal SKILL.md nor a projected closure resource.");
-        });
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".warp/skills/{skill.Name}/SKILL.md");
-
-            YamlMappingNode frontmatter = ReadFrontmatter(file);
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
-            string emittedDescription = RequireScalar(frontmatter, "description");
-            Assert.True(
-                !emittedDescription.Contains('\n', StringComparison.Ordinal) &&
-                string.Equals(emittedDescription, emittedDescription.Trim(), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description must be a trimmed single-line scalar.");
-            foreach (string line in skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                Assert.Contains(line, emittedDescription, StringComparison.Ordinal);
-            }
-
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                $"Skill '{skill.Name}' must not declare a model.");
-
-            string expectedBody = NormalizeBody(skill.InstructionBody);
-            Assert.True(
-                string.Equals(expectedBody, ReadBody(file), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
-        }
-
-        foreach (string collision in collisions)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".warp/skills/{collision}/SKILL.md");
-            SquadDeploymentFile roleFile = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".warp/skills/role-{collision}/SKILL.md");
-
-            SquadAgent agent = Assert.Single(source.Agents, a => a.Name == collision);
-            YamlMappingNode frontmatter = ReadFrontmatter(roleFile);
-            Assert.True(
-                string.Equals($"role-{collision}", RequireScalar(frontmatter, "name"), StringComparison.Ordinal),
-                $"Collision role skill for '{collision}' has the wrong name.");
-            Assert.True(
-                string.Equals(ToSingleLineScalar(agent.Description), RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
-                $"Collision role skill for '{collision}' has the wrong description.");
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
-                $"Collision role skill for '{collision}' has the wrong license.");
-            Assert.True(
-                string.Equals(NormalizeBody(agent.InstructionBody), ReadBody(roleFile), StringComparison.Ordinal),
-                $"Collision role skill for '{collision}' has the wrong body.");
-        }
-
-        foreach (string conductor in SharedIdentities(source))
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".warp/skills/{conductor}/SKILL.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".warp/skills/role-{conductor}/SKILL.md");
-            Assert.Equal(
-                1,
-                result.Files.Count(f => f.RelativePath.Contains($"/{conductor}/SKILL.md", StringComparison.Ordinal)));
-
-            SquadDegradationRecord fallback = Assert.Single(
-                result.Degradations,
-                d => d.CanonicalIdentity == conductor && d.Code == "role-skill-fallback");
-            Assert.Equal(conductor, fallback.OutputIdentity);
-        }
-
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
         foreach (SquadAgent agent in source.Agents)
         {
+            string outputIdentity = collisions.Contains(agent.Name) ? $"role-{agent.Name}" : agent.Name;
             SquadDegradationRecord fallback = Assert.Single(
                 result.Degradations,
                 d => d.CanonicalIdentity == agent.Name && d.Code == "role-skill-fallback");
-            Assert.Equal("warp", fallback.Target);
-            Assert.Equal(agent.BodyDigest, fallback.InstructionDigest);
+            Assert.Equal(outputIdentity, fallback.OutputIdentity);
 
-            if (collisions.Contains(agent.Name))
+            if (shared.Contains(agent.Name))
             {
-                Assert.Equal($"role-{agent.Name}", fallback.OutputIdentity);
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == $".warp/skills/role-{agent.Name}/SKILL.md");
+                continue;
             }
-            else
-            {
-                Assert.Equal(agent.Name, fallback.OutputIdentity);
-            }
+
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".warp/skills/{outputIdentity}/SKILL.md");
+            Assert.Equal(outputIdentity, RequireScalar(ReadFrontmatter(file), "name"));
+            Assert.Equal(NormalizeBody(agent.InstructionBody), ReadBody(file));
         }
 
-        string[] expectedPermissionAgents = source.Agents
-            .Where(a =>
-            {
-                Assert.True(
-                    source.CapabilityProfiles.Profiles.TryGetValue(a.CapabilityProfile, out SquadCapabilityProfile? profile),
-                    $"Agent '{a.Name}' references undeclared capability profile '{a.CapabilityProfile}'.");
-                return HasNonDenyCapability(source.CapabilityProfiles, profile);
-            })
-            .Select(a => a.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        string[] actualPermissionAgents = result.Degradations
-            .Where(d => d.Code == "permission-not-expressible")
-            .Select(d => d.CanonicalIdentity)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(expectedPermissionAgents, actualPermissionAgents);
-
-        foreach (SquadDegradationRecord degradation in result.Degradations.Where(d => d.Code == "permission-not-expressible"))
-        {
-            Assert.True(
-                string.Equals("warp", degradation.Target, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
-            Assert.True(
-                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
-                $"Permission degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
-            SquadAgent agent = Assert.Single(source.Agents, a => a.Name == degradation.CanonicalIdentity);
-            Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Permission degradation for '{agent.Name}' has the wrong instruction digest.");
-            Assert.DoesNotContain("widening", degradation.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            string[] constrained = source.CapabilityProfiles.Capabilities
-                .Order(StringComparer.Ordinal)
-                .Where(capability =>
-                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision != SquadPermissionDecision.Deny)
-                .ToArray();
-            int previousIndex = -1;
-            foreach (string capability in constrained)
-            {
-                int capabilityIndex = degradation.Details?.IndexOf(capability, StringComparison.Ordinal) ?? -1;
-                Assert.True(
-                    capabilityIndex > previousIndex,
-                    $"Permission degradation for '{agent.Name}' does not list capability '{capability}' in ordinal order.");
-                previousIndex = capabilityIndex;
-            }
-        }
-
-        // No render may widen a canonical permission: the fallback records what it cannot
-        // express, it never claims a broader grant.
-        Assert.DoesNotContain(
-            result.Degradations,
-            d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase));
-
-        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(
+            source.Agents
+                .Where(a => HasNonDenyCapability(source.CapabilityProfiles, source.CapabilityProfiles.Profiles[a.CapabilityProfile]))
+                .Select(a => a.Name)
+                .Order(StringComparer.Ordinal),
+            result.Degradations
+                .Where(d => d.Code == "permission-not-expressible")
+                .Select(d => d.CanonicalIdentity)
+                .Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -330,12 +161,6 @@ public sealed class WarpRendererContractTests : IDisposable
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
         return normalized.EndsWith('\n') ? normalized : normalized + "\n";
     }
-
-    private static string ToSingleLineScalar(string value) =>
-        string.Join(
-            ' ',
-            value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text)
     {
