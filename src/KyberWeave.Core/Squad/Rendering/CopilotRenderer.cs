@@ -59,7 +59,6 @@ public sealed class CopilotRenderer : ISquadRenderer
     private const string AgentsDirectory = ".github/agents";
     private const string SkillsDirectory = ".github/skills";
     private const string CliHooksFileRelativePath = ".github/hooks/kyber-arbiter.json";
-    private const string ArbiterCommandName = "kyber-weave-arbiter";
     private const string VsCodeHarnessToken = "copilot-vscode";
     private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
@@ -587,8 +586,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         writer.WriteStartObject();
         writer.WriteString("type", "command");
         writer.WriteString("matcher", "task");
-        writer.WriteString("bash", $"{ArbiterCommandName} hook --harness {CliHarnessToken}");
-        writer.WriteString("powershell", $"{ArbiterCommandName} hook --harness {CliHarnessToken}");
+        string command = ArbiterHookWiring.HookCommandLine(CliHarnessToken);
+        writer.WriteString("bash", command);
+        writer.WriteString("powershell", command);
         writer.WriteNumber("timeoutSec", timeoutSeconds);
         writer.WriteEndObject();
         writer.WriteEndArray();

@@ -272,8 +272,10 @@ public sealed class SquadHookJsonBlockTests
     [Fact]
     public void CursorEntryIsSquadOwnedWhenCommandCarriesHarnessSignature()
     {
-        Assert.True(SquadHookJsonBlock.IsSquadEntry(
+        Assert.False(SquadHookJsonBlock.IsSquadEntry(
             SquadHookBlockFormat.Cursor, CursorEntry("kyber-weave-arbiter hook --harness cursor --extra")));
+        Assert.False(SquadHookJsonBlock.IsSquadEntry(
+            SquadHookBlockFormat.Cursor, CursorEntry("kyber-weave-arbiter hook --harness cursor-extra")));
         Assert.False(SquadHookJsonBlock.IsSquadEntry(
             SquadHookBlockFormat.Cursor, CursorEntry("user-linter --fast")));
         Assert.False(SquadHookJsonBlock.IsSquadEntry(
@@ -291,7 +293,7 @@ public sealed class SquadHookJsonBlockTests
     {
         Assert.True(SquadHookJsonBlock.IsSquadEntry(
             format, MatcherGroup(harness, "m", $"kyber-weave-arbiter hook --harness {harness}")));
-        Assert.True(SquadHookJsonBlock.IsSquadEntry(
+        Assert.False(SquadHookJsonBlock.IsSquadEntry(
             format, MatcherGroup(harness, "m", $"kyber-weave-arbiter hook --harness {harness} --flag", $"kyber-weave-arbiter hook --harness {harness}")));
         Assert.False(SquadHookJsonBlock.IsSquadEntry(
             format, MatcherGroup(harness, "m", $"kyber-weave-arbiter hook --harness {harness}", "user-tool")));

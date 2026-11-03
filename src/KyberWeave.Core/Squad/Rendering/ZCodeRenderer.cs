@@ -1058,8 +1058,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private static bool GrantsArbiter(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
-        (string.Equals(agent.Name, "conductor", StringComparison.Ordinal)
-            || string.Equals(agent.Name, "code-reviewer", StringComparison.Ordinal)) &&
+        (string.Equals(agent.Name, SquadOperatorChannel.ConductorAgentName, StringComparison.Ordinal)
+            || string.Equals(agent.Name, SquadOperatorChannel.CodeReviewerAgentName, StringComparison.Ordinal)) &&
         capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
         profile.Permissions.TryGetValue(ArbiterDecisionCapability, out SquadPermissionDecision decision) &&
         decision == SquadPermissionDecision.Allow;

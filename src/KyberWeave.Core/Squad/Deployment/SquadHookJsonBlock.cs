@@ -675,7 +675,10 @@ public static class SquadHookJsonBlock
         node is JsonValue value
         && value.TryGetValue<string>(out string? command)
         && command is not null
-        && command.StartsWith(CommandPrefix + harness, StringComparison.Ordinal);
+        // Exact equality: a user hook whose command merely starts with our prefix
+        // (`--harness factory-evil`, `--harness factory --custom-flag`) is not ours,
+        // and splicing or removing it would silently delete the user's entry.
+        && string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal);
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch

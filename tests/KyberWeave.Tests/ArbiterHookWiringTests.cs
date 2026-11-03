@@ -108,6 +108,12 @@ public sealed class ArbiterHookWiringTests : IDisposable
         Assert.Contains("caller", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void HookCommandLine_WithoutACaller_RejectsAHostileHarnessToken()
+    {
+        Assert.Throws<ArgumentException>(() => ArbiterHookWiring.HookCommandLine("claude; id"));
+    }
+
     [Theory]
     [InlineData("csharp-dev")]
     [InlineData("docs_dev")]

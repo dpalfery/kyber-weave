@@ -79,7 +79,7 @@ public sealed class SquadHookBlockReviewFixTests
     public void Install_WritesOnlyDocumentedFields()
     {
         using TempDirectory fixture = new();
-        JsonObject entry = CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one");
+        JsonObject entry = CursorEntry("kyber-weave-arbiter hook --harness cursor", "probe-one");
         entry["sentinel"] = "must-not-reach-the-file";
         SquadRenderedBlock block = new(
             "cursor",
@@ -133,8 +133,8 @@ public sealed class SquadHookBlockReviewFixTests
 
         string content = Read(fixture.Path, ".cursor/hooks.json");
         Assert.Contains("lint && fmt", content, StringComparison.Ordinal);
-        Assert.Contains("--probe two", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("--probe one", content, StringComparison.Ordinal);
+        Assert.Contains("\"matcher\": \"probe-two\"", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"matcher\": \"probe-one\"", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public sealed class SquadHookBlockReviewFixTests
         JsonNode file = JsonNode.Parse(File.ReadAllText(path))!;
         JsonArray entries = file["hooks"]!["preToolUse"]!.AsArray();
         Assert.Equal(2, entries.Count);
-        ((JsonObject)entries[0]!)["command"] = "kyber-weave-arbiter hook --harness cursor --probe edited";
+        ((JsonObject)entries[0]!)["matcher"] = "probe-edited";
         File.WriteAllText(path, file.ToJsonString());
 
         IReadOnlyList<SquadOwnedBlockDrift> drifts = Update(fixture.Path, previous, TwoIdenticalCursorEntries()).BlockDrifts;
@@ -240,7 +240,7 @@ public sealed class SquadHookBlockReviewFixTests
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
         string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
-        File.WriteAllText(path, File.ReadAllText(path).Replace("--probe one", "--probe edited", StringComparison.Ordinal));
+        File.WriteAllText(path, File.ReadAllText(path).Replace("\"matcher\": \"probe-one\"", "\"matcher\": \"probe-edited\"", StringComparison.Ordinal));
 
         Assert.NotEmpty(Update(fixture.Path, previous, CursorBlock("two")).BlockDrifts);
     }
@@ -313,7 +313,7 @@ public sealed class SquadHookBlockReviewFixTests
             "cursor",
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
-            [new SquadRenderedBlockEntry("preToolUse", CursorEntry($"kyber-weave-arbiter hook --harness cursor --probe {marker}"))]);
+            [new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor", $"probe-{marker}"))]);
 
     /// <summary>Two owned entries with identical content, so both record the same digest.</summary>
     private static SquadRenderedBlock TwoIdenticalCursorEntries() =>
@@ -322,8 +322,8 @@ public sealed class SquadHookBlockReviewFixTests
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
             [
-                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
-                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor", "probe-one")),
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor", "probe-one")),
             ]);
 
     private static SquadRenderedBlock CodexBlock(string marker) =>
@@ -331,21 +331,21 @@ public sealed class SquadHookBlockReviewFixTests
             "codex",
             ".codex/hooks.json",
             SquadHookBlockFormat.Codex,
-            [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup($"kyber-weave-arbiter hook --harness codex --probe {marker}"))]);
+            [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup("kyber-weave-arbiter hook --harness codex", $"probe-{marker}"))]);
 
-    private static JsonObject CursorEntry(string command) =>
+    private static JsonObject CursorEntry(string command, string matcher = "Task") =>
         new()
         {
             ["command"] = command,
-            ["matcher"] = "Task",
+            ["matcher"] = matcher,
             ["timeout"] = 5,
             ["failClosed"] = true,
         };
 
-    private static JsonObject MatcherGroup(string command) =>
+    private static JsonObject MatcherGroup(string command, string matcher = "pre-matcher") =>
         new()
         {
-            ["matcher"] = "pre-matcher",
+            ["matcher"] = matcher,
             ["hooks"] = new JsonArray(
                 new JsonObject
                 {

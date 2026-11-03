@@ -191,7 +191,6 @@ public static class ArbiterHookWiring
     /// </exception>
     public static string HookCommandLine(string harnessToken, string caller)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(caller);
         if (!CallerPattern.IsMatch(caller))
         {
@@ -202,6 +201,22 @@ public static class ArbiterHookWiring
                 nameof(caller));
         }
 
+        ValidateHarnessToken(harnessToken);
+        return $"{CommandName} hook --harness {harnessToken} --caller {caller}";
+    }
+
+    /// <summary>Builds the project-wide hook command line, which carries no caller.</summary>
+    /// <param name="harnessToken">The harness token passed to <c>--harness</c>.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="harnessToken"/> is not a plain token.</exception>
+    public static string HookCommandLine(string harnessToken)
+    {
+        ValidateHarnessToken(harnessToken);
+        return $"{CommandName} hook --harness {harnessToken}";
+    }
+
+    private static void ValidateHarnessToken(string harnessToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
         if (!CallerPattern.IsMatch(harnessToken))
         {
             throw new ArgumentException(
@@ -209,8 +224,6 @@ public static class ArbiterHookWiring
                 $"match {CallerPatternText}.",
                 nameof(harnessToken));
         }
-
-        return $"{CommandName} hook --harness {harnessToken} --caller {caller}";
     }
 
     /// <summary>Produces the hook decisions for a render, gated on Enabled and Project scope.</summary>

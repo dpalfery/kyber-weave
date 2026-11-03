@@ -490,28 +490,28 @@ public sealed class SquadOwnedBlockLifecycleTests
             "cursor",
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
-            [new SquadRenderedBlockEntry("preToolUse", CursorEntry($"kyber-weave-arbiter hook --harness cursor --probe {marker}"))]);
+            [new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor", $"probe-{marker}"))]);
 
     private static SquadRenderedBlock CodexBlock(string marker) =>
         new(
             "codex",
             ".codex/hooks.json",
             SquadHookBlockFormat.Codex,
-            [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup($"kyber-weave-arbiter hook --harness codex --probe {marker}"))]);
+            [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup("kyber-weave-arbiter hook --harness codex", $"probe-{marker}"))]);
 
-    private static JsonObject CursorEntry(string command) =>
+    private static JsonObject CursorEntry(string command, string matcher = "Task") =>
         new()
         {
             ["command"] = command,
-            ["matcher"] = "Task",
+            ["matcher"] = matcher,
             ["timeout"] = 5,
             ["failClosed"] = true,
         };
 
-    private static JsonObject MatcherGroup(string command) =>
+    private static JsonObject MatcherGroup(string command, string matcher = "pre-matcher") =>
         new()
         {
-            ["matcher"] = "pre-matcher",
+            ["matcher"] = matcher,
             ["hooks"] = new JsonArray(
                 new JsonObject
                 {
@@ -527,8 +527,8 @@ public sealed class SquadOwnedBlockLifecycleTests
         JsonNode root2 = JsonNode.Parse(File.ReadAllText(path))!;
         JsonArray pre = Assert.IsType<JsonObject>(root2)["hooks"]!.AsObject()["preToolUse"]!.AsArray();
         JsonObject owned = Assert.IsType<JsonObject>(pre.Single(
-            node => node!.AsObject()["command"]!.GetValue<string>().Contains(marker, StringComparison.Ordinal)));
-        owned["command"] = owned["command"]!.GetValue<string>().Replace(
+            node => node!.AsObject()["matcher"]!.GetValue<string>().Contains(marker, StringComparison.Ordinal)));
+        owned["matcher"] = owned["matcher"]!.GetValue<string>().Replace(
             marker,
             replacement,
             StringComparison.Ordinal);
