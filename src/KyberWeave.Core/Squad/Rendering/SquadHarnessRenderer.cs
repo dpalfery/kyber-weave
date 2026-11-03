@@ -1,0 +1,287 @@
+using System.Text;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using YamlDotNet.Serialization;
+
+namespace KyberWeave.Core.Squad.Rendering;
+
+/// <summary>
+/// The shared render pipeline every shipped harness renderer runs on: one skeleton that guards
+/// the request, loads the source and assembles the result, around a harness that supplies only
+/// its <see cref="SquadHarnessSpec"/> and the format decisions that are truly its own.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Thirteen renderers used to restate the same guard, directory resolution, skill document,
+/// model lowering and skill loop, each a little differently. A fix to one reached the others only
+/// if someone copied it, and the per-harness test suites pinned the copies. The pipeline owns those
+/// steps once, so a harness's code is what makes it different (ADR 0055).
+/// </para>
+/// <para>
+/// The default <see cref="Render"/> is the native shape: each agent in source order through
+/// <see cref="RenderAgent"/>, then the canonical skills, then any Arbiter wiring. A harness whose
+/// output order differs (Warp lowers every agent onto a skill and projects resources last)
+/// overrides <see cref="Render"/> and still uses the context's shared steps.
+/// </para>
+/// </remarks>
+public abstract class SquadHarnessRenderer : ISquadRenderer
+{
+    private protected SquadHarnessRenderer(SquadHarnessSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        Spec = spec;
+        SupportedTargets = [spec.Target];
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; }
+
+    private protected SquadHarnessSpec Spec { get; }
+
+    /// <inheritdoc />
+    public Task<SquadRenderResult> RenderAsync(
+        SquadRenderRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (request.Targets.Any(target => target != Spec.Target))
+        {
+            throw new ArgumentException(
+                $"{GetType().Name} was asked to render a target other than {Spec.DisplayName}.",
+                nameof(request));
+        }
+
+        if (request.Targets.Count == 0)
+        {
+            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
+        }
+
+        SquadHarnessRenderContext context = new(Spec, request, SquadRenderSource.Load(request, Spec.Target));
+        return Task.FromResult(Render(context));
+    }
+
+    /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
+    private protected virtual SquadRenderResult Render(SquadHarnessRenderContext context)
+    {
+        foreach (SquadAgent agent in context.Source.Agents)
+        {
+            RenderAgent(context, agent);
+        }
+
+        RenderCanonicalSkills(context);
+        RenderArbiter(context);
+        return context.ToResult();
+    }
+
+    /// <summary>Emits one canonical agent's projection, resources and degradation records.</summary>
+    private protected abstract void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent);
+
+    /// <summary>Emits every canonical skill a native target does not suppress.</summary>
+    private protected virtual void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
+        context.EmitCanonicalSkills(skill => context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody));
+
+    /// <summary>Emits Arbiter wiring when the request enables it; the default emits nothing.</summary>
+    private protected virtual void RenderArbiter(SquadHarnessRenderContext context)
+    {
+    }
+}
+
+/// <summary>
+/// One render in progress: the request and loaded source, the output being accumulated, and the
+/// steps every harness shares.
+/// </summary>
+internal sealed class SquadHarnessRenderContext
+{
+    private HashSet<string>? _sharedIdentities;
+    private HashSet<string>? _suppressedSkillIdentities;
+    private HashSet<string>? _skillNames;
+    private string[]? _capabilityVocabulary;
+
+    public SquadHarnessRenderContext(SquadHarnessSpec spec, SquadRenderRequest request, SquadSource source)
+    {
+        Spec = spec;
+        Request = request;
+        Source = source;
+    }
+
+    public SquadHarnessSpec Spec { get; }
+
+    public SquadRenderRequest Request { get; }
+
+    public SquadSource Source { get; }
+
+    public SquadDeploymentScope Scope => Request.Scope;
+
+    public string Token => Spec.Token;
+
+    public List<SquadDeploymentFile> Files { get; } = [];
+
+    public List<SquadDegradationRecord> Degradations { get; } = [];
+
+    public List<SquadRenderedBlock> Blocks { get; } = [];
+
+    public IReadOnlyDictionary<string, SquadCapabilityProfile> CapabilityProfiles =>
+        Source.CapabilityProfiles.Profiles;
+
+    public IReadOnlyDictionary<string, SquadModelProfile> ModelProfiles => Source.ModelProfiles.Profiles;
+
+    public string AgentsDirectory => ResolveDirectory(
+        Spec.AgentsSubdirectory ??
+        throw new InvalidOperationException($"Harness '{Token}' has no agent directory."));
+
+    public string SkillsDirectory => ResolveDirectory("skills");
+
+    /// <summary>Every profile's shared identities, read from source rather than a renderer roster.</summary>
+    public IReadOnlySet<string> SharedIdentities => _sharedIdentities ??= Source.FallbackProfiles.Profiles.Values
+        .SelectMany(profile => profile.SharedIdentities)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The shared identities whose canonical skill a native target suppresses because the agent
+    /// file carries the identical body. A primary shared identity's skill is its entry point and is
+    /// never suppressed.
+    /// </summary>
+    public IReadOnlySet<string> SuppressedSkillIdentities => _suppressedSkillIdentities ??=
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(Source, SharedIdentities);
+
+    public IReadOnlySet<string> SkillNames => _skillNames ??= Source.Skills
+        .Select(skill => skill.Name)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The declared capability vocabulary, sorted: a capability added to
+    /// <c>profiles/capabilities.yml</c> appears in degradation text without a renderer change.
+    /// </summary>
+    public IReadOnlyList<string> CapabilityVocabulary => _capabilityVocabulary ??=
+        [.. Source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// The Arbiter wiring to render, or null. A null or disabled wiring renders byte for byte as
+    /// before the field existed, and global scope has no project configuration to enforce from
+    /// (Req 22.4).
+    /// </summary>
+    public SquadArbiterWiring? EnabledArbiter =>
+        Request.Arbiter is { Enabled: true } && Scope == SquadDeploymentScope.Project ? Request.Arbiter : null;
+
+    public string ResolveDirectory(string subdirectory) => Spec.ResolveDirectory(subdirectory, Scope);
+
+    public string? ResolveModel(SquadAgent agent) =>
+        SquadHarnessLowering.ResolveModel(agent, ModelProfiles, Token, Spec.ModelPolicy);
+
+    public string SingleLine(string value) => SquadHarnessLowering.SingleLine(value, Spec.DescriptionLineBreaks);
+
+    public SquadDeploymentFile CreateFile(string relativePath, string content) =>
+        new(relativePath, Encoding.UTF8.GetBytes(content), Token);
+
+    /// <summary>Adds a rendered principal and projects its resource closure beside it.</summary>
+    public void AddPrincipal(SquadDeploymentFile principal, IReadOnlyList<SquadResource> resources)
+    {
+        Files.Add(principal);
+        SquadResourceProjection.Append(Files, principal, resources);
+    }
+
+    public void AddDegradation(SquadDegradationRecord? record)
+    {
+        if (record is not null)
+        {
+            Degradations.Add(record);
+        }
+    }
+
+    /// <summary>A degradation record for <paramref name="agent"/> under its own name on this target.</summary>
+    public SquadDegradationRecord Degradation(SquadAgent agent, string code, string details) =>
+        new(Token, agent.Name, agent.Name, code, agent.BodyDigest, details);
+
+    /// <summary>
+    /// The skill document every harness shares: <c>name</c>, a single-line <c>description</c> and
+    /// <c>license: MIT</c>, in that order, at <c>skills/&lt;name&gt;/SKILL.md</c>. No model or
+    /// permission keys: a skill cannot express the capability lattice.
+    /// </summary>
+    public SquadDeploymentFile RenderSkillDocument(string name, string description, string instructionBody)
+    {
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["name"] = name,
+            ["description"] = SingleLine(description),
+            ["license"] = "MIT"
+        };
+
+        return CreateFile(
+            $"{SkillsDirectory}/{name}/SKILL.md",
+            SquadYamlEmitter.Default.Compose(frontmatter, instructionBody));
+    }
+
+    /// <summary>
+    /// Emits each canonical skill through <paramref name="render"/>, with its resources, except a
+    /// suppressed shared identity, which has one projection: the agent file.
+    /// </summary>
+    public void EmitCanonicalSkills(Func<SquadSkill, SquadDeploymentFile> render)
+    {
+        foreach (SquadSkill skill in Source.Skills)
+        {
+            if (SuppressedSkillIdentities.Contains(skill.Name))
+            {
+                continue;
+            }
+
+            AddPrincipal(render(skill), skill.Resources);
+        }
+    }
+
+    /// <summary>
+    /// The accumulated result. <paramref name="emptyBlocks"/> keeps an empty block list rather than
+    /// null, for the renderers whose result always carried one.
+    /// </summary>
+    public SquadRenderResult ToResult(bool emptyBlocks = false) =>
+        new(true, Files, Degradations, [], [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
+
+    /// <summary>
+    /// Rejects a canonical name that is not a single portable path segment, before any file is
+    /// built from it.
+    /// </summary>
+    public static void ValidateCanonicalName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) ||
+            name.Contains('/', StringComparison.Ordinal) ||
+            name.Contains('\\', StringComparison.Ordinal) ||
+            name.Contains("..", StringComparison.Ordinal) ||
+            name.Trim('.').Length == 0)
+        {
+            throw new SquadRenderValidationException(
+                $"Canonical name '{name}' is not a valid single-segment path for rendering.");
+        }
+    }
+}
+
+/// <summary>A YAML serializer that is safe to share across concurrent renders.</summary>
+/// <remarks>
+/// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the registry may
+/// dispatch renderers concurrently, so every serialization takes this emitter's lock.
+/// </remarks>
+internal sealed class SquadYamlEmitter
+{
+    private readonly ISerializer _serializer;
+    private readonly Lock _gate = new();
+
+    public SquadYamlEmitter(ISerializer serializer)
+    {
+        _serializer = serializer;
+    }
+
+    /// <summary>The plain serializer, for harnesses whose frontmatter needs no type converter.</summary>
+    public static SquadYamlEmitter Default { get; } = new(new SerializerBuilder().Build());
+
+    public string Serialize(object graph)
+    {
+        lock (_gate)
+        {
+            return _serializer.Serialize(graph);
+        }
+    }
+
+    /// <summary>Composes a frontmatter-plus-body Markdown document.</summary>
+    public string Compose(IReadOnlyDictionary<string, object?> frontmatter, string body) =>
+        SquadMarkdownDocument.Compose(Serialize(frontmatter), body);
+}

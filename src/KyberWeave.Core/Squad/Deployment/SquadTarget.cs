@@ -18,6 +18,22 @@ public enum SquadTarget
     CommandCode
 }
 
+/// <summary>How a harness projects canonical agents, which decides what its output may contain.</summary>
+public enum SquadAgentProjection
+{
+    /// <summary>
+    /// The harness has an agent primitive. Agents and skills occupy separate namespaces, so no
+    /// output carries a <c>role-</c> prefix and a shared identity projects at most one skill.
+    /// </summary>
+    Native,
+
+    /// <summary>
+    /// The harness has no agent primitive. Every agent lowers to a role skill, emits no agent file,
+    /// and a distinct-body collision ships both the canonical skill and a <c>role-</c> skill.
+    /// </summary>
+    RoleSkillFallback
+}
+
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
 public static class SquadTargetCatalog
 {
@@ -79,6 +95,21 @@ public static class SquadTargetCatalog
         SquadTarget.ZCode => "zcode",
         SquadTarget.Devin => "devin",
         SquadTarget.CommandCode => "commandcode",
+        _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
+    };
+
+    /// <summary>
+    /// Returns how <paramref name="target"/> projects canonical agents. This is a fact about the
+    /// harness, so it lives here beside its token rather than in the registry's validation: adding a
+    /// harness states it once, and every renderer is checked against it.
+    /// </summary>
+    public static SquadAgentProjection GetAgentProjection(SquadTarget target) => target switch
+    {
+        SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or SquadTarget.Copilot or
+            SquadTarget.OpenCode or SquadTarget.Kilo or SquadTarget.Antigravity or SquadTarget.Factory or
+            SquadTarget.Pi or SquadTarget.ZCode or SquadTarget.Devin or SquadTarget.CommandCode =>
+            SquadAgentProjection.Native,
+        SquadTarget.Warp => SquadAgentProjection.RoleSkillFallback,
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
 
