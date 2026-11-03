@@ -506,19 +506,36 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void ArbiterProjectPinsTheMcpPackagesToTheVersionsTheMcpProjectUses()
     {
-        XDocument doc = XDocument.Load(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Arbiter", "KyberWeave.Arbiter.csproj"));
-        XNamespace ns = doc.Root!.Name.Namespace;
+        XDocument arbiter = LoadProject("KyberWeave.Arbiter");
+        XDocument mcp = LoadProject("KyberWeave.Mcp");
 
-        Assert.Equal("2.2.0", PackageVersion(doc, ns, "ModelContextProtocol"));
-        Assert.Equal("10.0.12", PackageVersion(doc, ns, "Microsoft.Extensions.Hosting"));
+        // Comparing the two project files is the contract, not a literal: a dependency bump
+        // that moves one project and not the other fails here, which is what the name says.
+        foreach (string package in new[] { "ModelContextProtocol", "Microsoft.Extensions.Hosting" })
+        {
+            string? mcpVersion = PackageVersion(mcp, package);
+            string? arbiterVersion = PackageVersion(arbiter, package);
+
+            Assert.True(mcpVersion is not null, $"KyberWeave.Mcp must pin '{package}'.");
+            Assert.True(
+                string.Equals(mcpVersion, arbiterVersion, StringComparison.Ordinal),
+                $"'{package}' drifts: KyberWeave.Mcp pins {mcpVersion}, KyberWeave.Arbiter pins {arbiterVersion ?? "nothing"}.");
+        }
     }
 
-    private static string? PackageVersion(XDocument doc, XNamespace ns, string name) =>
-        doc.Descendants(ns + "PackageReference")
+    private static XDocument LoadProject(string projectName) =>
+        XDocument.Load(Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "src", projectName, $"{projectName}.csproj"));
+
+    private static string? PackageVersion(XDocument doc, string name)
+    {
+        XNamespace ns = doc.Root!.Name.Namespace;
+
+        return doc.Descendants(ns + "PackageReference")
             .Where(element => string.Equals((string?)element.Attribute("Include"), name, StringComparison.Ordinal))
             .Select(element => (string?)element.Attribute("Version"))
             .SingleOrDefault();
+    }
 
     private static MethodInfo ToolMethod(string toolName)
     {
