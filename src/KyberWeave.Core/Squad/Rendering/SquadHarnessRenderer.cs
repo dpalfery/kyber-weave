@@ -239,6 +239,49 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>
+    /// Lowers a primary-invocation agent onto a harness with no primary-agent primitive: onto the
+    /// form <paramref name="renderLowered"/> emits (a skill or a command) for
+    /// <c>no-primary-agent: skill</c>, onto the same-name canonical skill for a shared identity,
+    /// or onto nothing for <c>omit</c>, which records <c>omitted</c>.
+    /// </summary>
+    /// <param name="agent">The primary-invocation agent.</param>
+    /// <param name="collisionMessage">The fail-closed message when a canonical skill already holds the identity.</param>
+    /// <param name="renderLowered">Renders the lowered form.</param>
+    /// <param name="loweredRecords">
+    /// The records for a lowered agent, given its fallback profile and whether it reuses the
+    /// canonical skill.
+    /// </param>
+    public void AddLoweredPrimaryAgent(
+        SquadAgent agent,
+        Func<string> collisionMessage,
+        Func<SquadDeploymentFile> renderLowered,
+        Func<SquadFallbackProfile, bool, IEnumerable<SquadDegradationRecord>> loweredRecords)
+    {
+        SquadPrimaryLowering lowering = ResolvePrimaryLowering(agent, collisionMessage);
+        SquadFallbackProfile fallbackProfile = Source.FallbackProfiles.Profiles[agent.Fallback];
+        switch (lowering)
+        {
+            case SquadPrimaryLowering.ReuseCanonicalSkill:
+                // The canonical skill is the entry point and is emitted by the skill loop, so no
+                // lowered form is emitted here; one identity, one projection.
+                Degradations.AddRange(loweredRecords(fallbackProfile, true));
+                break;
+            case SquadPrimaryLowering.EntryPointSkill:
+                AddPrincipal(renderLowered(), agent.Resources);
+                Degradations.AddRange(loweredRecords(fallbackProfile, false));
+                break;
+            default:
+                Degradations.Add(Degradation(
+                    agent,
+                    "omitted",
+                    $"Fallback profile '{agent.Fallback}' declares no-primary-agent: omit; " +
+                    $"{Spec.DisplayName} has no primary-agent primitive for this agent to render onto, " +
+                    "so no file is emitted."));
+                break;
+        }
+    }
+
+    /// <summary>
     /// The dual projection a harness uses when it renders a primary agent through an additional
     /// entry-point form (ADR 0034): the agent file is already emitted, and a primary agent whose
     /// profile declares <c>no-primary-agent: skill</c> also renders as an entry-point skill, unless

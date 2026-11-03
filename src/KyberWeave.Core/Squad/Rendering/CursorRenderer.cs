@@ -100,44 +100,24 @@ public sealed class CursorRenderer : SquadHarnessRenderer
             return;
         }
 
-        SquadPrimaryLowering lowering = context.ResolvePrimaryLowering(agent, () =>
-            $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
-            $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
-            "separate agent and skill namespaces with no role-prefixed fallback " +
-            "mechanism, so this is a fail-closed condition rather than a naming " +
-            "collision this renderer can resolve on its own.");
-        SquadFallbackProfile fallbackProfile = context.Source.FallbackProfiles.Profiles[agent.Fallback];
-        switch (lowering)
-        {
-            case SquadPrimaryLowering.ReuseCanonicalSkill:
-                // The canonical skill is the entry point and is emitted by the skill loop, so no
-                // lowered skill is emitted here; one identity, one projection.
-                context.Degradations.Add(BuildPrimaryAgentDegradation(
+        context.AddLoweredPrimaryAgent(
+            agent,
+            () =>
+                $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
+                $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
+                "separate agent and skill namespaces with no role-prefixed fallback " +
+                "mechanism, so this is a fail-closed condition rather than a naming " +
+                "collision this renderer can resolve on its own.",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody),
+            (fallbackProfile, reused) =>
+            [
+                BuildPrimaryAgentDegradation(
                     agent,
                     fallbackProfile,
                     context.CapabilityProfiles,
                     context.CapabilityVocabulary,
-                    true));
-                break;
-            case SquadPrimaryLowering.EntryPointSkill:
-                context.AddPrincipal(
-                    context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody),
-                    agent.Resources);
-                context.Degradations.Add(BuildPrimaryAgentDegradation(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    context.CapabilityVocabulary));
-                break;
-            default:
-                context.Degradations.Add(context.Degradation(
-                    agent,
-                    "omitted",
-                    $"Fallback profile '{agent.Fallback}' declares " +
-                    "no-primary-agent: omit; Cursor has no primary-agent primitive for this " +
-                    "agent to render onto, so no file is emitted."));
-                break;
-        }
+                    reused)
+            ]);
     }
 
     /// <summary>Squad's owned block for the shared <c>.cursor/hooks.json</c>.</summary>

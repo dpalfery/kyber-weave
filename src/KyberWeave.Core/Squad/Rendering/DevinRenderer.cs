@@ -229,51 +229,28 @@ public sealed class DevinRenderer : SquadHarnessRenderer
             return;
         }
 
-        SquadPrimaryLowering lowering = context.ResolvePrimaryLowering(agent, () =>
-            $"Cannot lower primary agent '{agent.Name}' to a Devin skill: a canonical " +
-            $"skill named '{agent.Name}' already occupies that identity. Devin keeps " +
-            "agents and skills in separate namespaces with no role-prefixed fallback, " +
-            "so this fails closed rather than renaming either one.");
-        SquadFallbackProfile fallbackProfile = context.Source.FallbackProfiles.Profiles[agent.Fallback];
-        switch (lowering)
-        {
-            case SquadPrimaryLowering.ReuseCanonicalSkill:
-                // The canonical skill is the entry point and is emitted by the skill loop, so no
-                // lowered skill is emitted here; one identity, one projection.
-                context.Degradations.AddRange(BuildPrimaryAgentDegradations(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    context.CapabilityVocabulary,
-                    true));
-                break;
-            case SquadPrimaryLowering.EntryPointSkill:
-                // The lowered skill runs only when the operator starts it (ADR 0025 decision 7).
-                context.AddPrincipal(
-                    context.RenderSkillDocument(
-                        agent.Name,
-                        agent.Description,
-                        agent.InstructionBody,
-                        additionalFrontmatter: new Dictionary<string, object?>(StringComparer.Ordinal)
-                        {
-                            ["triggers"] = UserOnlyTriggers
-                        }),
-                    agent.Resources);
-                context.Degradations.AddRange(BuildPrimaryAgentDegradations(
-                    agent,
-                    fallbackProfile,
-                    context.CapabilityProfiles,
-                    context.CapabilityVocabulary));
-                break;
-            default:
-                context.Degradations.Add(context.Degradation(
-                    agent,
-                    "omitted",
-                    $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                    "omit; Devin has no primary-agent primitive for this agent to render " +
-                    "onto, so no file is emitted."));
-                break;
-        }
+        context.AddLoweredPrimaryAgent(
+            agent,
+            () =>
+                $"Cannot lower primary agent '{agent.Name}' to a Devin skill: a canonical " +
+                $"skill named '{agent.Name}' already occupies that identity. Devin keeps " +
+                "agents and skills in separate namespaces with no role-prefixed fallback, " +
+                "so this fails closed rather than renaming either one.",
+            // The lowered skill runs only when the operator starts it (ADR 0025 decision 7).
+            () => context.RenderSkillDocument(
+                agent.Name,
+                agent.Description,
+                agent.InstructionBody,
+                additionalFrontmatter: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["triggers"] = UserOnlyTriggers
+                }),
+            (fallbackProfile, reused) => BuildPrimaryAgentDegradations(
+                agent,
+                fallbackProfile,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                reused));
     }
 
     /// <summary>
