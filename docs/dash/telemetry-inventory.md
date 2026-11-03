@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-03
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
@@ -213,7 +213,7 @@ in [the Factory source-precedence rule](architecture.md#the-factory-source-prece
 | Model | `factory.model.id`, present only when the hook payload names a model | Absent stays absent: the model is never guessed or defaulted. |
 | Tool invocations | `factory.tool` spans at `PreToolUse` and `PostToolUse`, carrying `factory.tool.name`, `factory.tool.call_id`, `factory.tool.status` and `factory.tool.error_type` | The two hooks of one call share a span id. The tool's arguments and result **text** are not captured; only their sizes (`factory.tool.input_bytes`, `factory.tool.result_bytes`) travel. |
 | Child sessions | **None.** The `SubagentStop` event produces no span: Factory's documented payload for that event carries `task_name`, `task_result`, `task_error` and `stop_hook_active`, and no child session id — the common `session_id` is the **parent's** session, so a span there would name the parent as the child. The event is **not registered** either, so no process is spent on it | The plugin path contributes no parent-child linkage of its own. A child session is discovered by the file source as its own session, and its counters are paired from its own companion file. |
-| Prompt text | `factory.turn.prompt.text`, capped at 64 KiB and marked when it is cut | **Content**: it travels only under consent. |
+| Prompt text | `factory.turn.prompt.text`, capped at 64 KiB and marked when it is cut | **Content**: it travels only under consent — and the store's gate strips it from a **claimed** envelope while the consent is off, so a span the plugin parked under consent-on and re-delivered after consent-off is not stored with the text. |
 | Token counters | **None.** The hook payload carries no counter, and Factory exports no token or cost data as customer OTEL metrics | Every counter class is declared `not_measurable` with a reason — never zero. |
 | Cost | **None.** No figure is fabricated and no rate table is applied to a plugin row | A plugin row's cost is absent, not zero. |
 
@@ -332,19 +332,27 @@ names each value and **which level pinned it**, so a reader sees an export that 
 rather than one that is merely pointed somewhere else.
 
 **What the consent governs, and what it does not.** KyberDash's consent file governs **the
-capture plugin's prompt text on the wire, and the content of Factory's native OpenTelemetry
-route**. It does **not** govern the Factory **file source**, which stores the owner's first
-message fragment (up to 500 characters) whatever the consent file says — that route is outside
-the consent's reach. The two routes it does govern are governed differently: the plugin's own
-hook runner reads the consent on every event and publishes the prompt text only when the consent
-is on, while on the native route the **harness's own message-content switch** decides whether
-the export carries content at all and KyberDash's consent decides whether that content may be
-stored. The native gate runs at the ingest seam, before the normalization and before the
+capture plugin's prompt text on the wire and at the store, and the content of Factory's native
+OpenTelemetry route**. It does **not** govern the Factory **file source**, which stores the owner's
+first message fragment (up to 500 characters) whatever the consent file says — that route is
+outside the consent's reach. The two routes it does govern are governed differently: the plugin's
+own hook runner reads the consent on every event and publishes the prompt text only when the
+consent is on, while on the native route the **harness's own message-content switch** decides
+whether the export carries content at all and KyberDash's consent decides whether that content may
+be stored. The native gate runs at the ingest seam, before the normalization and before the
 quarantine write, so the text reaches neither a record nor a quarantine packet; it has a
 **fail-closed arm** — a span that belongs to **no** harness has an unknown origin, so its
 content is stripped too, which covers a Factory child that arrives before its root across a
-batch boundary — and a **claimed** span's content is never touched, so another harness's own
-content is untouched.
+batch boundary — and a **claimed** span of another harness keeps its content, so another harness's
+own content is untouched. **The plugin envelope is the one claimed span the gate does reach.**
+The plugin gates its own prompt at emission, but the emission gate is not the last gate: a span
+the plugin **parked** because the delivery failed is re-delivered from its spool without the
+consent being read again, so the store's gate names the envelope's own `factory.turn.prompt.text`
+among the attributes it strips and applies the verdict to a **claimed** Factory envelope. The
+envelope's identity attributes — the span id, the session id, the model, the tool name — are
+measurements, not content, and survive the gate; the plugin's tool attributes stay off the
+content list, because the plugin publishes tool arguments and results as byte counts, never as
+content.
 
 **An organisation's hard controls can refuse the route or make it inert.** `strictKnownMarketplaces`
 makes the higher-level list the ceiling for marketplace sources, `strictEnabledPlugins` makes the
@@ -358,15 +366,19 @@ so the surfaces must not read "installed" as "capturing".
 
 **Native metric points are stored, not projected.** A decoded metric point becomes **one row per
 distinct decoded point** in the canon store's own `metric_point` table — a point's identity is a
-content digest, so a re-delivered point lands on the row it already occupies instead of beside it
-— and nothing projects it: the canon projection and the dashboard have no metric concept. A metric
-point is a stored fact, not a figure the dashboard shows, and no reader is told a metric was
-measured and shown as one.
+content digest **of everything the row carries, including the interval the point's measurement
+covers**, so a re-delivered point lands on the row it already occupies instead of beside it, and
+the same measurement over a different window is a different point rather than a second delivery of
+the first — and nothing projects it: the canon projection and the dashboard have no metric
+concept. A metric point is a stored fact, not a figure the dashboard shows, and no reader is told
+a metric was measured and shown as one.
 
 The row carries what the point measured: the metric's name, kind and unit, its aggregation
-temporality, the point's timestamp and its value or its count and sum, the point's attributes,
-the resource attributes, the scope, and the exporter's `service.name` as the row's **source**. A
-point that carried no value of its own keeps the value absent, never zero.
+temporality, the point's timestamp, **the start of the interval the point's measurement covers**,
+and its value or its count and sum, the point's attributes, the resource attributes, the scope,
+and the exporter's `service.name` as the row's **source**. A point that carried no value of its
+own keeps the value absent, never zero, and a point that declared no interval carries none —
+absent, never a fabricated zero.
 
 **The row stores the exporter's own content, verbatim.** `attributes_json` holds the point's own
 attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
@@ -385,9 +397,11 @@ A metric point has **no span**, so its row carries **no harness attribution** �
 to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
 why a **scoped per-harness wipe cannot clear these rows**: it cannot claim a row it cannot
 attribute. The full corpus wipe clears them with everything else. The table is created by the
-store's own schema with `CREATE ... IF NOT EXISTS`, so the schema version does not move and
-there is no migration step: a store that predates the table opens unchanged and grows it on the
-next open.
+store's own schema with `CREATE ... IF NOT EXISTS`, so the table's own creation needs no version
+bump and no migration step: a store that predates the table opens unchanged and grows it on the
+next open. A **column** added to the table afterwards is a different matter — the same
+`IF NOT EXISTS` leaves an existing table without it — so the interval start landed with the
+**schema 23** migration, presence-guarded like the other `ADD COLUMN` steps.
 
 The writer's rule is unchanged: a sink that cannot persist metrics does not offer the port, and
 the writer **refuses** the batch rather than accepting one it would drop. The arrival is recorded

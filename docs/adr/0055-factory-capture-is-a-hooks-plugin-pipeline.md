@@ -4,7 +4,7 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-03
 code-refs:
   - droidAdapter
   - installFactoryPlugin
@@ -37,6 +37,10 @@ KyberDash writes into the Factory root. The plugin that runs is the harness's **
 that tree, and `${DROID_PLUGIN_ROOT}` expands to the cached path. The route this record first
 recorded was measured to be false: a plugin directory written under `~/.factory/plugins/` was
 never loaded by the harness.
+
+Amended 2026-11-03: the owner's consent is enforced at a **third** point — the store's gate
+strips the plugin envelope's own prompt text while the consent is off, so a span the plugin
+parked under consent-on and re-delivered after consent-off is not stored with the text.
 
 ## Context
 

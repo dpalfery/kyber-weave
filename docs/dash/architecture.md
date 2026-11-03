@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-03
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -699,17 +699,32 @@ whose Settings switch also sets consent: for Factory the switch is "install the 
 consent off.
 
 **What the consent governs, and what it does not.** The consent file governs **the capture
-plugin's prompt text on the wire, and the content of Factory's native OpenTelemetry route**. It
-does **not** govern the Factory **file source**, which reads the owner's first user-message
-fragment out of the owner's own transcript and carries it on every file-sourced Factory record's
-raw attributes whatever the consent file says. On the native route the gate runs at the **ingest
-seam** — before the normalization and before the quarantine write — so the text is never written
-anywhere, not to a record and not to a quarantine packet (`dash/src/canon/ingest.ts`,
-`dash/src/canon/droid-content.ts`). The gate has a **fail-closed arm**: a span that belongs to
-**no** harness has an unknown origin, so its content is stripped too, which is what covers a
-Factory child that arrives before its root across a batch boundary; a **claimed** span's content
-is never touched, so another harness's own `gen_ai.input.messages` is untouched. The native
-route's own content switch belongs to the harness, not to KyberDash.
+plugin's prompt text on the wire and at the store, and the content of Factory's native
+OpenTelemetry route**. It does **not** govern the Factory **file source**, which reads the owner's
+first user-message fragment out of the owner's own transcript and carries it on every
+file-sourced Factory record's raw attributes whatever the consent file says. On the native route
+the gate runs at the **ingest seam** — before the normalization and before the quarantine write —
+so the text is never written anywhere, not to a record and not to a quarantine packet
+(`dash/src/canon/ingest.ts`, `dash/src/canon/droid-content.ts`). The gate has a **fail-closed
+arm**: a span that belongs to **no** harness has an unknown origin, so its content is stripped
+too, which is what covers a Factory child that arrives before its root across a batch boundary;
+a **claimed** span of another harness keeps its content, so another harness's own
+`gen_ai.input.messages` is untouched. The native route's own content switch belongs to the
+harness, not to KyberDash.
+
+**The gate covers the plugin envelope's own prompt attribute, and it reaches a claimed envelope.**
+The plugin gates its own prompt at **emission** — it reads the consent when it maps the span —
+but the emission gate is not the last gate. A span the plugin **parked** because the delivery
+failed is re-delivered from its spool **without the consent being read again**, so a prompt span
+parked while the consent was on reaches the store with the owner's text after the owner has
+turned the consent off. The store-side gate closes that hole, and it closes it in two steps: the
+gate's content list names the plugin envelope's own prompt attribute (`factory.turn.prompt.text`)
+among the attributes it strips, and the strip decision gives a **claimed** Factory envelope the
+same arm the native Factory span has. The envelope's **identity** attributes — the span id, the
+session id, the model, the tool name — are measurements, not content, and survive the gate; the
+plugin's **tool** attributes stay off the content list on purpose, because the plugin publishes
+tool arguments and results as **byte counts**, never as content (`dash/src/canon/droid-content.ts`,
+`dash/src/canon/ingest.ts`).
 
 **Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
 
@@ -893,11 +908,15 @@ protocol is added. Logs are never exported by Droid, so `/v1/logs` receives noth
 the canon store's own `metric_point` table (`dash/src/canon/store.ts`), written through the
 production sink's `upsertMetrics` port and the `ingestMetricBatch` seam
 (`dash/src/canon/metric-ingest.ts`). A point's identity is a content digest of everything the row
-carries, so a re-delivered point lands on the row it already occupies instead of beside it. The
-row carries the metric's name, kind and unit, its aggregation temporality, the point's timestamp
-and its value or its count and sum, the point's attributes, the resource attributes, the scope,
+carries — **including the interval the point's measurement covers** — so a re-delivered point
+lands on the row it already occupies instead of beside it, and the same measurement over a
+different window is a different point rather than a second delivery of the first. The
+row carries the metric's name, kind and unit, its aggregation temporality, the point's timestamp,
+**the start of the interval the point's measurement covers**, and its value or its count and sum,
+the point's attributes, the resource attributes, the scope,
 and the exporter's `service.name` as the row's **source**. A point that carried no value of its
-own keeps the value absent, never zero.
+own keeps the value absent, never zero, and a point that declared no interval carries none —
+absent, never a fabricated zero.
 
 **What the row stores is the exporter's own content.** `attributes_json` holds the point's own
 attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
@@ -913,8 +932,11 @@ never reach the stored row. The keys that survive are the correlation and usage 
 attributes such as `model.id` or `skill.name`. Those are not identity, so they are kept.
 
 The table is created by the store's own schema with `CREATE ... IF NOT EXISTS`, the
-`model_context_window_catalog` precedent, so **the schema version does not move and there is no
-migration step**: a store that predates the table opens unchanged and grows it on the next open.
+`model_context_window_catalog` precedent, so **the table's own creation needs no version bump and
+no migration step**: a store that predates the table opens unchanged and grows it on the next
+open. A **column** added to the table afterwards is a different matter — the same
+`IF NOT EXISTS` leaves an existing table without it — so the interval start landed with the
+**schema 23** migration, and it is presence-guarded like the other `ADD COLUMN` steps.
 
 A metric point has **no span**, so its row carries **no harness attribution** — there is no span
 to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
@@ -1604,7 +1626,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 22;
+schema is a version-controlled constant executed on construction, currently at version 23;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -1621,7 +1643,8 @@ schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined sp
 schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
 schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)), and
 schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
-schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22).
+schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22), and
+schema 23 added the metric point's interval start (`metric_point.start_time_unix_nano`) — a column costs a version bump and a migration step where the table's own `CREATE ... IF NOT EXISTS` does not, because a store that already carries the table never gains the column from the `CREATE TABLE`.
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
