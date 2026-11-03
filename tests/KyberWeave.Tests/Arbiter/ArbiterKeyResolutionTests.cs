@@ -282,6 +282,23 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void LinuxReadSurfacesALookupFailureInsteadOfReportingAnAbsentKey()
+    {
+        FakeCredentialProcessRunner failing = new();
+        failing.NextResult = new ProcessResult(
+            1,
+            string.Empty,
+            "Cannot autolaunch D-Bus without X11 $DISPLAY");
+        SecretServiceCredentialStore store = new(failing);
+
+        SecretServiceUnavailableException ex =
+            Assert.Throws<SecretServiceUnavailableException>(() => store.Read("https://api.typesafe.ai"));
+
+        Assert.Contains("exit code 1", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("D-Bus", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WindowsStoreDeclaresAdvapi32EntryPointsAndIsGatedByOperatingSystem()
     {
         Type? native = typeof(WindowsCredentialStore).GetNestedType("NativeMethods", BindingFlags.NonPublic);

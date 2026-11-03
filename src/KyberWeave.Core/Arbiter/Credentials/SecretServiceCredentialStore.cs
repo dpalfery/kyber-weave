@@ -47,7 +47,21 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         ProcessResult result = RunSecretTool(startInfo, string.Empty);
         if (result.ExitCode != 0)
         {
-            return null;
+            // secret-tool uses exit 1 both for "no matching item" and for a failed
+            // lookup (no D-Bus, locked keyring, EPERM). Only the no-match case is an
+            // absent key; every other failure must surface, or a reviewer silently
+            // loses its key and the Arbiter fails open.
+            if (result.ExitCode == 1
+                && (string.IsNullOrWhiteSpace(result.StandardError)
+                    || result.StandardError.Contains("no match", StringComparison.OrdinalIgnoreCase)
+                    || result.StandardError.Contains("no such secret", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            throw new SecretServiceUnavailableException(
+                $"The Secret Service read failed with exit code {result.ExitCode}: " +
+                $"{OneLine(result.StandardError)}");
         }
 
         string output = result.StandardOutput.TrimEnd('\r', '\n');
@@ -82,6 +96,9 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
                 $"The Secret Service write failed with exit code {result.ExitCode}.");
         }
     }
+
+    private static string OneLine(string value) =>
+        string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)
     {

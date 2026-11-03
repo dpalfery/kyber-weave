@@ -238,10 +238,13 @@ public sealed class ArbiterEvaluator
                 batch = await _provider.AskStep1Async(selected, facts, step0Answers, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException
+                || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
             {
                 // A provider failure is undecidable, not an error result: every
-                // selected rule answers undecidable and the family maps it.
+                // selected rule answers undecidable and the family maps it. Only
+                // transport and parse failures are caught; a provider bug surfaces
+                // as KW-ARB-HOOK-001 instead of silently allowing.
                 foreach (ArbiterRule rule in selected)
                 {
                     step1.Add(new KeyValuePair<ArbiterRule, string>(rule, RuleEngine.Undecidable));

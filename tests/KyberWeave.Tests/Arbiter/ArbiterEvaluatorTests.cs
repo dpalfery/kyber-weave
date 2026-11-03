@@ -76,6 +76,18 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         }
     }
 
+    private sealed class BuggyProvider : IArbiterProvider
+    {
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("provider bug");
+        }
+    }
+
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
@@ -256,6 +268,22 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.False(result.IsError);
         Assert.Equal(0, resolverCalls);
+    }
+
+    [Fact]
+    public async Task Evaluator_ProviderBugIsNotConvertedToUndecidable()
+    {
+        const string DelegatePrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        ArbiterEvaluator evaluator = CreateEvaluator(new BuggyProvider());
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(DelegatePrompt), config);
+
+        Assert.True(result.IsError);
+        Assert.Equal(ArbiterEvaluator.HookErrorCode, result.ErrorCode);
+        Assert.Equal("provider bug", result.ErrorMessage);
     }
 
     [Fact]
