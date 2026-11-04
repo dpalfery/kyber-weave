@@ -60,10 +60,12 @@ switch and the confirm), and a third gate on the same decision was friction, not
 
 Amended 2026-11-04: the prompt text reaches the **canonical session payload**, not only the raw
 payload. The `droid` adapter files `factory.turn.prompt.text` as a `conversation_history` part,
-the way the OpenCode adapter files its prompt, so the session view shows what was asked. A turn
-whose prompt the consent withheld declares it `not_measurable` with a reason that names the
-consent, so the absence is stated rather than shown as a blank. The projected prompt is a
-content part like every other, so the 14-day content purge applies to it.
+the way the OpenCode adapter files its prompt, so the session view shows what was asked. The
+**prompt turn** whose prompt the consent withheld declares it `not_measurable` with a reason that
+names the consent, so the absence is stated rather than shown as a blank; the plugin's
+**completion turn** for the same turn carries no prompt by construction, so it says nothing about
+one. The projected prompt is a content part like every other, so the 14-day content purge applies
+to it.
 
 Amended 2026-11-04: a turn stored **before** that mapping is repaired by the next
 renormalization, and the repair keeps the content it collected. The renormalize re-derives

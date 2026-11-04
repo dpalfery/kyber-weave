@@ -732,10 +732,11 @@ tool arguments and results as **byte counts**, never as content (`dash/src/canon
 consent decides whether it travels at all. When it travels, the `droid` adapter files it as the
 record's `conversation_history` part (`dash/src/canon/adapters/droid.ts`), the way the OpenCode
 adapter files its prompt, so the session's own content carries what was asked and the dashboard's
-session view shows it. A turn whose prompt the consent withheld declares the prompt
+session view shows it. The **prompt turn** whose prompt the consent withheld declares the prompt
 `not_measurable` with a reason that names the consent, so the absence is stated rather than shown
-as a blank. The projected prompt is a content part like every other, so the 14-day content purge
-applies to it; the raw copy the plugin's span carries is not purged.
+as a blank; the plugin's **completion turn** for the same turn carries no prompt by construction,
+so it says nothing about one. The projected prompt is a content part like every other, so the
+14-day content purge applies to it; the raw copy the plugin's span carries is not purged.
 
 **A turn stored before the mapping is repaired by the renormalize.** The adapter's mapping
 arrived after some turns were stored, and a stored record keeps what it was stored with. The
@@ -917,6 +918,13 @@ identity: a later folder import **replaces** the live rows rather than adding a 
 the same counters, and the split above still prices and counts nothing twice. The pass reads
 only sessions the plugin captured — it never invents a Factory session the capture did not see —
 and it holds the refresh lock while it writes, so a refresh never runs under it.
+
+The pass says what it read. A sessions root that exists and cannot be read **fails** the pass
+and names the root, because "no Factory sessions" and "the sessions root cannot be read" are
+different statements. A session whose id is not a plain file name is not a session of ours: the
+id comes out of a span, so it is data and never a path. The project's name comes from the
+session's own file, the way the file source derives it, so the two paths file one session the
+same way.
 
 ### Factory's native OpenTelemetry path (authorized, complementary)
 

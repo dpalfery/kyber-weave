@@ -311,8 +311,8 @@ plugin state, the receipt state and the content consent. The Settings switch
 `~/.kyberdash/factory-plugin.json` (`{ "version": 1, "content": <boolean> }`).
 
 - Turning the capture on in Settings turns the prompt text on with it, and the confirm states
-  what the switch does to your text before it is applied. Turning the capture off turns the
-  prompt text off with it.
+  what the switch does to your text before it is applied — including that it was off, when it
+  was. Turning the capture off turns the prompt text off with it.
 - The install creates that file with `content: false` only when it is absent. An `enable` then
   sets it to `content: true`, because the confirmed switch is the consent.
 - **Off, while the capture stays on:** run the consent verb, or edit the file yourself:

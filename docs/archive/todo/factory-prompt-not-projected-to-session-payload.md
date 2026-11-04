@@ -14,8 +14,9 @@ impact-components: [KyberDash]
 
 Delivered on 2026-11-04: the `droid` canon adapter files the consented prompt as the record's
 `conversation_history` part, so the canonical session payload carries it and the session view
-shows what was asked. A turn whose prompt the consent withheld declares the prompt
-`not_measurable` with a reason that names the consent. The decision is recorded in
+shows what was asked. The **prompt turn** whose prompt the consent withheld declares the prompt
+`not_measurable` with a reason that names the consent; the plugin's **completion turn** for the
+same turn carries no prompt by construction, so it says nothing about one. The decision is recorded in
 [ADR 0055](../../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md).
 
 The Factory capture plugin puts the user's prompt on the wire: the `UserPromptSubmit` turn span
