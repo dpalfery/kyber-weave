@@ -989,9 +989,24 @@ function disableFilePlugin(
   configDir: string | undefined,
   harnessCli: HarnessCli | undefined,
 ): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[]; notes: string[] } {
-  const consent = plugin.consent.set(home, env, false, { dryRun })
-  const out = [...consent.out]
-  const notes: string[] = [...(consent.notes ?? [])]
+  const out: string[] = []
+  const notes: string[] = []
+  const err: string[] = []
+  try {
+    const consent = plugin.consent.set(home, env, false, { dryRun })
+    out.push(...consent.out)
+    notes.push(...(consent.notes ?? []))
+  } catch (error) {
+    // The consent is turned off before the plugin is removed, so the text
+    // stops flowing first. A consent file that cannot be written must not
+    // strand the capture, though: the plugin is removed anyway, and the
+    // failure is reported rather than swallowed.
+    err.push(
+      `harness ${harness}: the content consent could not be turned off: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  }
   const removed = plugin.uninstall(home, env, {
     dryRun,
     ...(configDir !== undefined ? { configDir } : {}),
@@ -1010,7 +1025,7 @@ function disableFilePlugin(
             ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
           },
         ]
-  return { exitCode: removed.exitCode, out, err: [...removed.err], events, notes }
+  return { exitCode: removed.exitCode, out, err: [...err, ...removed.err], events, notes }
 }
 
 async function runEnable(

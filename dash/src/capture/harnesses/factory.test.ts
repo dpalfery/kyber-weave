@@ -477,6 +477,51 @@ describe('the Factory (Droid) capture writer', () => {
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(consentContent(f)).toBe(false)
   })
+
+  it('removes the capture even when the content consent cannot be written', async () => {
+    const f = fixture('factory-writer-consent-unwritable-')
+    await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+    // A directory where the consent file belongs cannot be written over.
+    const consentPath = join(f.home, '.kyberdash', 'factory-plugin.json')
+    rmSync(consentPath, { force: true })
+    mkdirSync(consentPath, { recursive: true })
+
+    const result = await runCapture('disable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+
+    // The consent is turned off before the plugin is removed, so the text
+    // stops first — but a consent file that cannot be written must not strand
+    // the capture.
+    expect(existsSync(f.pluginDir)).toBe(false)
+    expect(result.stderr).toMatch(/consent/i)
+  })
+
+  it('names the transition when an enable turns the prompt text back on', async () => {
+    const f = fixture('factory-writer-consent-transition-')
+    writeConsent(f, false)
+    const result = await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+
+    // The switch is the consent, so the confirm has to say what it changes.
+    expect(result.notes.join('\n')).toMatch(/it was off/i)
+    expect(consentContent(f)).toBe(true)
+  })
 })
 
 describe('the Factory row and the native OpenTelemetry export', () => {

@@ -49,6 +49,30 @@ const CONSENT_ON_WOULD = 'harness factory: would record the prompt text of your 
 const CONSENT_OFF_WOULD = 'harness factory: would record no prompt text (content consent off)'
 
 /**
+ * What the consent switch says, in one line, naming the change it makes.
+ *
+ * The transition is named because the switch IS the consent: an enable that
+ * turns the prompt text back on after the owner turned it off has to say so,
+ * so the confirm is the informed decision the consent model rests on. A file
+ * that is absent or malformed reads as off, which is what the plugin reads
+ * it as too.
+ */
+function consentNote(content: boolean, was: ConsentState, dryRun: boolean): string {
+  const base = dryRun
+    ? content
+      ? CONSENT_ON_WOULD
+      : CONSENT_OFF_WOULD
+    : content
+      ? CONSENT_ON
+      : CONSENT_OFF
+  const wasOn = was === 'on'
+  const wasOff = was === 'off' || was === 'absent' || was === 'invalid'
+  if (content && wasOff && !wasOn) return `${base} — it was off`
+  if (!content && wasOn) return `${base} — it was on`
+  return base
+}
+
+/**
  * The engine knows one vocabulary for a plugin outcome; the installer's preserve-only
  * outcomes (a kept tree, a skipped install) are folded into it.
  */
@@ -270,12 +294,13 @@ const factoryFilePlugin: ManagedFilePlugin = {
     // off without disabling the capture.
     set: (home, env, content, options) => {
       const { consentFile } = factoryPluginPaths(home, env)
+      const was = readConsentState(consentFile)
       if (options.dryRun === true) {
-        const note = content ? CONSENT_ON_WOULD : CONSENT_OFF_WOULD
+        const note = consentNote(content, was, true)
         return { out: [note], notes: [note] }
       }
       writeContentConsent(consentFile, content)
-      const note = content ? CONSENT_ON : CONSENT_OFF
+      const note = consentNote(content, was, false)
       return { out: [note], notes: [note] }
     },
   },
