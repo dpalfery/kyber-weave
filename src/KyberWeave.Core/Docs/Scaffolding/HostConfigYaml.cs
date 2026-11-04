@@ -957,6 +957,275 @@ public static partial class HostConfigYaml
     /// and they take the document's dominant style.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Sets <c>arbiter.provider.kind</c> without disturbing the rest of the document. When the
+    /// arbiter block or the provider key is absent, they are inserted in place; an existing
+    /// matching kind leaves the input unchanged.
+    /// </summary>
+    public static string WithArbiterProviderKind(string yaml, string kind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        List<string> lines = SplitLines(yaml);
+        int arbiter = IndexOfTopLevelKey(lines, "arbiter");
+        if (arbiter < 0)
+        {
+            List<string> appended = [.. lines];
+            if (appended.Count > 0 && appended[^1].Trim().Length > 0)
+                appended.Add(string.Empty);
+
+            appended.Add("arbiter:");
+            appended.Add("  enabled: true");
+            appended.Add("  provider:");
+            appended.Add("    kind: " + kind);
+            appended.Add(string.Empty);
+            return string.Join(newline, appended);
+        }
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+
+        int provider = -1;
+        string providerIndent = blockIndent;
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "provider", out string lineIndent, out _, out _)
+                || !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+                continue;
+
+            provider = i;
+            providerIndent = lineIndent;
+            break;
+        }
+
+        if (provider < 0)
+        {
+            int anchor = arbiter;
+            for (int i = arbiter + 1; i < blockEnd; i++)
+            {
+                if (TrySplitKeyedLine(lines[i], "enabled", out string lineIndent, out _, out _)
+                    && string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+                {
+                    anchor = i;
+                    break;
+                }
+            }
+
+            lines.Insert(anchor + 1, blockIndent + "provider:");
+            lines.Insert(anchor + 2, blockIndent + "  kind: " + kind);
+            return string.Join(newline, lines);
+        }
+
+        (string providerValue, string providerSuffix) = SplitScalarAndSuffix(
+            ProviderRest(lines[provider]));
+        if (providerValue.Trim().Length > 0)
+        {
+            lines[provider] = providerIndent + "provider:" + providerSuffix;
+        }
+
+        int providerEnd = lines.Count;
+        for (int i = provider + 1; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            if (LeadingWhitespace(line).Length <= providerIndent.Length)
+            {
+                providerEnd = i;
+                break;
+            }
+        }
+
+        string subIndent = providerIndent + "  ";
+        int shallowest = int.MaxValue;
+        for (int i = provider + 1; i < providerEnd; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            int length = LeadingWhitespace(line).Length;
+            if (length > providerIndent.Length && length < shallowest)
+                shallowest = length;
+        }
+
+        if (shallowest != int.MaxValue)
+            subIndent = new string(' ', shallowest);
+
+        for (int i = provider + 1; i < providerEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "kind", out string lineIndent, out string prefix, out string rest))
+                continue;
+
+            // providerEnd bounds this loop to the provider block, so every keyed line
+            // nested under 'provider:' is the kind, at whatever depth the file indents
+            // it — a depth cap here would miss a deeply indented kind and insert a
+            // duplicate beside it.
+            if (lineIndent.Length <= providerIndent.Length)
+                continue;
+
+            (string value, string suffix) = SplitScalarAndSuffix(rest);
+            if (string.Equals(UnquoteScalar(value), kind, StringComparison.Ordinal))
+                return yaml;
+
+            string separator = prefix.EndsWith(':') ? " " : string.Empty;
+            lines[i] = prefix + separator + kind + suffix;
+            return string.Join(newline, lines);
+        }
+
+        lines.Insert(provider + 1, subIndent + "kind: " + kind);
+        return string.Join(newline, lines);
+    }
+
+    private static string ProviderRest(string providerLine)
+    {
+        if (TrySplitKeyedLine(providerLine, "provider", out _, out _, out string rest))
+            return rest;
+
+        return string.Empty;
+    }
+
+    private static List<string> SplitLines(string yaml)
+    {
+        string normalized = yaml.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        List<string> lines = [.. normalized.Split('\n')];
+        if (lines.Count > 0 && lines[^1].Length == 0)
+            lines.RemoveAt(lines.Count - 1);
+
+        return lines;
+    }
+
+    private static int IndexOfTopLevelKey(List<string> lines, string name)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (IsTopLevelKey(lines[i], name))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool IsTopLevelKey(string line, string name)
+    {
+        string text = line.Length > 0 && line[0] == '\uFEFF' ? line[1..] : line;
+        if (text.Length == 0 || text[0] == ' ' || text[0] == '\t' || text[0] == '#')
+            return false;
+
+        if (!text.StartsWith(name, StringComparison.Ordinal))
+            return false;
+
+        int i = name.Length;
+        if (i < text.Length && text[i] != ' ' && text[i] != '\t' && text[i] != ':' && text[i] != '#')
+            return false;
+
+        while (i < text.Length && (text[i] == ' ' || text[i] == '\t'))
+            i++;
+
+        if (i >= text.Length || text[i] != ':')
+            return false;
+
+        i++;
+        while (i < text.Length && (text[i] == ' ' || text[i] == '\t'))
+            i++;
+
+        return i >= text.Length || text[i] == '#';
+    }
+
+    private static int EndOfBlock(List<string> lines, int blockStart)
+    {
+        for (int i = blockStart + 1; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] == '#')
+                continue;
+
+            return i;
+        }
+
+        return lines.Count;
+    }
+
+    private static string BlockIndent(List<string> lines, int blockStart, int blockEnd)
+    {
+        string? shallowest = null;
+        for (int i = blockStart + 1; i < blockEnd; i++)
+        {
+            string trimmed = lines[i].TrimStart();
+            if (trimmed.Length == 0 || trimmed[0] == '#')
+                continue;
+
+            int indent = lines[i].Length - trimmed.Length;
+            if (indent > 0 && (shallowest is null || indent < shallowest.Length))
+                shallowest = lines[i][..indent];
+        }
+
+        return shallowest ?? "  ";
+    }
+
+    private static string LeadingWhitespace(string line)
+    {
+        int i = 0;
+        while (i < line.Length && (line[i] == ' ' || line[i] == '\t'))
+            i++;
+
+        return line[..i];
+    }
+
+    private static bool TrySplitKeyedLine(
+        string line,
+        string name,
+        out string indent,
+        out string prefix,
+        out string rest)
+    {
+        indent = string.Empty;
+        prefix = string.Empty;
+        rest = string.Empty;
+
+        string trimmed = line.TrimStart(' ', '\t');
+        if (trimmed.StartsWith('#'))
+            return false;
+
+        indent = line[..(line.Length - trimmed.Length)];
+        if (!trimmed.StartsWith(name, StringComparison.Ordinal))
+            return false;
+
+        int i = name.Length;
+        if (i < trimmed.Length && trimmed[i] != ' ' && trimmed[i] != '\t' && trimmed[i] != ':')
+            return false;
+
+        while (i < trimmed.Length && (trimmed[i] == ' ' || trimmed[i] == '\t'))
+            i++;
+
+        if (i >= trimmed.Length || trimmed[i] != ':')
+            return false;
+
+        i++;
+        int valueStart = i;
+        while (valueStart < trimmed.Length && (trimmed[valueStart] == ' ' || trimmed[valueStart] == '\t'))
+            valueStart++;
+
+        prefix = indent + trimmed[..valueStart];
+        rest = trimmed[valueStart..];
+        return true;
+    }
+
+    private static string UnquoteScalar(string value)
+    {
+        string trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '\'' && trimmed[^1] == '\'')
+            return trimmed[1..^1].Replace("''", "'", StringComparison.Ordinal);
+
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+            return trimmed[1..^1];
+
+        return trimmed;
+    }
+
     private sealed class HostConfigLines
     {
         private readonly List<string> _content = [];

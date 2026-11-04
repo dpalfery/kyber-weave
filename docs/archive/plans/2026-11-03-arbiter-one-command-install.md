@@ -79,6 +79,8 @@ open.
 | D11 | May T1 also fix `KW-ARB-READY-001`'s empty-dependency handling? | Yes. T1 adds a `count: 0` → `ready` clause before the subset check; the first T1 dispatch was blocked because an empty `plan.task.depends-on` list was compared with the absent `ledger.completed-tasks` fact and answered `waiting`. | This is the same execution-blocking gate class as D10. It is fixed test-first in T1 with the bootstrap gate-off exception, then the gate is re-enabled. | ANSWERED — autonomous: recommendation accepted; bootstrap continuation. |
 | AP1 | Approve and execute | Approve this plan and its Test contract (T1–T6) for execution at the declared scale — `extends-component` on `KyberArbiter`, `KyberSquad`, `Distribution`. | Conductor explicitly returned `AUTONOMOUS_APPROVAL: approve-and-execute` on 2026-11-03 under resolved autonomy `autonomous` (Config Reg `<autonomy>`). Recorded in the permanent `## Decisions` table per the autonomous-decisions reference and preserved intact across the lifecycle. | ANSWERED — autonomous: recommendation accepted; explicit conductor gate `approve-and-execute`. |
 
+> **Errata (post-closeout, 2026-11-04).** D5's parenthetical "same `ArbiterPluginShim`" is narrower than written: the root pin covers the Kilo and OpenCode shims rendered by `ArbiterPluginShim`. Pi renders its own `.pi/extensions/kyber-arbiter.ts` in `PiRenderer` and still passes the process cwd; the root pin does not cover Pi.
+
 ## Design harvest
 
 `documentation-impact: extends-component`; `impact-components: [KyberArbiter, KyberSquad, Distribution]`.

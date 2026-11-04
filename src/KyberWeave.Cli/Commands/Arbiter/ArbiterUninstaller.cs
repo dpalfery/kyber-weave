@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
@@ -7,6 +8,12 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// owned hook blocks beneath one deployment root. Shared files are never deleted, only scrubbed;
 /// agent frontmatter, MCP grants, and every non-arbiter entry stay byte-identical.
 /// </summary>
+/// <remarks>
+/// The static tables are the arbiter-exclusive subset of a deployment. When the project has a
+/// Squad receipt, that receipt is authoritative: an artifact is touched only when the receipt
+/// records it for the target, so an operator file at the same path survives. A root without a
+/// receipt keeps the historical path-only behavior.
+/// </remarks>
 internal sealed class ArbiterUninstaller : IArbiterUninstaller
 {
     private static readonly IReadOnlyDictionary<SquadTarget, string[]> OwnedFiles =
@@ -29,11 +36,19 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         };
 
     private readonly string _root;
+    private readonly Func<string, SquadReceipt?> _readReceipt;
 
     internal ArbiterUninstaller(string root)
+        : this(root, ReadReceipt)
+    {
+    }
+
+    internal ArbiterUninstaller(string root, Func<string, SquadReceipt?> readReceipt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(readReceipt);
         _root = Path.GetFullPath(root);
+        _readReceipt = readReceipt;
     }
 
     /// <inheritdoc />
@@ -43,22 +58,28 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         if (!SquadTargetCatalog.TryResolve(target, out SquadTarget parsed))
             throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
 
-        RemoveOwnedFiles(parsed);
-        RemoveOwnedBlocks(parsed);
+        SquadReceipt? receipt = _readReceipt(_root);
+        RemoveOwnedFiles(parsed, receipt);
+        RemoveOwnedBlocks(parsed, receipt);
     }
 
     /// <summary>
     /// Whether any arbiter-owned artifact for <paramref name="target"/> exists beneath
-    /// <paramref name="root"/>: an owned file on disk, or a shared hook file still carrying an
-    /// owned block entry. An unparsable hook file counts as present so it fails honestly in
-    /// <see cref="Uninstall"/> instead of reading as "nothing to uninstall".
+    /// <paramref name="root"/>: a receipt-owned file on disk, or a shared hook file still carrying
+    /// a receipt-owned block entry. An unparsable hook file counts as present so it fails honestly
+    /// in <see cref="Uninstall"/> instead of reading as "nothing to uninstall".
     /// </summary>
     internal static bool HasDeployment(string root, SquadTarget target)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         string full = Path.GetFullPath(root);
+        string token = SquadTargetCatalog.GetToken(target);
+        SquadReceipt? receipt = ReadReceipt(full);
+
         if (OwnedFiles.TryGetValue(target, out string[]? files)
-            && files.Any(relative => File.Exists(Path.Combine(full, relative))))
+            && files.Any(relative =>
+                File.Exists(Path.Combine(full, relative))
+                && (receipt is null || ReceiptOwnsFile(receipt, token, relative))))
         {
             return true;
         }
@@ -66,7 +87,11 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         if (!OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat format))
             return false;
 
-        string path = Path.Combine(full, SquadHookJsonBlock.RelativePath(format));
+        string relativePath = SquadHookJsonBlock.RelativePath(format);
+        if (receipt is not null && !ReceiptOwnsBlock(receipt, token, relativePath))
+            return false;
+
+        string path = Path.Combine(full, relativePath);
         if (!File.Exists(path))
             return false;
 
@@ -85,25 +110,66 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         }
     }
 
-    private void RemoveOwnedFiles(SquadTarget target)
+    private static SquadReceipt? ReadReceipt(string root)
+    {
+        try
+        {
+            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
+                null,
+                Environment.GetEnvironmentVariable);
+            return stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or InvalidDataException
+                                       or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool ReceiptOwnsFile(SquadReceipt receipt, string targetToken, string relativePath)
+    {
+        return receipt.Files.Any(file =>
+            string.Equals(file.RelativePath, relativePath, StringComparison.Ordinal)
+            && string.Equals(file.Target, targetToken, StringComparison.Ordinal));
+    }
+
+    private static bool ReceiptOwnsBlock(SquadReceipt receipt, string targetToken, string relativePath)
+    {
+        return receipt.Blocks.Any(block =>
+            string.Equals(block.RelativePath, relativePath, StringComparison.Ordinal)
+            && string.Equals(block.Target, targetToken, StringComparison.Ordinal));
+    }
+
+    private void RemoveOwnedFiles(SquadTarget target, SquadReceipt? receipt)
     {
         if (!OwnedFiles.TryGetValue(target, out string[]? files))
             return;
 
+        string token = SquadTargetCatalog.GetToken(target);
         foreach (string relative in files)
         {
+            if (receipt is not null && !ReceiptOwnsFile(receipt, token, relative))
+                continue;
+
             string path = Path.Combine(_root, relative);
             if (File.Exists(path))
                 File.Delete(path);
         }
     }
 
-    private void RemoveOwnedBlocks(SquadTarget target)
+    private void RemoveOwnedBlocks(SquadTarget target, SquadReceipt? receipt)
     {
         if (!OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat format))
             return;
 
-        string path = Path.Combine(_root, SquadHookJsonBlock.RelativePath(format));
+        string relative = SquadHookJsonBlock.RelativePath(format);
+        if (receipt is not null && !ReceiptOwnsBlock(receipt, SquadTargetCatalog.GetToken(target), relative))
+            return;
+
+        string path = Path.Combine(_root, relative);
         if (File.Exists(path))
             SquadHookJsonBlock.RemoveFile(format, path);
     }

@@ -432,7 +432,13 @@ internal sealed class SelfUpdater : IDisposable
             return;
         }
 
-        IReadOnlyList<string> roots = CollectArbiterEnabledProjectRoots();
+        (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
+        if (!loaded)
+        {
+            _log("warning: arbiter hooks could not be checked: the project registry could not be read");
+            return;
+        }
+
         try
         {
             _arbiterHookRefresher.Refresh(roots);
@@ -454,10 +460,11 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>
-    /// The registered, non-stale projects whose configuration enables the arbiter. Best effort:
-    /// an unreadable registry or configuration reads as no projects rather than failing the update.
+    /// The registered, non-stale projects whose configuration enables the arbiter. A project whose
+    /// configuration cannot be read is skipped; an unreadable registry is reported as failed so the
+    /// caller does not print a success line for a check that never happened.
     /// </summary>
-    private IReadOnlyList<string> CollectArbiterEnabledProjectRoots()
+    private (bool Loaded, IReadOnlyList<string> Roots) CollectArbiterEnabledProjectRoots()
     {
         try
         {
@@ -474,14 +481,15 @@ internal sealed class SelfUpdater : IDisposable
                     roots.Add(entry.Path);
             }
 
-            return roots;
+            return (true, roots);
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException
             or InvalidDataException
             or InvalidOperationException)
         {
-            return [];
+            _log($"warning: the arbiter project registry could not be read: {ex.Message}");
+            return (false, []);
         }
     }
 

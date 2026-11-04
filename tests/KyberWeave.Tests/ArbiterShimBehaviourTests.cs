@@ -306,7 +306,8 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
 
     private void WriteFakeBinary(string stdout, string exit)
     {
-        string script = Path.Combine(_temp.Path, "kyber-weave-arbiter");        string body = "#!/bin/sh\ncat >/dev/null\n"
+        string script = Path.Combine(_temp.Path, "kyber-weave-arbiter");
+        string body = "#!/bin/sh\ncat >/dev/null\n"
             + (stdout.Length > 0 ? $"printf '%s' '{stdout}'\n" : string.Empty)
             + $"exit {exit}\n";
         File.WriteAllText(script, body);
