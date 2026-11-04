@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
+|---|---|---|---|---|---|
+| [2026-11-03-arbiter-one-command-install.md](2026-11-03-arbiter-one-command-install.md) | Ready — test-first, autonomous; decisions D1–D10 answered; approve-and-execute gate approved (AP1, `autonomous: recommendation accepted`) | 2026-11-03 | — | — (closeout T8 maps the `Design harvest` rows) | One-command `kyber-weave arbiter install`, `arbiter uninstall --target`, `update`-time hook refresh, the Kilo shim repo-root bind, the `KW-ARB-PLANNER-001` gate fix (T1), and the ADR 0053 amendment. |
 
 ## Archived Plans
 
