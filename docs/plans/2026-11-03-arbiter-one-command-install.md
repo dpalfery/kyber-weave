@@ -77,6 +77,7 @@ open.
 | D8 | Amend ADR 0053 or add a new ADR? | Amend ADR 0053 in place: D18 (argv key exception) and D22 (one-command install replacing the three-part install). | The repository's precedent is in-place amendment (ADR 0031, 0034). D18/D22 are reversals of a single accepted decision, not a new boundary. | ANSWERED — autonomous: recommendation accepted (in-place amend precedent). |
 | D9 | Exit codes and distinct failure codes for the new verbs? | `arbiter install`/`uninstall` follow the squad convention: `2` for client-input errors (invalid target, `--global` on install, missing key, invalid provider), `1` for operational failures, `0` for success or an idempotent no-op. Missing key surfaces the existing `KW-ARB-KEY-001`; an invalid target names the target and the roster (reusing `SquadTargetCatalog`'s message). | Mirrors `squad install` (`2` client input, `1` other) and `ArbiterStatusCommand.KeyMissing = "KW-ARB-KEY-001"`. | ANSWERED — squad exit-code convention; existing `KW-ARB-KEY-001`. |
 | D10 | Fix `KW-ARB-PLANNER-001` first (test-first, with a regression test) and record the gate-off bootstrap this plan runs under? | Yes to both. This plan is authored under the documented bootstrap exception (`arbiter.enabled: false`), because `KW-ARB-PLANNER-001`'s `matches: config.planning-dirs` decide clause compares the raw `delegation.plan-file` against literal directory strings (`docs/plans`, `docs/specs`, `docs/todo`) through `PathGlob`, so a file beneath a planning directory never matches and falls through to `malformed`, while the bare `docs/plans` directory matches. T1 (the first task) fixes it test-first: emit `config.planning-dirs` as directory-prefix globs (`docs/plans/**`, `docs/specs/**`, `docs/todo/**`) from `TriggerFactBuilder.PlanningDirs`, so a `PLAN_FILE` naming a file inside a planning directory answers `recognised`. The id stays permanent (no renumber, no new `KW-ARB-*` id). | The one-liner's own install/update work depends on planner dispatches that name `docs/plans/<file>.md`; keeping the gate broken means every such dispatch needs the exception. The `**` idiom is the one the `OWNER-001` map and `LENS-001` already use. The same change also repairs `KW-ARB-PLANNER-DIFF-001`'s `subset-of: config.planning-dirs`, which `IsCovered` evaluates through `PathGlob` and so currently fails to count a file write beneath a planning directory as `inside`. | ANSWERED — autonomous: recommendation accepted; gate-off bootstrap recorded here (auditable run decision/finding). |
+| D11 | May T1 also fix `KW-ARB-READY-001`'s empty-dependency handling? | Yes. T1 adds a `count: 0` → `ready` clause before the subset check; the first T1 dispatch was blocked because an empty `plan.task.depends-on` list was compared with the absent `ledger.completed-tasks` fact and answered `waiting`. | This is the same execution-blocking gate class as D10. It is fixed test-first in T1 with the bootstrap gate-off exception, then the gate is re-enabled. | ANSWERED — autonomous: recommendation accepted; bootstrap continuation. |
 | AP1 | Approve and execute | Approve this plan and its Test contract (T1–T6) for execution at the declared scale — `extends-component` on `KyberArbiter`, `KyberSquad`, `Distribution`. | Conductor explicitly returned `AUTONOMOUS_APPROVAL: approve-and-execute` on 2026-11-03 under resolved autonomy `autonomous` (Config Reg `<autonomy>`). Recorded in the permanent `## Decisions` table per the autonomous-decisions reference and preserved intact across the lifecycle. | ANSWERED — autonomous: recommendation accepted; explicit conductor gate `approve-and-execute`. |
 
 ## Scale and Design harvest
@@ -163,7 +164,7 @@ matching `csharp-dev`; implementers never author or weaken tests.
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
-| T1 | `tests/KyberWeave.Tests/Arbiter/ArbiterPlannerRuleTests.cs` (new) + `tests/KyberWeave.Tests/Arbiter/ArbiterFactBuilderTests.cs` (pin update) | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterPlannerRuleTests|FullyQualifiedName~ArbiterFactBuilderTests"` | `KW-ARB-PLANNER-001` answers `recognised` for a `delegation.plan-file` naming a file beneath `docs/plans`, `docs/specs`, or `docs/todo`; answers `malformed` for a path outside the planning dirs and for a missing plan-file. `config.planning-dirs` resolves to the prefix globs `docs/plans/**`, `docs/specs/**`, `docs/todo/**`. | New RED cases fail because the current `matches: config.planning-dirs` clause (and the literal-directory `config.planning-dirs` value) make a file path answer `malformed`. | Same cases pass; the shipped-rules catalogue (`ArbiterDefaultRulesTests`) stays green; no rule id is renumbered or added. |
+| T1 | `tests/KyberWeave.Tests/Arbiter/ArbiterPlannerRuleTests.cs` (new) + `tests/KyberWeave.Tests/Arbiter/ArbiterFactBuilderTests.cs` (pin update) | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterPlannerRuleTests|FullyQualifiedName~ArbiterFactBuilderTests"` | `KW-ARB-PLANNER-001` answers `recognised` for a `delegation.plan-file` naming a file beneath `docs/plans`, `docs/specs`, or `docs/todo`; answers `malformed` for a path outside the planning dirs and for a missing plan-file. `config.planning-dirs` resolves to the prefix globs `docs/plans/**`, `docs/specs/**`, `docs/todo/**`. `KW-ARB-READY-001` answers `ready` for a task whose dependency list is empty even when `ledger.completed-tasks` is absent, and `waiting` for a non-empty unsatisfied list. | New RED cases fail because the current `matches: config.planning-dirs` clause makes a file path answer `malformed`, and because the empty `plan.task.depends-on` list is compared with an absent `ledger.completed-tasks` fact and answers `waiting`. | Same cases pass; the shipped-rules catalogue (`ArbiterDefaultRulesTests`) stays green; no rule id is renumbered or added. |
 | T2 | `tests/KyberWeave.Tests/HostConfigYamlTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~HostConfigYamlTests"` | `WithArbiterEnabled` flips an existing `arbiter.enabled: false` to `true`; appends an `arbiter:` block when absent; is idempotent; preserves comments, key order, and line endings; preserves `arbiter.provider`/`rules` when present. | New RED cases fail because `WithArbiterEnabled` does not exist (compile) or returns the input unchanged. | Same cases pass; no assertion weakened; every other byte of the input is byte-identical. |
 | T3 | `tests/KyberWeave.Tests/ArbiterShimBehaviourTests.cs` + `tests/KyberWeave.Tests/ArbiterKiloRenderingTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterShimBehaviourTests|FullyQualifiedName~ArbiterKiloRenderingTests"` | `ArbiterPluginShim.Render("kilo")` output contains a root-resolution step walking up for `.kyber-weave/kyber-weave.yml` (fallback `.git`); the spawn `cwd` and the envelope `cwd` are the resolved root; an unresolvable root throws a block instead of spawning. | New RED cases fail because the rendered shim still passes the raw harness `directory`. | Same cases pass; the rendered shim no longer uses an unverified cwd. |
 | T4 | `tests/KyberWeave.Tests/ArbiterInstallCommandTests.cs` (new) | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterInstallCommandTests"` | Invalid `--target` exits 2 naming the roster; `--global` exits 2; `--provider ""` → `none`; `--provider systemone --arbiter-key <k>` writes `<k>` to the injected fake store for the origin and never into config/receipt/log; systemone with no key/`--key-stdin`/env surfaces `KW-ARB-KEY-001`; a second run exits 0 as a no-op with no duplicate writes; the merge preserves pre-existing config content. | New RED cases fail because `arbiter install` is unregistered or does not yet write/merge. | Same cases pass; key value asserted only via the injected store, never from any file or stdout. |
@@ -175,7 +176,7 @@ matching `csharp-dev`; implementers never author or weaken tests.
 Mode-aware, dependency-ordered, file-scope disjoint where possible. RED first, then GREEN, per task.
 Each developer task ends with the worker's own `task-gate`; a failing gate returns to that worker.
 
-### T1 — Fix `KW-ARB-PLANNER-001` so a real `PLAN_FILE` path is recognised (Core rules)
+### T1 — Fix the planner and leaf-readiness gate rules (Core rules)
 
 - **Objective.** The planner gate answers `malformed` for every real plan-file header: the
   `matches: config.planning-dirs` decide clause compares the raw `delegation.plan-file`
@@ -184,17 +185,24 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
   `delegation.plan-file exists: true` clause answers `malformed`, while the bare `docs/plans`
   directory matches. Fix it so a file inside a planning directory answers `recognised`; the
   `KW-ARB-*` id stays permanent (no renumber, no new id).
+  The same task fixes `KW-ARB-READY-001`: an empty `plan.task.depends-on` list is compared with the
+  absent `ledger.completed-tasks` fact on a fresh run, so every leaf task answers `waiting` and no
+  execution can start. Add a `count: 0` → `ready` clause before the subset check.
 - **Files.** `src/KyberWeave.Core/Arbiter/Facts/TriggerFactBuilder.cs` (`PlanningDirs`/`DirectoryOf`
-  emit `docs/plans/**` prefix globs); tests `tests/KyberWeave.Tests/Arbiter/ArbiterPlannerRuleTests.cs`
-  (new regression) and `tests/KyberWeave.Tests/Arbiter/ArbiterFactBuilderTests.cs` (update the
-  `config.planning-dirs` pin to the glob values). `src/KyberWeave.Core/Arbiter/Rules/default-rules.yml`
-  is unchanged in ids and clauses; its `matches`/`subset-of` clauses now match files beneath the
-  planning dirs because the fact carries prefix globs.
+  emit `docs/plans/**` prefix globs); `src/KyberWeave.Core/Arbiter/Rules/default-rules.yml` (one
+  `count: 0` clause on `KW-ARB-READY-001`, no id change); tests
+  `tests/KyberWeave.Tests/Arbiter/ArbiterPlannerRuleTests.cs` (new regression) and
+  `tests/KyberWeave.Tests/Arbiter/ArbiterFactBuilderTests.cs` (update the `config.planning-dirs` pin
+  to the glob values). The planner rule's ids and other clauses are unchanged; its
+  `matches`/`subset-of` clauses now match files beneath the planning dirs because the fact carries
+  prefix globs.
 - **Skills.** RED `test-dev`; GREEN `csharp-dev`.
 - **Acceptance.** Contract row T1 GREEN; `RuleEngine.Decide` on `KW-ARB-PLANNER-001` with
   `delegation.plan-file = docs/plans/2026-11-03-arbiter-one-command-install.md` (and `docs/specs/`,
   `docs/todo/` equivalents) answers `recognised`; a path outside the planning dirs and a missing
-  plan-file answer `malformed`; the shipped-rules catalogue stays green.
+  plan-file answer `malformed`; `KW-ARB-READY-001` answers `ready` for an empty dependency list with
+  no completed tasks and `waiting` for a non-empty unsatisfied list; the shipped-rules catalogue
+  stays green.
 
 ### T2 — `HostConfigYaml.WithArbiterEnabled` (Core, non-destructive merge)
 
