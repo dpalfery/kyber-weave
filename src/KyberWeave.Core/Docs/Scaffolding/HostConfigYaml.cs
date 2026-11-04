@@ -941,47 +941,32 @@ public static partial class HostConfigYaml
     private static partial Regex ArbiterEnabledKey();
 
     /// <summary>
-    /// A host configuration read as lines, each carrying the line break that ended it.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Split on <c>'\n'</c> alone, a document written with lone CR endings is one long line, and
-    /// every key this type looks for in column zero is looked for where the file does not have
-    /// it: the <c>ontology:</c> block goes unfound, a second one is appended, and YAML refuses to
-    /// load the result at all. A lone CR is a line break to YAML, so it has to be one here too.
-    /// </para>
-    /// <para>
-    /// Each line keeps its own terminator rather than one style for the document, because this
-    /// type edits a line and has no business normalizing the rest of an operator's file — the
-    /// diff would show changes nobody made. Only the lines this tool adds take a new terminator,
-    /// and they take the document's dominant style.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// Sets <c>arbiter.provider.kind</c> without disturbing the rest of the document. When the
     /// arbiter block or the provider key is absent, they are inserted in place; an existing
     /// matching kind leaves the input unchanged.
     /// </summary>
+    /// <remarks>
+    /// A scalar or flow <c>provider:</c> value is refused rather than rewritten: replacing it
+    /// with a block would silently drop whatever the operator wrote there, the same hazard
+    /// <see cref="WithTechnologies"/> rejects for a scalar <c>technologies</c>.
+    /// </remarks>
     public static string WithArbiterProviderKind(string yaml, string kind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
         ArgumentNullException.ThrowIfNull(yaml);
 
-        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        List<string> lines = SplitLines(yaml);
+        HostConfigLines lines = HostConfigLines.Read(yaml);
         int arbiter = IndexOfTopLevelKey(lines, "arbiter");
         if (arbiter < 0)
         {
-            List<string> appended = [.. lines];
-            if (appended.Count > 0 && appended[^1].Trim().Length > 0)
-                appended.Add(string.Empty);
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+                lines.Add(string.Empty);
 
-            appended.Add("arbiter:");
-            appended.Add("  enabled: true");
-            appended.Add("  provider:");
-            appended.Add("    kind: " + kind);
-            appended.Add(string.Empty);
-            return string.Join(newline, appended);
+            lines.Add("arbiter:");
+            lines.Add(DefaultIndent + "enabled: true");
+            lines.Add(DefaultIndent + "provider:");
+            lines.Add(DefaultIndent + DefaultIndent + "kind: " + kind);
+            return lines.ToText();
         }
 
         int blockEnd = EndOfBlock(lines, arbiter);
@@ -1014,15 +999,21 @@ public static partial class HostConfigYaml
             }
 
             lines.Insert(anchor + 1, blockIndent + "provider:");
-            lines.Insert(anchor + 2, blockIndent + "  kind: " + kind);
-            return string.Join(newline, lines);
+            lines.Insert(anchor + 2, blockIndent + DefaultIndent + "kind: " + kind);
+            return lines.ToText();
         }
 
-        (string providerValue, string providerSuffix) = SplitScalarAndSuffix(
-            ProviderRest(lines[provider]));
-        if (providerValue.Trim().Length > 0)
+        (string providerValue, _) = SplitScalarAndSuffix(ProviderRest(lines[provider]));
+
+        // A hash where the value would start is a comment, not a value: 'provider: # note'
+        // is an empty block key and the kind can be inserted beneath it.
+        if (providerValue.Trim().Length > 0 && providerValue.TrimStart()[0] != '#')
         {
-            lines[provider] = providerIndent + "provider:" + providerSuffix;
+            throw new InvalidDataException(
+                "arbiter.provider holds a scalar or flow mapping, not a block mapping. " +
+                "Replace it with a block mapping (provider: followed by indented keys) before " +
+                "setting the provider kind — rewriting it as a block would silently drop the " +
+                "existing value.");
         }
 
         int providerEnd = lines.Count;
@@ -1060,11 +1051,10 @@ public static partial class HostConfigYaml
             if (!TrySplitKeyedLine(lines[i], "kind", out string lineIndent, out string prefix, out string rest))
                 continue;
 
-            // providerEnd bounds this loop to the provider block, so every keyed line
-            // nested under 'provider:' is the kind, at whatever depth the file indents
-            // it — a depth cap here would miss a deeply indented kind and insert a
-            // duplicate beside it.
-            if (lineIndent.Length <= providerIndent.Length)
+            // Only a direct child of the provider block uses its computed sub-indent.
+            // A deeper 'kind:' belongs to a nested mapping (options.kind) and must not be
+            // mistaken for provider.kind.
+            if (!string.Equals(lineIndent, subIndent, StringComparison.Ordinal))
                 continue;
 
             (string value, string suffix) = SplitScalarAndSuffix(rest);
@@ -1073,11 +1063,11 @@ public static partial class HostConfigYaml
 
             string separator = prefix.EndsWith(':') ? " " : string.Empty;
             lines[i] = prefix + separator + kind + suffix;
-            return string.Join(newline, lines);
+            return lines.ToText();
         }
 
         lines.Insert(provider + 1, subIndent + "kind: " + kind);
-        return string.Join(newline, lines);
+        return lines.ToText();
     }
 
     private static string ProviderRest(string providerLine)
@@ -1088,17 +1078,7 @@ public static partial class HostConfigYaml
         return string.Empty;
     }
 
-    private static List<string> SplitLines(string yaml)
-    {
-        string normalized = yaml.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        List<string> lines = [.. normalized.Split('\n')];
-        if (lines.Count > 0 && lines[^1].Length == 0)
-            lines.RemoveAt(lines.Count - 1);
-
-        return lines;
-    }
-
-    private static int IndexOfTopLevelKey(List<string> lines, string name)
+    private static int IndexOfTopLevelKey(HostConfigLines lines, string name)
     {
         for (int i = 0; i < lines.Count; i++)
         {
@@ -1133,37 +1113,6 @@ public static partial class HostConfigYaml
             i++;
 
         return i >= text.Length || text[i] == '#';
-    }
-
-    private static int EndOfBlock(List<string> lines, int blockStart)
-    {
-        for (int i = blockStart + 1; i < lines.Count; i++)
-        {
-            string line = lines[i];
-            if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] == '#')
-                continue;
-
-            return i;
-        }
-
-        return lines.Count;
-    }
-
-    private static string BlockIndent(List<string> lines, int blockStart, int blockEnd)
-    {
-        string? shallowest = null;
-        for (int i = blockStart + 1; i < blockEnd; i++)
-        {
-            string trimmed = lines[i].TrimStart();
-            if (trimmed.Length == 0 || trimmed[0] == '#')
-                continue;
-
-            int indent = lines[i].Length - trimmed.Length;
-            if (indent > 0 && (shallowest is null || indent < shallowest.Length))
-                shallowest = lines[i][..indent];
-        }
-
-        return shallowest ?? "  ";
     }
 
     private static string LeadingWhitespace(string line)
@@ -1226,6 +1175,23 @@ public static partial class HostConfigYaml
         return trimmed;
     }
 
+    /// <summary>
+    /// A host configuration read as lines, each carrying the line break that ended it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Split on <c>'\n'</c> alone, a document written with lone CR endings is one long line, and
+    /// every key this type looks for in column zero is looked for where the file does not have
+    /// it: the <c>ontology:</c> block goes unfound, a second one is appended, and YAML refuses to
+    /// load the result at all. A lone CR is a line break to YAML, so it has to be one here too.
+    /// </para>
+    /// <para>
+    /// Each line keeps its own terminator rather than one style for the document, because this
+    /// type edits a line and has no business normalizing the rest of an operator's file — the
+    /// diff would show changes nobody made. Only the lines this tool adds take a new terminator,
+    /// and they take the document's dominant style.
+    /// </para>
+    /// </remarks>
     private sealed class HostConfigLines
     {
         private readonly List<string> _content = [];
