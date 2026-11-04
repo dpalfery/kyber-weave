@@ -91,6 +91,46 @@ const PLUGIN_TOOL_NAME_KEYS = ['factory.tool.name', 'factory.tool_name'] as cons
 const PLUGIN_PROMPT_TEXT_KEYS = ['factory.turn.prompt.text'] as const
 
 /**
+ * The plugin envelope's turn operation key.
+ *
+ * The plugin emits TWO turn spans for one turn: the prompt turn, which
+ * carries the operation and the prompt text, and the completion turn, which
+ * carries neither. The operation is what tells them apart.
+ */
+const PLUGIN_TURN_OPERATION_KEYS = ['factory.turn.operation'] as const
+
+/**
+ * The prompt text the wire carries at most, in bytes.
+ *
+ * The plugin cuts the prompt to this bound before it sends it. The value is
+ * the wire's, repeated here for the same reason the envelope's strings are:
+ * the canon adapter never depends on the plugin.
+ */
+const MAX_PROMPT_BYTES = 64 * 1024
+
+/** The marker the wire appends to a prompt it cut. */
+const PROMPT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
+
+/**
+ * The prompt text, cut to the wire's own bound.
+ *
+ * The plugin caps the prompt before it sends it, so a span that carries more
+ * is not the plugin's. The prompt is the one piece of content the corpus
+ * never purges, so it must not land unbounded: the text is cut at a
+ * character boundary and marked, exactly as the wire marks it.
+ */
+function cappedPrompt(text: string): string {
+  if (Buffer.byteLength(text, 'utf8') <= MAX_PROMPT_BYTES) return text
+  const budget = MAX_PROMPT_BYTES - Buffer.byteLength(PROMPT_TRUNCATION_MARKER, 'utf8')
+  const head = text.slice(0, budget)
+  const bytes = Buffer.from(head, 'utf8')
+  let end = Math.min(budget, bytes.length)
+  // A cut that lands inside a character would leave a broken one behind.
+  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1
+  return `${bytes.toString('utf8', 0, end)}${PROMPT_TRUNCATION_MARKER}`
+}
+
+/**
  * Keys downstream already reads for the model (`sessions.ts` `MODEL_KEYS`,
  * `store.ts` `PROJECTED_ATTRIBUTE_KEYS`). The plugin's model is bridged onto
  * one of them so no downstream reader needs a new key.
@@ -225,12 +265,25 @@ function applyUsage(record: CanonicalRecord, attributes: Record<string, unknown>
  * conversation history, so the session view shows what was asked; a turn
  * without one declares the prompt `not_measurable` with a reason that names
  * the consent, so the absence is stated rather than shown as a blank.
+ *
+ * Only the PROMPT turn says anything about the prompt. The plugin's second
+ * turn span for the same turn — the completion — carries no prompt by
+ * construction, so a consent-off reason on it would name a consent that was
+ * never asked for.
  */
 function applyPrompt(record: CanonicalRecord, raw: RawSpan): void {
   if (raw.name !== 'factory.turn') return
   const prompt = firstNonEmptyString(raw.attributes, PLUGIN_PROMPT_TEXT_KEYS)
+  const operation = firstNonEmptyString(raw.attributes, PLUGIN_TURN_OPERATION_KEYS)
+  // A span that carries neither the operation nor the prompt is the
+  // completion turn: it says nothing about a prompt.
+  if (prompt === undefined && operation === undefined) return
   if (prompt !== undefined) {
-    appendPart(record, { part: 'conversation_history', text: prompt, role: 'user' })
+    appendPart(record, {
+      part: 'conversation_history',
+      text: cappedPrompt(prompt),
+      role: 'user',
+    })
   }
   record.measurability = {
     ...record.measurability,

@@ -724,7 +724,9 @@ describe('the plugin envelope path', () => {
     const record = normalize(
       droidAdapter,
       'plugin-turn-without-prompt',
-      pluginAttributes(),
+      // The prompt turn carries the operation whether or not the consent let
+      // the text travel.
+      pluginAttributes({ 'factory.turn.operation': 'llm.invoke' }),
       PLUGIN_SOURCE,
       'factory.turn',
     )
@@ -735,6 +737,40 @@ describe('the plugin envelope path', () => {
     expect(typeof declared).toBe('object')
     expect((declared as { availability: string }).availability).toBe('not_measurable')
     expect((declared as { reason?: string }).reason).toMatch(/consent/i)
+  })
+
+  it('says nothing about a prompt on the completion turn, which carries none by construction', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-completion',
+      // The plugin's second turn span for one turn: no operation, no prompt.
+      pluginAttributes(),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    // A consent-off reason here would name a consent that was never asked
+    // for: this span never carried a prompt to withhold.
+    expect(record.measurability?.['user_prompt']).toBeUndefined()
+    expect(record.parts ?? []).toEqual([])
+  })
+
+  it('cuts a prompt that is over the wire’s own bound, and marks it', async () => {
+    const { droidAdapter } = await loadDroid()
+    const huge = 'x'.repeat(200 * 1024)
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-with-huge-prompt',
+      pluginAttributes({ 'factory.turn.operation': 'llm.invoke', 'factory.turn.prompt.text': huge }),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    const part = record.parts?.[0]
+    expect(part?.part).toBe('conversation_history')
+    expect(Buffer.byteLength(part?.text ?? '', 'utf8')).toBeLessThanOrEqual(64 * 1024)
+    expect(part?.text).toContain('[kyberdash: truncated]')
   })
 
   it('quarantines a plugin span of an undeclared name as non-model rather than guessing its kind', async () => {
@@ -839,7 +875,12 @@ describe('the plugin envelope is the only claim path', () => {
         [
           otlpSpan(
             'plugin-turn-withheld-prompt',
-            pluginAttributes({ 'factory.turn.prompt.text': FACTORY_PROMPT }),
+            // The prompt turn carries the operation whether or not the
+            // consent let the text travel; the gate strips the text alone.
+            pluginAttributes({
+              'factory.turn.operation': 'llm.invoke',
+              'factory.turn.prompt.text': FACTORY_PROMPT,
+            }),
             { name: 'factory.turn', resource: { 'service.name': PLUGIN_SOURCE } },
           ),
         ],
