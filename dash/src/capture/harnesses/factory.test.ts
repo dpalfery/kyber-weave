@@ -365,6 +365,24 @@ describe('the Factory (Droid) capture writer', () => {
     expect(readFileSync(f.settingsFile, 'utf8')).toBe(owner)
   })
 
+  it('states in the preview that the confirmed switch records the prompt text', async () => {
+    const f = fixture('factory-writer-consent-note-')
+
+    const preview = await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      dryRun: true,
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+
+    // The confirm reads this: what the switch does to the owner's text is
+    // said before it is confirmed, not after.
+    expect(preview.notes.join('\n')).toMatch(/would record the prompt text/i)
+    expect(preview.notes.join('\n')).not.toMatch(/\/var\/folders|\/Users\//)
+  })
+
   it('enables and disables through the engine without receipting a configuration key', async () => {
     const f = fixture('factory-writer-engine-')
     const owner = '{\n  "theme": "dark"\n}\n'
@@ -398,7 +416,7 @@ describe('the Factory (Droid) capture writer', () => {
     expect(readFileSync(f.settingsFile, 'utf8')).toBe(owner)
   })
 
-  it('enables the capture without recording the prompt text: the consent file is created with content off', async () => {
+  it('enables the capture with the prompt text: the confirmed switch is the consent', async () => {
     const f = fixture('factory-writer-consent-absent-')
     await runCapture('enable', {
       homeDir: f.home,
@@ -407,12 +425,12 @@ describe('the Factory (Droid) capture writer', () => {
       fetchHealth: NO_LISTENER,
       harnessCli: f.fake.harness,
     })
-    // The switch starts the capture; it does not opt the prompt text in.
+    // One decision: the owner confirmed the switch, so the prompt text is recorded.
     expect(existsSync(f.pluginDir)).toBe(true)
-    expect(consentContent(f)).toBe(false)
+    expect(consentContent(f)).toBe(true)
   })
 
-  it('leaves an owner content consent on when enable installs the capture', async () => {
+  it('keeps an owner content consent on when enable installs the capture', async () => {
     const f = fixture('factory-writer-consent-on-')
     writeConsent(f, true)
     await runCapture('enable', {
@@ -426,7 +444,7 @@ describe('the Factory (Droid) capture writer', () => {
     expect(consentContent(f)).toBe(true)
   })
 
-  it('leaves an owner content consent off when enable installs the capture', async () => {
+  it('turns an owner content consent on when enable installs the capture', async () => {
     const f = fixture('factory-writer-consent-off-')
     writeConsent(f, false)
     await runCapture('enable', {
@@ -436,7 +454,7 @@ describe('the Factory (Droid) capture writer', () => {
       fetchHealth: NO_LISTENER,
       harnessCli: f.fake.harness,
     })
-    expect(consentContent(f)).toBe(false)
+    expect(consentContent(f)).toBe(true)
   })
 
   it('disable uninstalls the plugin and turns the content consent off', async () => {
@@ -458,6 +476,51 @@ describe('the Factory (Droid) capture writer', () => {
     })
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(consentContent(f)).toBe(false)
+  })
+
+  it('removes the capture even when the content consent cannot be written', async () => {
+    const f = fixture('factory-writer-consent-unwritable-')
+    await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+    // A directory where the consent file belongs cannot be written over.
+    const consentPath = join(f.home, '.kyberdash', 'factory-plugin.json')
+    rmSync(consentPath, { force: true })
+    mkdirSync(consentPath, { recursive: true })
+
+    const result = await runCapture('disable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+
+    // The consent is turned off before the plugin is removed, so the text
+    // stops first — but a consent file that cannot be written must not strand
+    // the capture.
+    expect(existsSync(f.pluginDir)).toBe(false)
+    expect(result.stderr).toMatch(/consent/i)
+  })
+
+  it('names the transition when an enable turns the prompt text back on', async () => {
+    const f = fixture('factory-writer-consent-transition-')
+    writeConsent(f, false)
+    const result = await runCapture('enable', {
+      homeDir: f.home,
+      platform: HOST,
+      harnessIds: ['factory'],
+      fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
+    })
+
+    // The switch is the consent, so the confirm has to say what it changes.
+    expect(result.notes.join('\n')).toMatch(/it was off/i)
+    expect(consentContent(f)).toBe(true)
   })
 })
 

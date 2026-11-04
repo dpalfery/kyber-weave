@@ -58,6 +58,7 @@
       ]
     }
   ],
+  "notes": [],
   "harnessState": {
     "id": "claude-code",
     "displayName": "Claude Code",
