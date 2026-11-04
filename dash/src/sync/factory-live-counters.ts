@@ -22,12 +22,12 @@
 import { existsSync, type Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { acquireStoreRefreshLock, stateDir } from '../refresh/lock.js'
-import { createDroidProvider, deriveProjectName } from '../providers/droid.js'
+import { createDroidProvider, sessionProjectOf } from '../providers/droid.js'
 import type { ParsedProviderCall, SessionSource } from '../providers/types.js'
 import { Synthesizer } from '../synth/synth.js'
 
@@ -246,12 +246,6 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** The working directory the plugin recorded for a session, or undefined. */
-function workingDirectoryOf(attributes: Record<string, unknown> | undefined): string | undefined {
-  const cwd = attributes?.['factory.cwd']
-  return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
-}
-
 /** A call's timestamp as an instant, or undefined when it names none. */
 function instantOf(call: ParsedProviderCall): number | undefined {
   // The value comes out of a JSON transcript, so its type is the file's
@@ -370,18 +364,6 @@ export async function syncFactoryLiveCounters(
       const stillActive = nowMs - lastSeenMs <= minIntervalMs
       if (!advanced && !(dueAgain && stillActive)) continue
 
-      const spanRow = db
-        .prepare(
-          `SELECT span_id FROM records
-            WHERE harness = ? AND source = ? AND session_id = ?
-            ORDER BY timestamp DESC LIMIT 1`,
-        )
-        .get(FACTORY_HARNESS, FACTORY_PLUGIN_SOURCE, candidate.session_id) as
-        | { span_id: string }
-        | undefined
-      if (spanRow === undefined) continue
-
-      const cwd = workingDirectoryOf(store.spanAttributes(spanRow.span_id))
       const transcriptPath = findSessionTranscript(sessionsRoot, workspaces, candidate.session_id)
       if (transcriptPath === undefined) {
         // Nothing to read for this session: remember it, so the pass does not
@@ -391,12 +373,18 @@ export async function syncFactoryLiveCounters(
         continue
       }
 
-      const records = await readCounterRecords(
-        transcriptPath,
-        cwd === undefined ? basename(dirname(transcriptPath)) : deriveProjectName(cwd),
-        factoryRoot,
-        nowMs,
-      )
+      // The project is derived the way the file source derives it, from the
+      // session's own file: the two paths must name one session the same way,
+      // or the rows they write are two rows for one session.
+      const project = await sessionProjectOf(transcriptPath, factoryRoot)
+      if (project === undefined) {
+        // The session is the harness's own housekeeping, or its transcript
+        // names no session: the file source keeps no counters for it either.
+        rememberRead(readStates, candidate.session_id, candidate.last_seen, nowMs, true)
+        continue
+      }
+
+      const records = await readCounterRecords(transcriptPath, project, factoryRoot, nowMs)
       rememberRead(readStates, candidate.session_id, candidate.last_seen, nowMs, records.length === 0)
       if (records.length === 0) continue
 
