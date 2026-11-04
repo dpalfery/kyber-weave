@@ -6,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -110,6 +112,68 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(1, refresher.Calls);
         Assert.DoesNotContain(spawned, line => line.Contains("arbiter", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The success line reports what the refresher actually did, not how many projects it was
+    /// handed: a project whose hook update fails must not be counted as refreshed.
+    /// </summary>
+    [Fact]
+    public void Update_ReportsTheRefreshOutcomeNotTheInputCount()
+    {
+        InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "user-home"));
+        Directory.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = new(userPaths);
+
+        string project = Path.Combine(_install.Path, "registered-project");
+        string configDirectory = Path.Combine(project, ".kyber-weave");
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(
+            Path.Combine(configDirectory, "kyber-weave.yml"),
+            "arbiter:\n  enabled: true\n");
+
+        string receiptPath = store.ResolveReceiptPath(project, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(
+            receiptPath,
+            store.SerializeReceipt(new SquadReceipt(
+                "kyber-squad.receipt/v1",
+                SquadDeploymentScope.Project,
+                project,
+                DateTimeOffset.UtcNow,
+                [],
+                [])));
+
+        RecordingArbiterHookRefresher refresher = new()
+        {
+            Result = new ArbiterHookRefreshResult(Refreshed: 0, Failed: 1),
+        };
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => userPaths.HomeDirectory,
+            "APPDATA" => userPaths.ApplicationDataDirectory,
+            _ => null,
+        };
+
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(
+            log,
+            line => line.Contains("0 project(s)", StringComparison.Ordinal)
+                    && line.Contains("1 failed", StringComparison.Ordinal));
     }
 
     private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false)
@@ -220,11 +284,15 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
 
         public List<string> RefreshedRoots { get; } = [];
 
-        public void Refresh(IReadOnlyList<string> projectRoots)
+        /// <summary>When unset, every input root is reported as refreshed.</summary>
+        public ArbiterHookRefreshResult? Result { get; set; }
+
+        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
         {
             ArgumentNullException.ThrowIfNull(projectRoots);
             Calls++;
             RefreshedRoots.AddRange(projectRoots);
+            return Result ?? new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
         }
     }
 

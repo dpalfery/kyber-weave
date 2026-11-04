@@ -826,10 +826,11 @@ public sealed class UpdateCommandTests : IDisposable
     {
         public int Calls { get; private set; }
 
-        public void Refresh(IReadOnlyList<string> projectRoots)
+        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
         {
             ArgumentNullException.ThrowIfNull(projectRoots);
             Calls++;
+            return new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
         }
     }
 

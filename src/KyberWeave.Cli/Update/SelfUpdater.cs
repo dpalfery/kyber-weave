@@ -434,18 +434,17 @@ internal sealed class SelfUpdater : IDisposable
 
         (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
         if (!loaded)
-        {
-            _log("warning: arbiter hooks could not be checked: the project registry could not be read");
             return;
-        }
 
+        ArbiterHookRefreshResult outcome;
         try
         {
-            _arbiterHookRefresher.Refresh(roots);
+            outcome = _arbiterHookRefresher.Refresh(roots);
         }
         catch (Exception ex) when (ex is InvalidOperationException
             or IOException
             or UnauthorizedAccessException
+            or InvalidDataException
             or HttpRequestException
             or TimeoutException
             or OperationCanceledException)
@@ -454,9 +453,13 @@ internal sealed class SelfUpdater : IDisposable
             return;
         }
 
-        _log(roots.Count == 0
-            ? "arbiter hooks are checked"
-            : $"refreshed arbiter hooks for {roots.Count} project(s)");
+        if (roots.Count == 0)
+            _log("arbiter hooks are checked");
+        else if (outcome.Failed > 0)
+            _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +
+                 $"{outcome.Failed} failed");
+        else
+            _log($"refreshed arbiter hooks for {outcome.Refreshed} project(s)");
     }
 
     /// <summary>
@@ -488,7 +491,8 @@ internal sealed class SelfUpdater : IDisposable
             or InvalidDataException
             or InvalidOperationException)
         {
-            _log($"warning: the arbiter project registry could not be read: {ex.Message}");
+            _log("warning: arbiter hooks could not be checked because the project registry " +
+                 $"could not be read: {ex.Message}");
             return (false, []);
         }
     }

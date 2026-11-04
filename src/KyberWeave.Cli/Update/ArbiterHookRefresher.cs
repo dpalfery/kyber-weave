@@ -22,14 +22,16 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
     }
 
     /// <inheritdoc />
-    public void Refresh(IReadOnlyList<string> projectRoots)
+    public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
     {
         ArgumentNullException.ThrowIfNull(projectRoots);
         if (projectRoots.Count == 0)
-            return;
+            return default;
 
         SquadLifecycleService lifecycle =
             SquadCommandComposition.CreateLifecycleService(environmentReader: _environmentReader);
+        int refreshed = 0;
+        int failed = 0;
         foreach (string root in projectRoots)
         {
             if (string.IsNullOrWhiteSpace(root))
@@ -43,6 +45,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 _log?.Invoke($"warning: skipping arbiter hook refresh for '{root}': {ex.Message}");
+                failed++;
                 continue;
             }
 
@@ -60,6 +63,11 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                         ? string.Join(Environment.NewLine, result.Errors)
                         : "the Squad update reported failure.";
                     _log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {reason}");
+                    failed++;
+                }
+                else
+                {
+                    refreshed++;
                 }
             }
             catch (Exception ex) when (ex is InvalidOperationException
@@ -71,7 +79,10 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                 or InvalidDataException)
             {
                 _log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {ex.Message}");
+                failed++;
             }
         }
+
+        return new ArbiterHookRefreshResult(refreshed, failed);
     }
 }
