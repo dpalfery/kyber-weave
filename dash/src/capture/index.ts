@@ -191,6 +191,15 @@ export type CaptureRunResult = {
   stderr: string
   /** Additive structured outcomes; the text above is unchanged by their presence. */
   events: CaptureEvent[]
+  /**
+   * The engine's own lines about what the action did or would do, one per line.
+   *
+   * These are the harness-level lines the writers produced — the consent, the
+   * plugin, the keys — and not the receiver prose the CLI prints around them.
+   * A surface that shows a confirm reads them, so what a switch changes is
+   * stated by the engine that changes it.
+   */
+  notes: string[]
 }
 
 /** Usage errors exit 2; operational refusals (drift, conflict) exit 1. */
@@ -433,7 +442,7 @@ export async function runCapture(
       `kyberdash capture: --endpoint must be an OTLP/HTTP URL (http:// or https://); got "${endpoint}". ` +
         'Only OTLP/HTTP protocols may be written.',
     )
-    return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [] }
+    return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [], notes: [] }
   }
 
   const writers = options.writers ?? [...CAPTURE_HARNESS_REGISTRY]
@@ -447,7 +456,7 @@ export async function runCapture(
         `kyberdash capture: unknown harness "${id}". ` +
           `Expected one of: ${writers.map((writer) => writer.id).join(', ')}.`,
       )
-      return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [] }
+      return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [], notes: [] }
     }
   }
   const selected = requested
@@ -464,7 +473,7 @@ export async function runCapture(
     if (options.engine !== undefined) {
       out.push(...engineStatusLines(await options.engine.probe(), options.engine.cliVersion))
     }
-    return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [] }
+    return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [], notes: out }
   }
 
   // The engine writes file by file, so a host error on a later file can follow earlier
@@ -941,13 +950,14 @@ function enableFilePlugin(
   dryRun: boolean,
   configDir: string | undefined,
   harnessCli: HarnessCli | undefined,
-): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[]; notes: string[] } {
   const installed = plugin.install(home, env, {
     dryRun,
     ...(configDir !== undefined ? { configDir } : {}),
     ...(harnessCli !== undefined ? { harnessCli } : {}),
   })
   const out = [...installed.out]
+  const notes: string[] = []
   // A noop adds nothing beside the config file's own event, so it stays in the text only.
   const events: CaptureEvent[] =
     installed.outcome === 'noop' || installed.outcome === 'restored' || installed.outcome === 'would-restore'
@@ -961,8 +971,12 @@ function enableFilePlugin(
             ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
           },
         ]
-  if (installed.exitCode === 0) out.push(...plugin.consent.set(home, env, true, { dryRun }).out)
-  return { exitCode: installed.exitCode, out, err: [...installed.err], events }
+  if (installed.exitCode === 0) {
+    const consent = plugin.consent.set(home, env, true, { dryRun })
+    out.push(...consent.out)
+    notes.push(...(consent.notes ?? []))
+  }
+  return { exitCode: installed.exitCode, out, err: [...installed.err], events, notes }
 }
 
 /** `disable`: consent off first (so content stops even if the file is kept), then uninstall. */
@@ -974,8 +988,10 @@ function disableFilePlugin(
   dryRun: boolean,
   configDir: string | undefined,
   harnessCli: HarnessCli | undefined,
-): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
-  const out = [...plugin.consent.set(home, env, false, { dryRun }).out]
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[]; notes: string[] } {
+  const consent = plugin.consent.set(home, env, false, { dryRun })
+  const out = [...consent.out]
+  const notes: string[] = [...(consent.notes ?? [])]
   const removed = plugin.uninstall(home, env, {
     dryRun,
     ...(configDir !== undefined ? { configDir } : {}),
@@ -994,7 +1010,7 @@ function disableFilePlugin(
             ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
           },
         ]
-  return { exitCode: removed.exitCode, out, err: [...removed.err], events }
+  return { exitCode: removed.exitCode, out, err: [...removed.err], events, notes }
 }
 
 async function runEnable(
@@ -1012,6 +1028,8 @@ async function runEnable(
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
+  /** The engine's statements about what the action changes, for a confirm to read. */
+  const notes: string[] = []
   let exitCode = 0
   const loaded = loadReceiptState(home)
   // The key receipt matters only to key writers; a file plugin keeps its own. A corrupt
@@ -1027,6 +1045,7 @@ async function runEnable(
       stdout: '',
       stderr: `${err.join('\n')}\n`,
       events: [{ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' }],
+      notes: [],
     }
   }
   const receipt = loaded.receipt ?? { version: 1 as const, files: [] }
@@ -1097,6 +1116,7 @@ async function runEnable(
         out.push(...plugin.out)
         err.push(...plugin.err)
         events.push(...plugin.events)
+        notes.push(...plugin.notes)
         if (plugin.exitCode !== 0) exitCode = plugin.exitCode
       }
     }
@@ -1114,6 +1134,7 @@ async function runEnable(
     stdout: out.length > 0 ? `${out.join('\n')}\n` : '',
     stderr: err.length > 0 ? `${err.join('\n')}\n` : '',
     events,
+    notes,
   }
 }
 
@@ -1460,6 +1481,8 @@ async function runDisable(
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
+  /** The engine's statements about what the action changes, for a confirm to read. */
+  const notes: string[] = []
   let exitCode = 0
   const receiptState = loadReceiptState(home)
   // A present but corrupt receipt is not absence: the prior values disable would restore
@@ -1471,7 +1494,7 @@ async function runDisable(
     const harness = writers[0]?.id ?? ''
     err.push(`kyberdash capture: refusing to disable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
     events.push({ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' })
-    return { exitCode: REFUSAL_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events }
+    return { exitCode: REFUSAL_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events, notes: [] }
   }
   const receipt = receiptState.receipt
   const revertedPaths: string[] = []
@@ -1503,6 +1526,7 @@ async function runDisable(
       out.push(...plugin.out)
       err.push(...plugin.err)
       events.push(...plugin.events)
+      notes.push(...plugin.notes)
       if (plugin.exitCode !== 0) exitCode = plugin.exitCode
     }
     if (isPluginOnly(writer)) {
@@ -1690,6 +1714,7 @@ async function runDisable(
     stdout: out.length > 0 ? `${out.join('\n')}\n` : '',
     stderr: err.length > 0 ? `${err.join('\n')}\n` : '',
     events,
+    notes,
   }
 }
 

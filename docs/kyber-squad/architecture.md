@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-04
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -717,9 +717,10 @@ kyberdash kyber capture plugin install --harness factory --preserve
   or `squad update` skips it, and `--dry-run` passes `--dry-run` through to the verb.
 - **Consent.** Install never turns content capture on. For OpenCode the Settings switch (or
   `kyberdash kyber capture enable --harness opencode`) does that. For Factory the Settings switch
-  does **not**: the Factory switch installs the capture and leaves the content consent exactly as
-  the owner left it, and only `kyberdash kyber capture plugin consent --harness factory --on` (or
-  the owner editing the consent file) records the decision to capture the prompt text. The verb's
+  does that too: a confirmed `enable` turns the prompt text on with the capture, because the
+  confirmed switch is the consent, and `kyberdash kyber capture plugin consent --harness factory --off`
+  turns the prompt text back off without disabling the capture (or the owner edits the consent
+  file). The verb's
   own consent line, which Squad relays, says so.
 - **Guidance wording.** Squad prints no OpenCode or Factory restart line of its own. It relays the
   `harness opencode: ` lines the verb prints, and KyberDash owns their wording (ADR 0031). After an

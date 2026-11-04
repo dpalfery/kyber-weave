@@ -1701,6 +1701,7 @@ const CAPTURE_MAX_STEPS = 16
 const CAPTURE_MAX_EVENTS = 64
 const CAPTURE_MAX_CHANGES = 64
 const CAPTURE_MAX_ISSUES = 32
+const CAPTURE_MAX_NOTES = 32
 
 export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
 export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
@@ -1826,6 +1827,12 @@ export interface KyberCaptureResult {
   dryRun: boolean
   outcome: 'previewed' | 'wrote' | 'noop'
   events: KyberCaptureEvent[]
+  /**
+   * The engine's own words about what the action did or would do. A surface
+   * renders them; it never writes the sentence itself, so what a switch
+   * changes is stated by the engine that changes it.
+   */
+  notes: string[]
   harnessState: KyberCaptureHarness
   receiver: KyberCaptureReceiverNote
 }
@@ -2021,6 +2028,11 @@ function readEvents(value: unknown): KyberCaptureEvent[] {
   return mapBounded(value, CAPTURE_MAX_EVENTS, readEvent)
 }
 
+/** The engine's words about the change, bounded like every other wire string. */
+function readNotes(value: unknown): string[] {
+  return captureStrings(value, CAPTURE_MAX_NOTES)
+}
+
 /** A 2xx answer whose body is not the documented shape is a broken server, not data. */
 function malformed(status: number): KyberApiError {
   return new KyberApiError(status, CAPTURE_PATH)
@@ -2059,6 +2071,7 @@ function parseCaptureResult(raw: unknown, status: number): KyberCaptureResult {
     dryRun: raw.dryRun === true,
     outcome,
     events: readEvents(raw.events),
+    notes: readNotes(raw.notes),
     harnessState,
     receiver: {
       hosted: raw.receiver.hosted === true,

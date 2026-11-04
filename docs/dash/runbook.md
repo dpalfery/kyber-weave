@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-04
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
@@ -307,26 +307,24 @@ removes the tree KyberDash published, and turns the content consent off. `status
 plugin state, the receipt state and the content consent. The Settings switch
 "Factory (Droid) Enabled" runs the same `enable` and `disable`.
 
-**Content consent — the switch never turns it on.** The consent file is
+**Content consent — the Settings switch is the consent.** The consent file is
 `~/.kyberdash/factory-plugin.json` (`{ "version": 1, "content": <boolean> }`).
 
-- The install creates that file with `content: false` only when it is absent. An existing file is
-  never rewritten by the install, by `enable`, or by an update.
-- **On:** run the consent verb, or edit the file yourself:
+- Turning the capture on in Settings turns the prompt text on with it, and the confirm states
+  what the switch does to your text before it is applied. Turning the capture off turns the
+  prompt text off with it.
+- The install creates that file with `content: false` only when it is absent. An `enable` then
+  sets it to `content: true`, because the confirmed switch is the consent.
+- **Off, while the capture stays on:** run the consent verb, or edit the file yourself:
 
   ```bash
-  kyberdash kyber capture plugin consent --harness factory --on
   kyberdash kyber capture plugin consent --harness factory --off
+  kyberdash kyber capture plugin consent --harness factory --on
   ```
 
 - The verb exits `0` when it wrote the file, `1` when it could not write it, and `2` for a usage
   error (a missing or unsupported `--harness`, or both or neither of `--on` and `--off`).
 - `KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
-- **The Settings switch that installs the capture never records the prompt text.** This differs
-  from OpenCode, whose switch also sets consent, and the difference is deliberate: for Factory
-  the switch is "install the capture", not "start recording my prompts". It is a privacy
-  control, so the consent verb (or your own edit of the file) is the only thing that turns
-  content on.
 - While consent is off, the session, turn, tool, model and byte-size facts still flow. The
   prompt text reads `not_measurable`, with a reason.
 
@@ -1752,8 +1750,9 @@ and VS Code Insiders `settings.json`) and **Claude Code**. **OpenCode**, **Kilo 
 rather than key writers: `enable` installs the plugin, `disable` removes it, and the drawer shows
 them with Enable and Disable. OpenCode writes no key into `opencode.jsonc`. Its enable also sets content
 consent, and its disable turns that consent off. **Factory** owns a plugin **directory** and
-writes no key either; its enable installs the capture and deliberately leaves the content
-consent as the owner left it, and only the consent verb turns prompt recording on (see
+writes no key either; its enable installs the capture and sets the content consent with it, and
+its disable turns that consent off, because the confirmed switch is the consent. The consent verb
+turns prompt recording off while the capture stays on (see
 [§1c](#1c-factory-droid-capture-enable-and-verify)). **Codex**, **pi** and **Antigravity** are status-only:
 status reports them, `enable` and `disable` do not write them, and the drawer shows them read-only.
 
@@ -1812,11 +1811,10 @@ session, turn and
 tool spans to the loopback receiver, and it never fails Factory: every error is
 swallowed and the hook exits 0. It writes no key into `~/.factory/settings.json` and never
 touches `~/.factory/hooks.json` — Factory's own commands change the settings file during an
-install KyberDash requested, and KyberDash never edits it. Unlike the OpenCode plugin, the
-Factory switch that installs
-the capture **does not** turn the content consent on — see
-[§1c](#1c-factory-droid-capture-enable-and-verify) for the consent verb, the live check and the
-uninstall procedure.
+install KyberDash requested, and KyberDash never edits it. Like the OpenCode plugin, the Factory
+switch that installs the capture **is** the content consent — it turns the prompt text on with
+it; see [§1c](#1c-factory-droid-capture-enable-and-verify) for the consent verb, the live check
+and the uninstall procedure.
 
 **Install and update: one command.**
 

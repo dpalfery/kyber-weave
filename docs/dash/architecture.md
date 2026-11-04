@@ -667,8 +667,9 @@ capture never fails the host.
 
 **The consent contract.** The consent file is `~/.kyberdash/factory-plugin.json`
 (`{ "version": 1, "content": <boolean> }`), read on every event. An install creates it with
-`content: false` only when it is absent, and never rewrites an existing one. A missing,
-unreadable, oversized, malformed or unknown-version file reads as off.
+`content: false` only when it is absent; a confirmed `enable` then sets it to `content: true`,
+because the confirmed switch is the consent. A missing, unreadable, oversized, malformed or
+unknown-version file reads as off.
 `KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
 
 **One bound, one unit.** Every consent file is bounded at **4096 UTF-8 bytes**, and every reader
@@ -691,12 +692,13 @@ malformed, oversized, missing, unknown-version) and asserts identical verdicts, 
 trips the shared writer (`dash/src/capture/consent-file.ts`) into both readers. The **write**
 side is one module both sides already share.
 
-The Settings switch that installs the capture **never turns content recording on**. Only the
-consent verb (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner
-editing the consent file turns it on. This is a deliberate difference from the OpenCode writer,
-whose Settings switch also sets consent: for Factory the switch is "install the capture", not
-"start recording my prompts", and the difference is a privacy control. `disable` turns the
-consent off.
+The Settings switch **is** the content consent. Turning the capture on turns content recording
+on with it, and the confirm states what the switch does to the owner's text before it is
+applied; turning the capture off turns it off with it. The consent verb
+(`kyberdash kyber capture plugin consent --harness factory --on|--off`) and the owner editing
+the consent file turn content recording off without disabling the capture. This is the OpenCode
+writer's rule, and the earlier Factory-only difference is withdrawn: the owner has already
+confirmed the switch, and a second gate on the same decision is friction, not privacy.
 
 **What the consent governs, and what it does not.** The consent file governs **the capture
 plugin's prompt text on the wire and at the store, and the content of Factory's native
@@ -725,6 +727,15 @@ session id, the model, the tool name — are measurements, not content, and surv
 plugin's **tool** attributes stay off the content list on purpose, because the plugin publishes
 tool arguments and results as **byte counts**, never as content (`dash/src/canon/droid-content.ts`,
 `dash/src/canon/ingest.ts`).
+
+**The prompt reaches the session payload.** The plugin's prompt attribute is content, and the
+consent decides whether it travels at all. When it travels, the `droid` adapter files it as the
+record's `conversation_history` part (`dash/src/canon/adapters/droid.ts`), the way the OpenCode
+adapter files its prompt, so the session's own content carries what was asked and the dashboard's
+session view shows it. A turn whose prompt the consent withheld declares the prompt
+`not_measurable` with a reason that names the consent, so the absence is stated rather than shown
+as a blank. The projected prompt is a content part like every other, so the 14-day content purge
+applies to it; the raw copy the plugin's span carries is not purged.
 
 **Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
 

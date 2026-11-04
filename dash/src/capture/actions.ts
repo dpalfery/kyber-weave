@@ -54,6 +54,12 @@ export type CaptureActionResult = {
   events: CaptureEvent[]
   /** Set exactly when `outcome` is `refused`. */
   reason?: FsErrorReason
+  /**
+   * The engine's own lines about what the action did or would do. A surface
+   * renders them in the confirm, so the words that describe the change come
+   * from the engine that makes it.
+   */
+  notes: string[]
 }
 
 /** A refusal's reason is its first refused event's: the first thing that went wrong. */
@@ -114,6 +120,7 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
           code: 'PREVIEW_REQUIRED',
         },
       ],
+      notes: [],
     }
   }
   if (
@@ -164,6 +171,7 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
                 code: 'PREVIEW_UNAVAILABLE',
               },
             ],
+            notes: [],
           }
         }
         if (
@@ -185,6 +193,7 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
             outcome: 'refused',
             reason: refusalReason(events),
             events,
+            notes: [],
           }
         }
       }
@@ -199,8 +208,8 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
           ? 'refused'
           : outcomeOf(result.events, request.dryRun)
       return outcome === 'refused'
-        ? { outcome, events: result.events, reason: refusalReason(result.events) }
-        : { outcome, events: result.events }
+        ? { outcome, events: result.events, reason: refusalReason(result.events), notes: result.notes }
+        : { outcome, events: result.events, notes: result.notes }
     } catch (error) {
       // A write that the host refused (permissions, a locked file) surfaces as an errno
       // error out of the engine. It is a refusal the owner can act on, reported by code
@@ -215,6 +224,7 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
           ...partialEventsOf(error),
           { kind: 'error', harness: request.harnessId, fileId: '', path: '', reason, code },
         ],
+        notes: [],
       }
     }
   })

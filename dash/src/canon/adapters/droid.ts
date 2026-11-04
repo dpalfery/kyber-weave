@@ -45,11 +45,13 @@ import {
   OUTPUT_TOKEN_KEYS,
 } from './copilot.js'
 import { isDroidEnvelopeSpan, isSupportedDroidEnvelope } from './droid-envelope.js'
+import { appendPart } from './content-parts.js'
 import {
   notMeasurable,
   type CanonicalRecord,
   type Measurability,
   type MetricAvailability,
+  USER_PROMPT_METRIC,
 } from '../types.js'
 
 /** The harness identity stamped on records this adapter wins. */
@@ -78,6 +80,15 @@ const PLUGIN_MODEL_KEYS = ['factory.model.id', 'factory.model'] as const
 
 /** The plugin envelope's tool name keys, in the spellings the wire uses. */
 const PLUGIN_TOOL_NAME_KEYS = ['factory.tool.name', 'factory.tool_name'] as const
+
+/**
+ * The plugin envelope's prompt text key.
+ *
+ * The prompt is content: the plugin sends it only under the owner's consent,
+ * and the store's gate strips it from a claimed envelope while the consent is
+ * off. So a span that carries the key is a span whose prompt was captured.
+ */
+const PLUGIN_PROMPT_TEXT_KEYS = ['factory.turn.prompt.text'] as const
 
 /**
  * Keys downstream already reads for the model (`sessions.ts` `MODEL_KEYS`,
@@ -207,6 +218,32 @@ function applyUsage(record: CanonicalRecord, attributes: Record<string, unknown>
 }
 
 /**
+ * File the prompt the span carries, and declare it when it is absent.
+ *
+ * The prompt is the owner's own text, and it reaches the record only when the
+ * owner's consent let it travel. A turn that carries it files it as
+ * conversation history, so the session view shows what was asked; a turn
+ * without one declares the prompt `not_measurable` with a reason that names
+ * the consent, so the absence is stated rather than shown as a blank.
+ */
+function applyPrompt(record: CanonicalRecord, raw: RawSpan): void {
+  if (raw.name !== 'factory.turn') return
+  const prompt = firstNonEmptyString(raw.attributes, PLUGIN_PROMPT_TEXT_KEYS)
+  if (prompt !== undefined) {
+    appendPart(record, { part: 'conversation_history', text: prompt, role: 'user' })
+  }
+  record.measurability = {
+    ...record.measurability,
+    [USER_PROMPT_METRIC]:
+      prompt !== undefined
+        ? 'measured'
+        : notMeasurable(
+            "Factory's content consent is off, so this turn did not capture the prompt text; turn the Factory capture on in KyberDash Settings to record it.",
+          ),
+  }
+}
+
+/**
  * Map the plugin envelope onto the record `baseRecord` started.
  *
  * The envelope names its identity under the `factory.*` namespace, so the
@@ -270,7 +307,10 @@ export const droidAdapter: HarnessAdapter = {
 
   normalize(raw) {
     const record = baseRecord(this, raw)
-    if (isDroidPluginSpan(raw)) applyPluginEnvelope(record, raw)
+    if (isDroidPluginSpan(raw)) {
+      applyPluginEnvelope(record, raw)
+      applyPrompt(record, raw)
+    }
     applyUsage(record, raw.attributes)
     return record
   },

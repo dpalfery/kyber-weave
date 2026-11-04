@@ -113,6 +113,15 @@ function PreviewPanel({
         </div>
       ))}
       {!changed && <p className="mt-2 text-xs text-muted-foreground">No keys would change.</p>}
+      {result.notes.length > 0 && (
+        <ul data-testid="settings-preview-notes" className="mt-2 space-y-0.5">
+          {result.notes.map((note, index) => (
+            <li key={`${index}-${note}`} className="text-[11px] text-muted-foreground">
+              {note}
+            </li>
+          ))}
+        </ul>
+      )}
       {result.receiver.willEnable && (
         <p data-testid="settings-preview-receiver-note" className="mt-2 text-xs text-foreground">
           {result.receiver.hosted

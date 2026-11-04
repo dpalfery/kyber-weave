@@ -51,6 +51,20 @@ counted twice. Without it a live Factory session reached the dashboard with its 
 counters**, because an unattended refresh reads no folder sources at all
 (`settings.folder_import.scheduled` is off by default).
 
+Amended 2026-11-03: the **Settings switch is the content consent**. Turning the capture on in
+Settings turns the prompt text on with it, and the confirm states what the switch does to the
+owner's text before it is applied. The separate consent verb stays, as the way to turn the
+prompt text off without disabling the capture. The earlier decision — that installing the
+capture never turned the consent on — is withdrawn: the owner had already said yes twice (the
+switch and the confirm), and a third gate on the same decision was friction, not privacy.
+
+Amended 2026-11-04: the prompt text reaches the **canonical session payload**, not only the raw
+payload. The `droid` adapter files `factory.turn.prompt.text` as a `conversation_history` part,
+the way the OpenCode adapter files its prompt, so the session view shows what was asked. A turn
+whose prompt the consent withheld declares it `not_measurable` with a reason that names the
+consent, so the absence is stated rather than shown as a blank. The projected prompt is a
+content part like every other, so the 14-day content purge applies to it.
+
 ## Context
 
 Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only
@@ -150,15 +164,17 @@ projection, then `/api/kyber/*`.
   (`OTEL_TELEMETRY_ENDPOINT` and its siblings), and an organisation-managed `telemetry` block
   overrides them, so a deployment under such an override exports nothing locally and the plugin
   path is unaffected.
-- **Content consent is off by default, and installing the capture never turns it on.** The
-  consent file is `~/.kyberdash/factory-plugin.json` (`{ "version": 1, "content": <boolean> }`),
-  created with `content: false` only when absent. The Settings switch installs the capture and
-  leaves the owner's decision exactly as it was; only the consent verb
-  (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner editing
-  the file records the decision to capture the prompt text. `KYBERDASH_FACTORY_CONTEXT=1|0`
-  overrides the file. This differs from the OpenCode writer, whose Settings switch does set
-  consent, and the difference is deliberate: for Factory the switch is "install the capture", not
-  "start recording my prompts".
+- **The Settings switch is the content consent.** The consent file is
+  `~/.kyberdash/factory-plugin.json` (`{ "version": 1, "content": <boolean> }`). Turning the
+  capture on in Settings turns the prompt text on with it, because the owner confirmed that
+  switch and the confirmation is the consent — one decision, not two. The confirm states what
+  the switch does to the owner's text before it is applied, so the decision is informed. Turning
+  the capture off turns the prompt text off with it. The consent verb
+  (`kyberdash kyber capture plugin consent --harness factory --on|--off`) turns the prompt text
+  off without disabling the capture, and the owner editing the file has the same effect.
+  `KYBERDASH_FACTORY_CONTEXT=1|0` overrides the file. This is the OpenCode writer's rule, and
+  the earlier Factory-only difference is withdrawn: a capture install that is a second gate on
+  the same decision is friction, not privacy.
 - **KyberDash never writes the owner's Factory files; the harness does, on request.**
   `~/.factory/settings.json`, `~/.factory/hooks.json`, `.factory/settings.json` and
   `.factory/hooks.json` are never created, read, merged, rewritten or restored **by KyberDash** —
@@ -219,6 +235,13 @@ projection, then `/api/kyber/*`.
   the same records under the same identity, so the counters arrive with the turns rather than
   waiting for a folder import, and a later folder import replaces those records instead of
   adding a second copy of the same counters.
+- The prompt text is recorded when the owner turns the capture on, and the confirm says so
+  before it is applied. The consent file still records the decision, so the consent verb can
+  turn the text off again without disabling the capture.
+- The prompt text is the session's own content: the adapter files it as a
+  `conversation_history` part, so a reader of the session view sees what was asked. A turn
+  without it declares the prompt `not_measurable` with a reason that names the consent, so the
+  absence is stated rather than shown as a blank.
 - The Factory file source's own even split of the session's token total across its assistant
   calls stays as it is. It is a known lossy approximation, and the per-call data that would
   remove it is tracked separately.

@@ -6,17 +6,16 @@
 // `~/.factory/settings.json` is never written, read, merged or receipted — the capture
 // lives in the marketplace KyberDash owns, and `resolvePath` names that marketplace.
 //
-// The CONTENT consent is the owner's own decision, and it is deliberately NOT the Settings
-// switch: `enable` installs the capture and leaves that decision exactly as it was, and only
-// the consent verb (`kyberdash kyber capture plugin consent --harness factory --on`) or the
-// owner editing the consent file turns the prompt text on. `disable` turns it off. This
-// differs from the OpenCode writer, whose Settings switch does set the consent.
+// The CONTENT consent follows the Settings switch: `enable` installs the capture and turns
+// the prompt text on, because the owner confirmed the switch and that confirmation is the
+// consent — one decision, not two. `disable` turns it off. The consent verb
+// (`kyberdash kyber capture plugin consent --harness factory --off`) turns the prompt text
+// back off without disabling the capture, and the consent file keeps recording the decision.
 //
 // The Factory root is `$FACTORY_DIR`, else `~/.factory`: the resolution the Factory file
 // provider already uses (`dash/src/providers/droid.ts`) and the one the installer uses.
 
 import {
-  createConsentIfAbsent,
   readConsentState,
   writeContentConsent,
   type ConsentState,
@@ -43,8 +42,11 @@ import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
 
-/** What the enable path says when the content consent is off: the switch never records the prompt text. */
-const OFF_CONSENT = 'harness factory: content consent off (the capture switch does not record the prompt text)'
+/** What the enable path says when it turns the prompt text on, and what the disable path says when it turns it off. */
+const CONSENT_ON = 'harness factory: records the prompt text of your Factory sessions (content consent on)'
+const CONSENT_OFF = 'harness factory: records no prompt text (content consent off)'
+const CONSENT_ON_WOULD = 'harness factory: would record the prompt text of your Factory sessions (content consent on)'
+const CONSENT_OFF_WOULD = 'harness factory: would record no prompt text (content consent off)'
 
 /**
  * The engine knows one vocabulary for a plugin outcome; the installer's preserve-only
@@ -262,32 +264,19 @@ const factoryFilePlugin: ManagedFilePlugin = {
   state: (home, env) => factoryPluginState(home, env),
   describeStatus: (home, env) => factoryStatusLines(home, env),
   consent: {
-    // The Settings switch starts the capture; it never opts the prompt text in. The content
-    // consent is the owner's own decision, so `enable` leaves the file exactly as it is and
-    // creates it with content off only when it is absent; `disable` turns content off.
+    // The Settings switch starts the capture, and the confirmation that follows it is the
+    // owner's consent to record the prompt text too: one decision, not two. `enable` turns
+    // the prompt text on; `disable` turns it off. The consent verb turns the prompt text
+    // off without disabling the capture.
     set: (home, env, content, options) => {
       const { consentFile } = factoryPluginPaths(home, env)
-      if (!content) {
-        if (options.dryRun === true) return { out: ['harness factory: would set content consent off'] }
-        writeContentConsent(consentFile, false)
-        return { out: ['harness factory: content consent off'] }
+      if (options.dryRun === true) {
+        const note = content ? CONSENT_ON_WOULD : CONSENT_OFF_WOULD
+        return { out: [note], notes: [note] }
       }
-      const state = readConsentState(consentFile)
-      if (state === 'absent') {
-        if (options.dryRun === true) {
-          return { out: ['harness factory: would create the content consent with content off'] }
-        }
-        createConsentIfAbsent(consentFile)
-        return { out: [OFF_CONSENT] }
-      }
-      if (state === 'on') {
-        return { out: ['harness factory: content consent on (left as the owner set it)'] }
-      }
-      if (state === 'off') {
-        return { out: [OFF_CONSENT] }
-      }
-      // A malformed or unreadable file is the owner's to fix: it reads off either way.
-      return { out: ['harness factory: content consent left as it is'] }
+      writeContentConsent(consentFile, content)
+      const note = content ? CONSENT_ON : CONSENT_OFF
+      return { out: [note], notes: [note] }
     },
   },
 }

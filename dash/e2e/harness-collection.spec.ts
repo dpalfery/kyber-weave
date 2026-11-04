@@ -492,6 +492,17 @@ test.describe('the Factory (Droid) replay', () => {
     await openPromptTurnInspector(page)
     await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_MODEL)
     await expect(page.getByTestId('span-inspector')).toContainText(FACTORY_REPLAY_PROMPT)
+
+    // And the prompt is the session's own content, not only an attribute on the
+    // raw span: the session payload's request carries what was asked.
+    const response = await page.request.get(`${factoryApp}/api/kyber/session/${FACTORY_CONTENT_ON_SESSION_ID}`)
+    expect(response.status(), await response.text()).toBe(200)
+    const payload = (await response.json()) as {
+      requests?: Array<{ prompt?: unknown }>
+    }
+    const prompt = payload.requests?.[0]?.prompt
+    expect(typeof prompt, 'the session payload must carry the prompt the consent allowed').toBe('string')
+    expect(prompt as string).toContain(FACTORY_REPLAY_PROMPT)
   })
 })
 
