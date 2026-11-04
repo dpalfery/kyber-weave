@@ -673,14 +673,14 @@ describe('factory (droid) capture status', () => {
     expect(factory.statusLines.some((line) => /consent/i.test(line))).toBe(true)
   })
 
-  it('reports the content consent as off after an enable, because the switch does not record the prompt text', async () => {
+  it('reports the content consent as on after an enable, because the confirmed switch is the consent', async () => {
     const home = makeHome()
     await enableViaEngine(home, ['factory'])
 
     const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
     const consent = factory.statusLines.find((line) => line.toLowerCase().includes('consent'))
     expect(consent).toBeDefined()
-    expect(consent).toMatch(/consent: off/i)
+    expect(consent).toMatch(/consent: on/i)
   })
 
   it('reports unknown for a marketplace tree KyberDash did not write', () => {

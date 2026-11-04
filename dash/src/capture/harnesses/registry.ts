@@ -222,7 +222,19 @@ export type ManagedFilePlugin = {
   describeStatus: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => readonly string[]
   /** The Settings switch is the consent: on for `enable`, off for `disable`. */
   consent: {
-    set: (home: string, env: PathEnv | undefined, content: boolean, options: { dryRun: boolean }) => { out: string[] }
+    /**
+     * Set the consent, and say what it means.
+     *
+     * `out` is the CLI's prose. `notes` is the statement a confirm reads: one
+     * short, machine-independent sentence about what the consent now means, so
+     * the switch that records the owner's text says so before it is confirmed.
+     */
+    set: (
+      home: string,
+      env: PathEnv | undefined,
+      content: boolean,
+      options: { dryRun: boolean },
+    ) => { out: string[]; notes?: string[] }
   }
 }
 

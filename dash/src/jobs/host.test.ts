@@ -324,6 +324,95 @@ describe('JobHost: pause stops only scheduled jobs', () => {
   })
 })
 
+describe('JobHost: the live Factory counter pass', () => {
+  const makeCounterHost = (
+    factoryCounters: () => Promise<{ outcome: 'completed'; sessions: number; records: number }>,
+  ): JobHost => {
+    const host = new JobHost({
+      store,
+      stateDir,
+      program: 'kyberdash',
+      clock,
+      spawner,
+      tickIntervalMs: TICK_MS,
+      maintenance: () => {},
+      factoryCounters,
+    })
+    hosts.push(host)
+    return host
+  }
+
+  it('runs the pass on every tick, so a live Factory session keeps its counters', async () => {
+    let runs = 0
+    const host = makeCounterHost(async () => {
+      runs += 1
+      return { outcome: 'completed', sessions: 1, records: 12 }
+    })
+
+    await host.start()
+    await vi.waitFor(() => expect(runs).toBe(1))
+
+    clock.set(T0 + MINUTE)
+    await host.tick()
+
+    await vi.waitFor(() => expect(runs).toBe(2))
+  })
+
+  it('records a failed pass as the sync failure and names the reason', async () => {
+    const host = new JobHost({
+      store,
+      stateDir,
+      program: 'kyberdash',
+      clock,
+      spawner,
+      tickIntervalMs: TICK_MS,
+      maintenance: () => {},
+      factoryCounters: async () => ({
+        outcome: 'failed',
+        reason: 'the companion file is unreadable',
+      }),
+    })
+    hosts.push(host)
+
+    await host.start()
+
+    await vi.waitFor(() =>
+      expect(host.getStatus().lastSyncFailure).toBe('the companion file is unreadable'),
+    )
+  })
+
+  it('keeps both reasons when the transcript sync and the counter pass both fail', async () => {
+    const host = new JobHost({
+      store,
+      stateDir,
+      program: 'kyberdash',
+      clock,
+      spawner,
+      tickIntervalMs: TICK_MS,
+      maintenance: () => {},
+      sync: async () => ({
+        outcome: 'failed',
+        reason: 'the transcript store is unreadable',
+      }),
+      factoryCounters: async () => ({
+        outcome: 'failed',
+        reason: 'the companion file is unreadable',
+      }),
+    })
+    hosts.push(host)
+
+    await host.start()
+
+    // Both are facts about the machine, and a reader told one of them is
+    // looking at half the picture.
+    await vi.waitFor(() =>
+      expect(host.getStatus().lastSyncFailure).toBe(
+        'the transcript store is unreadable; the companion file is unreadable',
+      ),
+    )
+  })
+})
+
 describe('JobHost: manual runs and exclusion', () => {
   it('declines a manual refresh while another job is running', async () => {
     const host = makeHost()

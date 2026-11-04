@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-04
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -130,6 +130,16 @@ the switch installs the capture, and only the explicit consent verb
 consent file records the decision to capture the prompt text. Nothing else in this record moves:
 the key-level rules of decisions 1 to 3 still govern every other harness, and the departure from
 ADR 0026 stays scoped to KyberDash's own plugin tree.
+
+Amended 2026-11-04 (the Factory content consent, [ADR 0055](0055-factory-capture-is-a-hooks-plugin-pipeline.md)):
+the 2026-11-02 amendment above is **withdrawn** on the one point it names. The Factory
+**Settings switch is the content consent**: a confirmed `enable` turns the prompt text on with
+the capture, and the confirm states what the switch does to the owner's text before it is
+applied, because the owner has already confirmed the switch and a second gate on the same
+decision is friction rather than privacy. The explicit consent verb
+(`kyberdash kyber capture plugin consent --harness factory --on|--off`) stays, as the way to
+turn the prompt text off without disabling the capture, and the consent file still records the
+decision. Nothing else in that amendment or in this record moves.
 
 Amended 2026-11-02 (the Factory install route, measured against Factory Droid CLI 1.1.0): the
 Factory install is **delegated to the harness's own commands**, and the owned unit is the

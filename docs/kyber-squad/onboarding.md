@@ -618,10 +618,10 @@ capture-plugin harness, in a fixed order, each call handed what its own harness'
   not added.
 
 Preserve mode never turns content capture on. For OpenCode the Settings switch does that. For
-**Factory the Settings switch deliberately does not** — it installs the capture and leaves the
-content consent exactly as you left it, and only
-`kyberdash kyber capture plugin consent --harness factory --on` (or editing the consent file
-yourself) records the decision to capture the prompt text.
+**Factory the Settings switch does that too** — a confirmed `enable` turns the prompt text on
+with the capture, because the confirmed switch is the consent — and the consent verb
+(`kyberdash kyber capture plugin consent --harness factory --off`) turns the prompt text back
+off without disabling the capture.
 
 Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If
 `kyberdash` is not installed, Squad prints a skip line that names `kyber-weave update`, and

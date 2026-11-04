@@ -1,14 +1,23 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { buildSessions } from '../canon/sessions.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
-import { renormalizeRecords } from './backfill.js'
+import { renormalizeRecords, keepCollectedContent } from './backfill.js'
 
 const RETAINED_TRACE = 'ffffffffffffffffffffffffffffffff'
 const NOISE_TRACE = '99999999999999999999999999999999'
 const RETAINED_SPAN = 'ffff000000000001'
 const NOISE_SPAN = '9999000000000001'
+/** The plugin turn whose prompt the consent let the export carry. */
+const PLUGIN_TURN_TRACE = 'aaaa0000000000000000000000000000'
+const PLUGIN_TURN_SPAN = 'aaaa000000000001'
+/** The prompt the plugin envelope carried. */
+const PLUGIN_PROMPT = 'what is our status?'
 
 const retainedParts = [
   { part: 'conversation_history' as const, text: 'synthetic retained context', order: 0 },
@@ -364,5 +373,163 @@ describe('renormalizeRecords — retained raw evidence', () => {
     expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
     expect(store.countSessionsByHarness()['gemini'] ?? 0).toBe(0)
     store.close()
+  })
+})
+
+describe('the content a renormalization keeps', () => {
+  it('keeps every derived part of a bucket the collected content left empty', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+      parts: [
+        { part: 'conversation_history', text: 'the first message', order: 0 },
+        { part: 'conversation_history', text: 'the second message', order: 1 },
+      ],
+    })
+
+    const kept = keepCollectedContent(collected, derived)
+
+    // Two parts of one bucket join into one content string, so dropping the
+    // second would lose evidence the adapter supplied.
+    expect(kept?.parts).toHaveLength(2)
+    expect(kept?.content['conversation_history']).toBe('the first message\nthe second message')
+  })
+
+  it('files no part for a bucket the canonical keys do not name', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: { not_a_bucket: 'text the canonical keys do not know' } as never,
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+
+    // The parts are the authority, and a part of an unknown kind would carry
+    // a key no reader knows.
+    expect(keepCollectedContent(collected, derived)).toBeUndefined()
+  })
+
+  it('files no part for a bucket whose value is not text', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: { conversation_history: 42 } as never,
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+
+    expect(keepCollectedContent(collected, derived)).toBeUndefined()
+  })
+})
+
+describe('renormalizeRecords — derived content fills the collected gaps', () => {
+  it('keeps the prompt the adapter derived, so a repaired turn is not left without its content', () => {
+    // The consent is the owner's decision on disk: without it the plugin's
+    // prompt never travels, and the turn has no content to keep.
+    const home = mkdtempSync(join(tmpdir(), 'kyberdash-backfill-consent-'))
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    writeFileSync(
+      join(home, '.kyberdash', 'factory-plugin.json'),
+      JSON.stringify({ version: 1, content: true }),
+    )
+    const previousHome = process.env['HOME']
+    process.env['HOME'] = home
+    const store = new CanonStore(':memory:')
+    try {
+      // A plugin turn stored before the adapter learned to map the prompt: the
+      // raw evidence carries it, the record carries no content.
+      store.upsertMany([
+        staleRecord({
+          spanId: PLUGIN_TURN_SPAN,
+          traceId: PLUGIN_TURN_TRACE,
+          source: 'kyberdash-factory-plugin',
+          harness: 'droid',
+          name: 'factory.turn',
+          op: 'llm.invoke',
+          raw: {
+            'factory.contract_version': '1',
+            'factory.session.id': 'droid-session-1',
+            'factory.turn.prompt.text': PLUGIN_PROMPT,
+          },
+        }),
+      ])
+
+      renormalizeRecords(store)
+
+      const repaired = store.get(PLUGIN_TURN_SPAN)
+      expect(repaired?.parts).toEqual([
+        { part: 'conversation_history', text: PLUGIN_PROMPT, role: 'user', order: 0 },
+      ])
+      expect(repaired?.content['conversation_history']).toBe(PLUGIN_PROMPT)
+      // The measurability and the content agree: neither is a claim the other
+      // does not back.
+      expect(repaired?.measurability?.['user_prompt']).toBe('measured')
+    } finally {
+      store.close()
+      if (previousHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = previousHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('fills the buckets the collected content left empty, and keeps the collected ones', () => {
+    const home = mkdtempSync(join(tmpdir(), 'kyberdash-backfill-consent-'))
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    writeFileSync(
+      join(home, '.kyberdash', 'factory-plugin.json'),
+      JSON.stringify({ version: 1, content: true }),
+    )
+    const previousHome = process.env['HOME']
+    process.env['HOME'] = home
+    const store = new CanonStore(':memory:')
+    try {
+      // The collected content holds a bucket the adapter never derives — the
+      // richer signal-specific content the repair must not lose.
+      store.upsertMany([
+        staleRecord({
+          spanId: PLUGIN_TURN_SPAN,
+          traceId: PLUGIN_TURN_TRACE,
+          source: 'kyberdash-factory-plugin',
+          harness: 'droid',
+          name: 'factory.turn',
+          op: 'llm.invoke',
+          content: { system_prompt: 'synthetic retained system prompt' },
+          raw: {
+            'factory.contract_version': '1',
+            'factory.session.id': 'droid-session-1',
+            'factory.turn.prompt.text': PLUGIN_PROMPT,
+          },
+        }),
+      ])
+
+      renormalizeRecords(store)
+
+      const repaired = store.get(PLUGIN_TURN_SPAN)
+      expect(repaired?.content['system_prompt']).toBe('synthetic retained system prompt')
+      expect(repaired?.content['conversation_history']).toBe(PLUGIN_PROMPT)
+      // The collected bucket becomes a part of its own, so the content
+      // survives the rewrite a parts-carrying row gets.
+      expect(repaired?.parts).toEqual([
+        { part: 'system_prompt', text: 'synthetic retained system prompt', order: 0 },
+        { part: 'conversation_history', text: PLUGIN_PROMPT, role: 'user', order: 1 },
+      ])
+    } finally {
+      store.close()
+      if (previousHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = previousHome
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })
