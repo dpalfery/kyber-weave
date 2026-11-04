@@ -112,7 +112,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_OpenCode_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
@@ -123,61 +122,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        // 1. Target filtering: requesting OpenCode renders only files targeting opencode
-        Assert.All(result.Files, f => Assert.Equal("opencode", f.Target));
-        Assert.All(result.Files, f => Assert.True(
-            f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) ||
-            f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal),
-            $"File '{f.RelativePath}' does not start with expected OpenCode directory."));
-
-        // 2. Output counts: exactly 52 principal files (24 agents under .opencode/agents/*.md
-        // + 28 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
-        int principalAgentCount = result.Files.Count(f =>
-            f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) &&
-            f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
-            !f.RelativePath[".opencode/agents/".Length..^".md".Length].Contains('/', StringComparison.Ordinal));
-
-        int principalSkillCount = result.Files.Count(f =>
-            f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal) &&
-            f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal) &&
-            !f.RelativePath[".opencode/skills/".Length..^"/SKILL.md".Length].Contains('/', StringComparison.Ordinal));
-
-        Assert.Equal(24, principalAgentCount);
-        Assert.Equal(28, principalSkillCount);
-        Assert.Equal(52, principalAgentCount + principalSkillCount);
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedFileCount =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
-
-        // Derived from the loaded corpus, not a pinned literal: adding a checklist reference or
-        // resource file must not require editing this test. A dropped or duplicated file still
-        // fails here because the count is computed from the source, not from the renderer.
-        Assert.Equal(expectedFileCount, result.Files.Count);
-
-        // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
-        // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.
-        Assert.Contains(result.Files, f => f.RelativePath == ".opencode/agents/conductor.md");
-        Assert.DoesNotContain(result.Files, f => f.RelativePath == ".opencode/skills/conductor/SKILL.md");
-
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".opencode/agents/{sharedIdentity}.md");
-            string sharedSkillPath = $".opencode/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-            else
-            {
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-        }
 
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
 
@@ -337,47 +281,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                     $"Agent '{agent.Name}' permission '{permKey}' is out of order.");
                 lastOrderIndex = orderIndex;
             }
-
-            // Body verification: the discovery guard rewrites in-closure .md resource
-            // links to .markdown so they still resolve beside their principal; every
-            // other byte stays verbatim.
-            string verbatimBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!verbatimBody.EndsWith('\n'))
-            {
-                verbatimBody += "\n";
-            }
-
-            string expectedAgentBody = verbatimBody;
-            foreach (SquadResource resource in agent.Resources)
-            {
-                if (resource.RelativePath.EndsWith(".md", StringComparison.Ordinal))
-                {
-                    expectedAgentBody = expectedAgentBody.Replace(
-                        resource.RelativePath,
-                        string.Concat(resource.RelativePath[..^".md".Length], ".markdown"),
-                        StringComparison.Ordinal);
-                }
-            }
-
-            Assert.True(
-                string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
-                $"Agent '{agent.Name}' body mismatch.");
-
-            // Pin the guard link-by-link, matching SquadResourceRenderingContract:
-            // every authored in-closure .md link appears rewritten, and the original
-            // target is gone.
-            foreach (SquadResource resource in agent.Resources)
-            {
-                if (!resource.RelativePath.EndsWith(".md", StringComparison.Ordinal) ||
-                    !verbatimBody.Contains(resource.RelativePath, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                string rewrittenTarget = string.Concat(resource.RelativePath[..^".md".Length], ".markdown");
-                Assert.Contains(rewrittenTarget, body, StringComparison.Ordinal);
-                Assert.DoesNotContain(resource.RelativePath, body, StringComparison.Ordinal);
-            }
         }
 
         // Concrete lowering snapshots
@@ -461,45 +364,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["kyber-weave_*"] = "allow",
                 ["task"] = "deny"
             });
-
-        // Skills verification
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".opencode/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name),
-                    StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description mismatch.");
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n'))
-            {
-                expectedSkillBody += "\n";
-            }
-
-            Assert.True(
-                string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
-        }
 
         // 5. Degradation records: verify agents with network.publish != Deny (e.g., github-devops) emit
         // a SquadDegradationRecord with code permission-not-expressible and InstructionDigest matching agent.BodyDigest
@@ -606,18 +470,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
         }
 
-        // Digest integrity: Every degradation record must match target, output identity, and agent InstructionDigest
-        foreach (SquadDegradationRecord degradation in result.Degradations)
-        {
-            Assert.Equal("opencode", degradation.Target);
-            Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable"
-                    or "resource-links-rewritten",
-                $"Degradation for '{degradation.CanonicalIdentity}' has unexpected code '{degradation.Code}'.");
-            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
-            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
-        }
+        Assert.All(result.Degradations, degradation => Assert.True(
+            degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable"
+                or "resource-links-rewritten",
+            $"Degradation for '{degradation.CanonicalIdentity}' has unexpected code '{degradation.Code}'."));
 
         // Anti-widening check
         Assert.DoesNotContain(

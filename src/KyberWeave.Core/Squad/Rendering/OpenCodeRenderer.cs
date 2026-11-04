@@ -1,7 +1,5 @@
-using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -77,12 +75,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>SKILL.md</c> one level deep and never mistakes them for agents.
 /// </para>
 /// </remarks>
-public sealed class OpenCodeRenderer : ISquadRenderer
+public sealed class OpenCodeRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".opencode/agents";
-    private const string SkillsDirectory = ".opencode/skills";
-    private const string ArbiterPluginFileRelativePath = ".opencode/plugins/kyber-arbiter.ts";
-
     private const string KyberWeaveMcpPermission = "kyber-weave_*";
 
     private static readonly string[] BaseUngovernedPermissions = ["todowrite", "skill", "question"];
@@ -132,129 +126,19 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         "task"
     ];
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.OpenCode,
+        "OpenCode",
+        ".opencode",
+        "agents",
+        SquadModelPolicy.InheritOrBlankOmitted);
 
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
-
-    /// <summary>
-    /// Under <c>Scope: Global</c> the physical root already is OpenCode's global directory
-    /// (R18), so the relative path drops the project-scope <c>.opencode/</c> wrapper and
-    /// emits the bare <c>agents/</c> / <c>skills/</c> form directly.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public OpenCodeRenderer()
+        : base(HarnessSpec)
     {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".opencode/", StringComparison.Ordinal)
-            ? baseDirectory[".opencode/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.OpenCode];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.OpenCode))
-        {
-            throw new ArgumentException(
-                "OpenCodeRenderer was asked to render a target other than OpenCode.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.OpenCode);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point. Only a suppressed identity withholds the KyberWeave MCP permission: the primary
-        // wrappers edit files and run commands, so withholding it would strip the tools their
-        // role exists to use.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadDeploymentFile principal = RenderAgent(
-                agent,
-                source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles,
-                suppressedSkillIdentities,
-                request.Scope);
-            files.Add(principal);
-            SquadAgentResourceDiscoveryGuard.Append(
-                files,
-                agent,
-                principal,
-                agent.Resources,
-                degradations,
-                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-                "{agent,agents}/**/*.md");
-
-            degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        // A null Arbiter must render byte for byte as before the field existed, so the
-        // guard lives here: only an enabled wiring at Project scope emits the owned
-        // plugin shim. Under Global scope there is no project configuration to enforce
-        // from (Req 22.4).
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
-        {
-            files.Add(new SquadDeploymentFile(
-                ArbiterPluginFileRelativePath,
-                Encoding.UTF8.GetBytes(ArbiterPluginShim.Render(SquadTargetCatalog.GetToken(SquadTarget.OpenCode))),
-                SquadTargetCatalog.GetToken(SquadTarget.OpenCode)));
-        }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
-    }
-
-    private static SquadDeploymentFile RenderAgent(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> suppressedSkillIdentities,
-        SquadDeploymentScope scope)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -263,82 +147,25 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
         };
 
-        string? model = ResolveOpenCodeModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        // Always emit permission map: omitting it inherits ambient tool access (widening).
-        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, suppressedSkillIdentities);
+        // Always emit permission map: omitting it inherits ambient tool access (widening). Only a
+        // suppressed shared identity withholds the KyberWeave MCP permission: the primary wrappers
+        // edit files and run commands, so withholding it would strip the tools their role exists
+        // to use.
+        frontmatter["permission"] = ResolvePermissions(agent, context.CapabilityProfiles, context.SuppressedSkillIdentities);
 
-        // The composed agent file carries discovery-guarded links: an in-closure .md link
-        // is rewritten to .markdown so it still resolves after the guard renames the
-        // projection. Frontmatter is unchanged.
-        string body = SquadAgentResourceDiscoveryGuard.RewriteBody(agent);
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, body);
-        }
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.OpenCode));
+        context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
+        context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles));
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
+        context.AddArbiterPluginShim(".opencode/plugins/kyber-arbiter.ts");
 
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = skill.Name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.OpenCode));
-    }
-
-    private static string? ResolveOpenCodeModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue("opencode", out string? opencodeModel))
-        {
-            // Omit model key when override is inherit or empty.
-            return string.Equals(opencodeModel, "inherit", StringComparison.Ordinal) ||
-                   string.IsNullOrWhiteSpace(opencodeModel)
-                ? null
-                : opencodeModel;
-        }
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
-               string.IsNullOrWhiteSpace(profile.Default)
-            ? null
-            : profile.Default;
-    }
 
     /// <summary>
     /// Lowers a capability profile onto OpenCode's closed permission map. Only
@@ -416,6 +243,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         return ordered;
     }
 
+
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
@@ -436,7 +264,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                "opencode",
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -470,7 +298,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                "opencode",
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -488,7 +316,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+            "opencode",
             agent.Name,
             agent.Name,
             agent.BodyDigest,

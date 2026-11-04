@@ -83,226 +83,56 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived
-    ///     from the source.
+    ///     Antigravity's own decisions on the real corpus: the Native Both pattern renders every agent
+    ///     as <c>.agents/agents/&lt;name&gt;/agent.md</c> beside every canonical skill, collisions and
+    ///     shared identities included, with no role lowering; and permission records name exactly the
+    ///     agents with a non-deny decision that is not the shell-implies-write case, plus every agent
+    ///     with a delegation roster. The skill documents are the shared pipeline's, checked in
+    ///     <see cref="Squad.SquadRendererSharedContractTests"/>.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
-        HashSet<string> canonicalSkillNames = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (string identity in shared)
-            Assert.True(
-                canonicalSkillNames.Contains(identity),
-                $"Shared identity '{identity}' has no canonical skill projection.");
-
-        HashSet<string> collisions = DeriveCollisions(source);
-
-
-        // Native dual-root rendering: every agent emits an agent.md file,
-        // all canonical skills are emitted, and each projects its validated resource closure beneath
-        // its identity directory. R17: Agents.Count + Σ agent resources + Skills.Count
-        // + Σ skill resources.
-        int expectedFiles = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                                + source.Skills.Count
-                                                + source.Skills.Sum(skill => skill.Resources.Count);
-
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
+        SquadRenderResult result = await new SquadRendererRegistry([new AntigravityRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.Equal(expectedFiles, result.Files.Count);
-
-        // Path uniqueness guards the occupancy-derived lowering: two agents claiming the
-        // same .agents/skills/{name}/SKILL.md path would pass the count check while one
-        // silently overwrites the other at deployment time.
-        string[] duplicatePaths = result.Files
-            .GroupBy(f => f.RelativePath, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToArray();
-        Assert.True(
-            duplicatePaths.Length == 0,
-            $"Duplicate rendered paths: {string.Join(", ", duplicatePaths)}");
-
-        // Native dual-root rendering with distinct resource projection: agent principals are
-        // .agents/agents/{name}/agent.md, skill principals are .agents/skills/{name}/SKILL.md;
-        // closure resources project beside their respective principal.
-        HashSet<string> agentResourceOutputPaths = source.Agents
-            .SelectMany(
-                agent => agent.Resources,
-                (agent, resource) => $".agents/agents/{agent.Name}/{resource.RelativePath}")
-            .ToHashSet(StringComparer.Ordinal);
-
-        HashSet<string> skillResourceOutputPaths = source.Skills
-            .SelectMany(
-                skill => skill.Resources,
-                (skill, resource) => $".agents/skills/{skill.Name}/{resource.RelativePath}")
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.All(result.Files, f =>
+        Assert.NotEmpty(DeriveCollisions(source));
+        foreach (SquadAgent agent in source.Agents)
         {
-            Assert.Equal("antigravity", f.Target);
-            Assert.True(
-                f.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal),
-                $"File '{f.RelativePath}' is outside .agents/agents/ and .agents/skills/.");
-            Assert.True(
-                (f.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) &&
-                 f.RelativePath.EndsWith("/agent.md", StringComparison.Ordinal)) ||
-                (f.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal) &&
-                 f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal)) ||
-                agentResourceOutputPaths.Contains(f.RelativePath) ||
-                skillResourceOutputPaths.Contains(f.RelativePath),
-                $"Rendered file '{f.RelativePath}' is neither an agent.md/SKILL.md principal nor a projected closure resource.");
-        });
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".agents/skills/{skill.Name}/SKILL.md");
-
-            YamlMappingNode frontmatter = ReadFrontmatter(file);
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
-            string emittedDescription = RequireScalar(frontmatter, "description");
-            Assert.True(
-                !emittedDescription.Contains('\n', StringComparison.Ordinal) &&
-                string.Equals(emittedDescription, emittedDescription.Trim(), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description must be a trimmed single-line scalar.");
-            foreach (string line in skill.Description.Split(
-                         ['\r', '\n'],
-                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                Assert.Contains(line, emittedDescription, StringComparison.Ordinal);
-
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                $"Skill '{skill.Name}' must not declare a model.");
-
-            string expectedBody = NormalizeBody(skill.InstructionBody);
-            Assert.True(
-                string.Equals(expectedBody, ReadBody(file), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
+            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
+            Assert.Equal(agent.Name, RequireScalar(ReadFrontmatter(file), "name"));
+            Assert.Equal(NormalizeBody(agent.InstructionBody), ReadBody(file));
         }
 
-        foreach (string collision in collisions)
-        {
-            // Native dual-root rendering: collision means both agent and skill exist.
-            // Agent renders to .agents/agents/{collision}/agent.md, skill to .agents/skills/{collision}/SKILL.md.
-            Assert.Contains(result.Files, f => f.RelativePath == $".agents/agents/{collision}/agent.md");
-            Assert.Contains(result.Files, f => f.RelativePath == $".agents/skills/{collision}/SKILL.md");
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/role-", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Degradations, d => d.Code == "role-skill-fallback");
 
-            SquadAgent agent = Assert.Single(source.Agents, a => a.Name == collision);
-            SquadDeploymentFile agentFile = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".agents/agents/{collision}/agent.md");
-
-            YamlMappingNode agentFrontmatter = ReadFrontmatter(agentFile);
-            Assert.True(
-                string.Equals(collision, RequireScalar(agentFrontmatter, "name"), StringComparison.Ordinal),
-                $"Collision agent '{collision}' has the wrong name.");
-            Assert.True(
-                string.Equals(ToSingleLineScalar(agent.Description), RequireScalar(agentFrontmatter, "description"),
-                    StringComparison.Ordinal),
-                $"Collision agent '{collision}' has the wrong description.");
-            Assert.True(
-                string.Equals(NormalizeBody(agent.InstructionBody), ReadBody(agentFile), StringComparison.Ordinal),
-                $"Collision agent '{collision}' has the wrong body.");
-        }
-
-        // Native rendering: shared identities render both as agent files AND as canonical skills.
-        // In Native Both pattern, skill projection is suppressed for shared identities to avoid
-        // redundant resource projection, but agent files still exist.
-        foreach (string conductor in SharedIdentities(source))
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".agents/agents/{conductor}/agent.md");
-            Assert.Contains(result.Files, f => f.RelativePath == $".agents/skills/{conductor}/SKILL.md");
-            Assert.Equal(
-                1,
-                result.Files.Count(f => f.RelativePath.EndsWith($"{conductor}/SKILL.md", StringComparison.Ordinal)));
-            Assert.Equal(
-                1,
-                result.Files.Count(f => f.RelativePath.EndsWith($"{conductor}/agent.md", StringComparison.Ordinal)));
-
-            // Native target: no role-skill-fallback degradations
-            Assert.DoesNotContain(
-                result.Degradations,
-                d => d.CanonicalIdentity == conductor && d.Code == "role-skill-fallback");
-        }
-
-        // Native rendering: no role-skill-fallback degradations at all
-        Assert.DoesNotContain(
-            result.Degradations,
-            d => d.Code == "role-skill-fallback");
-
-        // Permission degradations are emitted only for specific permission constraints
-        // that cannot be expressed in Antigravity's agent.md format:
-        // D10: capability-not-isolable (process.execute Allow + filesystem.write not Allow)
-        // D12: delegates-to roster enforcement (agents with DelegatesTo constraints)
-        // Verify that all reported permission-not-expressible degradations refer to valid agents
-        // and match their instruction digests.
         List<string> expectedPermissionAgents = [];
         foreach (SquadAgent agent in source.Agents)
         {
-            Assert.True(
-                source.CapabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile,
-                    out SquadCapabilityProfile? profile),
-                $"Agent '{agent.Name}' references undeclared capability profile '{agent.CapabilityProfile}'.");
-
-            bool executeAllowed =
-                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
-                exec == SquadPermissionDecision.Allow;
-            bool writeAllowed =
-                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
-                write == SquadPermissionDecision.Allow;
-            bool isCapabilityNotIsolable = executeAllowed && !writeAllowed;
-
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool isCapabilityNotIsolable =
+                profile.Permissions.GetValueOrDefault("process.execute", SquadPermissionDecision.Deny) == SquadPermissionDecision.Allow &&
+                profile.Permissions.GetValueOrDefault("filesystem.write", SquadPermissionDecision.Deny) != SquadPermissionDecision.Allow;
             if (!isCapabilityNotIsolable && HasNonDenyCapability(source.CapabilityProfiles, profile))
+            {
                 expectedPermissionAgents.Add(agent.Name);
+            }
 
-            if (agent.DelegatesTo.Count > 0) expectedPermissionAgents.Add(agent.Name);
+            if (agent.DelegatesTo.Count > 0)
+            {
+                expectedPermissionAgents.Add(agent.Name);
+            }
         }
 
-        string[] expectedPermissionArray = expectedPermissionAgents
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        string[] actualPermissionAgents = result.Degradations
-            .Where(d => d.Code == "permission-not-expressible")
-            .Select(d => d.CanonicalIdentity)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(expectedPermissionArray, actualPermissionAgents);
-
-        // Native renderer permission degradations record constraints that cannot be expressed.
-        // Each degradation's target, identity, and instruction digest must be consistent.
-        foreach (SquadDegradationRecord degradation in result.Degradations.Where(d =>
-                     d.Code == "permission-not-expressible"))
-        {
-            Assert.True(
-                string.Equals("antigravity", degradation.Target, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
-            Assert.True(
-                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
-                $"Permission degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
-            SquadAgent agent = Assert.Single(source.Agents, a => a.Name == degradation.CanonicalIdentity);
-            Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Permission degradation for '{agent.Name}' has the wrong instruction digest.");
-            Assert.DoesNotContain("widening", degradation.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        }
-
-        // No render may widen a canonical permission: degradations record what they cannot
-        // express, they never claim a broader grant.
-        Assert.DoesNotContain(
-            result.Degradations,
-            d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(
+            expectedPermissionAgents.Order(StringComparer.Ordinal),
+            result.Degradations
+                .Where(d => d.Code == "permission-not-expressible")
+                .Select(d => d.CanonicalIdentity)
+                .Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -353,33 +183,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     first.Files,
                     f => f.RelativePath == $".agents/skills/{skill.Name}/{resource.RelativePath}");
     }
-
-    [Fact]
-    public async Task RenderSkill_FrontmatterKeyOrderIsStable()
-    {
-        // The frontmatter contract is name, description, license — an ordered mapping, not
-        // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
-        // a list-of-pairs shape.
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        string probe = source.Skills
-                           .Select(skill => skill.Name)
-                           .OrderBy(name => name, StringComparer.Ordinal)
-                           .FirstOrDefault()
-                       ?? throw new InvalidOperationException($"Corpus at '{ProductRoot}' declares no skills.");
-
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
-
-        SquadDeploymentFile rendered = Assert.Single(
-            result.Files,
-            f => f.RelativePath == $".agents/skills/{probe}/SKILL.md");
-        YamlMappingNode frontmatter = ReadFrontmatter(rendered);
-        string[] keys = frontmatter.Children.Keys
-            .OfType<YamlScalarNode>()
-            .Select(key => key.Value ?? string.Empty)
-            .ToArray();
-        Assert.Equal(["name", "description", "license"], keys);
-    }
-
     private static string NormalizeBody(string body)
     {
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -454,23 +257,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 result.Files.Any(f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md" &&
                                       f.Target == "antigravity"),
                 $"Agent '{agent.Name}' must render to .agents/agents/{agent.Name}/agent.md");
-    }
-
-    /// <summary>Every canonical skill still emits its <c>SKILL.md</c> under native rendering.</summary>
-    [Fact]
-    public async Task RenderAsync_Antigravity_Native_EmitsCanonicalSkillFiles()
-    {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        // Every canonical skill must still emit a SKILL.md file (native both pattern)
-        foreach (SquadSkill skill in source.Skills)
-            Assert.True(
-                result.Files.Any(f => f.RelativePath == $".agents/skills/{skill.Name}/SKILL.md" &&
-                                      f.Target == "antigravity"),
-                $"Skill '{skill.Name}' must render to .agents/skills/{skill.Name}/SKILL.md");
     }
 
     /// <summary>Native rendering emits no role-prefixed collision files.</summary>

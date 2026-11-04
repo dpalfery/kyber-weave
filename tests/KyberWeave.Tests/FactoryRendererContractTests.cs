@@ -117,8 +117,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
         SquadRenderRequest request = new(
             ProductRoot,
@@ -128,40 +126,9 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
-
-        // A non-shared primary agent also projects an entry-point skill (1 + its resource
-        // closure) beside its droid, per the native dual entry point. A primary shared identity
-        // contributes no extra entry-point skill: its canonical skill already is the entry point
-        // and is counted with the skills.
-        int primaryAgentSkillContribution = source.Agents
-            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
-            .Sum(agent => 1 + agent.Resources.Count);
-
-        int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-                                                    + expectedSkillCount
-                                                    + source.Skills.Where(skill =>
-                                                            !suppressedSkillIdentities.Contains(skill.Name))
-                                                        .Sum(skill => skill.Resources.Count)
-                                                    + primaryAgentSkillContribution;
-        Assert.Equal(expectedFileCount, result.Files.Count);
-
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("factory", f.Target);
-            Assert.True(
-                f.RelativePath.StartsWith(".factory/droids/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith(".factory/skills/", StringComparison.Ordinal),
-                $"File '{f.RelativePath}' does not start with expected Factory directory.");
-        });
-
         Assert.DoesNotContain(result.Files, f =>
             f.RelativePath.Contains(".factory/agents/", StringComparison.Ordinal));
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
-
-        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -275,47 +242,6 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.Equal(expectedBody, body);
         }
 
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            Assert.Contains(result.Files, f => f.RelativePath == $".factory/droids/{sharedIdentity}.md");
-            string sharedSkillPath = $".factory/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            else
-                // Primary shared identity: the canonical skill is the entry point and ships.
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".factory/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", skill.Name));
-            Assert.DoesNotContain(frontmatter.Children.Keys.OfType<YamlScalarNode>(), key =>
-                string.Equals(key.Value, "license", StringComparison.Ordinal));
-
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n')) expectedSkillBody += "\n";
-
-            Assert.Equal(expectedSkillBody, skillBody);
-        }
-
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
@@ -377,20 +303,10 @@ public sealed class FactoryRendererContractTests : IDisposable
 
             foreach (SquadDegradationRecord degradation in agentRecords)
             {
-                Assert.Equal("factory", degradation.Target);
-                Assert.Equal(agent.Name, degradation.OutputIdentity);
-                Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
                 Assert.NotNull(degradation.Details);
                 AssertDoesNotClaimGuessedFactoryField(degradation.Details, agent.Name);
             }
         }
-
-        Assert.NotEmpty(result.Degradations);
-        Assert.All(
-            result.Degradations,
-            d => Assert.True(
-                agentsByName.ContainsKey(d.CanonicalIdentity),
-                $"Degradation names unknown identity '{d.CanonicalIdentity}'."));
     }
 
     /// <summary>
@@ -691,17 +607,12 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     An agent whose capability profile cannot be resolved still carries the MCP withholding
-    ///     receipt for its empty whitelist, so the fail-closed exclusion is visible rather than
-    ///     silent.
+    ///     An agent whose capability profile cannot be resolved is refused before anything renders:
+    ///     the pipeline fails closed on an unresolvable profile for every harness (ADR 0056), rather
+    ///     than rendering an agent whose grants it cannot derive.
     /// </summary>
-    /// <remarks>
-    ///     The renderer defends against an unresolvable profile even though the source loader
-    ///     normally rejects one: a preloaded source can reach it. Withholding the whitelist without
-    ///     the receipt would make the exclusion invisible in the only stream a doctor run inspects.
-    /// </remarks>
     [Fact]
-    public async Task RenderAsync_Factory_RecordsMcpWithholdingWhenTheCapabilityProfileIsUnresolved()
+    public async Task RenderAsync_Factory_RefusesAnAgentWhoseCapabilityProfileIsUnresolved()
     {
         string agentName = "review-lens";
         SquadSource canonical = TestSquadCorpus.CanonicalSource;
@@ -717,20 +628,14 @@ public sealed class FactoryRendererContractTests : IDisposable
             ]
         };
 
-        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Project,
-            PreloadedSource: source));
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        Assert.Empty(RenderedMcpServers(result, agentName));
-        SquadDegradationRecord withheld = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, agentName, StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(withheld.Details);
-        Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+        SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
+            new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+                ProductRoot,
+                [SquadTarget.Factory],
+                SquadDeploymentScope.Project,
+                PreloadedSource: source)));
+        Assert.Contains(agentName, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("unresolved-profile", refused.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -862,37 +767,6 @@ public sealed class FactoryRendererContractTests : IDisposable
                 + $"entitlement rule require [{string.Join(", ", expected)}].");
         }
     }
-
-    [Fact]
-    public async Task RenderAsync_Factory_GlobalScope_StripsFactoryPrefix()
-    {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
-            ProductRoot,
-            [SquadTarget.Factory],
-            SquadDeploymentScope.Global);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.NotEmpty(result.Files);
-        Assert.All(result.Files, f =>
-        {
-            Assert.Equal("factory", f.Target);
-            Assert.False(
-                f.RelativePath.StartsWith('.'),
-                $"Global-scope path '{f.RelativePath}' still carries a project-scope dot-prefix.");
-            Assert.DoesNotContain(".factory", f.RelativePath, StringComparison.Ordinal);
-            Assert.True(
-                f.RelativePath.StartsWith("droids/", StringComparison.Ordinal) ||
-                f.RelativePath.StartsWith("skills/", StringComparison.Ordinal),
-                $"Global-scope path '{f.RelativePath}' is neither droids/ nor skills/.");
-        });
-
-        Assert.DoesNotContain(result.Files, f =>
-            f.RelativePath.Contains("agents/", StringComparison.Ordinal));
-    }
-
     /// <summary>
     ///     The Factory app dispatches custom droids as subagents and exposes no session-parent
     ///     selector, so the primary agent renders as both a droid (kept for Task dispatch) and an

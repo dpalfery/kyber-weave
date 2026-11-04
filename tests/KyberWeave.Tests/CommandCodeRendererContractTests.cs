@@ -301,20 +301,6 @@ public sealed class CommandCodeRendererContractTests
                 d => d.CanonicalIdentity == agent.Name && d.Code == "role-skill-fallback");
         }
     }
-
-    [Fact]
-    public async Task GlobalScopeStripsTheCommandCodePrefix()
-    {
-        SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Global);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.All(result.Files, f => Assert.False(
-            f.RelativePath.StartsWith(".commandcode/", StringComparison.Ordinal),
-            f.RelativePath));
-        Assert.Contains(result.Files, f => f.RelativePath.StartsWith("agents/", StringComparison.Ordinal));
-        Assert.Contains(result.Files, f => f.RelativePath.StartsWith("skills/", StringComparison.Ordinal));
-    }
-
     [Fact]
     public void GlobalRootIsDotCommandCodeUnderHome()
     {

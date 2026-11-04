@@ -88,201 +88,113 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         rather than merely a plausible one.
 ///     </para>
 /// </remarks>
-public sealed class AntigravityRenderer : ISquadRenderer
+public sealed class AntigravityRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".agents/agents";
-    private const string SkillsDirectory = ".agents/skills";
-
     private const string ArbiterServer = "kyber-weave-arbiter";
     private const string ArbiterMatcher = "^invoke_subagent$";
-    private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness antigravity";
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Antigravity,
+        "Antigravity",
+        ".agents",
+        "agents",
+        SquadModelPolicy.NotRendered,
+        SquadLineBreaks.LineFeedOnly);
+
+    public AntigravityRenderer()
+        : base(HarnessSpec)
+    {
+    }
 
     /// <summary>
-    ///     YamlDotNet does not document <see cref="ISerializer" /> as thread-safe, and the
-    ///     registry may dispatch renderers concurrently; serialization takes this lock so a
-    ///     shared static instance cannot interleave emitter state.
+    /// Skills, then agents, then degradations, then resources: Antigravity's established output
+    /// order. The Native Both pattern means agents and skills occupy separate namespaces, allowing
+    /// both to render without collision.
     /// </summary>
-    private static readonly object SerializerLock = new();
-
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Antigravity];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    private protected override SquadRenderResult Render(SquadHarnessRenderContext context)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.Antigravity))
-            throw new ArgumentException(
-                "AntigravityRenderer was asked to render a target other than Antigravity.",
-                nameof(request));
-
-        if (request.Targets.Count == 0) return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Antigravity);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in degradation text without a renderer
-        // change. Sorted for deterministic details strings.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
-
-        // Read once: the launch definitions come from the squad's own declaration, so no renderer
-        // holds a second copy of a command line that could drift from mcp.json. The list is ordinal
-        // and excludes the Arbiter hook server, which is not an agent-facing MCP server.
-        IReadOnlyList<McpServerDeclaration> declaredMcpServers = ResolveDeclaredMcpServers(source);
-
-        // A null server has two causes that must not be conflated: the squad never declared the key,
-        // or it declared it in a form the loader rejects. The roster names the tools either way, so
-        // the first case is a squad whose mcp.json has been renamed or truncated, and every agent
-        // silently loses the grant. The second is rejected at load time and is not reported here.
-        McpDeclarationShape mcpShape = ReadMcpShape(source.McpConfiguration);
-        bool universalToolsDeclared =
-            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools).Count > 0;
+        McpPlan mcp = context.GetOrCreateState(McpPlan.Create);
 
         // Emit canonical skills first, preserving the established ordering.
-        foreach (SquadSkill skill in source.Skills)
-            files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope));
+        foreach (SquadSkill skill in context.Source.Skills)
+        {
+            SquadHarnessRenderContext.ValidateCanonicalName(skill.Name);
+            context.Files.Add(context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody));
+        }
 
-        // Emit native agent.md files for all agents. The Native Both pattern means agents
-        // and skills occupy separate namespaces, allowing both to render without collision.
-        foreach (SquadAgent agent in source.Agents)
-            files.Add(RenderAgent(
-                agent,
-                source.CapabilityProfiles,
-                source.ModelProfiles,
-                declaredMcpServers,
-                request.Scope));
+        foreach (SquadAgent agent in context.Source.Agents)
+        {
+            RenderAgent(context, agent);
+        }
 
         // Degrade agents only for capability constraints that cannot be expressed in
         // frontmatter (D10: shell-implies-write, D12-delegate: unenforceable roster).
-        foreach (SquadAgent agent in source.Agents)
+        foreach (SquadAgent agent in context.Source.Agents)
         {
-            // Records capability permission constraints that cannot be fully expressed
-            // in frontmatter.
-            SquadDegradationRecord? permission = BuildPermissionDegradation(
+            context.AddDegradation(BuildPermissionDegradation(
                 agent,
-                source.CapabilityProfiles.Profiles,
-                capabilityVocabulary,
-                declaredMcpServers,
-                mcpShape,
-                universalToolsDeclared);
-            if (permission is not null) degradations.Add(permission);
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                mcp.DeclaredServers,
+                mcp.Shape,
+                mcp.UniversalToolsDeclared));
 
             // D12: Record unenforceable delegates-to roster as permission-not-expressible
             if (agent.DelegatesTo.Count > 0)
             {
                 string roster = string.Join(", ", agent.DelegatesTo.Order(StringComparer.Ordinal));
-                degradations.Add(new SquadDegradationRecord(
-                    "antigravity",
-                    agent.Name,
-                    agent.Name,
+                context.Degradations.Add(context.Degradation(
+                    agent,
                     "permission-not-expressible",
-                    agent.BodyDigest,
                     $"Antigravity does not restrict delegates-to roster enforcement; this agent may invoke agents outside its declared roster [{roster}]."));
             }
         }
 
         // Project agent resources beside their native agent.md so relative links in the
         // unchanged instruction body resolve, and so a same-named canonical skill's
-        // resources cannot collide with them.
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, request.Scope);
-        foreach (SquadAgent agent in source.Agents)
-            SquadResourceProjection.Append(
-                files,
-                $"{agentsDir}/{agent.Name}/agent.md",
-                agent.Resources,
-                "antigravity");
-
-        // Project skill resources beneath their own identities.
-        foreach (SquadSkill skill in source.Skills)
-            SquadResourceProjection.Append(
-                files,
-                $"{skillsDir}/{skill.Name}/SKILL.md",
-                skill.Resources,
-                "antigravity");
-
-        // A null Arbiter must render byte for byte as before the field existed, so the
-        // guard lives here: only an enabled wiring at Project scope emits the owned
-        // hook group. Under Global scope there is no project configuration to enforce
-        // from (Req 22.4).
-        List<SquadRenderedBlock> blocks = [];
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        // resources cannot collide with them. Skill resources project beneath their own identities.
+        foreach (SquadAgent agent in context.Source.Agents)
         {
-            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
-
-            // §10.5: the hook gates a dispatch pre-tool only — Antigravity documents no
-            // post-dispatch result, so outcomes are logged and reported by audit but
-            // never delivered back. One record per rendered agent, recorded beside the
-            // block and never without it.
-            foreach (SquadAgent agent in source.Agents)
-            {
-                degradations.Add(BuildArbiterDegradation(agent));
-            }
+            SquadResourceProjection.Append(
+                context.Files,
+                $"{context.AgentsDirectory}/{agent.Name}/agent.md",
+                agent.Resources,
+                context.Token);
         }
 
-        return Task.FromResult(new SquadRenderResult(
-            true,
-            files,
-            degradations,
-            [],
-            [],
-            blocks.Count > 0 ? blocks : null));
-    }
+        foreach (SquadSkill skill in context.Source.Skills)
+        {
+            SquadResourceProjection.Append(
+                context.Files,
+                $"{context.SkillsDirectory}/{skill.Name}/SKILL.md",
+                skill.Resources,
+                context.Token);
+        }
 
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
-    {
-        if (scope == SquadDeploymentScope.Project) return baseDirectory;
-
-        return baseDirectory.StartsWith(".agents/", StringComparison.Ordinal)
-            ? baseDirectory[".agents/".Length..]
-            : baseDirectory;
+        RenderArbiter(context);
+        return context.ToResult();
     }
 
     /// <summary>
-    /// Builds Squad's owned <c>kyber-arbiter</c> group for <c>.agents/hooks.json</c>.
+    /// §10.5: the hook gates a dispatch pre-tool only — Antigravity documents no post-dispatch
+    /// result, so outcomes are logged and reported by audit but never delivered back. One record
+    /// per rendered agent, recorded beside the block and never without it.
     /// </summary>
-    /// <remarks>
-    /// [F10]: the block entries are the group's <c>PreToolUse</c>/<c>PostToolUse</c>
-    /// event arrays, each holding one matcher group for <c>^invoke_subagent$</c> with one
-    /// command hook and the timeout in seconds. The splice sets the group key itself
-    /// (design §10.4: top-level keys are group names, so Squad owns the whole group).
-    /// Only documented fields are written — no <c>enabled</c> flag and no sentinel key,
-    /// because JSON hook files carry no comments (D25).
-    /// </remarks>
-    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
-        new(
-            SquadTargetCatalog.GetToken(SquadTarget.Antigravity),
-            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Antigravity),
-            SquadHookBlockFormat.Antigravity,
-            [
-                new SquadRenderedBlockEntry("PreToolUse", ArbiterMatcherGroup(timeoutSeconds)),
-                new SquadRenderedBlockEntry("PostToolUse", ArbiterMatcherGroup(timeoutSeconds)),
-            ]);
-
-    private static JsonObject ArbiterMatcherGroup(int timeoutSeconds) =>
-        new()
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is null)
         {
-            ["matcher"] = ArbiterMatcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = ArbiterCommandLine,
-                    ["timeout"] = timeoutSeconds,
-                }),
-        };
+            return;
+        }
+
+        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Antigravity, ArbiterMatcher);
+        foreach (SquadAgent agent in context.Source.Agents)
+        {
+            context.Degradations.Add(BuildArbiterDegradation(agent));
+        }
+    }
 
     /// <summary>
     /// Records <c>arbiter-not-enforced</c> for one rendered agent with §10.5's
@@ -293,39 +205,19 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// rendered agent and carries its instruction digest.
     /// </summary>
     private static SquadDegradationRecord BuildArbiterDegradation(SquadAgent agent) => new(
-        Target: SquadTargetCatalog.GetToken(SquadTarget.Antigravity),
+        Target: "antigravity",
         CanonicalIdentity: agent.Name,
         OutputIdentity: agent.Name,
         Code: ArbiterNotEnforcedCode,
         InstructionDigest: agent.BodyDigest,
         Details: NoPostDispatchFeedbackReason);
 
-    /// <summary>
-    ///     Canonical names become directory names in the rendered tree, so a name carrying
-    ///     path syntax would not be a portable relative path. The registry's validation pass
-    ///     would reject it at deployment time; rejecting it here keeps the failure at the
-    ///     source, before any file is built. A valid canonical name is a single non-empty
-    ///     path segment with no separators and no traversal.
-    /// </summary>
-    private static void ValidateCanonicalName(string name)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        if (string.IsNullOrWhiteSpace(name) ||
-            name.Contains('/', StringComparison.Ordinal) ||
-            name.Contains('\\', StringComparison.Ordinal) ||
-            name.Contains("..", StringComparison.Ordinal) ||
-            name.Trim('.').Length == 0)
-            throw new SquadRenderValidationException(
-                $"Canonical name '{name}' is not a valid single-segment path for rendering.");
-    }
-
-    private static SquadDeploymentFile RenderAgent(
-        SquadAgent agent,
-        SquadCapabilityProfiles capabilityProfiles,
-        SquadModelProfiles modelProfiles,
-        IReadOnlyList<McpServerDeclaration> declaredMcpServers,
-        SquadDeploymentScope scope)
-    {
-        ValidateCanonicalName(agent.Name);
+        SquadHarnessRenderContext.ValidateCanonicalName(agent.Name);
+        SquadCapabilityProfiles capabilityProfiles = context.Source.CapabilityProfiles;
+        SquadModelProfiles modelProfiles = context.Source.ModelProfiles;
+        IReadOnlyList<McpServerDeclaration> declaredMcpServers = context.GetOrCreateState(McpPlan.Create).DeclaredServers;
 
         if (!capabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
             throw new SquadRenderValidationException(
@@ -341,7 +233,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // enable_subagent_tools, reasoning_effort, mainAgent (conductor only), mcpServers
         YamlMappingNode frontmatter = new();
         frontmatter.Add("name", agent.Name);
-        frontmatter.Add("description", ToSingleLineScalar(agent.Description));
+        frontmatter.Add("description", context.SingleLine(agent.Description));
         frontmatter.Add("model", modelTier);
 
         // Build tools list from capability profile with XOR narrowing
@@ -401,28 +293,9 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         if (mcpServers.Count > 0) frontmatter.Add("mcpServers", BuildMcpServersNode(mcpServers));
 
-        string yaml;
-        lock (SerializerLock)
-        {
-            yaml = YamlSerializer.Serialize(frontmatter);
-        }
-
-        StringBuilder builder = new();
-        builder.Append("---\n");
-        builder.Append(yaml);
-        if (!yaml.EndsWith('\n')) builder.Append('\n');
-
-        builder.Append("---\n");
-
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-        builder.Append(normalizedBody);
-        if (!normalizedBody.EndsWith('\n')) builder.Append('\n');
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}/agent.md",
-            Encoding.UTF8.GetBytes(builder.ToString()),
-            "antigravity");
+        context.Files.Add(context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}/agent.md",
+            SquadMarkdownDocument.Compose(SquadYamlEmitter.Default.Serialize(frontmatter), agent.InstructionBody)));
     }
 
     private static McpDeclarationShape ReadMcpShape(JsonElement mcpConfiguration)
@@ -605,44 +478,6 @@ public sealed class AntigravityRenderer : ISquadRenderer
             "orchestration" => "minimal",
             _ => null
         };
-    }
-
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody,
-        SquadDeploymentScope scope)
-    {
-        ValidateCanonicalName(name);
-
-        // Key order is the frontmatter contract: name, description, license.
-        // YamlMappingNode preserves child order; Dictionary does not define one. No model
-        // or permission keys — models.yml has no antigravity entry, and skills cannot
-        // express the capability lattice.
-        YamlMappingNode frontmatter = new();
-        frontmatter.Add("name", name);
-        frontmatter.Add("description", ToSingleLineScalar(description));
-        frontmatter.Add("license", "MIT");
-
-        string yaml;
-        lock (SerializerLock)
-        {
-            yaml = YamlSerializer.Serialize(frontmatter);
-        }
-
-        StringBuilder builder = new();
-        builder.Append("---\n");
-        builder.Append(yaml);
-        if (!yaml.EndsWith('\n')) builder.Append('\n');
-
-        builder.Append("---\n");
-
-        string normalizedBody = instructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-        builder.Append(normalizedBody);
-        if (!normalizedBody.EndsWith('\n')) builder.Append('\n');
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{name}/SKILL.md",
-            Encoding.UTF8.GetBytes(builder.ToString()),
-            "antigravity");
     }
 
     private static SquadDegradationRecord? BuildPermissionDegradation(
@@ -876,18 +711,6 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     /// <summary>
-    ///     YAML frontmatter scalars must stay single-line; a folded canonical description
-    ///     would otherwise emit a block scalar and break consumers that expect a plain string.
-    /// </summary>
-    private static string ToSingleLineScalar(string value)
-    {
-        return string.Join(
-            ' ',
-            value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-    }
-
-    /// <summary>
     ///     The shape of the raw MCP declaration: whether <c>mcpServers</c> is a well-formed object, and whether it
     ///     carries the <c>kyber-weave</c> key.
     /// </summary>
@@ -906,4 +729,27 @@ public sealed class AntigravityRenderer : ISquadRenderer
     ///     without either holding a second copy of the command line.
     /// </summary>
     private sealed record McpServerDeclaration(string Name, string Command, IReadOnlyList<string> Args);
+
+    /// <summary>What a render reads once from the squad's MCP declaration.</summary>
+    /// <param name="DeclaredServers">
+    /// The launch definitions from the squad's own declaration, so no renderer holds a second copy
+    /// of a command line that could drift from mcp.json. Ordinal, and excluding the Arbiter hook
+    /// server, which is not an agent-facing MCP server.
+    /// </param>
+    /// <param name="Shape">
+    /// Distinguishes a squad that never declared the key from one that declared it in a form the
+    /// loader rejects: the roster names the tools either way, so the first is a squad whose mcp.json
+    /// has been renamed or truncated, and every agent silently loses the grant.
+    /// </param>
+    /// <param name="UniversalToolsDeclared">Whether the toolchain roster names any universal MCP tool.</param>
+    private sealed record McpPlan(
+        IReadOnlyList<McpServerDeclaration> DeclaredServers,
+        McpDeclarationShape Shape,
+        bool UniversalToolsDeclared)
+    {
+        public static McpPlan Create(SquadHarnessRenderContext context) => new(
+            ResolveDeclaredMcpServers(context.Source),
+            ReadMcpShape(context.Source.McpConfiguration),
+            CapabilityDegradations.UniversalMcpToolNames(context.Source.Toolchain.RequiredMcpTools).Count > 0);
+    }
 }

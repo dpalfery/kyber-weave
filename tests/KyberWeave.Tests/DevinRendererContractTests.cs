@@ -102,26 +102,8 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        // A primary shared identity contributes no agent principal: its canonical skill is the
-        // entry point and is counted with the skills.
-        int sharedPrimaries = source.Agents.Count(agent =>
-            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-        int expectedFileCount =
-            source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
-                                                  + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
-
-        Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.All(result.Files, f => Assert.Equal("devin", f.Target));
         Assert.All(result.Files, f => Assert.True(
             f.RelativePath.StartsWith(".devin/agents/", StringComparison.Ordinal) ||
             f.RelativePath.StartsWith(".devin/skills/", StringComparison.Ordinal),
@@ -463,23 +445,6 @@ public sealed class DevinRendererContractTests : IDisposable
             Assert.Contains("apply_patch", record.Details, StringComparison.Ordinal);
         }
     }
-
-    [Fact]
-    public async Task RenderAsync_Devin_GlobalScopeDropsTheDevinPrefix()
-    {
-        SquadRendererRegistry registry = new([new DevinRenderer()]);
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Devin],
-            SquadDeploymentScope.Global));
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.All(result.Files, f => Assert.True(
-            f.RelativePath.StartsWith("agents/", StringComparison.Ordinal) ||
-            f.RelativePath.StartsWith("skills/", StringComparison.Ordinal),
-            $"Global-scope path '{f.RelativePath}' is outside agents/ and skills/."));
-    }
-
     /// <summary>
     /// A <c>devin:</c> harness override on one model profile is emitted as <c>model</c>, and
     /// an explicit <c>devin: inherit</c> on another still omits it.

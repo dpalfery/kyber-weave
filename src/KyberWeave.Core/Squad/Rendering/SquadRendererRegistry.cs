@@ -241,10 +241,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         foreach (SquadTarget target in targets)
         {
             string token = SquadTargetCatalog.GetToken(target);
-            bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
-                SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
-                SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
-                SquadTarget.Antigravity or SquadTarget.Devin or SquadTarget.CommandCode;
+            bool isNative = SquadTargetCatalog.GetAgentProjection(target) == SquadAgentProjection.Native;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))

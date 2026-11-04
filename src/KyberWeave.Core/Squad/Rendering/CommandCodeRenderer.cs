@@ -64,226 +64,90 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>/&lt;name&gt;</c>. This is the same shape as <see cref="FactoryRenderer"/>.
 /// </para>
 /// </remarks>
-public sealed class CommandCodeRenderer : ISquadRenderer
+public sealed class CommandCodeRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".commandcode/agents";
-    private const string SkillsDirectory = ".commandcode/skills";
-
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Command Code's built-in tool names,
     /// verified against the <c>command-code</c> 1.84.0 tool catalog on 2026-10-17.
     /// <c>network.publish</c> is absent: no built-in tool expresses it.
     /// <c>delegate</c> is absent: subagents never receive the <c>agent</c> tool.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["read_file"]),
-        ("filesystem.search", ["read_directory", "grep", "glob"]),
-        ("filesystem.write", ["write_file", "edit_file"]),
-        ("process.execute", ["shell_command", "shell_output"]),
-        ("network.read", ["web_search", "web_fetch"])
-    ];
-
-    /// <summary>
+    /// <remarks>
     /// Emission order, fixed so a rendered agent file is byte-stable regardless of how the
     /// profile's permissions enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "read_file",
-        "read_directory",
-        "grep",
-        "glob",
-        "write_file",
-        "edit_file",
-        "shell_command",
-        "shell_output",
-        "web_search",
-        "web_fetch"
-    ];
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["read_file"]),
+            ("filesystem.search", ["read_directory", "grep", "glob"]),
+            ("filesystem.write", ["write_file", "edit_file"]),
+            ("process.execute", ["shell_command", "shell_output"]),
+            ("network.read", ["web_search", "web_fetch"])
+        ],
+        [
+            "read_file",
+            "read_directory",
+            "grep",
+            "glob",
+            "write_file",
+            "edit_file",
+            "shell_command",
+            "shell_output",
+            "web_search",
+            "web_fetch"
+        ]);
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
+    private static readonly SquadYamlEmitter Yaml = new(new SerializerBuilder()
         .WithTypeConverter(new CommandCodeYamlFlowSequenceConverter())
-        .Build();
+        .Build());
 
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
+    private static readonly string[] AllowedReasoningEfforts = ["off", "low", "medium", "high", "xhigh", "max"];
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.CommandCode];
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.CommandCode,
+        "Command Code",
+        ".commandcode",
+        "agents",
+        SquadModelPolicy.InheritOrBlankOmitted,
+        SkillLicense: null);
 
-    /// <summary>
-    /// Under Project scope keeps the <c>.commandcode/</c> prefix; under Global scope the
-    /// physical root is already <c>~/.commandcode</c>, so the relative path is the bare
-    /// <c>agents/</c> / <c>skills/</c> form.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public CommandCodeRenderer()
+        : base(HarnessSpec)
     {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".commandcode/", StringComparison.Ordinal)
-            ? baseDirectory[".commandcode/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.CommandCode))
-        {
-            throw new ArgumentException(
-                "CommandCodeRenderer was asked to render a target other than Command Code.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.CommandCode);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // Read skill identities upfront so the primary-agent collision check can see whether
-        // a canonical skill already occupies the entry-point identity before any file is built.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
         // Read from canonical source through the shared derivation rather than a renderer-local
         // list, so a tool renamed upstream is a source edit, the doctor check reads the same
         // roster, and this target cannot disagree with the others about which server is which
         // entitlement class (ADR 0050 decision 4).
-        IReadOnlyList<string> universalMcpToolNames =
-            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
+        IReadOnlyList<string> universalMcpToolNames = context.GetOrCreateState(static c =>
+            CapabilityDegradations.UniversalMcpToolNames(c.Source.Toolchain.RequiredMcpTools));
 
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadDeploymentFile principal = RenderAgent(
+        context.AddPrincipal(RenderAgentFile(context, agent, universalMcpToolNames), agent.Resources);
+        context.AddEntryPointSkillProjection(
+            agent,
+            "an agent",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml),
+            (fallbackProfile, path, reused) => BuildPrimaryAgentDegradationRecords(
                 agent,
-                source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles,
+                fallbackProfile,
+                context.CapabilityProfiles,
                 universalMcpToolNames,
-                request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, agent.Resources);
-
-            if (agent.Invocation == SquadInvocation.Primary)
-            {
-                SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-                if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-                {
-                    if (skillIdentities.Contains(agent.Name))
-                    {
-                        // A declared shared identity already has its canonical skill as the entry
-                        // point at .commandcode/skills/<name>/SKILL.md, so emitting the entry-point
-                        // skill too would project one identity twice. The canonical skill is the
-                        // entry point; skip the duplicate rather than failing closed.
-                        if (sharedIdentities.Contains(agent.Name))
-                        {
-                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                                agent,
-                                fallbackProfile,
-                                source.CapabilityProfiles.Profiles,
-                                universalMcpToolNames,
-                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
-                                true));
-                        }
-                        else
-                        {
-                            // Not a declared shared identity: Command Code renders both an agent and an
-                            // entry-point skill for the identity, and a native target has no
-                            // role-prefixed escape hatch, so this is a real collision.
-                            throw new SquadRenderValidationException(
-                                $"Cannot render primary agent '{agent.Name}' as a Command Code entry-point " +
-                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                                "identity. Command Code renders both an agent and an entry-point skill, " +
-                                "so this is a fail-closed condition rather than a naming collision " +
-                                "this renderer can resolve on its own.");
-                        }
-                    }
-                    else
-                    {
-                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
-                        files.Add(skillPrincipal);
-                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            universalMcpToolNames,
-                            skillPrincipal.RelativePath));
-                    }
-                }
-                else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-                {
-                    // Omit mode: the agent renders exactly as before, with no entry-point skill.
-                    degradations.AddRange(BuildDegradationRecords(
-                        agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
-                }
-                else
-                {
-                    throw new SquadRenderValidationException(
-                        $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
-                        $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
-                }
-            }
-            else
-            {
-                degradations.AddRange(BuildDegradationRecords(
-                    agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+                path,
+                reused),
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles, universalMcpToolNames));
     }
 
-    private static SquadDeploymentFile RenderAgent(
+    private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
+        context.EmitCanonicalSkills(skill =>
+            context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
+
+    private static SquadDeploymentFile RenderAgentFile(
+        SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> universalMcpToolNames,
-        SquadDeploymentScope scope)
+        IReadOnlyList<string> universalMcpToolNames)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -291,7 +155,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             ["description"] = agent.Description
         };
 
-        string? model = ResolveCommandCodeModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             (string bareModel, string? reasoningEffort) = ParseReasoningEffortSuffix(model);
@@ -305,142 +169,20 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         // Always emit tools. Omitting it already grants nothing, but an explicit list keeps
         // the grant reviewable in the file, and an empty grant is the visible tools: [].
         frontmatter["tools"] = new CommandCodeYamlFlowSequence(
-            ResolveTools(agent, capabilityProfiles, universalMcpToolNames));
+            ResolveTools(agent, context.CapabilityProfiles, universalMcpToolNames));
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.CommandCode));
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            Yaml.Compose(frontmatter, agent.InstructionBody));
     }
-
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = skill.Name,
-            ["description"] = singleLineDescription
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.CommandCode));
-    }
-
-    /// <summary>
-    /// Renders a primary agent's entry-point skill: the canonical agent body verbatim under
-    /// the canonical skill frontmatter shape, so the user can invoke the role in the main
-    /// session where no session-parent selector exists.
-    /// </summary>
-    private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
-        SquadAgent agent,
-        SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", agent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = agent.Name,
-            ["description"] = singleLineDescription
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{agent.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.CommandCode));
-    }
-
-    private static readonly string[] AllowedReasoningEfforts = ["off", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>
     /// Splits an optional trailing <c>[reasoningEffort=&lt;level&gt;]</c> suffix off a model value.
     /// Command Code's agent frontmatter accepts <c>off | low | medium | high | xhigh | max</c>
     /// (<c>command-code</c> 1.84.0), so any other level throws <see cref="SquadRenderValidationException"/>.
     /// </summary>
-    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue)
-    {
-        const string suffixPrefix = "[reasoningEffort=";
-        int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
-        if (start < 0)
-        {
-            return (modelValue, null);
-        }
-
-        if (start == 0 || !modelValue.EndsWith(']'))
-        {
-            throw new SquadRenderValidationException(
-                $"Malformed reasoningEffort suffix in model value '{modelValue}': expected '<model>[reasoningEffort=<level>]'.");
-        }
-
-        string level = modelValue[(start + suffixPrefix.Length)..^1];
-        if (Array.IndexOf(AllowedReasoningEfforts, level) < 0)
-        {
-            throw new SquadRenderValidationException(
-                $"Invalid reasoningEffort '{level}' in model value '{modelValue}': Command Code accepts off, low, medium, high, xhigh, or max.");
-        }
-
-        string bareModel = modelValue[..start];
-        if (string.IsNullOrWhiteSpace(bareModel) ||
-            bareModel.Any(char.IsWhiteSpace) ||
-            bareModel.Contains('[', StringComparison.Ordinal) ||
-            bareModel.Contains(']', StringComparison.Ordinal))
-        {
-            throw new SquadRenderValidationException(
-                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
-        }
-
-        return (bareModel, level);
-    }
-
-    private static string? ResolveCommandCodeModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue("commandcode", out string? commandCodeModel))
-        {
-            return string.Equals(commandCodeModel, "inherit", StringComparison.Ordinal) ||
-                   string.IsNullOrWhiteSpace(commandCodeModel)
-                ? null
-                : commandCodeModel;
-        }
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
-               string.IsNullOrWhiteSpace(profile.Default)
-            ? null
-            : profile.Default;
-    }
+    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
+        SquadHarnessLowering.ParseReasoningEffortSuffix(modelValue, AllowedReasoningEfforts, HarnessSpec.DisplayName);
 
     /// <summary>
     /// Lowers a capability profile onto Command Code's tool allow-list. Only
@@ -468,31 +210,9 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> universalMcpToolNames)
     {
-        HashSet<string> granted = new(StringComparer.Ordinal);
-
-        // An unresolvable profile grants nothing. Falling back to "grant everything"
-        // here would turn a source error into silent widening.
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
-        {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    foreach (string tool in tools)
-                    {
-                        granted.Add(tool);
-                    }
-                }
-            }
-        }
-
-        // MCP names append after the built-ins: they come from source, so they cannot join the
-        // fixed renderer-local order, and the shared derivation already orders them
-        // server-then-tool.
         return
         [
-            .. ToolOrder.Where(granted.Contains),
+            .. Tools.Resolve(agent.CapabilityProfile, capabilityProfiles),
             .. CapabilityDegradations.ResolveMcpToolNames(
                 agent.CapabilityProfile,
                 capabilityProfiles,

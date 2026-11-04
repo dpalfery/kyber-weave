@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -94,12 +93,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         emitted.
 ///     </para>
 /// </remarks>
-public sealed class FactoryRenderer : ISquadRenderer
+public sealed class FactoryRenderer : SquadHarnessRenderer
 {
-    private const string DroidsDirectory = ".factory/droids";
-    private const string SkillsDirectory = ".factory/skills";
-    private const string ArbiterCommand = "kyber-weave-arbiter hook --harness factory";
-
     private const string ArbiterServer = "kyber-weave-arbiter";
     private const string ArbiterMatcher = "Task";
 
@@ -117,264 +112,93 @@ public sealed class FactoryRenderer : ISquadRenderer
     ///     <c>network.publish</c> is absent: no documented Factory tool expresses it.
     ///     <c>delegate</c> is absent: Factory withholds <c>Task</c> from subagents.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["Read"]),
-        ("filesystem.search", ["LS", "Grep", "Glob"]),
-        ("filesystem.write", ["Create", "Edit", "ApplyPatch"]),
-        ("process.execute", ["Execute"]),
-        ("network.read", ["WebSearch", "FetchUrl"])
-    ];
-
-    /// <summary>
+    /// <remarks>
     ///     Emission order, fixed so a rendered droid file is byte-stable regardless of how the
     ///     profile's permissions enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "Read",
-        "LS",
-        "Grep",
-        "Glob",
-        "Create",
-        "Edit",
-        "ApplyPatch",
-        "Execute",
-        "WebSearch",
-        "FetchUrl"
-    ];
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["Read"]),
+            ("filesystem.search", ["LS", "Grep", "Glob"]),
+            ("filesystem.write", ["Create", "Edit", "ApplyPatch"]),
+            ("process.execute", ["Execute"]),
+            ("network.read", ["WebSearch", "FetchUrl"])
+        ],
+        [
+            "Read",
+            "LS",
+            "Grep",
+            "Glob",
+            "Create",
+            "Edit",
+            "ApplyPatch",
+            "Execute",
+            "WebSearch",
+            "FetchUrl"
+        ]);
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
+    private static readonly SquadYamlEmitter Yaml = new(new SerializerBuilder()
         .WithTypeConverter(new FactoryYamlFlowSequenceConverter())
-        .Build();
-
-    /// <summary>
-    ///     YamlDotNet does not document <see cref="ISerializer" /> as thread-safe, and the
-    ///     registry may dispatch renderers concurrently; serialization takes this lock so a
-    ///     shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
+        .Build());
 
     private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Factory];
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Factory,
+        "Factory",
+        ".factory",
+        "droids",
+        SquadModelPolicy.InheritOrBlankOmitted,
+        SkillLicense: null);
 
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    public FactoryRenderer()
+        : base(HarnessSpec)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
+    }
 
-        if (request.Targets.Any(target => target != SquadTarget.Factory))
-            throw new ArgumentException(
-                "FactoryRenderer was asked to render a target other than Factory.",
-                nameof(request));
-
-        if (request.Targets.Count == 0) return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Factory);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // Read skill identities upfront so the primary-agent collision check can see whether
-        // a canonical skill already occupies the entry-point identity before any file is built.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
+    {
         // The whitelist source is the squad's own mcp.json, enumerated once per render and in
         // ordinal order so a rendered droid stays byte-stable across an edit that only
         // reorders the declaration. The toolchain roster is deliberately not the source: it
         // names servers an install may never configure, and a grant for one would point the
         // droid at a server with nothing behind it.
-        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> mcpServers = ResolveMcpServers(
+            agent,
+            context.CapabilityProfiles,
+            context.GetOrCreateState(static c => DeclaredMcpServerNames(c.Source)));
 
-        foreach (SquadAgent agent in source.Agents)
-        {
-            IReadOnlyList<string> mcpServers = ResolveMcpServers(
+        context.AddPrincipal(RenderDroid(context, agent, mcpServers), agent.Resources);
+
+        context.AddEntryPointSkillProjection(
+            agent,
+            "a droid",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml),
+            (fallbackProfile, path, reused) => BuildPrimaryAgentDegradationRecords(
                 agent,
-                source.CapabilityProfiles.Profiles,
-                declaredMcpServers);
-
-            SquadDeploymentFile principal = RenderAgent(
-                agent,
-                source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles,
-                request.Scope,
-                mcpServers);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, agent.Resources);
-
-            if (agent.Invocation == SquadInvocation.Primary)
-            {
-                SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-                if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-                {
-                    if (skillIdentities.Contains(agent.Name))
-                    {
-                        // A declared shared identity already has its canonical skill as the entry
-                        // point at .factory/skills/<name>/SKILL.md, so emitting the entry-point
-                        // skill too would project one identity twice. The canonical skill is the
-                        // entry point; skip the duplicate rather than failing closed.
-                        if (sharedIdentities.Contains(agent.Name))
-                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                                agent,
-                                fallbackProfile,
-                                source.CapabilityProfiles.Profiles,
-                                mcpServers,
-                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
-                                true));
-                        else
-                            // Not a declared shared identity: Factory renders both a droid and an
-                            // entry-point skill for the identity, and a native target has no
-                            // role-prefixed escape hatch, so this is a real collision.
-                            throw new SquadRenderValidationException(
-                                $"Cannot render primary agent '{agent.Name}' as a Factory entry-point " +
-                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                                "identity. Factory renders both a droid and an entry-point skill, " +
-                                "so this is a fail-closed condition rather than a naming collision " +
-                                "this renderer can resolve on its own.");
-                    }
-                    else
-                    {
-                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
-                        files.Add(skillPrincipal);
-                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            mcpServers,
-                            skillPrincipal.RelativePath));
-                    }
-                }
-                else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-                {
-                    // Omit mode: the droid renders exactly as before, with no entry-point skill.
-                    degradations.AddRange(BuildDegradationRecords(
-                        agent,
-                        source.CapabilityProfiles.Profiles,
-                        mcpServers));
-                }
-                else
-                {
-                    throw new SquadRenderValidationException(
-                        $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
-                        $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
-                }
-            }
-            else
-            {
-                degradations.AddRange(BuildDegradationRecords(
-                    agent,
-                    source.CapabilityProfiles.Profiles,
-                    mcpServers));
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name)) continue;
-
-            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        // Absence and emptiness are different claims here: FactoryHooksShadowing reads
-        // null as "no block was rendered" and an empty list as "a block was rendered
-        // and it held nothing", and only the first is true when the wiring is absent.
-        // Antigravity and Devin normalise the same way; this renderer's own byte-for-byte
-        // claim is about Files, which is untouched either way.
-        IReadOnlyList<SquadRenderedBlock> blocks = BuildArbiterBlocks(request);
-        return Task.FromResult(new SquadRenderResult(
-            true,
-            files,
-            degradations,
-            [],
-            [],
-            blocks.Count > 0 ? blocks : null));
+                fallbackProfile,
+                context.CapabilityProfiles,
+                mcpServers,
+                path,
+                reused),
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles, mcpServers));
     }
+
+    private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
+        context.EmitCanonicalSkills(skill =>
+            context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
 
     /// <summary>
-    ///     Under Project scope keeps the <c>.factory/</c> prefix; under Global scope the
-    ///     physical root is already <c>~/.factory</c>, so the relative path is the bare
-    ///     <c>droids/</c> / <c>skills/</c> form.
+    /// Absence and emptiness are different claims here: FactoryHooksShadowing reads null as "no
+    /// block was rendered" and an empty list as "a block was rendered and it held nothing", and
+    /// only the first is true when the wiring is absent.
     /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
-    {
-        if (scope == SquadDeploymentScope.Project) return baseDirectory;
+    private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
+        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Factory, ArbiterMatcher);
 
-        return baseDirectory.StartsWith(".factory/", StringComparison.Ordinal)
-            ? baseDirectory[".factory/".Length..]
-            : baseDirectory;
-    }
-
-    /// <summary>
-    /// Builds Squad's owned <c>.factory/hooks.json</c> block, or nothing when the Arbiter
-    /// is not enforced at project scope. The render stays byte-identical without the
-    /// wiring because files are untouched either way: the block travels separately for the
-    /// deployment plan to splice. Whether the plan may splice it at all is decided later,
-    /// by <see cref="FactoryHooksShadowing"/> at plan-build time.
-    /// </summary>
-    private static IReadOnlyList<SquadRenderedBlock> BuildArbiterBlocks(SquadRenderRequest request)
-    {
-        if (request.Arbiter is null || !request.Arbiter.Enabled || request.Scope != SquadDeploymentScope.Project)
-        {
-            return [];
-        }
-
-        return [BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds)];
-    }
-
-    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
-        new(
-            SquadTargetCatalog.GetToken(SquadTarget.Factory),
-            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Factory),
-            SquadHookBlockFormat.Factory,
-            [
-                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(timeoutSeconds)),
-                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(timeoutSeconds)),
-            ]);
-
-    /// <summary>One F11 matcher group: event names are the file's top level, so the
-    /// entry carries no <c>hooks</c> wrapper around the group itself.</summary>
-    private static JsonObject MatcherGroup(int timeoutSeconds) =>
-        new()
-        {
-            ["matcher"] = ArbiterMatcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = ArbiterCommand,
-                    ["timeout"] = timeoutSeconds,
-                }),
-        };
-
-    private static SquadDeploymentFile RenderAgent(
+    private static SquadDeploymentFile RenderDroid(
+        SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        SquadDeploymentScope scope,
         IReadOnlyList<string> mcpServers)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -383,90 +207,29 @@ public sealed class FactoryRenderer : ISquadRenderer
             ["description"] = agent.Description
         };
 
-        string? model = ResolveFactoryModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             (string bareModel, string? reasoningEffort) = ParseReasoningEffortSuffix(model);
             frontmatter["model"] = bareModel;
-            if (reasoningEffort is not null) frontmatter["reasoningEffort"] = reasoningEffort;
+            if (reasoningEffort is not null)
+            {
+                frontmatter["reasoningEffort"] = reasoningEffort;
+            }
         }
 
-        // Always emit tools: omitting the key allows every Factory tool (widening).
-        // An empty grant is tools: [] (fail-closed), never omitted and never 'all'.
-        frontmatter["tools"] = new FactoryYamlFlowSequence(ResolveTools(agent, capabilityProfiles));
+        // Always emit tools: omitting the key allows every Factory tool (widening). An empty
+        // grant is tools: [] (fail-closed), never omitted and never 'all'. An unresolvable profile
+        // grants nothing (Factory omit = all tools).
+        frontmatter["tools"] = new FactoryYamlFlowSequence(Tools.Resolve(agent.CapabilityProfile, context.CapabilityProfiles));
 
         // Omitting mcpServers inherits parent MCP. Emit the key always, carrying the droid's
         // whitelist or [] when it is entitled to none, so the widening cannot happen.
         frontmatter["mcpServers"] = new FactoryYamlFlowSequence(mcpServers);
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string droidsDir = ResolvePrefixedDirectory(DroidsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{droidsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.Factory));
-    }
-
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = skill.Name,
-            ["description"] = singleLineDescription
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.Factory));
-    }
-
-    /// <summary>
-    ///     Renders a primary agent's entry-point skill: the canonical agent body verbatim under
-    ///     the canonical skill frontmatter shape, so the user can invoke the role in the main
-    ///     session where no session-parent selector exists.
-    /// </summary>
-    private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
-        SquadAgent agent,
-        SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", agent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = agent.Name,
-            ["description"] = singleLineDescription
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{agent.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.Factory));
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            Yaml.Compose(frontmatter, agent.InstructionBody));
     }
 
     /// <summary>
@@ -474,72 +237,8 @@ public sealed class FactoryRenderer : ISquadRenderer
     ///     Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.ai,
     ///     subagents), so any other level throws <see cref="SquadRenderValidationException" />.
     /// </summary>
-    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue)
-    {
-        const string suffixPrefix = "[reasoningEffort=";
-        int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
-        if (start < 0) return (modelValue, null);
-
-        if (start == 0 || !modelValue.EndsWith(']'))
-            throw new SquadRenderValidationException(
-                $"Malformed reasoningEffort suffix in model value '{modelValue}': expected '<model>[reasoningEffort=<level>]'.");
-
-        string level = modelValue[(start + suffixPrefix.Length)..^1];
-        if (Array.IndexOf(AllowedReasoningEfforts, level) < 0)
-            throw new SquadRenderValidationException(
-                $"Invalid reasoningEffort '{level}' in model value '{modelValue}': Factory accepts low, medium, or high.");
-
-        string bareModel = modelValue[..start];
-        if (string.IsNullOrWhiteSpace(bareModel) ||
-            bareModel.Any(char.IsWhiteSpace) ||
-            bareModel.Contains('[', StringComparison.Ordinal) ||
-            bareModel.Contains(']', StringComparison.Ordinal))
-            throw new SquadRenderValidationException(
-                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
-
-        return (bareModel, level);
-    }
-
-    private static string? ResolveFactoryModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile)) return null;
-
-        if (profile.HarnessModels.TryGetValue("factory", out string? factoryModel))
-            return string.Equals(factoryModel, "inherit", StringComparison.Ordinal) ||
-                   string.IsNullOrWhiteSpace(factoryModel)
-                ? null
-                : factoryModel;
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
-               string.IsNullOrWhiteSpace(profile.Default)
-            ? null
-            : profile.Default;
-    }
-
-    /// <summary>
-    ///     Lowers a capability profile onto Factory's documented tool allow-list. Only
-    ///     <see cref="SquadPermissionDecision.Allow" /> grants: <c>ask</c> and <c>deny</c> both
-    ///     withhold, which keeps the lowering non-broadening by construction.
-    /// </summary>
-    private static IReadOnlyList<string> ResolveTools(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        HashSet<string> granted = new(StringComparer.Ordinal);
-
-        // An unresolvable profile grants nothing. Falling back to "grant everything"
-        // here would turn a source error into silent widening (Factory omit = all tools).
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
-            foreach ((string capability, string[] tools) in CapabilityTools)
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                    foreach (string tool in tools)
-                        granted.Add(tool);
-
-        return ToolOrder.Where(granted.Contains).ToArray();
-    }
+    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
+        SquadHarnessLowering.ParseReasoningEffortSuffix(modelValue, AllowedReasoningEfforts, HarnessSpec.DisplayName);
 
     /// <summary>
     ///     The MCP servers a droid is entitled to declare, filtered from the squad's declared servers
@@ -619,10 +318,7 @@ public sealed class FactoryRenderer : ISquadRenderer
         // Serialize through the same converter the droid frontmatter uses, so the caveat's
         // spelling is the rendered value rather than a hand-joined approximation of it. A
         // hand-joined name containing a comma would read as two servers in the receipt.
-        lock (SerializerLock)
-        {
-            return YamlSerializer.Serialize(frontmatter).TrimEnd('\r', '\n');
-        }
+        return Yaml.Serialize(frontmatter).TrimEnd('\r', '\n');
     }
 
     /// <summary>
