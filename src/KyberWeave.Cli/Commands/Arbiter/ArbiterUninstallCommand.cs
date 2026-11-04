@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -17,16 +18,18 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 {
     private readonly IArbiterUninstaller? _uninstaller;
+    private readonly SquadStateStore? _stateStore;
 
     /// <summary>Creates a new uninstall command using default collaborators.</summary>
     public ArbiterUninstallCommand()
     {
     }
 
-    /// <summary>Creates a new uninstall command over an injected uninstaller.</summary>
-    internal ArbiterUninstallCommand(IArbiterUninstaller? uninstaller)
+    /// <summary>Creates a new uninstall command over injected collaborators.</summary>
+    internal ArbiterUninstallCommand(IArbiterUninstaller? uninstaller, SquadStateStore? stateStore = null)
     {
         _uninstaller = uninstaller;
+        _stateStore = stateStore;
     }
 
     /// <inheritdoc />
@@ -50,15 +53,21 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         string root = Path.GetFullPath(
             string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path);
 
+        SquadStateStore stateStore;
         bool deployed;
         try
         {
-            deployed = Directory.Exists(root) && ArbiterUninstaller.HasDeployment(root, target);
+            stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(
+                null,
+                Environment.GetEnvironmentVariable);
+            deployed = Directory.Exists(root)
+                       && ArbiterUninstaller.HasDeployment(root, target, stateStore);
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
                                        or UnauthorizedAccessException
                                        or JsonException
+                                       or InvalidDataException
                                        or InvalidOperationException)
         {
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
@@ -71,7 +80,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
-            if (settings.RemoveKey && !RemoveKey(root, settings))
+            if (settings.RemoveKey && !RemoveKey(root, settings, target, stateStore))
                 return 1;
 
             return 0;
@@ -79,20 +88,21 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         try
         {
-            IArbiterUninstaller uninstaller = _uninstaller ?? new ArbiterUninstaller(root);
+            IArbiterUninstaller uninstaller = _uninstaller ?? new ArbiterUninstaller(root, stateStore);
             uninstaller.Uninstall(SquadTargetCatalog.GetToken(target));
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
                                        or UnauthorizedAccessException
                                        or JsonException
+                                       or InvalidDataException
                                        or InvalidOperationException)
         {
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return 1;
         }
 
-        if (settings.RemoveKey && !RemoveKey(root, settings))
+        if (settings.RemoveKey && !RemoveKey(root, settings, target, stateStore))
             return 1;
 
         AnsiConsole.MarkupLine(
@@ -107,14 +117,35 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static bool RemoveKey(string root, ArbiterUninstallSettings settings)
+    private static bool RemoveKey(
+        string root,
+        ArbiterUninstallSettings settings,
+        SquadTarget target,
+        SquadStateStore stateStore)
     {
-        string endpoint = ArbiterSetupCommand.TypeSafeEndpoint;
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
-        if (loaded.Success && !string.IsNullOrWhiteSpace(loaded.Config?.Arbiter.Provider.Endpoint))
-            endpoint = loaded.Config.Arbiter.Provider.Endpoint;
+        if (!loaded.Success)
+        {
+            AnsiConsole.MarkupLine(
+                "[red]kyber-weave arbiter: error: the host configuration could not be loaded, so " +
+                $"the stored key's origin is unknown: {Markup.Escape(loaded.Error ?? "unknown load failure")}[/]");
+            return false;
+        }
+
+        string endpoint = string.IsNullOrWhiteSpace(loaded.Config?.Arbiter.Provider.Endpoint)
+            ? ArbiterSetupCommand.TypeSafeEndpoint
+            : loaded.Config.Arbiter.Provider.Endpoint;
 
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
+
+        if (AnotherTargetIsDeployed(root, target, stateStore))
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]warn:[/] The key for {Markup.Escape(origin)} is stored per endpoint origin " +
+                "and shared by every target that uses it. Another target is still deployed here, " +
+                "so it will need the key re-stored.");
+        }
+
         try
         {
             ArbiterCommandComposition.CredentialStore().Delete(origin);
@@ -130,5 +161,40 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         AnsiConsole.MarkupLine($"[grey]Removed the stored key for {Markup.Escape(origin)}.[/]");
         return true;
+    }
+
+    /// <summary>
+    /// Whether the receipt records another target in this root. The key is stored per endpoint
+    /// origin, not per target, so deleting it while another target remains deployed removes that
+    /// target's auth too.
+    /// </summary>
+    /// <remarks>
+    /// The warning is best effort: an unreadable receipt says nothing about the other targets,
+    /// and <c>--remove-key</c> is the operator's explicit request either way.
+    /// </remarks>
+    private static bool AnotherTargetIsDeployed(
+        string root,
+        SquadTarget target,
+        SquadStateStore stateStore)
+    {
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+        }
+        catch (Exception ex) when (ex is IOException
+                                       or UnauthorizedAccessException
+                                       or InvalidDataException
+                                       or InvalidOperationException)
+        {
+            return false;
+        }
+
+        if (receipt is null)
+            return false;
+
+        string token = SquadTargetCatalog.GetToken(target);
+        return receipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
+               || receipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal));
     }
 }

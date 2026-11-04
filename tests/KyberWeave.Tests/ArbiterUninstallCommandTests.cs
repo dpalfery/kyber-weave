@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -140,6 +142,121 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("nothing to uninstall", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// An unreadable receipt is not an absent one. Falling back to a path-only delete would
+    /// remove an operator-owned file at the same path on the strength of a receipt the tool
+    /// could not read, so the command must fail and leave the file alone.
+    /// </summary>
+    [Fact]
+    public void Uninstall_UnreadableReceipt_FailsWithoutDeletingTheOperatorFile()
+    {
+        string host = NewDir("uninstall-corrupt-receipt");
+        string operatorFile = Path.Combine(host, ".kilo", "plugin", "kyber-arbiter.ts");
+        Directory.CreateDirectory(Path.GetDirectoryName(operatorFile)!);
+        File.WriteAllText(operatorFile, "// operator-owned plugin\n");
+
+        SquadStateStore store = NewStateStore("uninstall-corrupt-receipt-home");
+        string receiptPath = store.ResolveReceiptPath(host, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, "{ this is not a receipt");
+
+        ArbiterUninstallCommand command = new(uninstaller: null, stateStore: store);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.True(
+            File.Exists(operatorFile),
+            "an unreadable receipt must not fall back to a path-only delete");
+    }
+
+    /// <summary>
+    /// <c>--remove-key</c> needs the endpoint to know which origin it deletes. When the host
+    /// configuration cannot be loaded the origin is unknown, so the key must survive instead of
+    /// the command guessing the default origin.
+    /// </summary>
+    [Fact]
+    public void Uninstall_RemoveKeyWithUnreadableConfig_FailsAndKeepsTheKey()
+    {
+        const string origin = "https://api.typesafe.ai";
+        const string key = "TS-UNINSTALL-BAD-CONFIG-2b3c4d5e";
+        _store.Write(origin, key);
+        string host = NewDir("uninstall-bad-config");
+        string directory = Path.Combine(host, ".kyber-weave");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), "arbiter: [unclosed\n");
+
+        ArbiterUninstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("could not be loaded", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(key, _store.Read(origin));
+    }
+
+    /// <summary>
+    /// The key is stored per endpoint origin, not per target. Deleting it while another target
+    /// is still deployed removes that target's auth too, so the operator is warned.
+    /// </summary>
+    [Fact]
+    public void Uninstall_RemoveKeyWithAnotherTargetDeployed_WarnsThatTheKeyIsShared()
+    {
+        const string origin = "https://api.typesafe.ai";
+        const string key = "TS-UNINSTALL-SHARED-3c4d5e6f";
+        _store.Write(origin, key);
+        string host = NewDir("uninstall-shared-key");
+        SquadStateStore store = NewStateStore("uninstall-shared-key-home");
+        WriteReceipt(
+            store,
+            host,
+            [
+                OwnedFile(".kilo/plugin/kyber-arbiter.ts", "kilo"),
+                OwnedFile(".opencode/plugins/kyber-arbiter.ts", "opencode"),
+            ]);
+
+        ArbiterUninstallCommand command = new(uninstaller: null, stateStore: store);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("shared", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(_store.Read(origin));
+    }
+
+    private SquadStateStore NewStateStore(string name)
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name));
+        Directory.CreateDirectory(userPaths.HomeDirectory);
+        return new SquadStateStore(userPaths);
+    }
+
+    private static void WriteReceipt(
+        SquadStateStore store,
+        string root,
+        IReadOnlyList<SquadOwnedFile> files)
+    {
+        string path = store.ResolveReceiptPath(root, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(
+            path,
+            store.SerializeReceipt(new SquadReceipt(
+                "kyber-squad.receipt/v1",
+                SquadDeploymentScope.Project,
+                root,
+                DateTimeOffset.UtcNow,
+                [],
+                files)));
+    }
+
+    private static SquadOwnedFile OwnedFile(string relativePath, string target)
+    {
+        return new SquadOwnedFile(relativePath, new string('0', 64), target, Adopted: false);
     }
 
     private string NewDir(string name)

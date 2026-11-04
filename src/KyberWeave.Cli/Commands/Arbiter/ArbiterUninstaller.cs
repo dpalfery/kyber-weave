@@ -12,7 +12,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// The static tables are the arbiter-exclusive subset of a deployment. When the project has a
 /// Squad receipt, that receipt is authoritative: an artifact is touched only when the receipt
 /// records it for the target, so an operator file at the same path survives. A root without a
-/// receipt keeps the historical path-only behavior.
+/// receipt keeps the historical path-only behavior, but an unreadable receipt is an error rather
+/// than an absent one: falling back to a path-only delete would remove an operator's file at the
+/// same path on the strength of a receipt the tool could not read.
 /// </remarks>
 internal sealed class ArbiterUninstaller : IArbiterUninstaller
 {
@@ -36,19 +38,19 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         };
 
     private readonly string _root;
-    private readonly Func<string, SquadReceipt?> _readReceipt;
+    private readonly SquadStateStore _stateStore;
 
     internal ArbiterUninstaller(string root)
-        : this(root, ReadReceipt)
+        : this(root, SquadCommandComposition.ResolveStateStore(null, Environment.GetEnvironmentVariable))
     {
     }
 
-    internal ArbiterUninstaller(string root, Func<string, SquadReceipt?> readReceipt)
+    internal ArbiterUninstaller(string root, SquadStateStore stateStore)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(readReceipt);
+        ArgumentNullException.ThrowIfNull(stateStore);
         _root = Path.GetFullPath(root);
-        _readReceipt = readReceipt;
+        _stateStore = stateStore;
     }
 
     /// <inheritdoc />
@@ -58,7 +60,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         if (!SquadTargetCatalog.TryResolve(target, out SquadTarget parsed))
             throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
 
-        SquadReceipt? receipt = _readReceipt(_root);
+        SquadReceipt? receipt = _stateStore.ReadReceipt(_root, SquadDeploymentScope.Project);
         RemoveOwnedFiles(parsed, receipt);
         RemoveOwnedBlocks(parsed, receipt);
     }
@@ -67,14 +69,16 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
     /// Whether any arbiter-owned artifact for <paramref name="target"/> exists beneath
     /// <paramref name="root"/>: a receipt-owned file on disk, or a shared hook file still carrying
     /// a receipt-owned block entry. An unparsable hook file counts as present so it fails honestly
-    /// in <see cref="Uninstall"/> instead of reading as "nothing to uninstall".
+    /// in <see cref="Uninstall"/> instead of reading as "nothing to uninstall". An unreadable
+    /// receipt propagates for the same reason rather than reading as absent.
     /// </summary>
-    internal static bool HasDeployment(string root, SquadTarget target)
+    internal static bool HasDeployment(string root, SquadTarget target, SquadStateStore stateStore)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(stateStore);
         string full = Path.GetFullPath(root);
         string token = SquadTargetCatalog.GetToken(target);
-        SquadReceipt? receipt = ReadReceipt(full);
+        SquadReceipt? receipt = stateStore.ReadReceipt(full, SquadDeploymentScope.Project);
 
         if (OwnedFiles.TryGetValue(target, out string[]? files)
             && files.Any(relative =>
@@ -107,25 +111,6 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             or System.Text.Json.JsonException or InvalidOperationException)
         {
             return true;
-        }
-    }
-
-    private static SquadReceipt? ReadReceipt(string root)
-    {
-        try
-        {
-            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
-                null,
-                Environment.GetEnvironmentVariable);
-            return stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
-        }
-        catch (Exception ex) when (ex is ArgumentException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or InvalidDataException
-                                       or InvalidOperationException)
-        {
-            return null;
         }
     }
 
