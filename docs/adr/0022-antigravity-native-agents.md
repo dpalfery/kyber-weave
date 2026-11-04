@@ -60,7 +60,7 @@ However, live verification also surfaced critical security and governance findin
 ## Decision
 
 1. **Antigravity is reclassified from fallback role-skill lowering to a native target.**
-   `SquadRendererRegistry` registers `SquadTarget.Antigravity` as native. Agents render to
+   `SquadTargetCatalog.GetAgentProjection` classifies `SquadTarget.Antigravity` as native. Agents render to
    `.agents/agents/<name>/agent.md` (or `~/.gemini/config/agents/<name>/agent.md`), and canonical
    skills render to `.agents/skills/<name>/SKILL.md` (or `~/.gemini/config/skills/<name>/SKILL.md`).
    Because the agent and skill trees reside in disjoint namespaces (`agents/` vs. `skills/`), the

@@ -31,6 +31,9 @@ public sealed class CursorRendererContractTests
     /// the same rule the renderer does; kept local so a renderer change must touch this
     /// suite deliberately.
     /// </summary>
+    /// <summary>The capabilities Cursor's <c>readonly</c> boolean enforces.</summary>
+    private static readonly string[] ReadOnlyEnforcedCapabilities = ["filesystem.write", "process.execute"];
+
     private static readonly string[] GovernedCapabilities =
     [
         "filesystem.read",
@@ -50,331 +53,67 @@ public sealed class CursorRendererContractTests
     /// </summary>
     private static readonly string[] LoweredSkillFrontmatterKeys = ["name", "description", "license"];
 
+    /// <summary>
+    ///     Cursor's own decisions on the real corpus: a subagent is an agent file whose model follows
+    ///     the <c>cursor</c> column verbatim and which is <c>readonly</c> exactly when both write and
+    ///     execute are withheld; a primary agent never gets an agent file — it lowers onto a skill
+    ///     carrying its body, or reuses its canonical skill when the identity is shared; and every
+    ///     agent with a non-deny governed capability records what Cursor cannot express. The
+    ///     canonical skill documents are the shared pipeline's, checked in
+    ///     <see cref="Squad.SquadRendererSharedContractTests"/>.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
-        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await new SquadRendererRegistry([new CursorRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Cursor], SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
-
-        // SKILL-ONLY replacement (Pi-renderer precedent): a canonical agent with
-        // invocation: primary whose fallback profile declares no-primary-agent: skill
-        // contributes its principal as a lowered skill (.cursor/skills/<name>/SKILL.md)
-        // plus its resource closure beside it — never an agent file. An omit-mode
-        // primary contributes nothing. A primary SHARED identity contributes no agent
-        // principal at all: its canonical skill is the entry point and is counted with the
-        // skills. Every non-omitted, non-shared agent still contributes exactly one principal.
-        SquadAgent[] primaryAgents = source.Agents
-            .Where(agent => agent.Invocation == SquadInvocation.Primary)
-            .ToArray();
-
-        // The corpus declares the conductor plus the two root wrappers; asserting non-empty
-        // here keeps the replacement math below from silently vacuously passing if that ever
-        // changes to zero.
-        Assert.NotEmpty(primaryAgents);
-        int omittedPrimaryCount = primaryAgents.Count(agent =>
-            string.Equals(
-                source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
-                "omit",
-                StringComparison.Ordinal));
-        int sharedPrimaryCount = primaryAgents.Count(agent => sharedIdentities.Contains(agent.Name));
-        int emittedAgentResourceCount = source.Agents.Sum(agent => agent.Resources.Count)
-            - primaryAgents
-                .Where(agent =>
-                    string.Equals(
-                        source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
-                        "omit",
-                        StringComparison.Ordinal) ||
-                    sharedIdentities.Contains(agent.Name))
-                .Sum(agent => agent.Resources.Count);
-
-        // C3: every rendered owner also projects its validated resource closure beside its
-        // principal output, so the corpus count is principals plus emitted closures.
-        int expectedFileCount =
-            source.Agents.Count - omittedPrimaryCount - sharedPrimaryCount + emittedAgentResourceCount
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
-        Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.All(result.Files, f => Assert.Equal("cursor", f.Target));
-
-        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".cursor/agents/{agent.Name}.md");
+            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".cursor/agents/{agent.Name}.md");
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), agent.Name);
 
-            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                agent.Name);
-            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
-            Assert.True(
-                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
-                $"Agent '{agent.Name}' description mismatch.");
-
-            // Model resolution: verify against loaded ModelProfiles. Every assertion names
-            // the agent so a failure identifies the offender out of the 21-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("cursor", out string? expectedModel))
-            {
-                Assert.True(
-                    string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
-                    $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
-            }
-            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
-            {
-                Assert.True(
-                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
-                    $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
-            }
-            else
-            {
-                Assert.False(
-                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                    $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
-            }
+            string? expectedModel = modelProfile.HarnessModels.TryGetValue("cursor", out string? cursorModel)
+                ? cursorModel
+                : modelProfile.Default == "inherit" ? null : modelProfile.Default;
+            Assert.Equal(
+                expectedModel,
+                frontmatter.Children.TryGetValue(new YamlScalarNode("model"), out YamlNode? model) ? ((YamlScalarNode)model).Value : null);
 
-            // Permission lowering: readonly is emitted only when both write and execute are withheld
-            SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool allowsWrite = capProfile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                               writeDecision == SquadPermissionDecision.Allow;
-            bool allowsExecute = capProfile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision executeDecision) &&
-                                 executeDecision == SquadPermissionDecision.Allow;
-            bool expectedReadOnly = !allowsWrite && !allowsExecute;
-
-            if (expectedReadOnly)
-            {
-                Assert.True(
-                    string.Equals("true", RequireScalar(frontmatter, "readonly", agent.Name), StringComparison.Ordinal),
-                    $"Agent '{agent.Name}' should carry readonly: true.");
-            }
-            else
-            {
-                Assert.False(
-                    frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")),
-                    $"Agent '{agent.Name}' should omit readonly.");
-            }
-
-            // Exact comparison: the renderer appends the normalized body verbatim, so a
-            // duplicated or padded body must fail, and the message names the offender.
-            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedAgentBody.EndsWith('\n'))
-            {
-                expectedAgentBody += "\n";
-            }
-
-            Assert.True(
-                string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
-                $"Agent '{agent.Name}' body mismatch.");
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool expectedReadOnly = !ReadOnlyEnforcedCapabilities.Any(capability =>
+                profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                decision == SquadPermissionDecision.Allow);
+            Assert.Equal(expectedReadOnly, frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
         }
 
-        // SKILL-ONLY replacement: every skill-mode primary agent renders only as a
-        // lowered skill; no .cursor/agents/<name>.md is emitted for it. An omit-mode
-        // primary renders neither an agent file nor a lowered skill.
-        foreach (SquadAgent primaryAgent in primaryAgents)
+        SquadAgent[] primaryAgents = [.. source.Agents.Where(a => a.Invocation == SquadInvocation.Primary)];
+        Assert.NotEmpty(primaryAgents);
+        foreach (SquadAgent primary in primaryAgents)
         {
-            SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[primaryAgent.Fallback];
-            if (sharedIdentities.Contains(primaryAgent.Name))
-            {
-                // Reused canonical skill: no agent file, and the skill at that path is the
-                // canonical skill's own body, not a lowered copy of the wrapper body.
-                Assert.DoesNotContain(
-                    result.Files,
-                    f => f.RelativePath == $".cursor/agents/{primaryAgent.Name}.md");
-                SquadDeploymentFile reusedSkill = Assert.Single(
-                    result.Files,
-                    f => f.RelativePath == $".cursor/skills/{primaryAgent.Name}/SKILL.md");
-                SquadSkill canonicalSkill = Assert.Single(
-                    source.Skills,
-                    skill => skill.Name == primaryAgent.Name);
-                Assert.Contains(
-                    canonicalSkill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal),
-                    Encoding.UTF8.GetString(reusedSkill.Content.Span),
-                    StringComparison.Ordinal);
-                continue;
-            }
-
-            if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-            {
-                Assert.DoesNotContain(
-                    result.Files,
-                    f => f.RelativePath == $".cursor/agents/{primaryAgent.Name}.md");
-
-                SquadDeploymentFile loweredSkillFile = Assert.Single(
-                    result.Files,
-                    f => f.RelativePath == $".cursor/skills/{primaryAgent.Name}/SKILL.md");
-                (YamlMappingNode loweredFrontmatter, string loweredBody) = SplitFrontmatter(
-                    Encoding.UTF8.GetString(loweredSkillFile.Content.Span),
-                    primaryAgent.Name);
-                Assert.Equal(primaryAgent.Name, RequireScalar(loweredFrontmatter, "name", primaryAgent.Name));
-                string expectedLoweredDescription = string.Join(" ", primaryAgent.Description.Split(
-                    ['\r', '\n'],
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-                Assert.True(
-                    string.Equals(expectedLoweredDescription, RequireScalar(loweredFrontmatter, "description", primaryAgent.Name), StringComparison.Ordinal),
-                    $"Lowered primary agent '{primaryAgent.Name}' description mismatch.");
-                Assert.True(
-                    string.Equals("MIT", RequireScalar(loweredFrontmatter, "license", primaryAgent.Name), StringComparison.Ordinal),
-                    $"Lowered primary agent '{primaryAgent.Name}' license mismatch.");
-
-                string expectedLoweredBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-                if (!expectedLoweredBody.EndsWith('\n'))
-                {
-                    expectedLoweredBody += "\n";
-                }
-
-                Assert.True(
-                    string.Equals(expectedLoweredBody, loweredBody, StringComparison.Ordinal),
-                    $"Lowered primary agent '{primaryAgent.Name}' body mismatch.");
-
-                foreach (SquadResource primaryResource in primaryAgent.Resources)
-                {
-                    Assert.Contains(
-                        result.Files,
-                        f => f.RelativePath == $".cursor/skills/{primaryAgent.Name}/{primaryResource.RelativePath}");
-                }
-            }
-            else
-            {
-                Assert.DoesNotContain(
-                    result.Files,
-                    f => f.RelativePath == $".cursor/agents/{primaryAgent.Name}.md");
-                Assert.DoesNotContain(
-                    result.Files,
-                    f => f.RelativePath.StartsWith($".cursor/skills/{primaryAgent.Name}/", StringComparison.Ordinal));
-            }
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/agents/{primary.Name}.md");
+            SquadDeploymentFile skill = Assert.Single(result.Files, f => f.RelativePath == $".cursor/skills/{primary.Name}/SKILL.md");
+            (_, string body) = SplitFrontmatter(Encoding.UTF8.GetString(skill.Content.Span), primary.Name);
+            string expectedBody = sharedIdentities.Contains(primary.Name)
+                ? source.Skills.Single(canonical => canonical.Name == primary.Name).InstructionBody
+                : primary.InstructionBody;
+            string normalized = expectedBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            Assert.Equal(normalized.EndsWith('\n') ? normalized : normalized + "\n", body);
         }
 
-        // Concrete lowerings verification against loaded profiles
-        SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
-        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
-        AssertReadOnly(result, "architect", expectedReadOnly: false);
-
-        // Cursor has no tools allow-list, so the documentation grant reaches the rendered output
-        // only through the readonly boolean. Either filesystem.write or process.execute being
-        // allowed omits readonly, so the rendered effect alone cannot distinguish process.execute
-        // Allow from Ask here. The grant is therefore pinned on the loaded profile, as the Claude
-        // and OpenCode renderer contracts do; the artifact assertions below check the rendered output.
-        SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
-        Assert.True(
-            docProfile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision docExecuteDecision),
-            "The 'documentation' capability profile must declare process.execute.");
-        Assert.True(
-            docExecuteDecision == SquadPermissionDecision.Allow,
-            $"The 'documentation' capability profile must grant process.execute Allow, but declares {docExecuteDecision}.");
-        Assert.Single(result.Files, f => f.RelativePath == ".cursor/agents/docs-dev.md");
-        AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
-
-        SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
-        Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
-        AssertReadOnly(result, "bug-crusher-investigator", expectedReadOnly: false);
-
-        foreach (string sharedIdentity in sharedIdentities)
-        {
-            string sharedSkillPath = $".cursor/skills/{sharedIdentity}/SKILL.md";
-            if (suppressedSkillIdentities.Contains(sharedIdentity))
-            {
-                Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-            else
-            {
-                // Primary shared identity: the canonical skill is the entry point; no agent file.
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
-                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
-        }
-
-        // Skills verification
-        foreach (SquadSkill skill in source.Skills)
-        {
-            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
-            string path = $".cursor/skills/{skill.Name}/SKILL.md";
-            if (isSuppressedSharedIdentity)
-            {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
-                continue;
-            }
-
-            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
-                Encoding.UTF8.GetString(file.Content.Span),
-                skill.Name);
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
-            string expectedDescription = string.Join(" ", skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description mismatch.");
-            Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' license mismatch.");
-
-            // Exact comparison with the normalized canonical body: the renderer appends it
-            // verbatim, so duplication or padding must fail, naming the offender.
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n'))
-            {
-                expectedSkillBody += "\n";
-            }
-
-            Assert.True(
-                string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
-                $"Skill '{skill.Name}' body mismatch.");
-        }
-
-        // Degradations: exactly the non-all-deny agents carry 'permission-not-expressible'
-        string[] expectedDegraded = source.Agents
-            .Where(a =>
-            {
-                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                // Mirror the renderer's governed set exactly: the renderer decides on
-                // CursorRenderer's seven capabilities, not on every key the profile
-                // happens to declare, so a corpus capability outside that set cannot
-                // break this oracle for a reason unrelated to the renderer.
-                return GovernedCapabilities.Any(cap =>
-                    prof.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                    decision != SquadPermissionDecision.Deny);
-            })
-            .Select(a => a.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.NotEmpty(expectedDegraded);
         Assert.Equal(
-            expectedDegraded,
-            result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
-
-        foreach (SquadDegradationRecord degradation in result.Degradations)
-        {
-            Assert.True(
-                string.Equals("cursor", degradation.Target, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
-            Assert.True(
-                string.Equals("permission-not-expressible", degradation.Code, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong code.");
-            Assert.True(
-                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
-            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
-        }
+            source.Agents
+                .Where(a => GovernedCapabilities.Any(capability =>
+                    source.CapabilityProfiles.Profiles[a.CapabilityProfile].Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                    decision != SquadPermissionDecision.Deny))
+                .Select(a => a.Name)
+                .Order(StringComparer.Ordinal),
+            result.Degradations.Select(d => d.CanonicalIdentity).Order(StringComparer.Ordinal));
+        Assert.All(result.Degradations, d => Assert.Equal("permission-not-expressible", d.Code));
     }
 
     /// <summary>

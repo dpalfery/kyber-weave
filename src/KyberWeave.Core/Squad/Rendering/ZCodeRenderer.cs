@@ -188,13 +188,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// deep and never mistakes them for skills.
 /// </para>
 /// </remarks>
-public sealed class ZCodeRenderer : ISquadRenderer
+public sealed class ZCodeRenderer : SquadHarnessRenderer
 {
-    private const string TargetToken = "zcode";
-    private const string AgentsDirectory = ".zcode/agents";
-    private const string SkillsDirectory = ".zcode/skills";
-    private const string CommandsDirectory = ".zcode/commands";
-
     /// <summary>
     /// The Arbiter's MCP server. It is excluded from the standard MCP grant and granted only
     /// through <see cref="GrantsArbiter"/>, so a capability profile that allows
@@ -219,230 +214,99 @@ public sealed class ZCodeRenderer : ISquadRenderer
     /// deliberately: no built-in tool expresses it. <c>delegate</c> maps to bare
     /// <c>Agent</c> but is handled separately, because granting it always loses the roster.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["Read"]),
-        ("filesystem.search", ["Grep", "Glob"]),
-        ("filesystem.write", ["Edit", "Write"]),
-        ("process.execute", ["Bash"]),
-        ("network.read", ["WebFetch", "WebSearch"]),
-        ("delegate", ["Agent"])
-    ];
+    /// <remarks>
+    /// <c>TodoWrite</c> and <c>Skill</c> are granted on every rendered principal regardless of
+    /// capability profile, matching <see cref="ClaudeRenderer"/>'s own ungoverned base. Neither can
+    /// broaden a canonical decision: <c>TodoWrite</c> writes no file and executes nothing, and
+    /// <c>Skill</c> only opens the skill tree this renderer itself deploys. The emission order is
+    /// fixed, so a rendered agent is byte-stable regardless of how the capability profile's
+    /// permissions happen to enumerate.
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["Read"]),
+            ("filesystem.search", ["Grep", "Glob"]),
+            ("filesystem.write", ["Edit", "Write"]),
+            ("process.execute", ["Bash"]),
+            ("network.read", ["WebFetch", "WebSearch"]),
+            ("delegate", ["Agent"])
+        ],
+        [
+            "TodoWrite", "Skill", "Read", "Grep", "Glob", "Edit", "Write", "Bash",
+            "WebFetch", "WebSearch", "Agent"
+        ],
+        ["TodoWrite", "Skill"]);
 
-    /// <summary>
-    /// Granted on every rendered principal regardless of capability profile, matching
-    /// <see cref="ClaudeRenderer"/>'s own ungoverned base. Neither can broaden a canonical
-    /// decision: <c>TodoWrite</c> writes no file and executes nothing, and <c>Skill</c> only
-    /// opens the skill tree this renderer itself deploys.
-    /// </summary>
-    private static readonly string[] UngovernedTools = ["TodoWrite", "Skill"];
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.ZCode,
+        "ZCode",
+        ".zcode",
+        "agents",
+        SquadModelPolicy.InheritOmitted,
+        SquadLineBreaks.LineFeedOnly);
 
-    /// <summary>
-    /// Fixed <c>tools</c> emission order, so a rendered agent is byte-stable regardless of how
-    /// the capability profile's permissions happen to enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "TodoWrite", "Skill", "Read", "Grep", "Glob", "Edit", "Write", "Bash",
-        "WebFetch", "WebSearch", "Agent"
-    ];
-
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.ZCode];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    public ZCodeRenderer()
+        : base(HarnessSpec)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.ZCode))
-        {
-            throw new ArgumentException(
-                "ZCodeRenderer was asked to render a target other than ZCode.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.ZCode);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        // Read upfront so the lowered-command collision check can see whether a canonical
-        // skill already occupies the identity the resource closure would claim, regardless of
-        // which loop reaches it first.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in a lowered agent's
-        // permission-not-expressible details without a renderer change.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        // Read from canonical source rather than a renderer-local list, so a tool renamed
-        // upstream is a source edit, and so the doctor check reads the same roster. The split
-        // into entitlement classes, and the order each class is emitted in, live in
-        // CapabilityDegradations: the partition is the one thing two targets must not each decide.
-        // The Arbiter server is granted separately, only to the principals that call it.
-        IReadOnlyDictionary<string, IReadOnlyList<string>> standardMcpTools =
-            source.Toolchain.RequiredMcpTools
-                .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
-                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames =
-            CapabilityDegradations.OrchestratorExcludedMcpToolNames(standardMcpTools);
-        IReadOnlyList<string> universalMcpToolNames =
-            CapabilityDegradations.UniversalMcpToolNames(standardMcpTools);
-        IReadOnlyList<string> arbiterMcpToolNames = ArbiterEnforced(request)
-            ? ArbiterMcpToolNames(source)
-            : [];
-        IReadOnlyList<string> mcpServerNames =
-            CapabilityDegradations.DeclaredMcpServerNames(standardMcpTools);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            if (agent.Invocation == SquadInvocation.Subagent)
-            {
-                RenderSubagent(
-                    agent,
-                    source,
-                    request.Scope,
-                    skillIdentities,
-                    orchestratorExcludedMcpToolNames,
-                    universalMcpToolNames,
-                    arbiterMcpToolNames,
-                    mcpServerNames,
-                    files,
-                    degradations);
-                continue;
-            }
-
-            RenderPrimaryAgent(
-                agent,
-                source,
-                request.Scope,
-                skillIdentities,
-                capabilityVocabulary,
-                orchestratorExcludedMcpToolNames,
-                universalMcpToolNames,
-                arbiterMcpToolNames,
-                mcpServerNames,
-                files,
-                degradations);
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection, per the same
-            // rule ClaudeRenderer follows. Resolved from source so a fallbacks.yml change is
-            // honored without a renderer change. A primary shared identity is the exception:
-            // its canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(
-                skill.Name,
-                skill.Description,
-                skill.InstructionBody,
-                request.Scope);
-            files.Add(principal);
-
-            // Skill resources keep the ordinary treatment: scanSkillFilesUnderRoot is one
-            // level deep and admits only a directory holding a SKILL.md, so a resource beside
-            // the skill is never mistaken for one.
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
     }
 
-    private static void RenderSubagent(
-        SquadAgent agent,
-        SquadSource source,
-        SquadDeploymentScope scope,
-        IReadOnlySet<string> skillIdentities,
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames,
-        IReadOnlyList<string> arbiterMcpToolNames,
-        IReadOnlyList<string> mcpServerNames,
-        List<SquadDeploymentFile> files,
-        List<SquadDegradationRecord> degradations)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        string body = RewriteResourceLinks(agent, skillIdentities, degradations, out bool rewritten);
+        McpPlan mcp = context.GetOrCreateState(McpPlan.Create);
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            RenderSubagent(context, agent, mcp);
+            return;
+        }
+
+        RenderPrimaryAgent(context, agent, mcp);
+    }
+
+    /// <summary>
+    /// Skills keep ZCode's own hand-rolled frontmatter. Skill resources keep the ordinary
+    /// treatment: scanSkillFilesUnderRoot is one level deep and admits only a directory holding a
+    /// SKILL.md, so a resource beside the skill is never mistaken for one.
+    /// </summary>
+    private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
+        context.EmitCanonicalSkills(skill =>
+            RenderSkill(context, skill.Name, skill.Description, skill.InstructionBody));
+
+    private static void RenderSubagent(SquadHarnessRenderContext context, SquadAgent agent, McpPlan mcp)
+    {
+        string body = RewriteResourceLinks(agent, context.SkillNames, context.Degradations, out bool rewritten);
 
         Dictionary<string, string> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = CollapseToSingleLine(agent.Description)
+            ["description"] = context.SingleLine(agent.Description)
         };
 
-        string? model = ResolveZCodeModel(agent, source.ModelProfiles.Profiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        IReadOnlyList<string> tools = ResolveTools(
-            agent,
-            source.CapabilityProfiles.Profiles,
-            orchestratorExcludedMcpToolNames,
-            universalMcpToolNames,
-            arbiterMcpToolNames);
+        IReadOnlyList<string> tools = ResolveTools(agent, context.CapabilityProfiles, mcp);
 
-        string agentsDirectory = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        files.Add(new SquadDeploymentFile(
-            $"{agentsDirectory}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(SquadMarkdownDocument.Compose(
-                ComposeFrontmatter(frontmatter, ("tools", tools)),
-                body)),
-            TargetToken));
+        context.Files.Add(context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            SquadMarkdownDocument.Compose(ComposeFrontmatter(frontmatter, ("tools", tools)), body)));
 
-        AppendRewrittenResources(files, agent, scope, rewritten);
-        degradations.AddRange(BuildCapabilityDegradations(
-            agent, source.CapabilityProfiles.Profiles, mcpServerNames));
+        AppendRewrittenResources(context, agent, rewritten);
+        context.Degradations.AddRange(BuildCapabilityDegradations(agent, context.CapabilityProfiles, mcp.ServerNames));
     }
 
-    private static void RenderPrimaryAgent(
-        SquadAgent agent,
-        SquadSource source,
-        SquadDeploymentScope scope,
-        IReadOnlySet<string> skillIdentities,
-        IReadOnlyList<string> capabilityVocabulary,
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames,
-        IReadOnlyList<string> arbiterMcpToolNames,
-        IReadOnlyList<string> mcpServerNames,
-        List<SquadDeploymentFile> files,
-        List<SquadDegradationRecord> degradations)
+    private static void RenderPrimaryAgent(SquadHarnessRenderContext context, SquadAgent agent, McpPlan mcp)
     {
-        SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
+        SquadSource source = context.Source;
+        SquadFallbackProfile fallbackProfile = context.FallbackProfileFor(agent);
 
         if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
         {
-            degradations.Add(new SquadDegradationRecord(
-                TargetToken,
-                agent.Name,
-                agent.Name,
+            context.Degradations.Add(context.Degradation(
+                agent,
                 "omitted",
-                agent.BodyDigest,
                 $"Fallback profile '{agent.Fallback}' declares no-primary-agent: omit; " +
                 "ZCode has no primary-agent primitive for this agent to render onto, so no " +
                 "file is emitted."));
@@ -460,12 +324,12 @@ public sealed class ZCodeRenderer : ISquadRenderer
         {
             // The canonical skill is the entry point and is emitted by the skill loop, so no
             // command is emitted here; one identity, one projection.
-            degradations.AddRange(BuildPrimaryAgentDegradations(
+            context.Degradations.AddRange(BuildPrimaryAgentDegradations(
                 agent,
                 fallbackProfile,
-                source.CapabilityProfiles.Profiles,
-                capabilityVocabulary,
-                mcpServerNames,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                mcp.ServerNames,
                 true));
             return;
         }
@@ -482,50 +346,41 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 "than deployed.");
         }
 
-        string body = RewriteResourceLinks(agent, skillIdentities, degradations, out bool rewritten);
+        string body = RewriteResourceLinks(agent, context.SkillNames, context.Degradations, out bool rewritten);
 
         Dictionary<string, string> frontmatter = new(StringComparer.Ordinal)
         {
-            ["description"] = CollapseToSingleLine(agent.Description)
+            ["description"] = context.SingleLine(agent.Description)
         };
 
-        string? model = ResolveZCodeModel(agent, source.ModelProfiles.Profiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        IReadOnlyList<string> tools = ResolveTools(
-            agent,
-            source.CapabilityProfiles.Profiles,
-            orchestratorExcludedMcpToolNames,
-            universalMcpToolNames,
-            arbiterMcpToolNames);
+        IReadOnlyList<string> tools = ResolveTools(agent, context.CapabilityProfiles, mcp);
 
-        string commandsDirectory = ResolvePrefixedDirectory(CommandsDirectory, scope);
-        files.Add(new SquadDeploymentFile(
-            $"{commandsDirectory}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(SquadMarkdownDocument.Compose(
-                ComposeFrontmatter(frontmatter, ("allowed-tools", tools)),
-                body)),
-            TargetToken));
+        context.Files.Add(context.CreateFile(
+            $"{context.ResolveDirectory("commands")}/{agent.Name}.md",
+            SquadMarkdownDocument.Compose(ComposeFrontmatter(frontmatter, ("allowed-tools", tools)), body)));
 
-        AppendRewrittenResources(files, agent, scope, rewritten);
-        degradations.AddRange(BuildPrimaryAgentDegradations(
+        AppendRewrittenResources(context, agent, rewritten);
+        context.Degradations.AddRange(BuildPrimaryAgentDegradations(
             agent,
             fallbackProfile,
-            source.CapabilityProfiles.Profiles,
-            capabilityVocabulary,
-            mcpServerNames));
+            context.CapabilityProfiles,
+            context.CapabilityVocabulary,
+            mcp.ServerNames));
     }
 
     private static SquadDeploymentFile RenderSkill(
+        SquadHarnessRenderContext context,
         string name,
         string description,
-        string instructionBody,
-        SquadDeploymentScope scope)
+        string instructionBody)
     {
-        string collapsed = CollapseToSingleLine(description);
+        string collapsed = context.SingleLine(description);
         if (collapsed.Length > MaxDescriptionLength)
         {
             throw new SquadRenderValidationException(
@@ -548,37 +403,25 @@ public sealed class ZCodeRenderer : ISquadRenderer
         frontmatter.Append("description: >-\n  ").Append(collapsed).Append('\n');
         frontmatter.Append("license: MIT\n");
 
-        string skillsDirectory = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDirectory}/{name}/SKILL.md",
-            Encoding.UTF8.GetBytes(SquadMarkdownDocument.Compose(
-                frontmatter.ToString(),
-                instructionBody)),
-            TargetToken);
+        return context.CreateFile(
+            $"{context.SkillsDirectory}/{name}/SKILL.md",
+            SquadMarkdownDocument.Compose(frontmatter.ToString(), instructionBody));
     }
 
     /// <summary>
     /// Projects an agent's or lowered command's resource closure under the skills tree, where
     /// neither the recursive agent scan nor the recursive command scan can reach it.
     /// </summary>
-    private static void AppendRewrittenResources(
-        List<SquadDeploymentFile> files,
-        SquadAgent agent,
-        SquadDeploymentScope scope,
-        bool rewritten)
+    private static void AppendRewrittenResources(SquadHarnessRenderContext context, SquadAgent agent, bool rewritten)
     {
         if (!rewritten)
         {
             return;
         }
 
-        string skillsDirectory = ResolvePrefixedDirectory(SkillsDirectory, scope);
         foreach (SquadResource resource in agent.Resources)
         {
-            files.Add(new SquadDeploymentFile(
-                $"{skillsDirectory}/{resource.RelativePath}",
-                Encoding.UTF8.GetBytes(resource.Content),
-                TargetToken));
+            context.Files.Add(context.CreateFile($"{context.SkillsDirectory}/{resource.RelativePath}", resource.Content));
         }
     }
 
@@ -637,7 +480,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
 
         rewritten = true;
         degradations.Add(new SquadDegradationRecord(
-            TargetToken,
+            "zcode",
             agent.Name,
             agent.Name,
             "resource-links-rewritten",
@@ -775,45 +618,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Under global scope the deployment root is already the ZCode storage directory, so the
-    /// portable path drops its <c>.zcode/</c> prefix and the same three subtrees hang off it.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
-    {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".zcode/", StringComparison.Ordinal)
-            ? baseDirectory[".zcode/".Length..]
-            : baseDirectory;
-    }
-
-    /// <summary>
-    /// Resolves the harness-specific model exactly as <c>ClaudeRenderer.ResolveClaudeModel</c>
-    /// does: the <c>zcode</c> harness override when the model profile declares one, otherwise
-    /// the target-neutral <c>default</c>; either an explicit or a defaulted <c>inherit</c>
-    /// omits the key, since that is the harness's own deferral value.
-    /// </summary>
-    private static string? ResolveZCodeModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue(TargetToken, out string? zcodeModel))
-        {
-            return string.Equals(zcodeModel, "inherit", StringComparison.Ordinal) ? null : zcodeModel;
-        }
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
-    }
-
-    /// <summary>
     /// Lowers a capability profile onto ZCode's built-in tool vocabulary. Only
     /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
     /// withhold, which keeps the lowering non-broadening by construction. An unresolvable
@@ -823,39 +627,20 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames,
-        IReadOnlyList<string> arbiterMcpToolNames)
+        McpPlan mcp)
     {
-        HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
-
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
-        {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    foreach (string tool in tools)
-                    {
-                        granted.Add(tool);
-                    }
-                }
-            }
-        }
-
-        // MCP names append after the built-ins rather than joining ToolOrder: they come from
+        // MCP names append after the built-ins rather than joining the fixed tool order: they come from
         // source, so they cannot be part of a fixed renderer-local order, and each group is
         // already emitted in a stable server-then-tool order by CapabilityDegradations.
         IReadOnlyList<string> resolved =
         [
-            .. ToolOrder.Where(granted.Contains),
+            .. Tools.Resolve(agent.CapabilityProfile, capabilityProfiles),
             .. CapabilityDegradations.ResolveMcpToolNames(
                 agent.CapabilityProfile,
                 capabilityProfiles,
-                orchestratorExcludedMcpToolNames,
-                universalMcpToolNames),
-            .. GrantsArbiter(agent, capabilityProfiles) ? arbiterMcpToolNames : []
+                mcp.OrchestratorExcludedToolNames,
+                mcp.UniversalToolNames),
+            .. GrantsArbiter(agent, capabilityProfiles) ? mcp.ArbiterToolNames : []
         ];
         if (resolved.Count == 0)
         {
@@ -893,7 +678,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                TargetToken,
+                "zcode",
                 agent.Name,
                 agent.Name,
                 "safety-narrowed",
@@ -939,7 +724,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         if (notExpressible.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                TargetToken,
+                "zcode",
                 agent.Name,
                 agent.Name,
                 "permission-not-expressible",
@@ -957,7 +742,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            TargetToken,
+            "zcode",
             agent.Name,
             agent.Name,
             agent.BodyDigest,
@@ -989,7 +774,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
               "rather than as a skill";
 
         yield return new SquadDegradationRecord(
-            TargetToken,
+            "zcode",
             agent.Name,
             agent.Name,
             "role-skill-fallback",
@@ -1008,7 +793,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
 
         yield return new SquadDegradationRecord(
-            TargetToken,
+            "zcode",
             agent.Name,
             agent.Name,
             "permission-not-expressible",
@@ -1064,11 +849,30 @@ public sealed class ZCodeRenderer : ISquadRenderer
         profile.Permissions.TryGetValue(ArbiterDecisionCapability, out SquadPermissionDecision decision) &&
         decision == SquadPermissionDecision.Allow;
 
-    private static string CollapseToSingleLine(string value)
+    /// <summary>
+    /// The MCP tool names a render reads once from canonical source rather than a renderer-local
+    /// list, so a tool renamed upstream is a source edit, and so the doctor check reads the same
+    /// roster. The split into entitlement classes, and the order each class is emitted in, live in
+    /// <see cref="CapabilityDegradations"/>: the partition is the one thing two targets must not
+    /// each decide. The Arbiter server is granted separately, only to the principals that call it.
+    /// </summary>
+    private sealed record McpPlan(
+        IReadOnlyList<string> OrchestratorExcludedToolNames,
+        IReadOnlyList<string> UniversalToolNames,
+        IReadOnlyList<string> ArbiterToolNames,
+        IReadOnlyList<string> ServerNames)
     {
-        return string.Join(
-            ' ',
-            value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        public static McpPlan Create(SquadHarnessRenderContext context)
+        {
+            IReadOnlyDictionary<string, IReadOnlyList<string>> standardMcpTools =
+                context.Source.Toolchain.RequiredMcpTools
+                    .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+            return new McpPlan(
+                CapabilityDegradations.OrchestratorExcludedMcpToolNames(standardMcpTools),
+                CapabilityDegradations.UniversalMcpToolNames(standardMcpTools),
+                ArbiterEnforced(context.Request) ? ArbiterMcpToolNames(context.Source) : [],
+                CapabilityDegradations.DeclaredMcpServerNames(standardMcpTools));
+        }
     }
 }

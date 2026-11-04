@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -59,10 +58,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Req 22.4), renders no block and leaves the owned files byte-identical.
 /// </para>
 /// </remarks>
-public sealed class CursorRenderer : ISquadRenderer
+public sealed class CursorRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".cursor/agents";
-    private const string SkillsDirectory = ".cursor/skills";
     private const string ArbiterCommand = "kyber-weave-arbiter hook --harness cursor";
 
     private static readonly string[] GovernedCapabilities =
@@ -82,190 +79,57 @@ public sealed class CursorRenderer : ISquadRenderer
     /// </summary>
     private static readonly string[] ReadOnlyEnforcedCapabilities = ["filesystem.write", "process.execute"];
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Cursor,
+        "Cursor",
+        ".cursor",
+        "agents",
+        SquadModelPolicy.HarnessValueVerbatim);
 
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public CursorRenderer()
+        : base(HarnessSpec)
     {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".cursor/", StringComparison.Ordinal)
-            ? baseDirectory[".cursor/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Cursor];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.Cursor))
+        if (agent.Invocation == SquadInvocation.Subagent)
         {
-            throw new ArgumentException(
-                "CursorRenderer was asked to render a target other than Cursor.",
-                nameof(request));
+            context.AddPrincipal(RenderAgentFile(context, agent), agent.Resources);
+            context.AddDegradation(BuildDegradationRecord(agent, context.CapabilityProfiles));
+            return;
         }
 
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Cursor);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        // Read upfront so the primary-agent fail-closed check can see whether a
-        // canonical skill already occupies the lowered identity before any file is built,
-        // regardless of which loop encounters the collision first.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in a lowered primary agent's
-        // permission-not-expressible details without a renderer change.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            if (agent.Invocation == SquadInvocation.Subagent)
-            {
-                SquadDeploymentFile principal = RenderAgent(
-                    agent,
-                    source.ModelProfiles.Profiles,
-                    source.CapabilityProfiles.Profiles,
-                    request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                SquadDegradationRecord? degradation = BuildDegradationRecord(agent, source.CapabilityProfiles.Profiles);
-                if (degradation is not null)
-                {
-                    degradations.Add(degradation);
-                }
-
-                continue;
-            }
-
-            SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-            if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-            {
-                if (skillIdentities.Contains(agent.Name))
-                {
-                    if (sharedIdentities.Contains(agent.Name))
-                    {
-                        // The canonical skill is the entry point and is emitted by the skill
-                        // loop, so no lowered skill is emitted here; one identity, one
-                        // projection.
-                        degradations.Add(BuildPrimaryAgentDegradation(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            capabilityVocabulary,
-                            true));
-                        continue;
-                    }
-
-                    throw new SquadRenderValidationException(
-                        $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
-                        $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
-                        "separate agent and skill namespaces with no role-prefixed fallback " +
-                        "mechanism, so this is a fail-closed condition rather than a naming " +
-                        "collision this renderer can resolve on its own.");
-                }
-
-                SquadDeploymentFile principal =
-                    RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                degradations.Add(BuildPrimaryAgentDegradation(
+        context.AddLoweredPrimaryAgent(
+            agent,
+            () =>
+                $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
+                $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
+                "separate agent and skill namespaces with no role-prefixed fallback " +
+                "mechanism, so this is a fail-closed condition rather than a naming " +
+                "collision this renderer can resolve on its own.",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody),
+            (fallbackProfile, reused) =>
+            [
+                BuildPrimaryAgentDegradation(
                     agent,
                     fallbackProfile,
-                    source.CapabilityProfiles.Profiles,
-                    capabilityVocabulary));
-            }
-            else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-            {
-                degradations.Add(new SquadDegradationRecord(
-                    "cursor",
-                    agent.Name,
-                    agent.Name,
-                    "omitted",
-                    agent.BodyDigest,
-                    $"Fallback profile '{agent.Fallback}' declares " +
-                    "no-primary-agent: omit; Cursor has no primary-agent primitive for this " +
-                    "agent to render onto, so no file is emitted."));
-            }
-            else
-            {
-                throw new SquadRenderValidationException(
-                    $"Fallback profile '{agent.Fallback}' declares unsupported " +
-                    $"no-primary-agent value '{fallbackProfile.NoPrimaryAgent}' for primary " +
-                    $"agent '{agent.Name}'.");
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal =
-                RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        // A null Arbiter must render byte for byte as before the field existed, so the
-        // guard lives here: only an enabled wiring at Project scope emits the owned
-        // hook block. Under Global scope there is no project configuration to enforce
-        // from (Req 22.4).
-        List<SquadRenderedBlock> blocks = [];
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
-        {
-            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
-        }
-
-        return Task.FromResult(new SquadRenderResult(
-            true,
-            files,
-            degradations,
-            [],
-            [],
-            blocks.Count > 0 ? blocks : null));
+                    context.CapabilityProfiles,
+                    context.CapabilityVocabulary,
+                    reused)
+            ]);
     }
 
-    private static SquadDeploymentFile RenderAgent(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        SquadDeploymentScope scope)
+    /// <summary>Squad's owned block for the shared <c>.cursor/hooks.json</c>.</summary>
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is { } arbiter)
+        {
+            context.Blocks.Add(BuildArbiterBlock(arbiter.HookTimeoutSeconds));
+        }
+    }
+
+    private static SquadDeploymentFile RenderAgentFile(SquadHarnessRenderContext context, SquadAgent agent)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -273,59 +137,25 @@ public sealed class CursorRenderer : ISquadRenderer
             ["description"] = agent.Description
         };
 
-        string? model = ResolveCursorModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        if (IsReadOnly(agent, capabilityProfiles))
+        if (IsReadOnly(agent, context.CapabilityProfiles))
         {
             frontmatter["readonly"] = true;
         }
 
-        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            "cursor");
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            SquadYamlEmitter.Default.Compose(frontmatter, agent.InstructionBody));
     }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody,
-        SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, instructionBody);
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "cursor");
-    }
-
-    /// <summary>Builds Squad's owned block for <c>.cursor/hooks.json</c>.</summary>
-    /// <remarks>
-    /// [F6]: flat entries matching <c>Task</c> with <c>failClosed: true</c> and a
-    /// timeout in seconds. The command carries no <c>--caller</c> because every
-    /// shared-file target has project-wide hooks (design §10.4). Only documented
-    /// fields are written, and no sentinel key.
-    /// </remarks>
     private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
         new(
-            SquadTargetCatalog.GetToken(SquadTarget.Cursor),
+            "cursor",
             SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
             SquadHookBlockFormat.Cursor,
             [
@@ -340,26 +170,6 @@ public sealed class CursorRenderer : ISquadRenderer
         ["timeout"] = timeoutSeconds,
         ["failClosed"] = true,
     };
-
-    private static string? ResolveCursorModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue("cursor", out string? cursorModel))
-        {
-            return cursorModel;
-        }
-
-        // Defer to Cursor's model default (omit model key) when fallback profile default is 'inherit'.
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
-            ? null
-            : profile.Default;
-    }
 
     private static bool IsReadOnly(
         SquadAgent agent,

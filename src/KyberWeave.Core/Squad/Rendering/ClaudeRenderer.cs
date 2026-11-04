@@ -98,11 +98,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>updatedInput</c> so the dispatcher receives the envelope inside the hand-back.
 /// </para>
 /// </remarks>
-public sealed class ClaudeRenderer : ISquadRenderer
+public sealed class ClaudeRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".claude/agents";
-    private const string SkillsDirectory = ".claude/skills";
-
     /// <summary>
     /// Anchored matchers for Arbiter frontmatter hooks. A matcher containing characters
     /// outside <c>[A-Za-z0-9_-, |]</c> is an unanchored JavaScript regex, so all three
@@ -117,8 +114,6 @@ public sealed class ClaudeRenderer : ISquadRenderer
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
     private const string HandbackMatcher = "^SubagentHandback$";
-
-    private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
     /// <summary>
     /// The MCP wildcard every read-entitled subagent carries, the pure orchestrator included.
@@ -137,253 +132,106 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Claude Code's built-in tool names,
-    /// verified against code.claude.com/docs/en/sub-agents on 2026-08-23.
-    /// <c>network.publish</c> is absent deliberately: no built-in publish tool exists.
-    /// <c>delegate</c> is handled separately so a non-empty
+    /// verified against code.claude.com/docs/en/sub-agents on 2026-08-23. <c>TodoWrite</c> and
+    /// <c>Skill</c> are ungoverned. <c>network.publish</c> is absent deliberately: no built-in
+    /// publish tool exists. <c>delegate</c> is handled separately so a non-empty
     /// <see cref="SquadAgent.DelegatesTo"/> can emit <c>Agent(roster)</c>.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["Read"]),
-        ("filesystem.search", ["Grep", "Glob"]),
-        ("filesystem.write", ["Edit", "Write", "NotebookEdit"]),
-        ("process.execute", ["Bash", "PowerShell"]),
-        ("network.read", ["WebFetch", "WebSearch"])
-    ];
-
-    /// <summary>
-    /// Emission order, fixed so a rendered agent file is byte-stable regardless of how the
-    /// profile's permissions enumerate. <c>Agent</c> is a placeholder: a roster form
+    /// <remarks>
+    /// The order is fixed so a rendered agent file is byte-stable regardless of how the profile's
+    /// permissions enumerate. <c>Agent</c> is a placeholder: a roster form
     /// <c>Agent(name1, name2, …)</c> occupies the same slot when present.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "TodoWrite",
-        "Skill",
-        "Read",
-        "mcp__codegraph__*",
-        "mcp__kyber-weave__*",
-        "mcp__context7__*",
-        "Grep",
-        "Glob",
-        "Edit",
-        "Write",
-        "NotebookEdit",
-        "Bash",
-        "PowerShell",
-        "WebFetch",
-        "WebSearch",
-        "Agent"
-    ];
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["Read"]),
+            ("filesystem.search", ["Grep", "Glob"]),
+            ("filesystem.write", ["Edit", "Write", "NotebookEdit"]),
+            ("process.execute", ["Bash", "PowerShell"]),
+            ("network.read", ["WebFetch", "WebSearch"])
+        ],
+        [
+            "TodoWrite",
+            "Skill",
+            "Read",
+            "mcp__codegraph__*",
+            "mcp__kyber-weave__*",
+            "mcp__context7__*",
+            "Grep",
+            "Glob",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Bash",
+            "PowerShell",
+            "WebFetch",
+            "WebSearch",
+            "Agent"
+        ],
+        ["TodoWrite", "Skill"]);
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
+    private static readonly SquadYamlEmitter Yaml = new(new SerializerBuilder()
         .WithTypeConverter(new ClaudeToolsFlowSequenceConverter())
-        .Build();
+        .Build());
 
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Claude,
+        "Claude",
+        ".claude",
+        "agents",
+        SquadModelPolicy.InheritOmitted);
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Claude];
-
-    /// <summary>
-    /// Resolves the directory prefix for agents/skills based on deployment scope.
-    /// Under Project scope, keeps `.claude/` prefix; under Global scope, removes it.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public ClaudeRenderer()
+        : base(HarnessSpec)
     {
-        // baseDirectory is like ".claude/agents" or ".claude/skills"
-        // Under Project scope, return as-is
-        // Under Global scope, strip the ".claude/" prefix
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        // Strip ".claude/" prefix for global scope
-        return baseDirectory.StartsWith(".claude/", StringComparison.Ordinal)
-            ? baseDirectory[".claude/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
+        ArbiterPlan arbiter = context.GetOrCreateState(ArbiterPlan.Create);
+        context.AddPrincipal(RenderAgentFile(context, agent, arbiter), agent.Resources);
 
-        if (request.Targets.Any(target => target != SquadTarget.Claude))
-        {
-            throw new ArgumentException(
-                "ClaudeRenderer was asked to render a target other than Claude.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // Read skill identities upfront so the primary-agent collision check can see whether
-        // a canonical skill already occupies the entry-point identity before any file is built.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in a lowered primary agent's
-        // permission-not-expressible details without a renderer change.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        bool arbiterEnabled = request.Arbiter is not null &&
-            request.Arbiter.Enabled &&
-            request.Scope == SquadDeploymentScope.Project;
-        IReadOnlySet<string> dispatcherAgents = arbiterEnabled
-            ? ArbiterHookWiring.Dispatchers(source)
-            : new HashSet<string>(StringComparer.Ordinal);
-        IReadOnlySet<string> guardedAgents = arbiterEnabled
-            ? ArbiterHookWiring.GuardedAgents(source)
-            : new HashSet<string>(StringComparer.Ordinal);
-        IReadOnlySet<string> dispatchTargets = arbiterEnabled
-            ? DispatchTargets(source)
-            : new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            SquadDeploymentFile principal = RenderAgent(
+        context.AddEntryPointSkillProjection(
+            agent,
+            "a subagent",
+            () => RenderEntryPointSkill(context, agent, arbiter),
+            (fallbackProfile, path, reused) => BuildPrimaryAgentDegradationRecords(
                 agent,
-                source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles,
-                request.Scope,
-                request.Arbiter,
-                dispatcherAgents,
-                guardedAgents,
-                dispatchTargets);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, agent.Resources);
-
-            if (agent.Invocation == SquadInvocation.Primary)
-            {
-                SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-                if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-                {
-                    if (skillIdentities.Contains(agent.Name))
-                    {
-                        // A declared shared identity already has its canonical skill as the entry
-                        // point at .claude/skills/<name>/SKILL.md, so emitting the entry-point
-                        // skill too would project one identity twice. The canonical skill is the
-                        // entry point; skip the duplicate rather than failing closed.
-                        if (sharedIdentities.Contains(agent.Name))
-                        {
-                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                                agent,
-                                fallbackProfile,
-                                source.CapabilityProfiles.Profiles,
-                                capabilityVocabulary,
-                                true,
-                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md"));
-                        }
-                        else
-                        {
-                            // Not a declared shared identity: the canonical skill and the
-                            // entry-point skill would both claim
-                            // .claude/skills/<name>/SKILL.md, and a native target has no
-                            // role-prefixed escape hatch, so this is a real collision that
-                            // cannot be resolved here.
-                            throw new SquadRenderValidationException(
-                                $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
-                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                                "identity. Claude renders both a subagent and an entry-point skill, " +
-                                "so this is a fail-closed condition rather than a naming collision " +
-                                "this renderer can resolve on its own.");
-                        }
-                    }
-                    else
-                    {
-                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(
-                            agent,
-                            request.Scope,
-                            request.Arbiter,
-                            dispatcherAgents,
-                            guardedAgents,
-                            dispatchTargets);
-                        files.Add(skillPrincipal);
-                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            capabilityVocabulary));
-                    }
-                }
-                else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-                {
-                    // Omit mode: render exactly as pre-T3 (no entry-point skill, byte-identical records).
-                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
-                }
-                else
-                {
-                    throw new SquadRenderValidationException(
-                        $"Fallback profile '{agent.Fallback}' declares unsupported " +
-                        $"no-primary-agent value '{fallbackProfile.NoPrimaryAgent}' for primary " +
-                        $"agent '{agent.Name}'.");
-                }
-            }
-            else
-            {
-                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+                fallbackProfile,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                reused,
+                reused ? path : ""),
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles));
     }
 
-    private static SquadDeploymentFile RenderAgent(
+    /// <summary>
+    /// The entry-point skill stays registered for the session, so a dispatching primary agent's
+    /// skill carries the same dispatch hooks as its subagent file.
+    /// </summary>
+    private static SquadDeploymentFile RenderEntryPointSkill(
+        SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        SquadDeploymentScope scope,
-        SquadArbiterWiring? arbiter,
-        IReadOnlySet<string> dispatcherAgents,
-        IReadOnlySet<string> guardedAgents,
-        IReadOnlySet<string> dispatchTargets)
+        ArbiterPlan arbiter)
+    {
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(
+            agent,
+            context.EnabledArbiter,
+            arbiter.Dispatchers,
+            arbiter.Guarded,
+            arbiter.DispatchTargets);
+        return context.RenderSkillDocument(
+            agent.Name,
+            agent.Description,
+            agent.InstructionBody,
+            Yaml,
+            hooks is null ? null : new Dictionary<string, object?>(StringComparer.Ordinal) { ["hooks"] = hooks });
+    }
+
+    private static SquadDeploymentFile RenderAgentFile(
+        SquadHarnessRenderContext context,
+        SquadAgent agent,
+        ArbiterPlan arbiter)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -391,98 +239,29 @@ public sealed class ClaudeRenderer : ISquadRenderer
             ["description"] = agent.Description
         };
 
-        string? model = ResolveClaudeModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
         // Always emit tools: omitting the key inherits every subagent tool (widening).
-        frontmatter["tools"] = new ClaudeToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
+        frontmatter["tools"] = new ClaudeToolsFlowSequence(ResolveTools(agent, context.CapabilityProfiles));
 
-        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents, dispatchTargets);
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(
+            agent,
+            context.EnabledArbiter,
+            arbiter.Dispatchers,
+            arbiter.Guarded,
+            arbiter.DispatchTargets);
         if (hooks is not null)
         {
             frontmatter["hooks"] = hooks;
         }
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            "claude");
-    }
-
-    private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
-        SquadAgent agent,
-        SquadDeploymentScope scope,
-        SquadArbiterWiring? arbiter,
-        IReadOnlySet<string> dispatcherAgents,
-        IReadOnlySet<string> guardedAgents,
-        IReadOnlySet<string> dispatchTargets)
-    {
-        string singleLineDescription = string.Join(" ", agent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = agent.Name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        // The entry-point skill stays registered for the session, so a dispatching primary
-        // agent's skill carries the same dispatch hooks as its subagent file.
-        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents, dispatchTargets);
-        if (hooks is not null)
-        {
-            frontmatter["hooks"] = hooks;
-        }
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{agent.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "claude");
-    }
-
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = skill.Name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "claude");
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}.md",
+            Yaml.Compose(frontmatter, agent.InstructionBody));
     }
 
     /// <summary>
@@ -586,29 +365,6 @@ public sealed class ClaudeRenderer : ISquadRenderer
         return targets;
     }
 
-    private static string? ResolveClaudeModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue("claude", out string? claudeModel))
-        {
-            // Docs default is inherit when the key is omitted; an explicit inherit is the
-            // same deferral and must not appear in frontmatter.
-            return string.Equals(claudeModel, "inherit", StringComparison.Ordinal)
-                ? null
-                : claudeModel;
-        }
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
-            ? null
-            : profile.Default;
-    }
-
     /// <summary>
     /// Lowers a capability profile onto Claude Code's closed tool allow-list. Only
     /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
@@ -618,25 +374,13 @@ public sealed class ClaudeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
-        HashSet<string> granted = new(BaseUngovernedTools, StringComparer.Ordinal);
+        HashSet<string> granted = Tools.Grant(agent.CapabilityProfile, capabilityProfiles);
         string? agentToolEntry = null;
 
         // An unresolvable profile grants nothing beyond the ungoverned tools. Falling back
         // to "grant everything" here would turn a source error into silent widening.
         if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    foreach (string tool in tools)
-                    {
-                        granted.Add(tool);
-                    }
-                }
-            }
-
             if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
                 delegateDecision == SquadPermissionDecision.Allow)
             {
@@ -667,7 +411,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
         }
 
         List<string> ordered = [];
-        foreach (string tool in ToolOrder)
+        foreach (string tool in Tools.Order)
         {
             if (string.Equals(tool, "Agent", StringComparison.Ordinal))
             {
@@ -916,6 +660,24 @@ public sealed class ClaudeRenderer : ISquadRenderer
         {
             yield return notIsolable;
         }
+    }
+
+    /// <summary>The agents each Arbiter hook attaches to, empty unless Arbiter is enabled at project scope.</summary>
+    private sealed record ArbiterPlan(
+        IReadOnlySet<string> Dispatchers,
+        IReadOnlySet<string> Guarded,
+        IReadOnlySet<string> DispatchTargets)
+    {
+        public static ArbiterPlan Create(SquadHarnessRenderContext context) =>
+            context.EnabledArbiter is null
+                ? new ArbiterPlan(
+                    new HashSet<string>(StringComparer.Ordinal),
+                    new HashSet<string>(StringComparer.Ordinal),
+                    new HashSet<string>(StringComparer.Ordinal))
+                : new ArbiterPlan(
+                    ArbiterHookWiring.Dispatchers(context.Source),
+                    ArbiterHookWiring.GuardedAgents(context.Source),
+                    ClaudeRenderer.DispatchTargets(context.Source));
     }
 
     /// <summary>

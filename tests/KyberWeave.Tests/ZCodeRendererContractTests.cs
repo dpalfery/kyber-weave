@@ -706,7 +706,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_ZCodeGlobalScope_DropsTheDotZcodePrefixFromEverySubtree()
+    public async Task RenderAsync_ZCodeGlobalScope_KeepsTheRewrittenSkillLinkForm()
     {
         SquadRenderResult project = await RenderZCodeAsync(ProductRoot);
         SquadRenderResult global = await RenderZCodeAsync(ProductRoot, SquadDeploymentScope.Global);

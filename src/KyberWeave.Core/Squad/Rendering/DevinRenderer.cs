@@ -162,11 +162,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// byte-identical.
 /// </para>
 /// </remarks>
-public sealed class DevinRenderer : ISquadRenderer
+public sealed class DevinRenderer : SquadHarnessRenderer
 {
     private const string TargetToken = "devin";
-    private const string AgentsDirectory = ".devin/agents";
-    private const string SkillsDirectory = ".devin/skills";
 
     /// <summary>Matches Devin's subagent dispatch tool ([F12]). The vendor documents only
     /// that <c>run_subagent</c> "takes a profile"; no namespaced spelling of the tool is
@@ -175,22 +173,31 @@ public sealed class DevinRenderer : ISquadRenderer
 
     private const string ArbiterServer = "kyber-weave-arbiter";
 
-    private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness devin";
-
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Devin's core tool names, every tool that
-    /// performs a capability included. <c>network.publish</c> is absent because no tool
+    /// performs a capability included. <c>todo_write</c> and <c>skill</c> are granted on every
+    /// subagent regardless of capability profile. <c>network.publish</c> is absent because no tool
     /// expresses it, and <c>delegate</c> because granting it cannot keep the roster (see the
     /// class remarks).
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("filesystem.read", ["read", "notebook_read"]),
-        ("filesystem.search", ["grep", "glob"]),
-        ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
-        ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
-        ("network.read", ["webfetch", "web_search"])
-    ];
+    /// <remarks>
+    /// Fixed tool emission order, so a rendered file is byte-stable regardless of how the
+    /// capability profile's permissions happen to enumerate.
+    /// </remarks>
+    private static readonly SquadToolMap Tools = new(
+        [
+            ("filesystem.read", ["read", "notebook_read"]),
+            ("filesystem.search", ["grep", "glob"]),
+            ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
+            ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
+            ("network.read", ["webfetch", "web_search"])
+        ],
+        [
+            "todo_write", "skill", "read", "notebook_read", "grep", "glob", "edit", "write",
+            "apply_patch", "notebook_edit", "exec", "get_output", "write_to_process", "kill_shell",
+            "webfetch", "web_search"
+        ],
+        ["todo_write", "skill"]);
 
     /// <summary>
     /// The lowered primary agent's <c>triggers</c>: the operator may start it, the model may not
@@ -198,245 +205,70 @@ public sealed class DevinRenderer : ISquadRenderer
     /// </summary>
     private static readonly string[] UserOnlyTriggers = ["user"];
 
-    /// <summary>Granted on every subagent regardless of capability profile.</summary>
-    private static readonly string[] UngovernedTools = ["todo_write", "skill"];
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Devin,
+        "Devin",
+        ".devin",
+        "agents",
+        SquadModelPolicy.InheritOmitted,
+        SquadLineBreaks.LineFeedOnly,
+        SkillLicense: null);
 
-    /// <summary>
-    /// Fixed tool emission order, so a rendered file is byte-stable regardless of how the
-    /// capability profile's permissions happen to enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "todo_write", "skill", "read", "notebook_read", "grep", "glob", "edit", "write",
-        "apply_patch", "notebook_edit", "exec", "get_output", "write_to_process", "kill_shell",
-        "webfetch", "web_search"
-    ];
-
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
-
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the registry
-    /// may dispatch renderers concurrently, so serialization takes this lock.
-    /// </summary>
-    private static readonly object SerializerLock = new();
-
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Devin];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
+    public DevinRenderer()
+        : base(HarnessSpec)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.Devin))
-        {
-            throw new ArgumentException(
-                "DevinRenderer was asked to render a target other than Devin.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Devin);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        // Read upfront so the primary-agent fail-closed check can see whether a canonical
-        // skill already occupies the lowered identity, whichever loop reaches it first.
-        HashSet<string> skillIdentities = source.Skills
-            .Select(skill => skill.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in a lowered agent's
-        // permission-not-expressible details without a renderer change.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        // Read from canonical source rather than a renderer-local list, so a tool renamed
-        // upstream is a source edit, and so the doctor check reads the same roster. The split
-        // into entitlement classes, and the order each class is emitted in, live in
-        // CapabilityDegradations: the partition is the one thing two targets must not each decide.
-        // The Arbiter server is granted separately, only through the Arbiter's own grant
-        // path, so it is excluded from the standard MCP partition on every target.
-        IReadOnlyDictionary<string, IReadOnlyList<string>> standardMcpTools =
-            source.Toolchain.RequiredMcpTools
-                .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
-                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames =
-            CapabilityDegradations.OrchestratorExcludedMcpToolNames(standardMcpTools);
-        IReadOnlyList<string> universalMcpToolNames =
-            CapabilityDegradations.UniversalMcpToolNames(standardMcpTools);
-        IReadOnlyList<string> mcpServerNames =
-            CapabilityDegradations.DeclaredMcpServerNames(standardMcpTools);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            if (agent.Invocation == SquadInvocation.Subagent)
-            {
-                SquadDeploymentFile principal = RenderSubagent(
-                    agent,
-                    source.ModelProfiles.Profiles,
-                    source.CapabilityProfiles.Profiles,
-                    orchestratorExcludedMcpToolNames,
-                    universalMcpToolNames,
-                    request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                degradations.AddRange(BuildSubagentDegradations(
-                    agent,
-                    source.CapabilityProfiles.Profiles,
-                    mcpServerNames));
-                continue;
-            }
-
-            SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
-            if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
-            {
-                if (skillIdentities.Contains(agent.Name))
-                {
-                    if (sharedIdentities.Contains(agent.Name))
-                    {
-                        // The canonical skill is the entry point and is emitted by the skill
-                        // loop, so no lowered skill is emitted here; one identity, one
-                        // projection.
-                        degradations.AddRange(BuildPrimaryAgentDegradations(
-                            agent,
-                            fallbackProfile,
-                            source.CapabilityProfiles.Profiles,
-                            capabilityVocabulary,
-                            true));
-                        continue;
-                    }
-
-                    throw new SquadRenderValidationException(
-                        $"Cannot lower primary agent '{agent.Name}' to a Devin skill: a canonical " +
-                        $"skill named '{agent.Name}' already occupies that identity. Devin keeps " +
-                        "agents and skills in separate namespaces with no role-prefixed fallback, " +
-                        "so this fails closed rather than renaming either one.");
-                }
-
-                SquadDeploymentFile principal = RenderSkill(
-                    agent.Name,
-                    agent.Description,
-                    agent.InstructionBody,
-                    true,
-                    request.Scope);
-                files.Add(principal);
-                SquadResourceProjection.Append(files, principal, agent.Resources);
-
-                degradations.AddRange(BuildPrimaryAgentDegradations(
-                    agent,
-                    fallbackProfile,
-                    source.CapabilityProfiles.Profiles,
-                    capabilityVocabulary));
-            }
-            else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
-            {
-                degradations.Add(new SquadDegradationRecord(
-                    TargetToken,
-                    agent.Name,
-                    agent.Name,
-                    "omitted",
-                    agent.BodyDigest,
-                    $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                    "omit; Devin has no primary-agent primitive for this agent to render " +
-                    "onto, so no file is emitted."));
-            }
-            else
-            {
-                throw new SquadRenderValidationException(
-                    $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
-                    $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection, per the same
-            // rule ClaudeRenderer follows. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(
-                skill.Name,
-                skill.Description,
-                skill.InstructionBody,
-                false,
-                request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        // The Arbiter block and its degradation travel with the render only when the wiring
-        // is enabled at project scope; otherwise the render stays byte-identical to omitting
-        // the wiring entirely (Req 22.4). Under Global scope the receipt keeps the
-        // wiring-derived global-scope record instead.
-        List<SquadRenderedBlock> blocks = [];
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
-        {
-            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
-            degradations.AddRange(NoPostDispatchFeedbackDegradations(source));
-        }
-
-        return Task.FromResult(new SquadRenderResult(
-            true,
-            files,
-            degradations,
-            [],
-            [],
-            blocks.Count > 0 ? blocks : null));
     }
 
-    /// <summary>Builds Squad's owned block for <c>.devin/hooks.v1.json</c>.</summary>
-    /// <remarks>
-    /// [F12]: the whole file is the hooks object in the Claude Code format, so the matcher
-    /// groups sit at the top level and each group carries one command hook with a timeout
-    /// in seconds. The command carries no <c>--caller</c> because every shared-file target
-    /// has project-wide hooks (design §10.4). Only documented fields are written, and no
-    /// sentinel key.
-    /// </remarks>
-    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
-        new(
-            TargetToken,
-            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Devin),
-            SquadHookBlockFormat.Devin,
-            [
-                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(timeoutSeconds)),
-                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(timeoutSeconds)),
-            ]);
-
-    private static JsonObject MatcherGroup(int timeoutSeconds) =>
-        new()
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
         {
-            ["matcher"] = ArbiterMatcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
+            McpPlan mcp = context.GetOrCreateState(McpPlan.Create);
+            context.AddPrincipal(RenderSubagent(context, agent, mcp), agent.Resources);
+            context.Degradations.AddRange(BuildSubagentDegradations(agent, context.CapabilityProfiles, mcp.ServerNames));
+            return;
+        }
+
+        context.AddLoweredPrimaryAgent(
+            agent,
+            () =>
+                $"Cannot lower primary agent '{agent.Name}' to a Devin skill: a canonical " +
+                $"skill named '{agent.Name}' already occupies that identity. Devin keeps " +
+                "agents and skills in separate namespaces with no role-prefixed fallback, " +
+                "so this fails closed rather than renaming either one.",
+            // The lowered skill runs only when the operator starts it (ADR 0025 decision 7).
+            () => context.RenderSkillDocument(
+                agent.Name,
+                agent.Description,
+                agent.InstructionBody,
+                additionalFrontmatter: new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["type"] = "command",
-                    ["command"] = ArbiterCommandLine,
-                    ["timeout"] = timeoutSeconds,
+                    ["triggers"] = UserOnlyTriggers
                 }),
-        };
+            (fallbackProfile, reused) => BuildPrimaryAgentDegradations(
+                agent,
+                fallbackProfile,
+                context.CapabilityProfiles,
+                context.CapabilityVocabulary,
+                reused));
+    }
+
+    /// <summary>
+    /// The Arbiter block and its degradation travel with the render only when the wiring is
+    /// enabled at project scope; otherwise the render stays byte-identical to omitting the wiring
+    /// entirely (Req 22.4). Under Global scope the receipt keeps the wiring-derived global-scope
+    /// record instead.
+    /// </summary>
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is null)
+        {
+            return;
+        }
+
+        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Devin, ArbiterMatcher);
+        context.Degradations.AddRange(NoPostDispatchFeedbackDegradations(context.Source));
+    }
 
     /// <summary>
     /// The render-time <c>arbiter-not-enforced</c> records accompanying Devin's block, one
@@ -471,20 +303,17 @@ public sealed class DevinRenderer : ISquadRenderer
     }
 
     private static SquadDeploymentFile RenderSubagent(
+        SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames,
-        SquadDeploymentScope scope)
+        McpPlan mcp)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = CollapseToSingleLine(agent.Description)
+            ["description"] = context.SingleLine(agent.Description)
         };
 
-        string? model = ResolveDevinModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
@@ -492,82 +321,13 @@ public sealed class DevinRenderer : ISquadRenderer
 
         frontmatter["allowed-tools"] = ResolveTools(
             agent,
-            capabilityProfiles,
-            orchestratorExcludedMcpToolNames,
-            universalMcpToolNames);
+            context.CapabilityProfiles,
+            mcp.OrchestratorExcludedToolNames,
+            mcp.UniversalToolNames);
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        return new SquadDeploymentFile(
-            $"{ResolvePrefixedDirectory(AgentsDirectory, scope)}/{agent.Name}/AGENT.md",
-            Encoding.UTF8.GetBytes(content),
-            TargetToken);
-    }
-
-    private static SquadDeploymentFile RenderSkill(
-        string name,
-        string description,
-        string instructionBody,
-        bool userInvokedOnly,
-        SquadDeploymentScope scope)
-    {
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = name,
-            ["description"] = CollapseToSingleLine(description)
-        };
-
-        if (userInvokedOnly)
-        {
-            frontmatter["triggers"] = UserOnlyTriggers;
-        }
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, instructionBody);
-        }
-
-        return new SquadDeploymentFile(
-            $"{ResolvePrefixedDirectory(SkillsDirectory, scope)}/{name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            TargetToken);
-    }
-
-    /// <summary>
-    /// Global scope writes beneath the Devin user configuration directory itself, so the
-    /// project's <c>.devin/</c> prefix is dropped there.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
-    {
-        return scope == SquadDeploymentScope.Project
-            ? baseDirectory
-            : baseDirectory[".devin/".Length..];
-    }
-
-    /// <summary>
-    /// The <c>devin</c> harness value when the model profile declares one, otherwise the
-    /// target-neutral <c>default</c>; either an explicit or a defaulted <c>inherit</c> omits
-    /// <c>model</c>, which on Devin leaves the subagent on the router-chosen default subagent
-    /// model rather than the parent's.
-    /// </summary>
-    private static string? ResolveDevinModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        string resolved = profile.HarnessModels.TryGetValue(TargetToken, out string? devinModel)
-            ? devinModel
-            : profile.Default;
-        return string.Equals(resolved, "inherit", StringComparison.Ordinal) ? null : resolved;
+        return context.CreateFile(
+            $"{context.AgentsDirectory}/{agent.Name}/AGENT.md",
+            SquadYamlEmitter.Default.Compose(frontmatter, agent.InstructionBody));
     }
 
     /// <summary>
@@ -581,27 +341,14 @@ public sealed class DevinRenderer : ISquadRenderer
         IReadOnlyList<string> orchestratorExcludedMcpToolNames,
         IReadOnlyList<string> universalMcpToolNames)
     {
-        HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
         string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
-
-        if (capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
-        {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    granted.UnionWith(tools);
-                }
-            }
-        }
 
         // MCP names append after the built-ins: they come from source, so they cannot join the
         // fixed renderer-local order, and each group is already server-then-tool from
         // CapabilityDegradations.
         string[] resolved =
         [
-            .. ToolOrder.Where(granted.Contains),
+            .. Tools.Resolve(profileName, capabilityProfiles),
             .. CapabilityDegradations.ResolveMcpToolNames(
                 profileName,
                 capabilityProfiles,
@@ -764,11 +511,29 @@ public sealed class DevinRenderer : ISquadRenderer
             $"profile denies. Its delegates-to roster ({rosterText}) is instruction-only.");
     }
 
-    private static string CollapseToSingleLine(string value)
+    /// <summary>
+    /// The MCP tool names a render reads once from canonical source rather than a renderer-local
+    /// list, so a tool renamed upstream is a source edit, and so the doctor check reads the same
+    /// roster. The split into entitlement classes, and the order each class is emitted in, live in
+    /// <see cref="CapabilityDegradations"/>: the partition is the one thing two targets must not
+    /// each decide. The Arbiter server is granted separately, only through the Arbiter's own grant
+    /// path, so it is excluded from the standard MCP partition on every target.
+    /// </summary>
+    private sealed record McpPlan(
+        IReadOnlyList<string> OrchestratorExcludedToolNames,
+        IReadOnlyList<string> UniversalToolNames,
+        IReadOnlyList<string> ServerNames)
     {
-        return string.Join(
-            ' ',
-            value.Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        public static McpPlan Create(SquadHarnessRenderContext context)
+        {
+            IReadOnlyDictionary<string, IReadOnlyList<string>> standardMcpTools =
+                context.Source.Toolchain.RequiredMcpTools
+                    .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+            return new McpPlan(
+                CapabilityDegradations.OrchestratorExcludedMcpToolNames(standardMcpTools),
+                CapabilityDegradations.UniversalMcpToolNames(standardMcpTools),
+                CapabilityDegradations.DeclaredMcpServerNames(standardMcpTools));
+        }
     }
 }

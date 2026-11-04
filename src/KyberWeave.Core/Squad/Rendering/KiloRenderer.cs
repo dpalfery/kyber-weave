@@ -1,7 +1,5 @@
-using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -94,12 +92,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// existed.
 /// </para>
 /// </remarks>
-public sealed class KiloRenderer : ISquadRenderer
+public sealed class KiloRenderer : SquadHarnessRenderer
 {
-    private const string AgentsDirectory = ".kilo/agents";
-    private const string SkillsDirectory = ".kilo/skills";
-    private const string ArbiterPluginFileRelativePath = ".kilo/plugin/kyber-arbiter.ts";
-
     /// <summary>
     /// The <c>permission</c> entry naming the whole <c>kyber-weave</c> MCP surface: Kilo gates MCP
     /// tools under the same permission map as built-in ones, keyed <c>{server}_{tool}</c> with the
@@ -109,138 +103,19 @@ public sealed class KiloRenderer : ISquadRenderer
     /// </summary>
     private const string KyberWeaveMcpPermission = "kyber-weave_*";
 
-    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(() => new SerializerBuilder().Build());
+    private static readonly SquadHarnessSpec HarnessSpec = new(
+        SquadTarget.Kilo,
+        "Kilo",
+        ".kilo",
+        "agents",
+        SquadModelPolicy.InheritOmitted);
 
-    /// <summary>
-    /// Under <c>Scope: Global</c> the physical root already is Kilo's global directory
-    /// (<c>~/.config/kilo</c>), so the relative path drops the project-scope <c>.kilo/</c>
-    /// wrapper and emits the bare <c>agents/</c> / <c>skills/</c> form directly.
-    /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    public KiloRenderer()
+        : base(HarnessSpec)
     {
-        if (scope == SquadDeploymentScope.Project)
-        {
-            return baseDirectory;
-        }
-
-        return baseDirectory.StartsWith(".kilo/", StringComparison.Ordinal)
-            ? baseDirectory[".kilo/".Length..]
-            : baseDirectory;
     }
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Kilo];
-
-    /// <inheritdoc />
-    public Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (request.Targets.Any(target => target != SquadTarget.Kilo))
-        {
-            throw new ArgumentException(
-                "KiloRenderer was asked to render a target other than Kilo.",
-                nameof(request));
-        }
-
-        if (request.Targets.Count == 0)
-        {
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-
-        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Kilo);
-        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-        // A subagent shared identity is suppressed because the agent file carries the identical
-        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
-        // point, so suppressing it would leave the wrapper pointing at nothing.
-        HashSet<string> suppressedSkillIdentities =
-            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
-
-        List<SquadDeploymentFile> files = [];
-        List<SquadDegradationRecord> degradations = [];
-
-        // The declared vocabulary, not a renderer-local copy: a capability added to
-        // profiles/capabilities.yml must appear in degradation text without a renderer
-        // change. Sorted for deterministic details strings.
-        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
-            // carries agent_coding_standards, and the role that assigns work is the role telling
-            // its delegates which standards they are held to (ADR 0050). The predicate is shared so
-            // this target cannot drift from the others' answer.
-            bool grantsKyberWeaveMcp = CapabilityDegradations.GrantsUniversalMcpServers(
-                agent.CapabilityProfile,
-                source.CapabilityProfiles.Profiles);
-
-            SquadDeploymentFile principal = RenderAgent(
-                agent,
-                source.ModelProfiles.Profiles,
-                grantsKyberWeaveMcp,
-                request.Scope);
-            files.Add(principal);
-            SquadAgentResourceDiscoveryGuard.Append(
-                files,
-                agent,
-                principal,
-                agent.Resources,
-                degradations,
-                SquadTargetCatalog.GetToken(SquadTarget.Kilo),
-                "{agent,agents}/**/*.md");
-
-            SquadDegradationRecord? degradation = BuildDegradationRecord(
-                agent,
-                source.CapabilityProfiles.Profiles,
-                capabilityVocabulary);
-            if (degradation is not null)
-            {
-                degradations.Add(degradation);
-            }
-        }
-
-        foreach (SquadSkill skill in source.Skills)
-        {
-            // A profile-declared shared identity has one canonical projection. Resolve the
-            // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change. A primary shared identity is the exception: its
-            // canonical skill is the entry point and must be emitted.
-            if (suppressedSkillIdentities.Contains(skill.Name))
-            {
-                continue;
-            }
-
-            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
-            files.Add(principal);
-            SquadResourceProjection.Append(files, principal, skill.Resources);
-        }
-
-        // A null Arbiter must render byte for byte as before the field existed, so the
-        // guard lives here: only an enabled wiring at Project scope emits the owned
-        // plugin shim. Under Global scope there is no project configuration to enforce
-        // from (Req 22.4).
-        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
-        {
-            files.Add(new SquadDeploymentFile(
-                ArbiterPluginFileRelativePath,
-                Encoding.UTF8.GetBytes(ArbiterPluginShim.Render(SquadTargetCatalog.GetToken(SquadTarget.Kilo))),
-                SquadTargetCatalog.GetToken(SquadTarget.Kilo)));
-        }
-
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
-    }
-
-    private static SquadDeploymentFile RenderAgent(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        bool grantsKyberWeaveMcp,
-        SquadDeploymentScope scope)
+    private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -249,18 +124,20 @@ public sealed class KiloRenderer : ISquadRenderer
             ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
         };
 
-        string? model = ResolveKiloModel(agent, modelProfiles);
+        string? model = context.ResolveModel(agent);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        // The key is a constant rather than assembled here: Kilo sanitizes the server name only
-        // for characters outside [a-zA-Z0-9_-], so "kyber-weave" keeps its hyphen and this is the
+        // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it carries
+        // agent_coding_standards, and the role that assigns work is the role telling its delegates
+        // which standards they are held to (ADR 0050). Kilo sanitizes the server name only for
+        // characters outside [a-zA-Z0-9_-], so "kyber-weave" keeps its hyphen and this is the
         // wildcard Kilo's matcher resolves for kyber-weave_docs_status. An unentitled agent emits
         // no entry: absence of "allow" withholds for a headless subagent (its ask fails closed),
         // and a "deny" here would out-assert a canonical source that declares no MCP reach.
-        if (grantsKyberWeaveMcp)
+        if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, context.CapabilityProfiles))
         {
             frontmatter["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -268,75 +145,19 @@ public sealed class KiloRenderer : ISquadRenderer
             };
         }
 
-        // The composed agent file carries discovery-guarded links: an in-closure .md link
-        // is rewritten to .markdown so it still resolves after the guard renames the
-        // projection. Frontmatter is unchanged.
-        string body = SquadAgentResourceDiscoveryGuard.RewriteBody(agent);
-
-        string content = SquadMarkdownDocument.Compose(
-            YamlSerializer.Value!,
-            frontmatter,
-            body);
-
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(content),
-            "kilo");
+        context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
+        context.AddDegradation(BuildDegradationRecord(context, agent));
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
+    /// <summary>
+    /// Kilo loads Bun plugins from <c>.kilo/plugin/*.ts</c> with OpenCode's plugin API.
+    /// </summary>
+    private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
+        context.AddArbiterPluginShim(".kilo/plugin/kyber-arbiter.ts");
+
+    private static SquadDegradationRecord? BuildDegradationRecord(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = skill.Name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        string content = SquadMarkdownDocument.Compose(
-            YamlSerializer.Value!,
-            frontmatter,
-            skill.InstructionBody);
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "kilo");
-    }
-
-    private static string? ResolveKiloModel(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
-    {
-        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
-        {
-            return null;
-        }
-
-        if (profile.HarnessModels.TryGetValue("kilo", out string? kiloModel))
-        {
-            return string.Equals(kiloModel, "inherit", StringComparison.Ordinal)
-                ? null
-                : kiloModel;
-        }
-
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
-            ? null
-            : profile.Default;
-    }
-
-    private static SquadDegradationRecord? BuildDegradationRecord(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
-    {
-        if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        if (!context.CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
             return null;
         }
@@ -349,24 +170,9 @@ public sealed class KiloRenderer : ISquadRenderer
         // widening). No record names MCP servers the agent was denied: the entitlement decides only
         // whether an approval is emitted, and an agent that is not entitled gets no entry rather
         // than a deny, so there is no withheld-server sentence to record.
-        List<string> unexpressed = capabilityVocabulary
-            .Where(cap => profile.Permissions.ContainsKey(cap))
-            .ToList();
-
-        if (unexpressed.Count == 0)
-        {
-            return null;
-        }
-
-        string details =
-            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
-
-        return new SquadDegradationRecord(
-            "kilo",
-            agent.Name,
-            agent.Name,
-            "permission-not-expressible",
-            agent.BodyDigest,
-            details);
+        return context.CapabilitiesNotExpressible(
+            agent,
+            context.CapabilityVocabulary.Where(profile.Permissions.ContainsKey).ToList(),
+            "Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed");
     }
 }
