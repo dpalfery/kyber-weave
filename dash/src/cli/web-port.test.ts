@@ -104,7 +104,8 @@ async function freePort(): Promise<number> {
 /**
  * `count` distinct free loopback ports. Every probe stays bound until all are read, so the
  * OS cannot hand the same ephemeral port back twice — which back-to-back `freePort()`
- * calls allow, since each probe is closed before the next one binds.
+ * calls allow, since each probe is closed before the next one binds. As with `freePort()`,
+ * the ports are released before use, so another process can still take one first.
  */
 async function freePorts(count: number): Promise<number[]> {
   const probes: Server[] = []
