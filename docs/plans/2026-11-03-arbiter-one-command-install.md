@@ -195,7 +195,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
   `delegation.plan-file = docs/plans/2026-11-03-arbiter-one-command-install.md` (and `docs/specs/`,
   `docs/todo/` equivalents) answers `recognised`; a path outside the planning dirs and a missing
   plan-file answer `malformed`; the shipped-rules catalogue stays green.
-- **Depends on.** — (leaf).
 
 ### T2 — `HostConfigYaml.WithArbiterEnabled` (Core, non-destructive merge)
 
@@ -203,7 +202,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
 - **Files.** `src/KyberWeave.Core/Docs/Scaffolding/HostConfigYaml.cs`; tests `tests/KyberWeave.Tests/HostConfigYamlTests.cs`.
 - **Skills.** RED `test-dev`; GREEN `csharp-dev`.
 - **Acceptance.** Contract row T2 GREEN; `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` 0 warnings.
-- **Depends on.** — (leaf).
 
 ### T3 — Kilo plugin shim binds and verifies the repo root (Core)
 
@@ -211,7 +209,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
 - **Files.** `src/KyberWeave.Core/Squad/Rendering/ArbiterPluginShim.cs`; tests `tests/KyberWeave.Tests/ArbiterShimBehaviourTests.cs`, `tests/KyberWeave.Tests/ArbiterKiloRenderingTests.cs`. Note: the same shim serves OpenCode and Pi; the generated source changes once and all three keep parity.
 - **Skills.** RED `test-dev`; GREEN `csharp-dev`.
 - **Acceptance.** Contract row T3 GREEN; build 0 warnings; a non-repo-cwd Kilo session is gated with an explicit reason, never `KW-ARB-HOOK-001` from a wrong root.
-- **Depends on.** — (leaf).
 
 ### T4 — `kyber-weave arbiter install` (CLI)
 
@@ -227,7 +224,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
 - **Files.** New `src/KyberWeave.Cli/Commands/Arbiter/ArbiterUninstallCommand.cs`, `ArbiterUninstallSettings.cs`; registration in `src/KyberWeave.Cli/Program.cs`. Reuse `SquadLifecycleService.UninstallAsync`, `SquadReceipt`.
 - **Skills.** RED `test-dev`; GREEN `csharp-dev`.
 - **Acceptance.** Contract row T5 GREEN; uninstall reverses only owned artifacts; key untouched without `--remove-key`.
-- **Depends on.** — (leaf; shares Program.cs registration line with T4 but the command bodies are disjoint files).
 
 ### T6 — `kyber-weave update` refreshes arbiter hooks/scripts (CLI Update)
 
@@ -235,7 +231,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
 - **Files.** `src/KyberWeave.Cli/Update/SelfUpdater.cs`; add the refresh seam (injectable `Func`/interface) wired in `UpdateCommand.cs` as needed. Reuse `SquadLifecycleService.UpdateAsync` + `SquadStateStore.ListProjects()`.
 - **Skills.** RED `test-dev`; GREEN `csharp-dev`.
 - **Acceptance.** Contract row T6 GREEN; `--no-arbiter` and an absent arbiter skip the refresh.
-- **Depends on.** — (leaf; file scopes disjoint from T4/T5).
 
 ### T7 — Amend ADR 0053 (docs-dev)
 
@@ -243,7 +238,6 @@ Each developer task ends with the worker's own `task-gate`; a failing gate retur
 - **Files.** `docs/adr/0053-kyber-arbiter-three-step-decision-gates.md` (and its index row only if the title/date changes).
 - **Skills.** `docs-dev`.
 - **Acceptance.** ADR 0053 states the amended D18 and D22; `docs validate` clean.
-- **Depends on.** Decisions table (already fixed); no task output consumed. Runs in parallel with T2–T6.
 
 ### T8 — Docs closeout: harvest + docs validation (docs-dev)
 
