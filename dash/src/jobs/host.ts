@@ -510,14 +510,21 @@ export class JobHost {
             clock: { now: () => this.clock.now() },
           })
       // A busy pass is a yield to a refresh, not a fault; only a failed outcome is recorded.
-      this.lastSyncFailure = outcome?.outcome === 'failed' ? outcome.reason : null
+      const syncFailure = outcome?.outcome === 'failed' ? outcome.reason : null
       // The live Factory counters: the numbers the plugin cannot carry, read from
       // the session's own companion file while the session runs. Without this a
       // live Factory session reaches the dashboard with its turns and no counters.
       const counters = await this.runFactoryCounters()
-      if (counters?.outcome === 'failed' && this.lastSyncFailure === null) {
-        this.lastSyncFailure = counters.reason
-      }
+      const counterFailure = counters?.outcome === 'failed' ? counters.reason : null
+      // Both passes can fail, and both reasons are facts about the machine: the
+      // status names each one, because a reader who is told one of them is
+      // looking at a half of the picture.
+      this.lastSyncFailure =
+        syncFailure === null
+          ? counterFailure
+          : counterFailure === null
+            ? syncFailure
+            : `${syncFailure}; ${counterFailure}`
     } catch (err) {
       // A sync failure must not crash the scheduler tick, but it is surfaced in status.
       this.lastSyncFailure = err instanceof Error ? err.message : String(err)

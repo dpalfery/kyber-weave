@@ -500,9 +500,13 @@ test.describe('the Factory (Droid) replay', () => {
     const payload = (await response.json()) as {
       requests?: Array<{ prompt?: unknown }>
     }
-    const prompt = payload.requests?.[0]?.prompt
-    expect(typeof prompt, 'the session payload must carry the prompt the consent allowed').toBe('string')
-    expect(prompt as string).toContain(FACTORY_REPLAY_PROMPT)
+    // The request that carries the prompt is found, not assumed to be the
+    // first: the payload's order is the session's, and a request that declares
+    // the prompt absent says so in a shape of its own.
+    const prompts = (payload.requests ?? []).map((request) => request.prompt)
+    const carried = prompts.find((prompt) => typeof prompt === 'string')
+    expect(carried, 'the session payload must carry the prompt the consent allowed').toBeDefined()
+    expect(carried as string).toContain(FACTORY_REPLAY_PROMPT)
   })
 })
 

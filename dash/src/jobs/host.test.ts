@@ -380,6 +380,37 @@ describe('JobHost: the live Factory counter pass', () => {
       expect(host.getStatus().lastSyncFailure).toBe('the companion file is unreadable'),
     )
   })
+
+  it('keeps both reasons when the transcript sync and the counter pass both fail', async () => {
+    const host = new JobHost({
+      store,
+      stateDir,
+      program: 'kyberdash',
+      clock,
+      spawner,
+      tickIntervalMs: TICK_MS,
+      maintenance: () => {},
+      sync: async () => ({
+        outcome: 'failed',
+        reason: 'the transcript store is unreadable',
+      }),
+      factoryCounters: async () => ({
+        outcome: 'failed',
+        reason: 'the companion file is unreadable',
+      }),
+    })
+    hosts.push(host)
+
+    await host.start()
+
+    // Both are facts about the machine, and a reader told one of them is
+    // looking at half the picture.
+    await vi.waitFor(() =>
+      expect(host.getStatus().lastSyncFailure).toBe(
+        'the transcript store is unreadable; the companion file is unreadable',
+      ),
+    )
+  })
 })
 
 describe('JobHost: manual runs and exclusion', () => {
