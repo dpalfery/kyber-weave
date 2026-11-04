@@ -323,6 +323,10 @@ app.Configure(config =>
         arbiter.AddCommand<ArbiterDoctorCommand>("doctor")
             .WithDescription("Diagnose the Arbiter configuration, key, log ignore, binary and guard.")
             .WithExample("arbiter", "doctor");
+
+        arbiter.AddCommand<ArbiterUninstallCommand>("uninstall")
+            .WithDescription("Remove Arbiter-owned hooks and plugin files for a target.")
+            .WithExample("arbiter", "uninstall", "--target", "kilo");
     });
 
     // Repository documentation tooling: the CodeGraph index and the live docs MCP server. Repository-scoped, so it

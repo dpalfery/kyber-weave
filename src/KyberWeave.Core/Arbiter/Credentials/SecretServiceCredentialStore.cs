@@ -96,6 +96,31 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
     }
 
+    /// <inheritdoc />
+    public void Delete(string origin)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        ProcessStartInfo startInfo = new("secret-tool")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("clear");
+        startInfo.ArgumentList.Add("service");
+        startInfo.ArgumentList.Add(Service);
+        startInfo.ArgumentList.Add("account");
+        startInfo.ArgumentList.Add(origin);
+
+        ProcessResult result = RunSecretTool(startInfo, string.Empty);
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"The Secret Service delete failed with exit code {result.ExitCode}.");
+        }
+    }
+
     private static string OneLine(string value) =>
         string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
