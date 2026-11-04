@@ -347,11 +347,14 @@ export function deriveProjectName(cwd: string, home: string = homedir()): string
  * counters for it.
  */
 export function deriveSessionProject(
-  start: { cwd?: string },
+  start: { cwd?: unknown },
   fallbackName: string,
   factoryDir: string,
 ): string | undefined {
-  const cwd = start.cwd ?? fallbackName
+  // The working directory is the transcript's own claim, and a claim is only
+  // text when it is text: a number or a list is not a path, so the session
+  // falls back to the name of the directory it was found in.
+  const cwd = typeof start.cwd === 'string' && start.cwd !== '' ? start.cwd : fallbackName
   if (isInternalSession(cwd, factoryDir)) return undefined
   return deriveProjectName(cwd)
 }
@@ -368,12 +371,17 @@ export async function sessionProjectOf(
 ): Promise<string | undefined> {
   const first = await readFirstJsonlLine(transcriptPath)
   if (first === null) return undefined
-  let start: DroidJsonlEntry
+  let parsed: unknown
   try {
-    start = JSON.parse(first) as DroidJsonlEntry
+    parsed = JSON.parse(first)
   } catch {
     return undefined
   }
+  // The first line is the file's own claim, and it can be any JSON value. A
+  // value that is not a session start says nothing about the session, and it
+  // must not throw: one corrupt line must not fail the pass that reads it.
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const start = parsed as DroidJsonlEntry
   if (start.type !== 'session_start') return undefined
   return deriveSessionProject(start, basename(dirname(transcriptPath)), factoryDir)
 }

@@ -390,4 +390,40 @@ describe('the project a Factory session is filed under', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  it('reads no project from a transcript whose first line is not a session start', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-not-a-session-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      // The first line is the file's own claim, and it can be any JSON value.
+      await writeFile(path, 'null\n', 'utf-8')
+
+      // Reading it must not throw: one corrupt line must not fail the pass
+      // that reads it.
+      expect(await sessionProjectOf(path, dir)).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the workspace name when the transcript names no working directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-bad-cwd-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      // A working directory is a path, so only text is one.
+      await writeFile(
+        path,
+        `${JSON.stringify({ type: 'session_start', id: 'session-1', cwd: 42 })}\n`,
+        'utf-8',
+      )
+
+      expect(await sessionProjectOf(path, dir)).toBe('workspace')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

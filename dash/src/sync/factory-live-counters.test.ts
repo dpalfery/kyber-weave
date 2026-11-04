@@ -447,6 +447,52 @@ describe('the live Factory counter sync (dash/src/sync/factory-live-counters.ts)
     expect(outcome.outcome === 'failed' ? outcome.reason : '').toContain(stateDir)
   })
 
+  it('reads a session whose workspace directory merely starts with two dots', async () => {
+    const dir = createTempDir('kyber-factory-dotted-workspace-')
+    const store = createStore(dir)
+    const factoryRoot = createFactoryRoot(dir)
+
+    // A directory named `..foo` does not leave the sessions root, and its
+    // session's counters are the session's counters. This session exists only
+    // there, so the pass has to find it there.
+    const dottedSession = '22222222-3333-4444-5555-666666666666'
+    const dotted = join(factoryRoot, 'sessions', '..foo')
+    mkdirSync(dotted, { recursive: true })
+    const transcript = [
+      JSON.stringify({ type: 'session_start', id: dottedSession, cwd: WORKING_DIRECTORY }),
+      JSON.stringify({
+        type: 'message',
+        id: 'msg-assistant-1',
+        timestamp: NOW_ISO,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'the answer' }] },
+      }),
+    ].join('\n')
+    writeFileSync(join(dotted, `${dottedSession}.jsonl`), transcript, 'utf-8')
+    writeFileSync(
+      join(dotted, `${dottedSession}.settings.json`),
+      JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        tokenUsage: { inputTokens: 1000, outputTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      }),
+      'utf-8',
+    )
+    store.upsert(pluginRecord(dottedSession))
+
+    const outcome = await syncFactoryLiveCounters({
+      store,
+      stateDir: dir,
+      factoryRoot,
+      now: () => NOW_MS,
+      readStates: new Map(),
+    })
+
+    expect(outcome).toMatchObject({ outcome: 'completed', sessions: 1 })
+    const counters = store
+      .recordsForHarnessSession('droid', dottedSession)
+      .filter((record) => record.source === 'codeburn/droid')
+    expect(counters).toHaveLength(1)
+  })
+
   it('re-reads a session only when its plugin records advanced', async () => {
     const dir = createTempDir('kyber-factory-throttle-')
     const store = createStore(dir)

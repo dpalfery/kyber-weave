@@ -188,7 +188,15 @@ function isSafeSessionId(sessionId: string): boolean {
 /** Whether a path stays under a root, after both are resolved. */
 function isUnder(root: string, path: string): boolean {
   const rel = relative(resolve(root), resolve(path))
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+  // A path that leaves the root names a `..` segment. A directory whose name
+  // merely starts with two dots (`..foo`) is a name, not a step up.
+  return (
+    rel !== '' &&
+    rel !== '..' &&
+    !rel.startsWith('../') &&
+    !rel.startsWith('..\\') &&
+    !isAbsolute(rel)
+  )
 }
 
 /**
