@@ -435,6 +435,78 @@ internal static partial class HostConfigYaml
     }
 
     /// <summary>
+    /// Returns <paramref name="yaml"/> with <c>arbiter.enabled</c> set to <c>true</c>.
+    /// An existing <c>enabled: false</c> is flipped in place; a missing <c>arbiter:</c>
+    /// block is appended. Returns the input unchanged when it already enables the arbiter.
+    /// </summary>
+    /// <remarks>
+    /// Like the other editors on this type, the change is done as text: one line changes
+    /// and the rest of the file is returned verbatim, so comments, key order, and line
+    /// endings survive.
+    /// </remarks>
+    public static string WithArbiterEnabled(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+
+        int arbiter = IndexOfArbiterKey(lines);
+        if (arbiter < 0)
+            return AppendArbiterBlock(lines).ToText();
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            Match match = ArbiterEnabledKey().Match(lines[i]);
+            if (!match.Success || !string.Equals(
+                    match.Groups["indent"].Value,
+                    blockIndent,
+                    StringComparison.Ordinal))
+                continue;
+
+            (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+
+            if (ScalarEquals(value, "true"))
+                return yaml;
+
+            // Any other value — 'false', an empty key, or a differently-cased scalar —
+            // means the arbiter is not enabled: enabling means the key reads 'true'.
+            // Only the value changes, so an inline comment in the suffix survives.
+            string enabledPrefix = match.Groups["prefix"].Value;
+            if (enabledPrefix.EndsWith(':')) enabledPrefix += " ";
+
+            lines[i] = enabledPrefix + "true" + suffix;
+            return lines.ToText();
+        }
+
+        lines.Insert(arbiter + 1, blockIndent + "enabled: true");
+        return lines.ToText();
+    }
+
+    /// <summary>Index of the top-level <c>arbiter:</c> key, or -1.</summary>
+    private static int IndexOfArbiterKey(HostConfigLines lines)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (ArbiterKey().IsMatch(lines[i]))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static HostConfigLines AppendArbiterBlock(HostConfigLines lines)
+    {
+        if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+            lines.Add(string.Empty);
+
+        lines.Add("arbiter:");
+        lines.Add(DefaultIndent + "enabled: true");
+        return lines;
+    }
+
+    /// <summary>
     /// Returns <paramref name="yaml"/> with <paramref name="technologies"/> merged into
     /// <c>ontology.technologies</c>. If <c>ontology:</c> does not exist, an ontology block
     /// is created. If <c>ontology.technologies</c> does not exist, it is inserted with proper
@@ -853,6 +925,18 @@ internal static partial class HostConfigYaml
     /// </summary>
     [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)technologies[ \t]*:[ \t]*)(?<rest>.*)$")]
     private static partial Regex TechnologiesKey();
+
+    /// <summary>
+    /// The top-level <c>arbiter:</c> key, tolerating a byte-order mark ahead of it.
+    /// </summary>
+    [GeneratedRegex(@"^\uFEFF?arbiter[ \t]*:[ \t]*(#.*)?$")]
+    private static partial Regex ArbiterKey();
+
+    /// <summary>
+    /// Splits an <c>enabled</c> line into the part before its value and the remaining text.
+    /// </summary>
+    [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)enabled[ \t]*:[ \t]*)(?<rest>.*)$")]
+    private static partial Regex ArbiterEnabledKey();
 
     /// <summary>
     /// A host configuration read as lines, each carrying the line break that ended it.

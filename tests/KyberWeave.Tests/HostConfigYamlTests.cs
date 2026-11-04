@@ -293,4 +293,187 @@ public sealed class HostConfigYamlTests
         Assert.Contains("    technologies:", result, StringComparison.Ordinal);
         Assert.Contains("      - 'csharp'", result, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// An existing <c>arbiter.enabled: false</c> is flipped in place. Only the value changes,
+    /// so the inline comment on that line and every other line survive.
+    /// </summary>
+    [Fact]
+    public void FlipsAnExistingArbiterEnabledFalseToTrue()
+    {
+        const string yaml =
+            """
+            ontology:
+              docs-root: docs
+
+            arbiter:
+              enabled: false  # enabled by hand for now
+            """;
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.Equal(
+            yaml.Replace("enabled: false", "enabled: true", StringComparison.Ordinal),
+            result);
+    }
+
+    /// <summary>
+    /// A configuration without an <c>arbiter:</c> block gains one at the end, and every byte
+    /// that was already in the file stays where it was.
+    /// </summary>
+    [Fact]
+    public void AppendsAnArbiterBlockWithoutChangingTheRestOfTheFile()
+    {
+        const string yaml =
+            """
+            # Hand-maintained host configuration
+            ontology:
+              docs-root: docs
+
+            harness:
+              profiles:
+                claude:
+                  directory-name: .agents/agents
+
+            """;
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.StartsWith(yaml, result, StringComparison.Ordinal);
+        Assert.Contains("\narbiter:\n  enabled: true", result, StringComparison.Ordinal);
+        YamlScalarNode enabled =
+            (YamlScalarNode)ReadArbiter(result).Children[new YamlScalarNode("enabled")];
+        Assert.Equal("true", enabled.Value);
+    }
+
+    /// <summary>
+    /// An already-enabled configuration is returned unchanged, so a second install run is a
+    /// no-op rather than a rewrite of the operator's file.
+    /// </summary>
+    [Fact]
+    public void ReturnsAnAlreadyEnabledConfigurationUnchanged()
+    {
+        const string yaml =
+            """
+            arbiter:
+              enabled: true
+            """;
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.Equal(yaml, result);
+        Assert.Equal(yaml, HostConfigYaml.WithArbiterEnabled(result));
+    }
+
+    /// <summary>
+    /// Only the enabled value changes: full-line comments, inline comments, and the order of
+    /// the surrounding keys are preserved byte-for-byte.
+    /// </summary>
+    [Fact]
+    public void PreservesCommentsAndKeyOrderWhenFlippingEnabled()
+    {
+        const string yaml =
+            """
+            # Host configuration, hand-maintained.
+            ontology:
+              docs-root: docs
+
+            arbiter:
+              # Switched off until the roll-out lands.
+              provider:
+                kind: none
+              enabled: false  # flip this, keep the comment
+              rules:
+                - id: KW-ARB-SCOPE-002
+            """;
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.Equal(
+            yaml.Replace("enabled: false", "enabled: true", StringComparison.Ordinal),
+            result);
+        Assert.Contains(
+            "# Switched off until the roll-out lands.",
+            result,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A CRLF configuration keeps its line endings: the appended block uses CRLF and no bare
+    /// LF is introduced anywhere in the file.
+    /// </summary>
+    [Fact]
+    public void AddsTheArbiterBlockWithCrlfLineEndings()
+    {
+        const string yaml =
+            "# Hand-maintained host configuration\r\nontology:\r\n  docs-root: docs\r\n";
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.StartsWith(yaml, result, StringComparison.Ordinal);
+        Assert.Contains("\r\narbiter:\r\n  enabled: true", result, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\n",
+            result.Replace("\r\n", string.Empty, StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        YamlScalarNode enabled =
+            (YamlScalarNode)ReadArbiter(result).Children[new YamlScalarNode("enabled")];
+        Assert.Equal("true", enabled.Value);
+    }
+
+    /// <summary>
+    /// A byte-order mark is a character, not a line break. When it precedes the first
+    /// <c>arbiter:</c> key, the merge must find that key rather than append a second block.
+    /// </summary>
+    [Fact]
+    public void AByteOrderMarkBeforeTheArbiterKeyDoesNotCauseASecondBlock()
+    {
+        const string yaml = "\uFEFFarbiter:\n  enabled: false\n";
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.Equal("\uFEFFarbiter:\n  enabled: true\n", result);
+    }
+
+    /// <summary>
+    /// An existing provider and rules block is operator state and survives the enabled flip
+    /// with every value, key, and comment intact.
+    /// </summary>
+    [Fact]
+    public void PreservesAnExistingArbiterProviderAndRulesBlock()
+    {
+        const string yaml =
+            """
+            arbiter:
+              enabled: false
+              provider:
+                kind: systemone
+                endpoint: https://api.example.test/v1
+                model: pinned-model
+                timeout-ms: 3000
+              rules:
+                - id: KW-ARB-SCOPE-002
+                  confidence-at-least: 0.85
+                - id: HOST-MIGRATIONS-001
+                  trigger: delegate
+                  question: Does the task touch database migrations?
+                  answers: [touches, clear]
+                  effects: { touches: escalate, clear: allow }
+            """;
+
+        string result = HostConfigYaml.WithArbiterEnabled(yaml);
+
+        Assert.Equal(
+            yaml.Replace("enabled: false", "enabled: true", StringComparison.Ordinal),
+            result);
+    }
+
+    private static YamlMappingNode ReadArbiter(string yaml)
+    {
+        YamlStream stream = new YamlStream();
+        using StringReader reader = new StringReader(yaml);
+        stream.Load(reader);
+        YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
+        return (YamlMappingNode)root.Children[new YamlScalarNode("arbiter")];
+    }
 }
