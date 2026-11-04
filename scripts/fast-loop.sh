@@ -285,4 +285,4 @@ if [[ "${needs_rust}" -eq 1 ]]; then
   (cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test)
 fi
 
-printf '\nFast tier clean. Run scripts/fast-loop.sh --full before pushing.\n'
+printf '\nFast tier clean. Push; CI runs the full suite. Use --full only for cross-cutting changes or to reproduce a CI failure.\n'
