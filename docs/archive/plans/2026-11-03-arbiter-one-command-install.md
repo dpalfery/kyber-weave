@@ -2,11 +2,11 @@
 id: plans/2026-11-03-arbiter-one-command-install
 title: Arbiter one-command install — `kyber-weave arbiter install` and update-time hook refresh
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 created: 2026-11-03
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-04
 development-mode: test-first
 autonomy: autonomous
 documentation-impact: extends-component
@@ -15,8 +15,7 @@ impact-components: [KyberArbiter, KyberSquad, Distribution]
 
 # Arbiter one-command install — `kyber-weave arbiter install` and update-time hook refresh
 
-**Status: Ready — approved for execution 2026-11-03 (AP1, `AUTONOMOUS_APPROVAL: approve-and-execute`,
-provenance `autonomous: recommendation accepted`).** No decisions remain open; the permanent
+**Status: Archived — complete 2026-11-04 (T7 ADR amendment + T8 docs harvest closeout).** No decisions remain open; the permanent
 `## Decisions` table below records the baseline choices, the autonomous recommendations accepted
 during planning, the gate-off bootstrap this dispatch runs under (D10), and the approve-and-execute
 gate (AP1). The first task (T1) fixes the `KW-ARB-PLANNER-001` gate that currently rejects every
@@ -80,19 +79,19 @@ open.
 | D11 | May T1 also fix `KW-ARB-READY-001`'s empty-dependency handling? | Yes. T1 adds a `count: 0` → `ready` clause before the subset check; the first T1 dispatch was blocked because an empty `plan.task.depends-on` list was compared with the absent `ledger.completed-tasks` fact and answered `waiting`. | This is the same execution-blocking gate class as D10. It is fixed test-first in T1 with the bootstrap gate-off exception, then the gate is re-enabled. | ANSWERED — autonomous: recommendation accepted; bootstrap continuation. |
 | AP1 | Approve and execute | Approve this plan and its Test contract (T1–T6) for execution at the declared scale — `extends-component` on `KyberArbiter`, `KyberSquad`, `Distribution`. | Conductor explicitly returned `AUTONOMOUS_APPROVAL: approve-and-execute` on 2026-11-03 under resolved autonomy `autonomous` (Config Reg `<autonomy>`). Recorded in the permanent `## Decisions` table per the autonomous-decisions reference and preserved intact across the lifecycle. | ANSWERED — autonomous: recommendation accepted; explicit conductor gate `approve-and-execute`. |
 
-## Scale and Design harvest
+## Design harvest
 
 `documentation-impact: extends-component`; `impact-components: [KyberArbiter, KyberSquad, Distribution]`.
 Each durable design item lands in canonical docs at closeout (T8):
 
-| Target component | Target doc type | Durable design item |
-|---|---|---|
-| KyberArbiter | runbook | The one-command `arbiter install` flow and its idempotency/verification contract; `arbiter uninstall --target` and `--remove-key`; `--arbiter-key` argv warning and the retained `--key-stdin`/env path. |
-| KyberArbiter | architecture | `arbiter.enabled` non-destructive merge (`HostConfigYaml.WithArbiterEnabled`) and the provider `none` default in the one-command path. |
-| KyberSquad | onboarding | The Arbiter hooks section updated for the one-command install; the Kilo shim repo-root binding and the trust-step printout. |
-| Distribution | install.md | `kyber-weave update` now also refreshes arbiter hooks/scripts; `arbiter install` replaces the multi-step "initialize your repository" sequence. |
-| Distribution | cli-command-surface.md | New `arbiter install` / `arbiter uninstall` verbs (the `arbiter` branch is currently absent from this page — a gap closed here), exit codes, and the updated `update` verb. |
-| KyberArbiter | adr | ADR 0053 amended in place: D18 argv-key exception, D22 one-command install. |
+| ID | Target component | Target doc type | Durable design item |
+|---|---|---|---|
+| H1 | KyberArbiter | runbook | The one-command `arbiter install` flow and its idempotency/verification contract; `arbiter uninstall --target` and `--remove-key`; `--arbiter-key` argv warning and the retained `--key-stdin`/env path. |
+| H2 | KyberArbiter | architecture | `arbiter.enabled` non-destructive merge (`HostConfigYaml.WithArbiterEnabled`) and the provider `none` default in the one-command path. |
+| H3 | KyberSquad | onboarding | The Arbiter hooks section updated for the one-command install; the Kilo shim repo-root binding and the trust-step printout. |
+| H4 | Distribution | install.md | `kyber-weave update` now also refreshes arbiter hooks/scripts; `arbiter install` replaces the multi-step "initialize your repository" sequence. |
+| H5 | Distribution | cli-command-surface.md | New `arbiter install` / `arbiter uninstall` verbs (the `arbiter` branch is currently absent from this page — a gap closed here), exit codes, and the updated `update` verb. |
+| H6 | KyberArbiter | adr | ADR 0053 amended in place: D18 argv-key exception, D22 one-command install. |
 
 ## Investigation findings
 
@@ -336,3 +335,55 @@ scripts/proc-guard.sh run -- dotnet run --project src/KyberWeave.Cli -- docs dri
 (`git mv` to `docs/archive/plans/`), moves the index row to **Archived Plans**, and re-runs
 `docs validate . --merge-ready` + `docs drift .` — at which point this plan's `## Decisions` table is
 preserved intact and the `Design harvest` rows above become the mapping to canonical docs. ADR work is T7.
+
+---
+
+## Closeout mapping
+
+**Completed 2026-11-04 (T7–T8 docs-dev harvest).** The `## Decisions` table above is preserved
+intact. Every decision and Design harvest item is mapped below. `docs validate .`
+(mergeReady false) and `docs drift .` returned 0 findings before the archive; `docs validate .
+--merge-ready --base origin/HEAD` and `docs drift .` returned 0 findings after it.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| `docs_validate` (mergeReady false, pre-archive) | pass, 0 errors, 0 warnings; provenance `root=/Users/dave/git/personal/kilo/kyber-weave` |
+| `docs_drift` (pre-archive) | pass, 0 errors, 0 warnings; same provenance |
+| `docs_validate --merge-ready --base origin/HEAD` (post-archive) | pass, 0 errors, 0 warnings |
+| `docs_drift` (post-archive) | pass, 0 errors, 0 warnings |
+| Implementation cross-check | `ArbiterInstallSettings`/`ArbiterUninstallSettings` flags, `--global` rejection, `--provider ""` → `none`, `KW-ARB-KEY-001` on missing key, and idempotent no-op verified against `src/KyberWeave.Cli/Commands/Arbiter/` via CodeGraph before documenting |
+
+### ADR waiver
+
+No new ADR — ADR waiver: D18/D22 are reversals of single accepted decisions in ADR 0053 (argv-key
+exception, one-command install replacing the three-part install), amended in place per the
+in-place amendment precedent (ADRs 0031, 0034); all other decisions refine existing architecture
+or record implementation reuse with no new boundary.
+
+### Mapping
+
+Documentation-impact is `extends-component` for every row; impact components are `KyberArbiter`,
+`KyberSquad`, `Distribution`; `last-reviewed` is 2026-11-04.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#setup-doctor-audit) — code-reuse constraint (Squad render pipeline, credential store, `ArbiterSetupCommand` rendering); the composed one-command flow is the lasting record. | extends-component | KyberArbiter, KyberSquad | 2026-11-04 | archived |
+| D2 | [`docs/adr/0053-kyber-arbiter-three-step-decision-gates.md`](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) (D18 argv-key exception); [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#setup-doctor-audit) (`--arbiter-key` warning, `--key-stdin`/env safer paths); [`docs/cli-command-surface.md`](../../cli-command-surface.md#arbiter--kyber-arbiter-decision-gates) (`arbiter install` flags) | extends-component | KyberArbiter, Distribution | 2026-11-04 | archived |
+| D3 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#setup-doctor-audit) and [`docs/cli-command-surface.md`](../../cli-command-surface.md#arbiter--kyber-arbiter-decision-gates) (`--provider ""` means `none`); behavior reuses the existing `TryParseProvider` parse, no new provider value. | extends-component | KyberArbiter, Distribution | 2026-11-04 | archived |
+| D4 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#hooks) (`arbiter.enabled: true` set non-destructively); [`docs/install.md`](../../install.md#then-initialize-your-repository) (one-command ensures config). No new architecture page: the merge is the line-based `HostConfigYaml` text edit already proven for `docs-root`/`technologies`. | extends-component | KyberArbiter, Distribution | 2026-11-04 | archived |
+| D5 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#hooks) (Kilo shim repo-root binding); [`docs/kyber-squad/onboarding.md`](../../kyber-squad/onboarding.md#arbiter-hooks) (Kilo shim row, trust-step printout). | extends-component | KyberArbiter, KyberSquad | 2026-11-04 | archived |
+| D6 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#hooks) (`arbiter uninstall --target`, `--remove-key` opt-in); [`docs/cli-command-surface.md`](../../cli-command-surface.md#arbiter--kyber-arbiter-decision-gates) (uninstall flags). | extends-component | KyberArbiter, Distribution | 2026-11-04 | archived |
+| D7 | [`docs/install.md`](../../install.md#updating) (update re-renders arbiter hooks/scripts); [`docs/cli-command-surface.md`](../../cli-command-surface.md#update--replace-the-release-binaries) (updated `update` verb). | extends-component | Distribution | 2026-11-04 | archived |
+| D8 | [`docs/adr/0053-kyber-arbiter-three-step-decision-gates.md`](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) amended in place (D18, D22); no new ADR row. | extends-component | KyberArbiter | 2026-11-04 | archived |
+| D9 | [`docs/cli-command-surface.md`](../../cli-command-surface.md#exit-codes) (`arbiter install`/`uninstall`: `2` client input incl. `KW-ARB-KEY-001`, `1` operational, `0` success/no-op); [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md#setup-doctor-audit) (exit-code line). | extends-component | KyberArbiter, Distribution | 2026-11-04 | archived |
+| D10 | [`docs/ci-pipelines/rule-reference.md`](../../ci-pipelines/rule-reference.md) — `KW-ARB-PLANNER-001` (`delegate.planner`) restored to its documented intent: a `PLAN_FILE` naming a file beneath a planning dir answers `recognised`; id permanent, no renumber. | extends-component | KyberArbiter | 2026-11-04 | archived |
+| D11 | [`docs/ci-pipelines/rule-reference.md`](../../ci-pipelines/rule-reference.md) — `KW-ARB-READY-001` empty-dependency handling restored to its documented intent; no rule id change, no user-facing surface. | extends-component | KyberArbiter | 2026-11-04 | archived |
+| AP1 | Documentation waiver: execution-approval provenance recorded in the `## Decisions` table, with no surviving architectural, operational, or behavioral invariant. | extends-component | KyberArbiter, KyberSquad, Distribution | 2026-11-04 | archived |
+| H1 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md) (`## Hooks`, `## Setup, doctor, audit`): one-command flow, idempotency/verification, uninstall/`--remove-key`, argv warning + `--key-stdin`/env path. | extends-component | KyberArbiter | 2026-11-04 | archived |
+| H2 | No file change — [`docs/kyber-arbiter/architecture.md`](../../kyber-arbiter/architecture.md) (`## Configuration`, provider `none`, `arbiter.enabled` gating) already states the semantics; the one-command path changes how they are established, documented in the runbook/install pages. | extends-component | KyberArbiter | 2026-11-04 | archived |
+| H3 | [`docs/kyber-squad/onboarding.md`](../../kyber-squad/onboarding.md#arbiter-hooks): one-command install, Kilo shim repo-root binding, trust-step printout. | extends-component | KyberSquad | 2026-11-04 | archived |
+| H4 | [`docs/install.md`](../../install.md): `## Then initialize your repository` one-liner replacing the multi-step sequence; `## Updating` arbiter hook/script refresh. | extends-component | Distribution | 2026-11-04 | archived |
+| H5 | [`docs/cli-command-surface.md`](../../cli-command-surface.md): new `arbiter` branch section (`install`, `uninstall`, existing verbs), updated `update` verb, `arbiter install`/`uninstall` exit-code rows. | extends-component | Distribution | 2026-11-04 | archived |
+| H6 | [`docs/adr/0053-kyber-arbiter-three-step-decision-gates.md`](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) (T7): D18 argv-key exception, D22 one-command install; `last-reviewed` 2026-11-04. | extends-component | KyberArbiter | 2026-11-04 | archived |
