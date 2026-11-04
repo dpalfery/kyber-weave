@@ -65,6 +65,15 @@ whose prompt the consent withheld declares it `not_measurable` with a reason tha
 consent, so the absence is stated rather than shown as a blank. The projected prompt is a
 content part like every other, so the 14-day content purge applies to it.
 
+Amended 2026-11-04: a turn stored **before** that mapping is repaired by the next
+renormalization, and the repair keeps the content it collected. The renormalize re-derives
+attribution and the token conversion from the stored raw payload, and it restores the content
+the record already held — the restore used to overwrite the freshly derived parts with it, so a
+mapping the adapter had learned since the span was stored never reached the stored turns, and a
+record could carry the measurability the derivation declared with no content behind it. The
+derived content now fills the buckets the collected content left empty, and the collected
+content still wins every bucket it holds.
+
 ## Context
 
 Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only

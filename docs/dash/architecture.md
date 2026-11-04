@@ -737,6 +737,16 @@ session view shows it. A turn whose prompt the consent withheld declares the pro
 as a blank. The projected prompt is a content part like every other, so the 14-day content purge
 applies to it; the raw copy the plugin's span carries is not purged.
 
+**A turn stored before the mapping is repaired by the renormalize.** The adapter's mapping
+arrived after some turns were stored, and a stored record keeps what it was stored with. The
+renormalize re-derives attribution and the token conversion from the stored raw payload, and it
+restores the content the record already collected — the restore used to overwrite the freshly
+derived parts with it, so a mapping the adapter had learned since the span was stored never
+reached the stored turns, and a record could carry the measurability the derivation declared with
+no content behind it. The derived content now fills the buckets the collected content left
+empty, and the collected content still wins every bucket it holds, so the repair adds a mapping
+without losing the richer content a signal-specific parser filed.
+
 **Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
 
 - **Strict** (`capture enable`): refuses a foreign tree (one holding a file KyberDash did not

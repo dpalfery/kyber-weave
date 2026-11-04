@@ -1057,6 +1057,16 @@ from other sources — and their derived sessions — are left untouched.
 Prefer it whenever the repair is scoped to one source (for example,
 re-attributing live Antigravity rows after an adapter change).
 
+A renormalization keeps the content a record already collected and gains the
+content the adapter derives from the same raw evidence for the buckets the
+collected content left empty. The collected content wins every bucket it
+holds — it is the richer signal-specific content the adapter may not know how
+to reconstruct — and the derived parts fill the gaps. So a mapping the adapter
+learned after the span was stored (the Factory plugin's prompt, say) reaches
+the stored turns on the next renormalization instead of being overwritten by
+the restore, and no record ends up carrying a measurability its content does
+not back.
+
 #### Tool Result Truncation and Parser Checkpoint Re-synthesis (issues #180, #232)
 
 Tool execution outputs captured during file or OTLP ingest are bounded to 64KiB (`MAX_TOOL_RESULT_BYTES = 65_536`) in stored parts (`part: 'tool_result_content'`). Truncated records carry `truncated: true`, with pre-truncation byte length stored in `attributes['gen_ai.tool.result_bytes']`.

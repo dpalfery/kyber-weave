@@ -25,7 +25,12 @@ import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
 import { observedNamespaces } from '../canon/adapters/quarantine.js'
 import { EXCLUDED_HARNESS_IDENTITIES, isExcludedHarnessIdentity } from '../canon/measurability.js'
-import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
+import {
+  contentFromParts,
+  type CanonicalContentKey,
+  type CanonicalRecord,
+  type ContentPart,
+} from '../canon/types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
 
 export type BackfillReport = {
@@ -163,6 +168,50 @@ function deleteDerivedSessions(
   }
 }
 
+/**
+ * The content one record keeps across a renormalization: what was collected,
+ * plus the parts the adapter derived from the same raw evidence for the
+ * buckets the collected content left empty.
+ *
+ * The collected content wins every bucket it already holds — it is the
+ * richer signal-specific content the adapter may not know how to
+ * reconstruct. The derived parts fill the gaps: a repair that gained a
+ * derivation (a prompt the adapter now maps, say) keeps it, instead of the
+ * overwrite throwing it away and leaving the record with the measurability
+ * the derivation declared and no content behind it.
+ *
+ * A collected bucket that holds no part — the legacy content shape, written
+ * before the parts became the authority — becomes a part of its own, so the
+ * content survives the rewrite a parts-carrying row gets.
+ *
+ * `undefined` means there is nothing to write: no collected content and no
+ * derived parts.
+ */
+function keepCollectedContent(
+  collected: CanonicalRecord,
+  derived: CanonicalRecord,
+): { content: CanonicalRecord['content']; parts: ContentPart[] } | undefined {
+  const held = collected.parts ?? []
+  const buckets = new Set<string>(held.map((part) => part.part))
+  const parts: ContentPart[] = [...held]
+  let order = held.reduce((max, part) => Math.max(max, (part.order ?? 0) + 1), 0)
+
+  for (const [bucket, text] of Object.entries(collected.content)) {
+    if (buckets.has(bucket) || text === '') continue
+    parts.push({ part: bucket as CanonicalContentKey, text, order: order++ })
+    buckets.add(bucket)
+  }
+
+  for (const part of derived.parts ?? []) {
+    if (buckets.has(part.part)) continue
+    parts.push({ ...part, order: order++ })
+    buckets.add(part.part)
+  }
+
+  if (parts.length === 0) return undefined
+  return { content: contentFromParts(parts), parts }
+}
+
 export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {
   const traceIds = store.traceIds()
   const progressEvery = options.progressEvery ?? 200
@@ -235,11 +284,19 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
       } else {
         report.reattributed += 1
       }
-      // Attribution is repaired from raw evidence, while content is retained
-      // exactly as collected. This protects richer signal-specific parts that
-      // the adapter may not know how to reconstruct.
-      if (before.parts !== undefined || Object.keys(before.content).length > 0) {
-        store.setContent(before.spanId, before.content, before.parts)
+      // Attribution is repaired from raw evidence, while the collected content
+      // is retained: this protects richer signal-specific parts that the
+      // adapter may not know how to reconstruct.
+      //
+      // The parts the adapter derived from the same raw evidence fill the
+      // buckets the collected content left empty. Without that, a repair
+      // that gained a derivation — a prompt the adapter now maps, say — would
+      // throw the derivation away with the overwrite, and the record would
+      // keep the measurability the derivation declared with no content
+      // behind it. Collected content wins every bucket it already holds.
+      const kept = keepCollectedContent(before, after)
+      if (kept !== undefined) {
+        store.setContent(before.spanId, kept.content, kept.parts)
       }
     }
 
