@@ -4,7 +4,7 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-04
 code-refs:
   - droidAdapter
   - installFactoryPlugin
@@ -41,6 +41,15 @@ never loaded by the harness.
 Amended 2026-11-03: the owner's consent is enforced at a **third** point — the store's gate
 strips the plugin envelope's own prompt text while the consent is off, so a span the plugin
 parked under consent-on and re-delivered after consent-off is not stored with the text.
+
+Amended 2026-11-03: the file source's counters are read **live** for the sessions the plugin
+captured, not only by a folder import. The live counter pass
+(`dash/src/sync/factory-live-counters.ts`) reads the same companion file the file source reads,
+for the captured sessions, while those sessions run, and writes the same records under the same
+identity — so a later folder import replaces them rather than adding to them, and nothing is
+counted twice. Without it a live Factory session reached the dashboard with its turns and **no
+counters**, because an unattended refresh reads no folder sources at all
+(`settings.folder_import.scheduled` is off by default).
 
 ## Context
 
@@ -205,6 +214,11 @@ projection, then `/api/kyber/*`.
   row's own counters are never measured and never zero: it declares them `not_measurable` with
   a reason that names the file source and the session-id pairing as where the number comes
   from. No token value is ever fabricated and none is reported as zero.
+- The file source is read over: the refresh reads it under the history window, and the live
+  counter pass reads it for the sessions the plugin captured while they run. Both reads write
+  the same records under the same identity, so the counters arrive with the turns rather than
+  waiting for a folder import, and a later folder import replaces those records instead of
+  adding a second copy of the same counters.
 - The Factory file source's own even split of the session's token total across its assistant
   calls stays as it is. It is a known lossy approximation, and the per-call data that would
   remove it is tracked separately.

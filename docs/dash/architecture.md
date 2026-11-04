@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-04
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -878,6 +878,24 @@ plugin adapter gives; a **file-only** session keeps the file source's. The pairi
 **exact-match only** — no fuzzy join, no time window, no counter-equality join — and it never
 fabricates: a paired session's totals are the file row's counters, and a plugin-only session's
 totals are absent, never zero.
+
+### Where the Factory file rows come from
+
+The file source is read over, and both reads write the **same** rows.
+
+- The **refresh** reads every Factory session under the history window — and only when a run is
+  allowed to read folder sources at all (`settings.folder_import.scheduled` is off by default, so
+  an unattended run reads none).
+- The **live counter pass** (`dash/src/sync/factory-live-counters.ts`), run by the job host on
+  every tick, reads the sessions the **plugin** captured, while those sessions run. A live
+  Factory session therefore reaches the dashboard with its counters instead of waiting for a
+  folder import that is off by default.
+
+Both reads go through the same provider and the same synthesizer, so the rows carry the same
+identity: a later folder import **replaces** the live rows rather than adding a second copy of
+the same counters, and the split above still prices and counts nothing twice. The pass reads
+only sessions the plugin captured — it never invents a Factory session the capture did not see —
+and it holds the refresh lock while it writes, so a refresh never runs under it.
 
 ### Factory's native OpenTelemetry path (authorized, complementary)
 

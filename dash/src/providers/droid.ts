@@ -298,7 +298,14 @@ function isInternalSession(cwd: string, factoryDir: string): boolean {
   return normalized === factoryDir
 }
 
-function deriveProjectName(cwd: string): string {
+/**
+ * The project a Factory session belongs to, derived from its working directory.
+ *
+ * Exported so the live counter sync names a session's project the same way the
+ * file source's own discovery does: two derivations of the same name would let
+ * the same session be filed under two projects.
+ */
+export function deriveProjectName(cwd: string): string {
   const normalized = cwd.replace(/\/+$/, '')
   const home = homedir()
 
