@@ -22,7 +22,7 @@
 import { existsSync, type Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
@@ -120,6 +120,24 @@ function factoryRootOf(explicit: string | undefined): string {
 }
 
 /**
+ * Whether a session id may be used as a file name.
+ *
+ * The id is read out of the plugin's own span, so it is data and never a
+ * path: a value carrying a separator or a `..` would name a file outside the
+ * Factory root, and the pass would read whatever it found there. The
+ * harness's session ids are UUIDs, so the accepted shape is narrow on purpose.
+ */
+function isSafeSessionId(sessionId: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(sessionId) && sessionId !== '.' && sessionId !== '..'
+}
+
+/** Whether a path stays under a root, after both are resolved. */
+function isUnder(root: string, path: string): boolean {
+  const rel = relative(resolve(root), resolve(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/**
  * The session's own file in the Factory root, or undefined when the harness
  * has no such session.
  *
@@ -133,8 +151,13 @@ function findSessionTranscript(
   workspaces: readonly string[],
   sessionId: string,
 ): string | undefined {
+  // A session id that is not a plain file name is not a session of ours.
+  if (!isSafeSessionId(sessionId)) return undefined
   for (const workspace of workspaces) {
     const path = join(sessionsRoot, workspace, `${sessionId}.jsonl`)
+    // Belt and braces: the id is already a plain name, and the path must
+    // still resolve under the sessions root.
+    if (!isUnder(sessionsRoot, path)) continue
     if (existsSync(path)) return path
   }
   return undefined

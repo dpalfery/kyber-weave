@@ -92,14 +92,14 @@ function createFactoryRoot(dir: string, options: { counters?: boolean } = {}): s
 }
 
 /** The plugin's own record for the session: the turns, and no counters. */
-function pluginRecord(): CanonicalRecord {
+function pluginRecord(sessionId: string = SESSION_ID): CanonicalRecord {
   return {
     spanId: 'plugin-span-1',
     traceId: 'plugin-trace-1',
     parentSpanId: null,
     source: 'kyberdash-factory-plugin',
     harness: 'droid',
-    sessionId: SESSION_ID,
+    sessionId,
     name: 'factory.session',
     op: 'agent.invoke',
     kind: 'internal',
@@ -118,7 +118,7 @@ function pluginRecord(): CanonicalRecord {
     cost: { basis: 'unknown', status: 'no_rate' },
     raw: {
       'factory.contract_version': '1',
-      'factory.session.id': SESSION_ID,
+      'factory.session.id': sessionId,
       'factory.cwd': WORKING_DIRECTORY,
     },
   }
@@ -225,6 +225,53 @@ describe('the live Factory counter sync (dash/src/sync/factory-live-counters.ts)
 
     expect(outcome).toMatchObject({ outcome: 'completed', sessions: 0, records: 0 })
     expect(store.recordsForHarnessSession('droid', SESSION_ID)).toHaveLength(0)
+  })
+
+  it('reads no session whose id would name a file outside the sessions root', async () => {
+    const dir = createTempDir('kyber-factory-traversal-')
+    const store = createStore(dir)
+    const factoryRoot = createFactoryRoot(dir)
+
+    // The session id comes out of the plugin's own span, so it is data and
+    // never a path: a value carrying a separator must not name a file
+    // outside the sessions root.
+    const secret = [
+      JSON.stringify({ type: 'session_start', id: 'escaped', cwd: WORKING_DIRECTORY }),
+      JSON.stringify({
+        type: 'message',
+        id: 'msg-assistant-1',
+        timestamp: NOW_ISO,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'the answer' }] },
+      }),
+    ].join('\n')
+    writeFileSync(join(factoryRoot, 'escaped.jsonl'), secret, 'utf-8')
+    writeFileSync(
+      join(factoryRoot, 'escaped.settings.json'),
+      JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        tokenUsage: { inputTokens: 1000, outputTokens: 200, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      }),
+      'utf-8',
+    )
+    store.upsert(pluginRecord('../../escaped'))
+
+    const outcome = await syncFactoryLiveCounters({
+      store,
+      stateDir: dir,
+      factoryRoot,
+      now: () => NOW_MS,
+      readStates: new Map(),
+    })
+
+    expect(outcome).toMatchObject({ outcome: 'completed', sessions: 0, records: 0 })
+    // Nothing was read outside the sessions root, so no counter record was
+    // written at all — not under the session id the span named, and not
+    // under the id the file outside the root carried.
+    const written = store
+      .getDatabase()
+      .prepare(`SELECT session_id FROM records WHERE source = 'codeburn/droid'`)
+      .all() as Array<{ session_id: string }>
+    expect(written).toHaveLength(0)
   })
 
   it('re-reads a session only when its plugin records advanced', async () => {
