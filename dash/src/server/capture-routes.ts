@@ -317,6 +317,10 @@ async function answerPost(
     dryRun: request.dryRun,
     outcome: result.outcome,
     events: result.events,
+    // The engine's own words about what the action did or would do. The confirm
+    // in the drawer reads them, so what a switch changes is stated by the
+    // engine that changes it and not by the surface that shows it.
+    notes: result.notes,
     harnessState,
     receiver: {
       hosted,

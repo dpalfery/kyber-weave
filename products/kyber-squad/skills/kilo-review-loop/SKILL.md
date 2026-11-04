@@ -35,9 +35,16 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    behaviour deserves a test through the real path, not a hand-fed fact. Use one commit per fix
    (or per tightly related group) so each reply can cite its own hash. Share one helper when
    several comments are the same mechanism.
-5. **Run the gates.** Build, formatters, the relevant tests, and for cross-platform repositories
-   the FULL suite on Linux as well (a macOS-only green has hidden Linux failures before). Do not
-   rely on a worker's "tests pass"; read the totals.
+5. **Run the gates.** Build and formatters for the touched projects, and the tests that target
+   the changed code (map changed files to test classes/files, e.g. `dotnet test --filter`,
+   `vitest related --run <files>` with paths relative to the package's directory,
+   `cargo test '<name>'` run from the crate's directory after `cargo fmt --check` and
+   `cargo clippy -- -D warnings`). Confirm every targeted run reports a non-zero test count: a
+   wrong filter or path matches nothing and exits 0. Do not run the full suite locally: CI runs it (on
+   Linux too, for cross-platform repositories). Run it locally only when the fix touches
+   cross-cutting code (shared core libraries, the repository's gate config, build or toolchain
+   config, CI workflows, migrations or schemas; the repository's AGENTS.md names the exact
+   paths) or to reproduce a CI failure. Do not rely on a worker's "tests pass"; read the totals.
 6. **Push (never force-push), then reply.** Replies must cite commits that exist on the remote,
    so push first. Stacked PRs: fix bottom-up, merge each level into the next, push all levels.
 7. **Reply to every comment you acted on with the fix commit hash**, one line, linking the
@@ -49,9 +56,8 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    **only for `fixed` comments.** Declined threads get their reply and stay open so a human can
    disagree.
 9. **Mark the PR ready for review** with `gh pr ready <n>` once every fixed thread is resolved,
-   every declined thread has its reasoned reply, the fixes are pushed, and the same gates CI
-   runs (full suite, on Linux for cross-platform repositories) passed locally on the pushed
-   head. Do not hold the PR in draft waiting for CI and do not poll CI: the CI monitor reports
+   every declined thread has its reasoned reply, the fixes are pushed, and the targeted
+   gates from step 5 passed locally on the pushed head (CI owns the full suite). Do not hold the PR in draft waiting for CI and do not poll CI: the CI monitor reports
    CI failures and new review comments as events; fix those when they arrive. Declined threads
    stay open on a ready PR; list them (with the reasons) in the report so the owner sees them.
    If a local gate failed, leave the PR a draft and say exactly which one.

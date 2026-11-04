@@ -445,6 +445,20 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     expect(enableButton('claude-code').textContent).toBe('Enable')
   })
 
+  it("shows the engine's notes in the preview, so the confirm states what the switch records", async () => {
+    const withNotes = clone(postPreviewEnable) as Json
+    withNotes.notes = [
+      'harness factory: would record the prompt text of your Factory sessions (content consent on)',
+    ]
+    stubFetch({ status: offClaude, post: () => ({ json: withNotes }) })
+    await openedDrawer()
+
+    fireEvent.click(enableButton('claude-code'))
+
+    const notes = await screen.findByTestId('settings-preview-notes')
+    expect(notes.textContent).toMatch(/record the prompt text/i)
+  })
+
   it('names the receiver change in the preview when the route says it will enable it', async () => {
     const withReceiver = clone(postPreviewEnable) as Json
     withReceiver.receiver.willEnable = true

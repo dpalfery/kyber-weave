@@ -667,8 +667,9 @@ capture never fails the host.
 
 **The consent contract.** The consent file is `~/.kyberdash/factory-plugin.json`
 (`{ "version": 1, "content": <boolean> }`), read on every event. An install creates it with
-`content: false` only when it is absent, and never rewrites an existing one. A missing,
-unreadable, oversized, malformed or unknown-version file reads as off.
+`content: false` only when it is absent; a confirmed `enable` then sets it to `content: true`,
+because the confirmed switch is the consent. A missing, unreadable, oversized, malformed or
+unknown-version file reads as off.
 `KYBERDASH_FACTORY_CONTEXT=1` forces content on and `0` forces it off, overriding the file.
 
 **One bound, one unit.** Every consent file is bounded at **4096 UTF-8 bytes**, and every reader
@@ -691,12 +692,13 @@ malformed, oversized, missing, unknown-version) and asserts identical verdicts, 
 trips the shared writer (`dash/src/capture/consent-file.ts`) into both readers. The **write**
 side is one module both sides already share.
 
-The Settings switch that installs the capture **never turns content recording on**. Only the
-consent verb (`kyberdash kyber capture plugin consent --harness factory --on|--off`) or the owner
-editing the consent file turns it on. This is a deliberate difference from the OpenCode writer,
-whose Settings switch also sets consent: for Factory the switch is "install the capture", not
-"start recording my prompts", and the difference is a privacy control. `disable` turns the
-consent off.
+The Settings switch **is** the content consent. Turning the capture on turns content recording
+on with it, and the confirm states what the switch does to the owner's text before it is
+applied; turning the capture off turns it off with it. The consent verb
+(`kyberdash kyber capture plugin consent --harness factory --on|--off`) and the owner editing
+the consent file turn content recording off without disabling the capture. This is the OpenCode
+writer's rule, and the earlier Factory-only difference is withdrawn: the owner has already
+confirmed the switch, and a second gate on the same decision is friction, not privacy.
 
 **What the consent governs, and what it does not.** The consent file governs **the capture
 plugin's prompt text on the wire and at the store, and the content of Factory's native
@@ -725,6 +727,26 @@ session id, the model, the tool name — are measurements, not content, and surv
 plugin's **tool** attributes stay off the content list on purpose, because the plugin publishes
 tool arguments and results as **byte counts**, never as content (`dash/src/canon/droid-content.ts`,
 `dash/src/canon/ingest.ts`).
+
+**The prompt reaches the session payload.** The plugin's prompt attribute is content, and the
+consent decides whether it travels at all. When it travels, the `droid` adapter files it as the
+record's `conversation_history` part (`dash/src/canon/adapters/droid.ts`), the way the OpenCode
+adapter files its prompt, so the session's own content carries what was asked and the dashboard's
+session view shows it. The **prompt turn** whose prompt the consent withheld declares the prompt
+`not_measurable` with a reason that names the consent, so the absence is stated rather than shown
+as a blank; the plugin's **completion turn** for the same turn carries no prompt by construction,
+so it says nothing about one. The projected prompt is a content part like every other, so the
+14-day content purge applies to it; the raw copy the plugin's span carries is not purged.
+
+**A turn stored before the mapping is repaired by the renormalize.** The adapter's mapping
+arrived after some turns were stored, and a stored record keeps what it was stored with. The
+renormalize re-derives attribution and the token conversion from the stored raw payload, and it
+restores the content the record already collected — the restore used to overwrite the freshly
+derived parts with it, so a mapping the adapter had learned since the span was stored never
+reached the stored turns, and a record could carry the measurability the derivation declared with
+no content behind it. The derived content now fills the buckets the collected content left
+empty, and the collected content still wins every bucket it holds, so the repair adds a mapping
+without losing the richer content a signal-specific parser filed.
 
 **Install modes.** The OpenCode installer's semantics, extended from one file to a tree:
 
@@ -878,6 +900,31 @@ plugin adapter gives; a **file-only** session keeps the file source's. The pairi
 **exact-match only** — no fuzzy join, no time window, no counter-equality join — and it never
 fabricates: a paired session's totals are the file row's counters, and a plugin-only session's
 totals are absent, never zero.
+
+### Where the Factory file rows come from
+
+The file source is read over, and both reads write the **same** rows.
+
+- The **refresh** reads every Factory session under the history window — and only when a run is
+  allowed to read folder sources at all (`settings.folder_import.scheduled` is off by default, so
+  an unattended run reads none).
+- The **live counter pass** (`dash/src/sync/factory-live-counters.ts`), run by the job host on
+  every tick, reads the sessions the **plugin** captured, while those sessions run. A live
+  Factory session therefore reaches the dashboard with its counters instead of waiting for a
+  folder import that is off by default.
+
+Both reads go through the same provider and the same synthesizer, so the rows carry the same
+identity: a later folder import **replaces** the live rows rather than adding a second copy of
+the same counters, and the split above still prices and counts nothing twice. The pass reads
+only sessions the plugin captured — it never invents a Factory session the capture did not see —
+and it holds the refresh lock while it writes, so a refresh never runs under it.
+
+The pass says what it read. A sessions root that exists and cannot be read **fails** the pass
+and names the root, because "no Factory sessions" and "the sessions root cannot be read" are
+different statements. A session whose id is not a plain file name is not a session of ours: the
+id comes out of a span, so it is data and never a path. The project's name comes from the
+session's own file, the way the file source derives it, so the two paths file one session the
+same way.
 
 ### Factory's native OpenTelemetry path (authorized, complementary)
 

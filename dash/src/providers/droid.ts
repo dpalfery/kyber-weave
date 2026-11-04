@@ -1,5 +1,5 @@
 import { readdir, stat, readFile } from 'fs/promises'
-import { join } from 'path'
+import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 
 import { readSessionFile, readSessionLines } from '../ingest/fs-utils.js'
@@ -298,14 +298,29 @@ function isInternalSession(cwd: string, factoryDir: string): boolean {
   return normalized === factoryDir
 }
 
-function deriveProjectName(cwd: string): string {
+/**
+ * The project a Factory session belongs to, derived from its working directory.
+ *
+ * Exported so the live counter sync names a session's project the same way the
+ * file source's own discovery does: two derivations of the same name would let
+ * the same session be filed under two projects.
+ *
+ * The home directory is stripped only at a path boundary: a directory whose
+ * name merely starts with the same characters (`/home/alice2` beside
+ * `/home/alice`) is not under the home, and stripping the prefix there would
+ * file the session under a project that belongs to someone else's tree.
+ */
+export function deriveProjectName(cwd: string, home: string = homedir()): string {
   const normalized = cwd.replace(/\/+$/, '')
-  const home = homedir()
 
   // Strip home directory prefix
-  let relative = normalized.startsWith(home)
-    ? normalized.slice(home.length).replace(/^\/+/, '')
-    : normalized.replace(/^\/+/, '')
+  let relative = normalized
+  if (normalized === home) {
+    relative = ''
+  } else {
+    const boundary = [home + '/', home + '\\'].find((prefix) => normalized.startsWith(prefix))
+    relative = boundary !== undefined ? normalized.slice(boundary.length) : normalized.replace(/^\/+/, '')
+  }
 
   if (!relative) relative = '~'
 
@@ -318,6 +333,57 @@ function deriveProjectName(cwd: string): string {
   }
 
   return parts.join('/')
+}
+
+/**
+ * The project a Factory session belongs to, from the session's own start entry.
+ *
+ * The file source's discovery derives it here and the live counter pass
+ * derives it through the same function, so one session is never filed under
+ * two project names by the two paths that read it.
+ *
+ * `undefined` means the session is the harness's own housekeeping — its
+ * working directory is the Factory root itself — and the file source keeps no
+ * counters for it.
+ */
+export function deriveSessionProject(
+  start: { cwd?: unknown },
+  fallbackName: string,
+  factoryDir: string,
+): string | undefined {
+  // The working directory is the transcript's own claim, and a claim is only
+  // text when it is text: a number or a list is not a path, so the session
+  // falls back to the name of the directory it was found in.
+  const cwd = typeof start.cwd === 'string' && start.cwd !== '' ? start.cwd : fallbackName
+  if (isInternalSession(cwd, factoryDir)) return undefined
+  return deriveProjectName(cwd)
+}
+
+/**
+ * The project a Factory session belongs to, read from the session's own file.
+ *
+ * The live counter pass reads it here, so the rows it writes carry the
+ * project the file source would give the same session.
+ */
+export async function sessionProjectOf(
+  transcriptPath: string,
+  factoryDir: string,
+): Promise<string | undefined> {
+  const first = await readFirstJsonlLine(transcriptPath)
+  if (first === null) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(first)
+  } catch {
+    return undefined
+  }
+  // The first line is the file's own claim, and it can be any JSON value. A
+  // value that is not a session start says nothing about the session, and it
+  // must not throw: one corrupt line must not fail the pass that reads it.
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const start = parsed as DroidJsonlEntry
+  if (start.type !== 'session_start') return undefined
+  return deriveSessionProject(start, basename(dirname(transcriptPath)), factoryDir)
 }
 
 async function readFirstJsonlLine(filePath: string): Promise<string | null> {
@@ -364,10 +430,12 @@ async function discoverSessionsInDir(
 
       const cwd = startEntry.cwd ?? entry
       if (isInternalSession(cwd, factoryDir)) continue
+      const project = deriveSessionProject(startEntry, entry, factoryDir)
+      if (project === undefined) continue
 
       sources.push({
         path: filePath,
-        project: deriveProjectName(cwd),
+        project,
         provider: 'droid',
       })
     }

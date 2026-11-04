@@ -16,6 +16,8 @@ import { join } from 'node:path'
 import type { CanonStore } from '../canon/store.js'
 import { defaultSpawn, guardedSpawn, type SpawnFn } from '../process/spawn-guard.js'
 import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
+import { syncFactoryLiveCounters } from '../sync/factory-live-counters.js'
+import type { FactoryLiveCountersOutcome } from '../sync/factory-live-counters.js'
 import { runTranscriptSync } from '../sync/transcript-sync.js'
 import type { TranscriptSyncOutcome } from '../sync/transcript-sync.js'
 import { acquireJobsLease } from './lease.js'
@@ -99,6 +101,17 @@ export type JobHostOptions = {
   readonly tickIntervalMs?: number
   readonly maintenance: () => void | Promise<void>
   readonly sync?: () => void | TranscriptSyncOutcome | Promise<void | TranscriptSyncOutcome>
+  /**
+   * The Factory root the live counter pass reads. Defaults to the harness's own
+   * root; a test points it at a temporary tree so the pass never reads the
+   * developer's home directory.
+   */
+  readonly factoryRoot?: string
+  /**
+   * The live Factory counter pass, injectable so a test can assert the host
+   * runs it without reading any session file.
+   */
+  readonly factoryCounters?: () => Promise<FactoryLiveCountersOutcome>
   /**
    * Why `resolveJobSpawnTarget` refused this process's entry. When set the host never calls its
    * spawner: a scheduled refresh is recorded as failed with this reason and a manual run
@@ -217,6 +230,8 @@ export class JobHost {
   private lastFailure: string | null = null
   private lastMaintenanceFailure: string | null = null
   private lastSyncFailure: string | null = null
+  private readonly factoryRoot: string | undefined
+  private readonly factoryCounters: (() => Promise<FactoryLiveCountersOutcome>) | undefined
 
   constructor(options: JobHostOptions) {
     this.store = options.store
@@ -228,6 +243,8 @@ export class JobHost {
     this.tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS
     this.maintenance = options.maintenance
     this.sync = options.sync
+    this.factoryRoot = options.factoryRoot
+    this.factoryCounters = options.factoryCounters
     this.spawnRefusal = options.spawnRefusal
   }
 
@@ -446,6 +463,27 @@ export class JobHost {
     }
   }
 
+  /**
+   * The live Factory counter pass.
+   *
+   * It is a pass like the transcript sync: it reads the owner's own files to
+   * complete what the capture left absent, and it holds the refresh lock while
+   * it writes. A busy store is a yield, not a failure.
+   */
+  private async runFactoryCounters(): Promise<FactoryLiveCountersOutcome | undefined> {
+    try {
+      if (this.factoryCounters !== undefined) return await this.factoryCounters()
+      return await syncFactoryLiveCounters({
+        store: this.store,
+        stateDir: this.stateDir,
+        factoryRoot: this.factoryRoot,
+        now: () => this.clock.now(),
+      })
+    } catch (err) {
+      return { outcome: 'failed', reason: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   private async runMaintenance(): Promise<void> {
     if (this.maintenanceRunning) return
     this.maintenanceRunning = true
@@ -472,7 +510,21 @@ export class JobHost {
             clock: { now: () => this.clock.now() },
           })
       // A busy pass is a yield to a refresh, not a fault; only a failed outcome is recorded.
-      this.lastSyncFailure = outcome?.outcome === 'failed' ? outcome.reason : null
+      const syncFailure = outcome?.outcome === 'failed' ? outcome.reason : null
+      // The live Factory counters: the numbers the plugin cannot carry, read from
+      // the session's own companion file while the session runs. Without this a
+      // live Factory session reaches the dashboard with its turns and no counters.
+      const counters = await this.runFactoryCounters()
+      const counterFailure = counters?.outcome === 'failed' ? counters.reason : null
+      // Both passes can fail, and both reasons are facts about the machine: the
+      // status names each one, because a reader who is told one of them is
+      // looking at a half of the picture.
+      this.lastSyncFailure =
+        syncFailure === null
+          ? counterFailure
+          : counterFailure === null
+            ? syncFailure
+            : `${syncFailure}; ${counterFailure}`
     } catch (err) {
       // A sync failure must not crash the scheduler tick, but it is surfaced in status.
       this.lastSyncFailure = err instanceof Error ? err.message : String(err)

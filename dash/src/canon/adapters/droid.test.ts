@@ -27,6 +27,10 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import type { OtlpSpan } from '../../otel/receiver.js'
 import { ingestBatch, ingestBatchWithAdapters } from '../ingest.js'
 import { buildSessions } from '../sessions.js'
@@ -54,6 +58,25 @@ const NATIVE_MODEL = 'claude-sonnet-4-5'
 const PLUGIN_MODEL = 'gpt-5-codex'
 /** The tool both paths report. */
 const TOOL_NAME = 'Read'
+/** The prompt the owner's consent let the plugin carry. */
+const FACTORY_PROMPT = 'what is our status?'
+
+/**
+ * A throwaway home holding the Factory consent file, so a case never reads
+ * the developer's real one and never depends on what it says.
+ *
+ * The consent file is the owner's decision on disk: `{"version":1,"content":true}`
+ * is the only body that lets the prompt travel.
+ */
+function consentHome(content: boolean): string {
+  const home = mkdtempSync(join(tmpdir(), 'kd-droid-consent-'))
+  mkdirSync(join(home, '.kyberdash'), { recursive: true })
+  writeFileSync(
+    join(home, '.kyberdash', 'factory-plugin.json'),
+    JSON.stringify({ version: 1, content }),
+  )
+  return home
+}
 
 /** The plugin turn's own duration, in milliseconds. */
 const PLUGIN_DURATION_MS = 1000
@@ -679,6 +702,77 @@ describe('the plugin envelope path', () => {
     expectCounterReason(record, 'cache_creation', /cache[\s-]?creation/i)
   })
 
+  it('files the prompt as conversation history, so the session shows what was asked', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-with-prompt',
+      pluginAttributes({ 'factory.turn.prompt.text': 'what is our status?' }),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    expect(record.parts).toEqual([
+      { part: 'conversation_history', text: 'what is our status?', role: 'user', order: 0 },
+    ])
+    expect(record.content['conversation_history']).toBe('what is our status?')
+    expect(record.measurability?.['user_prompt']).toBe('measured')
+  })
+
+  it('declares the prompt not measurable when the consent withheld it', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-without-prompt',
+      // The prompt turn carries the operation whether or not the consent let
+      // the text travel.
+      pluginAttributes({ 'factory.turn.operation': 'llm.invoke' }),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    // No part, never an empty one, and the absence is stated.
+    expect(record.parts ?? []).toEqual([])
+    const declared = record.measurability?.['user_prompt']
+    expect(typeof declared).toBe('object')
+    expect((declared as { availability: string }).availability).toBe('not_measurable')
+    expect((declared as { reason?: string }).reason).toMatch(/consent/i)
+  })
+
+  it('says nothing about a prompt on the completion turn, which carries none by construction', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-completion',
+      // The plugin's second turn span for one turn: no operation, no prompt.
+      pluginAttributes(),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    // A consent-off reason here would name a consent that was never asked
+    // for: this span never carried a prompt to withhold.
+    expect(record.measurability?.['user_prompt']).toBeUndefined()
+    expect(record.parts ?? []).toEqual([])
+  })
+
+  it('cuts a prompt that is over the wire’s own bound, and marks it', async () => {
+    const { droidAdapter } = await loadDroid()
+    const huge = 'x'.repeat(200 * 1024)
+    const record = normalize(
+      droidAdapter,
+      'plugin-turn-with-huge-prompt',
+      pluginAttributes({ 'factory.turn.operation': 'llm.invoke', 'factory.turn.prompt.text': huge }),
+      PLUGIN_SOURCE,
+      'factory.turn',
+    )
+
+    const part = record.parts?.[0]
+    expect(part?.part).toBe('conversation_history')
+    expect(Buffer.byteLength(part?.text ?? '', 'utf8')).toBeLessThanOrEqual(64 * 1024)
+    expect(part?.text).toContain('[kyberdash: truncated]')
+  })
+
   it('quarantines a plugin span of an undeclared name as non-model rather than guessing its kind', async () => {
     const { droidAdapter } = await loadDroid()
     // The wire contract declares the span names the map carries, and no
@@ -726,6 +820,90 @@ describe('the plugin envelope is the only claim path', () => {
       expect(summary.turn_count).toBe(1)
       expect(summary.duration_ms).toBe(PLUGIN_DURATION_MS)
     } finally {
+      store.close()
+    }
+  })
+
+  it('carries the prompt into the session payload, so the session shows what was asked', async () => {
+    const { droidAdapter } = await loadDroid()
+    const store = new CanonStore(':memory:')
+    const home = consentHome(true)
+    const previousHome = process.env['HOME']
+    process.env['HOME'] = home
+    try {
+      ingestBatchWithAdapters(
+        [
+          otlpSpan(
+            'plugin-turn-with-prompt',
+            pluginAttributes({ 'factory.turn.prompt.text': FACTORY_PROMPT }),
+            { name: 'factory.turn', resource: { 'service.name': PLUGIN_SOURCE } },
+          ),
+        ],
+        store,
+        [droidAdapter],
+      )
+      await buildSessions(store)
+
+      const payload = store.getSessionPayload(DROID_SESSION) as
+        | {
+            requests?: Array<{ prompt?: unknown }>
+            summary?: Record<string, unknown>
+          }
+        | undefined
+      expect(payload, 'the plugin turn must build a session').toBeDefined()
+      // The prompt is the session's own content, not only an attribute on the
+      // raw payload: the dashboard reads the request's prompt.
+      const prompt = payload?.requests?.[0]?.prompt
+      expect(typeof prompt).toBe('string')
+      expect(prompt as string).toContain(FACTORY_PROMPT)
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = previousHome
+      rmSync(home, { recursive: true, force: true })
+      store.close()
+    }
+  })
+
+  it('states the prompt as absent when the consent withheld it', async () => {
+    const { droidAdapter } = await loadDroid()
+    const store = new CanonStore(':memory:')
+    const home = consentHome(false)
+    const previousHome = process.env['HOME']
+    process.env['HOME'] = home
+    try {
+      ingestBatchWithAdapters(
+        [
+          otlpSpan(
+            'plugin-turn-withheld-prompt',
+            // The prompt turn carries the operation whether or not the
+            // consent let the text travel; the gate strips the text alone.
+            pluginAttributes({
+              'factory.turn.operation': 'llm.invoke',
+              'factory.turn.prompt.text': FACTORY_PROMPT,
+            }),
+            { name: 'factory.turn', resource: { 'service.name': PLUGIN_SOURCE } },
+          ),
+        ],
+        store,
+        [droidAdapter],
+      )
+      await buildSessions(store)
+
+      const payload = store.getSessionPayload(DROID_SESSION) as
+        | { requests?: Array<{ prompt?: unknown }> }
+        | undefined
+      const prompt = payload?.requests?.[0]?.prompt as
+        | { availability?: string; reason?: string }
+        | undefined
+      // The prompt never reached the store, and the session says so instead of
+      // showing a blank or a zero.
+      expect(prompt?.availability).toBe('not_measurable')
+      expect(prompt?.reason).toMatch(/consent/i)
+      expect(JSON.stringify(payload)).not.toContain(FACTORY_PROMPT)
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = previousHome
+      rmSync(home, { recursive: true, force: true })
       store.close()
     }
   })

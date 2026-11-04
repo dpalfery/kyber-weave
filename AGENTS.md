@@ -12,7 +12,29 @@ While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It 
 modified files and routes to targeted checks for .NET, KyberDash, the tray crate, and
 governed docs. Use `--scoped` for declared gates limited to changed files, or `--full` for
 all gates unscoped (`review gates . --all`). It is **not** evidence and must never be cited
-as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
+as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)).
+
+**Targeted tests only in the inner loop and before push.** Run the tests that cover the files
+you changed, plus build/lint of the touched projects; the full suite is CI's job, and CI is the
+gate before Ready / Kilo review. Map changed files to tests:
+
+- .NET: `scripts/fast-loop.sh --class <Area>*` (builds first), or build then filter:
+  `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
+  `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
+  Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
+- KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
+  (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
+  zero tests. Check the run reports a non-zero test count.
+- Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
+- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
+  The crate is one small test target, so this runs it whole, as `fast-loop.sh` does for any
+  change under `dash/tray/src-tauri/`. To narrow while iterating, add a quoted name filter
+  (`cargo test 'tray_menu'`) and check the result line shows a non-zero `passed` count.
+- Governed docs: `docs validate . --merge-ready` and `docs drift .`.
+
+Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`
+shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI
+workflows, migrations/schemas) or to reproduce a CI failure.
 
 **Every local test, gate and e2e command runs through the process watchdog.** From the
 repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
@@ -28,11 +50,13 @@ checks never take a slot. Playwright runs only with
 
 ### Before opening a PR
 
-Run the same declared gate suite a review cites — scoped by default, full before push:
+Run the declared gate suite scoped to changed files (the default). Add `--all` only for the
+cross-cutting changes or CI reproduction listed above; otherwise CI runs the full suite:
 
 ```bash
 dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
-dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
+# Cross-cutting changes or CI reproduction only, instead of the line above:
+# dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { createDroidProvider } from './droid.js'
+import { createDroidProvider, deriveProjectName, sessionProjectOf } from './droid.js'
 import type { ParsedProviderCall } from './types.js'
 
 let factoryDir: string
@@ -337,5 +337,93 @@ describe('droid provider', () => {
     })
 
     expect(await parseAll(path)).toHaveLength(0)
+  })
+})
+
+describe('the project a Factory session is filed under', () => {
+  it('strips the home directory only at a path boundary', () => {
+    // A directory that merely starts with the same characters is not under
+    // the home: stripping the prefix there would file the session under a
+    // project that belongs to a different tree.
+    expect(deriveProjectName('/home/alice/kyber', '/home/alice')).toBe('kyber')
+    expect(deriveProjectName('/home/alice2/kyber', '/home/alice')).toBe('home/alice2/kyber')
+    expect(deriveProjectName('/home/alice', '/home/alice')).toBe('~')
+  })
+
+  it('files a session under the project its own file names', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-project-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      await writeFile(
+        path,
+        `${JSON.stringify({ type: 'session_start', id: 'session-1', cwd: '/tmp/my-project' })}\n`,
+        'utf-8',
+      )
+
+      // The live counter pass and the file source's own discovery must name
+      // one session the same way.
+      const provider = createDroidProvider(dir)
+      const discovered = await provider.discoverSessions()
+      expect(discovered[0]?.project).toBe('tmp/my-project')
+      expect(await sessionProjectOf(path, dir)).toBe('tmp/my-project')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps no counters for a session whose working directory is the Factory root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-internal-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      await writeFile(
+        path,
+        `${JSON.stringify({ type: 'session_start', id: 'session-1', cwd: dir })}\n`,
+        'utf-8',
+      )
+
+      expect(await sessionProjectOf(path, dir)).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads no project from a transcript whose first line is not a session start', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-not-a-session-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      // The first line is the file's own claim, and it can be any JSON value.
+      await writeFile(path, 'null\n', 'utf-8')
+
+      // Reading it must not throw: one corrupt line must not fail the pass
+      // that reads it.
+      expect(await sessionProjectOf(path, dir)).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the workspace name when the transcript names no working directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kyber-droid-bad-cwd-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'workspace')
+      await mkdir(sessionDir, { recursive: true })
+      const path = join(sessionDir, 'session-1.jsonl')
+      // A working directory is a path, so only text is one.
+      await writeFile(
+        path,
+        `${JSON.stringify({ type: 'session_start', id: 'session-1', cwd: 42 })}\n`,
+        'utf-8',
+      )
+
+      expect(await sessionProjectOf(path, dir)).toBe('workspace')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -45,11 +45,13 @@ import {
   OUTPUT_TOKEN_KEYS,
 } from './copilot.js'
 import { isDroidEnvelopeSpan, isSupportedDroidEnvelope } from './droid-envelope.js'
+import { appendPart } from './content-parts.js'
 import {
   notMeasurable,
   type CanonicalRecord,
   type Measurability,
   type MetricAvailability,
+  USER_PROMPT_METRIC,
 } from '../types.js'
 
 /** The harness identity stamped on records this adapter wins. */
@@ -78,6 +80,55 @@ const PLUGIN_MODEL_KEYS = ['factory.model.id', 'factory.model'] as const
 
 /** The plugin envelope's tool name keys, in the spellings the wire uses. */
 const PLUGIN_TOOL_NAME_KEYS = ['factory.tool.name', 'factory.tool_name'] as const
+
+/**
+ * The plugin envelope's prompt text key.
+ *
+ * The prompt is content: the plugin sends it only under the owner's consent,
+ * and the store's gate strips it from a claimed envelope while the consent is
+ * off. So a span that carries the key is a span whose prompt was captured.
+ */
+const PLUGIN_PROMPT_TEXT_KEYS = ['factory.turn.prompt.text'] as const
+
+/**
+ * The plugin envelope's turn operation key.
+ *
+ * The plugin emits TWO turn spans for one turn: the prompt turn, which
+ * carries the operation and the prompt text, and the completion turn, which
+ * carries neither. The operation is what tells them apart.
+ */
+const PLUGIN_TURN_OPERATION_KEYS = ['factory.turn.operation'] as const
+
+/**
+ * The prompt text the wire carries at most, in bytes.
+ *
+ * The plugin cuts the prompt to this bound before it sends it. The value is
+ * the wire's, repeated here for the same reason the envelope's strings are:
+ * the canon adapter never depends on the plugin.
+ */
+const MAX_PROMPT_BYTES = 64 * 1024
+
+/** The marker the wire appends to a prompt it cut. */
+const PROMPT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
+
+/**
+ * The prompt text, cut to the wire's own bound.
+ *
+ * The plugin caps the prompt before it sends it, so a span that carries more
+ * is not the plugin's. The prompt is the one piece of content the corpus
+ * never purges, so it must not land unbounded: the text is cut at a
+ * character boundary and marked, exactly as the wire marks it.
+ */
+function cappedPrompt(text: string): string {
+  if (Buffer.byteLength(text, 'utf8') <= MAX_PROMPT_BYTES) return text
+  const budget = MAX_PROMPT_BYTES - Buffer.byteLength(PROMPT_TRUNCATION_MARKER, 'utf8')
+  const head = text.slice(0, budget)
+  const bytes = Buffer.from(head, 'utf8')
+  let end = Math.min(budget, bytes.length)
+  // A cut that lands inside a character would leave a broken one behind.
+  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1
+  return `${bytes.toString('utf8', 0, end)}${PROMPT_TRUNCATION_MARKER}`
+}
 
 /**
  * Keys downstream already reads for the model (`sessions.ts` `MODEL_KEYS`,
@@ -207,6 +258,45 @@ function applyUsage(record: CanonicalRecord, attributes: Record<string, unknown>
 }
 
 /**
+ * File the prompt the span carries, and declare it when it is absent.
+ *
+ * The prompt is the owner's own text, and it reaches the record only when the
+ * owner's consent let it travel. A turn that carries it files it as
+ * conversation history, so the session view shows what was asked; a turn
+ * without one declares the prompt `not_measurable` with a reason that names
+ * the consent, so the absence is stated rather than shown as a blank.
+ *
+ * Only the PROMPT turn says anything about the prompt. The plugin's second
+ * turn span for the same turn — the completion — carries no prompt by
+ * construction, so a consent-off reason on it would name a consent that was
+ * never asked for.
+ */
+function applyPrompt(record: CanonicalRecord, raw: RawSpan): void {
+  if (raw.name !== 'factory.turn') return
+  const prompt = firstNonEmptyString(raw.attributes, PLUGIN_PROMPT_TEXT_KEYS)
+  const operation = firstNonEmptyString(raw.attributes, PLUGIN_TURN_OPERATION_KEYS)
+  // A span that carries neither the operation nor the prompt is the
+  // completion turn: it says nothing about a prompt.
+  if (prompt === undefined && operation === undefined) return
+  if (prompt !== undefined) {
+    appendPart(record, {
+      part: 'conversation_history',
+      text: cappedPrompt(prompt),
+      role: 'user',
+    })
+  }
+  record.measurability = {
+    ...record.measurability,
+    [USER_PROMPT_METRIC]:
+      prompt !== undefined
+        ? 'measured'
+        : notMeasurable(
+            "Factory's content consent is off, so this turn did not capture the prompt text; turn the Factory capture on in KyberDash Settings to record it.",
+          ),
+  }
+}
+
+/**
  * Map the plugin envelope onto the record `baseRecord` started.
  *
  * The envelope names its identity under the `factory.*` namespace, so the
@@ -270,7 +360,10 @@ export const droidAdapter: HarnessAdapter = {
 
   normalize(raw) {
     const record = baseRecord(this, raw)
-    if (isDroidPluginSpan(raw)) applyPluginEnvelope(record, raw)
+    if (isDroidPluginSpan(raw)) {
+      applyPluginEnvelope(record, raw)
+      applyPrompt(record, raw)
+    }
     applyUsage(record, raw.attributes)
     return record
   },

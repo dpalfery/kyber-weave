@@ -37,12 +37,11 @@ import {
   validateRecordTokens,
 } from './copilot.js'
 import { isSupportedOpencodeEnvelope } from './opencode-envelope.js'
+import { appendPart } from './content-parts.js'
 import { OPENCODE_KEYS, type SpanKind } from '../../capture/harnesses/opencode-plugin/contract.js'
 import {
-  contentFromParts,
   notMeasurable,
   type CanonicalRecord,
-  type ContentPart,
   type CostBlock,
   type Measurability,
   type MetricAvailability,
@@ -192,15 +191,6 @@ function declareNoUsage(record: CanonicalRecord): void {
     cache_creation: notMeasurable(reason),
   }
   record.measurability = { ...record.measurability, ...declared }
-}
-
-/** Appends a content part after every existing part, recomputing order and content. */
-function appendPart(record: CanonicalRecord, part: Omit<ContentPart, 'order'>): void {
-  const existing = record.parts ?? []
-  const order = existing.reduce((max, entry) => Math.max(max, (entry.order ?? 0) + 1), 0)
-  const parts: ContentPart[] = [...existing, { ...part, order }]
-  record.parts = parts
-  record.content = contentFromParts(parts)
 }
 
 /**
