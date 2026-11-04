@@ -26,6 +26,7 @@ import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js
 import { observedNamespaces } from '../canon/adapters/quarantine.js'
 import { EXCLUDED_HARNESS_IDENTITIES, isExcludedHarnessIdentity } from '../canon/measurability.js'
 import {
+  CANONICAL_CONTENT_KEYS,
   contentFromParts,
   type CanonicalContentKey,
   type CanonicalRecord,
@@ -182,34 +183,50 @@ function deleteDerivedSessions(
  *
  * A collected bucket that holds no part — the legacy content shape, written
  * before the parts became the authority — becomes a part of its own, so the
- * content survives the rewrite a parts-carrying row gets.
+ * content survives the rewrite a parts-carrying row gets. A bucket the
+ * collected content names but the canonical keys do not, or whose value is
+ * not text, is not filed: the parts are the authority, and a part of an
+ * unknown kind would carry a key no reader knows.
  *
  * `undefined` means there is nothing to write: no collected content and no
  * derived parts.
  */
-function keepCollectedContent(
+export function keepCollectedContent(
   collected: CanonicalRecord,
   derived: CanonicalRecord,
 ): { content: CanonicalRecord['content']; parts: ContentPart[] } | undefined {
   const held = collected.parts ?? []
-  const buckets = new Set<string>(held.map((part) => part.part))
   const parts: ContentPart[] = [...held]
   let order = held.reduce((max, part) => Math.max(max, (part.order ?? 0) + 1), 0)
 
+  // The buckets the collected content holds: its own parts, and the legacy
+  // content shape's own keys. A derived part of one of these buckets is
+  // dropped — the collected content is the authority there.
+  const collectedBuckets = new Set<string>(held.map((part) => part.part))
+
   for (const [bucket, text] of Object.entries(collected.content)) {
-    if (buckets.has(bucket) || text === '') continue
-    parts.push({ part: bucket as CanonicalContentKey, text, order: order++ })
-    buckets.add(bucket)
+    collectedBuckets.add(bucket)
+    if (held.some((part) => part.part === bucket)) continue
+    if (!isCanonicalContentKey(bucket)) continue
+    if (typeof text !== 'string' || text === '') continue
+    parts.push({ part: bucket, text, order: order++ })
   }
 
+  // Every derived part of a bucket the collected content left empty is kept:
+  // two parts of one bucket join into one content string, and dropping the
+  // second would lose evidence the adapter supplied.
   for (const part of derived.parts ?? []) {
-    if (buckets.has(part.part)) continue
+    if (collectedBuckets.has(part.part)) continue
     parts.push({ ...part, order: order++ })
-    buckets.add(part.part)
   }
 
   if (parts.length === 0) return undefined
   return { content: contentFromParts(parts), parts }
+}
+
+/** Whether a key is one of the canonical content buckets. */
+function isCanonicalContentKey(key: string): key is CanonicalContentKey {
+  return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(key)
 }
 
 export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {

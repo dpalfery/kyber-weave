@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { buildSessions } from '../canon/sessions.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
-import { renormalizeRecords } from './backfill.js'
+import { renormalizeRecords, keepCollectedContent } from './backfill.js'
 
 const RETAINED_TRACE = 'ffffffffffffffffffffffffffffffff'
 const NOISE_TRACE = '99999999999999999999999999999999'
@@ -373,6 +373,64 @@ describe('renormalizeRecords — retained raw evidence', () => {
     expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
     expect(store.countSessionsByHarness()['gemini'] ?? 0).toBe(0)
     store.close()
+  })
+})
+
+describe('the content a renormalization keeps', () => {
+  it('keeps every derived part of a bucket the collected content left empty', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+      parts: [
+        { part: 'conversation_history', text: 'the first message', order: 0 },
+        { part: 'conversation_history', text: 'the second message', order: 1 },
+      ],
+    })
+
+    const kept = keepCollectedContent(collected, derived)
+
+    // Two parts of one bucket join into one content string, so dropping the
+    // second would lose evidence the adapter supplied.
+    expect(kept?.parts).toHaveLength(2)
+    expect(kept?.content['conversation_history']).toBe('the first message\nthe second message')
+  })
+
+  it('files no part for a bucket the canonical keys do not name', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: { not_a_bucket: 'text the canonical keys do not know' } as never,
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+
+    // The parts are the authority, and a part of an unknown kind would carry
+    // a key no reader knows.
+    expect(keepCollectedContent(collected, derived)).toBeUndefined()
+  })
+
+  it('files no part for a bucket whose value is not text', () => {
+    const collected = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: { conversation_history: 42 } as never,
+    })
+    const derived = staleRecord({
+      spanId: 'merge-span',
+      traceId: 'merge-trace',
+      content: {},
+    })
+
+    expect(keepCollectedContent(collected, derived)).toBeUndefined()
   })
 })
 
