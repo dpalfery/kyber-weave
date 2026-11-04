@@ -56,6 +56,7 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
     {
         string bun = RequireBun();
         WriteFakeBinary(stdout, exit);
+        PlantRepositoryMarker();
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), ArbiterPluginShim.Render("opencode"));
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
             import { KyberArbiter } from "./shim.ts";
@@ -83,6 +84,7 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         // it must hold the same fail-closed table as the OpenCode shim under Bun.
         string bun = RequireBun();
         WriteFakeBinary(stdout, exit);
+        PlantRepositoryMarker();
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), await RenderKiloShimAsync());
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
             import { KyberArbiter } from "./shim.ts";
@@ -290,10 +292,21 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         return Encoding.UTF8.GetString(extension.Content.Span);
     }
 
+    private void PlantRepositoryMarker()
+    {
+        // The shim resolves the repository root by walking up from its own
+        // location to the nearest `.kyber-weave/kyber-weave.yml` (falling back
+        // to `.git`) and blocks when no marker resolves. The temp directory is
+        // markerless by default, so without this the shim blocks before the
+        // fake binary ever runs and the deliberate-allow rows can never pass.
+        string configDirectory = Path.Combine(_temp.Path, ".kyber-weave");
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), "ontology:\n");
+    }
+
     private void WriteFakeBinary(string stdout, string exit)
     {
-        string script = Path.Combine(_temp.Path, "kyber-weave-arbiter");
-        string body = "#!/bin/sh\ncat >/dev/null\n"
+        string script = Path.Combine(_temp.Path, "kyber-weave-arbiter");        string body = "#!/bin/sh\ncat >/dev/null\n"
             + (stdout.Length > 0 ? $"printf '%s' '{stdout}'\n" : string.Empty)
             + $"exit {exit}\n";
         File.WriteAllText(script, body);

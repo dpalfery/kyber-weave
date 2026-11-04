@@ -30,9 +30,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// root by walking up from its own plugin file location to the nearest
 /// <c>.kyber-weave/kyber-weave.yml</c> (falling back to the nearest <c>.git</c>,
 /// then to the same walk from the harness directory) and binds that root into
-/// both the spawn <c>cwd</c> and the envelope <c>cwd</c>. When no marker resolves
-/// and the harness supplied no usable directory either, the hook handler throws a
-/// block with a clear reason instead of spawning with a possibly-wrong cwd.
+/// both the spawn <c>cwd</c> and the envelope <c>cwd</c>. When no marker resolves,
+/// the hook handler throws a block with a clear reason instead of spawning with
+/// a possibly-wrong cwd.
 /// </para>
 /// </remarks>
 public static class ArbiterPluginShim
@@ -103,8 +103,10 @@ public static class ArbiterPluginShim
             // harness-reported directory is never trusted on its own. The repository
             // root is resolved by walking up from this plugin file's own directory to
             // the nearest .kyber-weave/kyber-weave.yml, falling back to the nearest
-            // .git, then to the same walk from the harness directory. The resolved
-            // root feeds both the spawn cwd and the envelope cwd below.
+            // .git, then to the same walk from the harness directory. When no marker
+            // resolves, the hook handler throws a block instead of spawning with a
+            // possibly-wrong cwd. The resolved root feeds both the spawn cwd and the
+            // envelope cwd below.
             function currentFileDirectory(): string {
               const meta = import.meta as { dir?: unknown; url?: unknown };
               if (typeof meta.dir === "string" && meta.dir.length > 0) {
@@ -172,9 +174,6 @@ public static class ArbiterPluginShim
                 if (gitRoot !== null) {
                   return gitRoot;
                 }
-              }
-              if (typeof harnessDirectory === "string" && harnessDirectory.length > 0) {
-                return harnessDirectory;
               }
               throw new Error(
                 "kyber-arbiter: cannot resolve repository root from the plugin location or the harness directory " +
