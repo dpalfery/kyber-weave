@@ -324,6 +324,11 @@ app.Configure(config =>
             .WithDescription("Diagnose the Arbiter configuration, key, log ignore, binary and guard.")
             .WithExample("arbiter", "doctor");
 
+        arbiter.AddCommand<ArbiterInstallCommand>("install")
+            .WithDescription("Install the Arbiter hooks and provider for a target in one run.")
+            .WithExample("arbiter", "install", "--target", "kilo", "--provider", "none")
+            .WithExample("arbiter", "install", "--target", "kilo", "--provider", "systemone", "--key-stdin");
+
         arbiter.AddCommand<ArbiterUninstallCommand>("uninstall")
             .WithDescription("Remove Arbiter-owned hooks and plugin files for a target.")
             .WithExample("arbiter", "uninstall", "--target", "kilo");
