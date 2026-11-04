@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Text.Json;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -48,16 +50,30 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         string root = Path.GetFullPath(
             string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path);
 
-        if (settings.RemoveKey && !RemoveKey(root, settings))
+        bool deployed;
+        try
+        {
+            deployed = Directory.Exists(root) && ArbiterUninstaller.HasDeployment(root, target);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or JsonException
+                                       or InvalidOperationException)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return 1;
+        }
 
-        bool deployed = Directory.Exists(root) && ArbiterUninstaller.HasDeployment(root, target);
         if (!deployed)
         {
             AnsiConsole.MarkupLine(
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
+            if (settings.RemoveKey && !RemoveKey(root, settings))
+                return 1;
+
             return 0;
         }
 
@@ -67,14 +83,17 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             uninstaller.Uninstall(SquadTargetCatalog.GetToken(target));
         }
         catch (Exception ex) when (ex is ArgumentException
-            or IOException
-            or UnauthorizedAccessException
-            or System.Text.Json.JsonException
-            or InvalidOperationException)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or JsonException
+                                       or InvalidOperationException)
         {
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return 1;
         }
+
+        if (settings.RemoveKey && !RemoveKey(root, settings))
+            return 1;
 
         AnsiConsole.MarkupLine(
             $"[green]Removed Arbiter hooks for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]' " +
@@ -83,8 +102,10 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
     }
 
     /// <summary>Runs the command without cancellation; the entry-point tests use this.</summary>
-    public int Execute(CommandContext context, ArbiterUninstallSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, ArbiterUninstallSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 
     private static bool RemoveKey(string root, ArbiterUninstallSettings settings)
     {
@@ -99,9 +120,9 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             ArbiterCommandComposition.CredentialStore().Delete(origin);
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception)
         {
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
             return false;

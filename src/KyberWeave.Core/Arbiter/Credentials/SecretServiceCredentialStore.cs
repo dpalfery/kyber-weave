@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 
@@ -36,7 +37,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true
         };
         startInfo.ArgumentList.Add("lookup");
         startInfo.ArgumentList.Add("service");
@@ -51,9 +52,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             // lookup (no D-Bus, locked keyring, EPERM). Only the no-match case is an
             // absent key; every other failure must surface, or a reviewer silently
             // loses its key and the Arbiter fails open.
-            if (result.ExitCode == 1
-                && (result.StandardError.Contains("no match", StringComparison.OrdinalIgnoreCase)
-                    || result.StandardError.Contains("no such secret", StringComparison.OrdinalIgnoreCase)))
+            if (IsMissingSecret(result))
             {
                 return null;
             }
@@ -77,7 +76,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true
         };
         startInfo.ArgumentList.Add("store");
         startInfo.ArgumentList.Add(Label);
@@ -105,7 +104,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true
         };
         startInfo.ArgumentList.Add("clear");
         startInfo.ArgumentList.Add("service");
@@ -116,13 +115,35 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         ProcessResult result = RunSecretTool(startInfo, string.Empty);
         if (result.ExitCode != 0)
         {
+            // Clearing an absent secret is already the desired end state, so the
+            // no-match case succeeds; any other failure surfaces like a read.
+            if (IsMissingSecret(result))
+            {
+                return;
+            }
+
             throw new InvalidOperationException(
                 $"The Secret Service delete failed with exit code {result.ExitCode}.");
         }
     }
 
-    private static string OneLine(string value) =>
-        string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    /// <summary>
+    /// Whether <paramref name="result"/> reports no matching secret: exit 1 with a
+    /// "no match" or "no such secret" diagnostic, the same absence <see cref="Read"/>
+    /// treats as a missing key.
+    /// </summary>
+    private static bool IsMissingSecret(ProcessResult result)
+    {
+        return result.ExitCode == 1
+               && (result.StandardError.Contains("no match", StringComparison.OrdinalIgnoreCase)
+                   || result.StandardError.Contains("no such secret", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string OneLine(string value)
+    {
+        return string.Join(' ',
+            value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)
     {
@@ -130,7 +151,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         {
             return _runner.Run(startInfo, standardInput);
         }
-        catch (System.ComponentModel.Win32Exception exception)
+        catch (Win32Exception exception)
         {
             // Process.Start raises Win32Exception when secret-tool is not on PATH. Mapping it
             // here keeps the raw OS text out of every surface and states the remedy instead.
