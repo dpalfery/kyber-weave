@@ -6,6 +6,7 @@ using KyberWeave.Cli.Update;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -108,7 +109,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         string endpoint = ResolveEndpoint(root, settings.Config);
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
-            && !IsLoopbackEndpoint(endpoint);
+                        && !IsLoopbackEndpoint(endpoint);
 
         string? keyToStore = NullIfEmpty(settings.ArbiterKey);
         if (needsKey && keyToStore is null && settings.KeyStdin)
@@ -141,15 +142,15 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
 
         string? existingStored = needsKey ? ReadStoredKey(origin) : null;
         bool keyWriteNeeded = needsKey
-            && !string.IsNullOrEmpty(keyToStore)
-            && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
+                              && !string.IsNullOrEmpty(keyToStore)
+                              && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
 
         string configPath = ResolveConfigPath(root, settings.Config);
         string? existingText = ReadConfigText(configPath);
         if (existingText is null)
             return 1;
 
-        string desiredText = EnsureProviderKind(EnsureArbiterEnabled(existingText), kindName);
+        string desiredText = EnsureProviderKind(HostConfigYaml.WithArbiterEnabled(existingText), kindName);
         bool configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
 
         SquadStateStore stateStore =
@@ -161,8 +162,8 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             existingReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
         }
         catch (Exception ex) when (ex is InvalidDataException
-            or IOException
-            or UnauthorizedAccessException)
+                                       or IOException
+                                       or UnauthorizedAccessException)
         {
             WriteError($"The Squad deployment state for '{root}' could not be read: {ex.Message}");
             return 1;
@@ -273,8 +274,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use this.</summary>
-    public int Execute(CommandContext context, ArbiterInstallSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, ArbiterInstallSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind)
     {
@@ -295,8 +298,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return false;
     }
 
-    private static string Roster() =>
-        string.Join(", ", SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
+    private static string Roster()
+    {
+        return string.Join(", ", SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
+    }
 
     private static void WriteError(string message)
     {
@@ -304,8 +309,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
     }
 
-    private static string? NullIfEmpty(string? value) =>
-        string.IsNullOrEmpty(value) ? null : value;
+    private static string? NullIfEmpty(string? value)
+    {
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
 
     private static string? ReadStdinKey()
     {
@@ -331,7 +338,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private Func<string, string?> EnvironmentReader() => _environmentReader ?? Environment.GetEnvironmentVariable;
+    private Func<string, string?> EnvironmentReader()
+    {
+        return _environmentReader ?? Environment.GetEnvironmentVariable;
+    }
 
     private string ResolveEndpoint(string root, string? configOption)
     {
@@ -364,9 +374,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             store = ArbiterCommandComposition.CredentialStore();
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception)
         {
             return null;
         }
@@ -376,10 +386,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             return ArbiterKeyResolver.Resolve(endpoint, store, EnvironmentReader());
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception
-            or ArgumentException)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception
+                                       or ArgumentException)
         {
             return null;
         }
@@ -392,10 +402,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             return ArbiterCommandComposition.CredentialStore().Read(origin);
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception
-            or ArgumentException)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception
+                                       or ArgumentException)
         {
             return null;
         }
@@ -408,10 +418,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             ArbiterCommandComposition.CredentialStore().Write(origin, key);
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception
-            or ArgumentException)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception
+                                       or ArgumentException)
         {
             WriteError(
                 $"The credential store for origin '{origin}' is not available: {ex.Message} " +
@@ -510,10 +520,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                     ArbiterCommandComposition.GetEnvironmentVariable);
             }
             catch (Exception ex) when (ex is InvalidOperationException
-                or IOException
-                or UnauthorizedAccessException
-                or System.ComponentModel.Win32Exception
-                or ArgumentException)
+                                           or IOException
+                                           or UnauthorizedAccessException
+                                           or Win32Exception
+                                           or ArgumentException)
             {
                 key = null;
             }
@@ -547,9 +557,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or Win32Exception)
         {
             AnsiConsole.MarkupLine(
                 "[yellow]warn:[/] The 'kyber-weave-arbiter' binary probe failed: " +
@@ -604,57 +614,6 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Returns <paramref name="yaml"/> with <c>arbiter.enabled</c> set to <c>true</c>.
-    /// An existing <c>enabled: false</c> is flipped in place; a missing
-    /// <c>arbiter:</c> block is appended. Returns the input unchanged when it
-    /// already enables the arbiter. Every other byte is preserved.
-    /// </summary>
-    /// <remarks>
-    /// Mirrors <c>HostConfigYaml.WithArbiterEnabled</c> line for line. That helper is
-    /// <c>internal</c> to <c>KyberWeave.Core</c> (visible only to tests), so this CLI
-    /// command cannot call it without widening Core's surface outside this task's scope.
-    /// </remarks>
-    internal static string EnsureArbiterEnabled(string yaml)
-    {
-        ArgumentNullException.ThrowIfNull(yaml);
-
-        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        List<string> lines = SplitLines(yaml);
-        int arbiter = IndexOfTopLevelKey(lines, "arbiter");
-        if (arbiter < 0)
-        {
-            List<string> appended = [.. lines];
-            if (appended.Count > 0 && appended[^1].Trim().Length > 0)
-                appended.Add(string.Empty);
-
-            appended.Add("arbiter:");
-            appended.Add("  enabled: true");
-            appended.Add(string.Empty);
-            return string.Join(newline, appended);
-        }
-
-        int blockEnd = EndOfBlock(lines, arbiter);
-        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
-        for (int i = arbiter + 1; i < blockEnd; i++)
-        {
-            if (!TrySplitKeyedLine(lines[i], "enabled", out string lineIndent, out string prefix, out string rest)
-                || !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
-                continue;
-
-            (string value, string suffix) = SplitScalarAndSuffix(rest);
-            if (string.Equals(UnquoteScalar(value), "true", StringComparison.Ordinal))
-                return yaml;
-
-            string separator = prefix.EndsWith(':') ? " " : string.Empty;
-            lines[i] = prefix + separator + "true" + suffix;
-            return string.Join(newline, lines);
-        }
-
-        lines.Insert(arbiter + 1, blockIndent + "enabled: true");
-        return string.Join(newline, lines);
     }
 
     /// <summary>
@@ -761,7 +720,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             if (!TrySplitKeyedLine(lines[i], "kind", out string lineIndent, out string prefix, out string rest))
                 continue;
 
-            if (lineIndent.Length <= providerIndent.Length || lineIndent.Length >= 16)
+            // providerEnd bounds this loop to the provider block, so every keyed line
+            // nested under 'provider:' is the kind, at whatever depth the file indents
+            // it — a depth cap here would miss a deeply indented kind and insert a
+            // duplicate beside it.
+            if (lineIndent.Length <= providerIndent.Length)
                 continue;
 
             (string value, string suffix) = SplitScalarAndSuffix(rest);

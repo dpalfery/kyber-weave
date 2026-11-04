@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -27,7 +28,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// style the file uses most.
 /// </para>
 /// </remarks>
-internal static partial class HostConfigYaml
+public static partial class HostConfigYaml
 {
     /// <summary>Indentation used for keys this type inserts, matching the emitted template.</summary>
     private const string DefaultIndent = "  ";
@@ -149,7 +150,7 @@ internal static partial class HostConfigYaml
         // A block sequence lives on the lines below the key. Its items may be indented past
         // the key or sit at the key's own indent — both are valid YAML — so an item is
         // recognised by its '-', and the first line that is not one ends the sequence.
-        List<string> items = new List<string>();
+        List<string> items = new();
         for (int i = keyIndex + 1; i < lines.Count; i++)
         {
             string trimmed = lines[i].TrimStart();
@@ -265,8 +266,8 @@ internal static partial class HostConfigYaml
         roots = [];
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader(document);
+            YamlStream stream = new();
+            using StringReader reader = new(document);
             stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             if (!root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node) ||
@@ -275,7 +276,7 @@ internal static partial class HostConfigYaml
                 return false;
             }
 
-            List<string> values = new List<string>();
+            List<string> values = new();
             foreach (YamlNode child in sequence.Children)
             {
                 if (child is not YamlScalarNode { Value: { } scalar }) return false;
@@ -285,7 +286,7 @@ internal static partial class HostConfigYaml
             roots = values;
             return values.Count > 0;
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -306,15 +307,15 @@ internal static partial class HostConfigYaml
     {
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader("value: " + token);
+            YamlStream stream = new();
+            using StringReader reader = new("value: " + token);
             stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             return root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node)
-                && node is YamlScalarNode scalar
-                && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
+                   && node is YamlScalarNode scalar
+                   && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -534,7 +535,8 @@ internal static partial class HostConfigYaml
             ArgumentException.ThrowIfNullOrWhiteSpace(tech);
             if (tech.Any(char.IsControl))
             {
-                throw new ArgumentException("Technology names may not contain control characters.", nameof(technologies));
+                throw new ArgumentException("Technology names may not contain control characters.",
+                    nameof(technologies));
             }
         }
 
@@ -668,7 +670,7 @@ internal static partial class HostConfigYaml
         int blockEnd,
         IReadOnlyList<string> technologies)
     {
-        List<string> existingTechs = new List<string>();
+        List<string> existingTechs = new();
         int lastItemIndex = keyIndex;
         string itemIndent = blockIndent + DefaultIndent;
 
@@ -721,7 +723,7 @@ internal static partial class HostConfigYaml
             return originalYaml;
         }
 
-        List<string> newLines = new List<string>();
+        List<string> newLines = new();
         foreach (string tech in toAdd)
         {
             newLines.Add(itemIndent + "- " + QuoteScalar(tech));
@@ -783,8 +785,8 @@ internal static partial class HostConfigYaml
         items = [];
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader(document);
+            YamlStream stream = new();
+            using StringReader reader = new(document);
             stream.Load(reader);
             if (stream.Documents.Count == 0)
             {
@@ -798,7 +800,7 @@ internal static partial class HostConfigYaml
                 return false;
             }
 
-            List<string> values = new List<string>();
+            List<string> values = new();
             foreach (YamlNode child in sequence.Children)
             {
                 if (child is not YamlScalarNode { Value: { } scalar })
@@ -812,7 +814,7 @@ internal static partial class HostConfigYaml
             items = values;
             return true;
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -961,7 +963,10 @@ internal static partial class HostConfigYaml
         private readonly List<string> _terminators = [];
         private readonly string _newline;
 
-        private HostConfigLines(string newline) => _newline = newline;
+        private HostConfigLines(string newline)
+        {
+            _newline = newline;
+        }
 
         public int Count => _content.Count;
 
