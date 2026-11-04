@@ -102,6 +102,21 @@ async function freePort(): Promise<number> {
 }
 
 /**
+ * `count` distinct free loopback ports. Every probe stays bound until all are read, so the
+ * OS cannot hand the same ephemeral port back twice — which back-to-back `freePort()`
+ * calls allow, since each probe is closed before the next one binds.
+ */
+async function freePorts(count: number): Promise<number[]> {
+  const probes: Server[] = []
+  try {
+    for (let i = 0; i < count; i++) probes.push(await occupy(0))
+    return probes.map((probe) => (probe.address() as AddressInfo).port)
+  } finally {
+    await Promise.all(probes.map((probe) => new Promise<void>((done) => probe.close(() => done()))))
+  }
+}
+
+/**
  * Starts the dashboard with the host seams injected (fake spawners, a refusing prober)
  * so no live job can ever run. An omitted `store` exercises the engine-owned path —
  * the process-singleton default store and the default bridge — which a failed start
@@ -405,10 +420,9 @@ describe('the persisted setting applies on the next startup, never to the runnin
     })
     const dbPath = join(root, 'canon.db')
     const stateDir = tempStateDir()
-    const secondPort = await freePort()
+    const [secondPort, firstPort] = await freePorts(2)
 
     // First startup takes an explicit CLI port for this run only; nothing is persisted.
-    const firstPort = await freePort()
     expect(secondPort).not.toBe(firstPort)
     const firstStore = new CanonStore(dbPath)
     const first = startDashboard({ port: firstPort, store: firstStore, stateDir })
