@@ -291,6 +291,31 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         Assert.Equal(key, _store.Read(TypeSafeOrigin));
     }
 
+    /// <summary>
+    /// A dry run on a bare root previews instead of installing: it must not scaffold
+    /// <c>.kyber-weave/</c> or any other file while reporting a plan.
+    /// </summary>
+    [Fact]
+    public void Install_DryRunOnAnEmptyDirectoryCreatesNothing()
+    {
+        string host = NewDir("install-dry-run");
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "kilo",
+                Provider = "none",
+                DryRun = true,
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Dry-run", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.GetFileSystemEntries(host));
+    }
+
     private static string ConfigPath(string host) =>
         Path.Combine(host, ".kyber-weave", "kyber-weave.yml");
 

@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -145,7 +146,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                               && !string.IsNullOrEmpty(keyToStore)
                               && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
 
-        if (string.IsNullOrWhiteSpace(settings.Config) && FindConfigPath(root) is null)
+        if (!settings.DryRun
+            && string.IsNullOrWhiteSpace(settings.Config)
+            && FindConfigPath(root) is null)
         {
             try
             {
@@ -216,7 +219,26 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 return 1;
         }
 
-        KyberWeaveConfigLoadResult configLoad = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
+        // A dry run writes no scaffold, so on a bare root there is no file to load. Preview
+        // against the configuration the real run would have written instead of failing.
+        KyberWeaveConfigLoadResult configLoad;
+        if (settings.DryRun && !File.Exists(configPath))
+        {
+            try
+            {
+                configLoad = KyberWeaveConfigLoadResult.Ok(
+                    KyberWeaveConfigLoader.LoadFromYaml(desiredText), configPath);
+            }
+            catch (YamlException ex)
+            {
+                configLoad = KyberWeaveConfigLoadResult.Fail(ex.Message, configPath);
+            }
+        }
+        else
+        {
+            configLoad = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
+        }
+
         if (!configLoad.Success || configLoad.Config is null)
         {
             WriteError(
@@ -631,11 +653,4 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
 
         return null;
     }
-
-    /// <summary>
-    /// Returns <paramref name="yaml"/> with <c>arbiter.provider.kind</c> set to
-    /// <paramref name="kind"/>. The provider block is added when absent; only the
-    /// kind value changes otherwise, so comments, key order, and unrelated keys
-    /// survive. Returns the input unchanged when it already names the kind.
-    /// </summary>
 }
