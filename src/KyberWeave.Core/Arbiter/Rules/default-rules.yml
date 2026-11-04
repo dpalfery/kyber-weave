@@ -65,6 +65,8 @@ rules:
         answer: overlaps-in-flight
       - when: { fact: plan.task.depends-on, exists: false }
         answer: ready
+      - when: { fact: plan.task.depends-on, count: 0 }
+        answer: ready
       - when: { fact: plan.task.depends-on, subset-of: ledger.completed-tasks }
         answer: ready
       - when: { fact: harness.observes-returns, equals: false }

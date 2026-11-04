@@ -116,8 +116,9 @@ public sealed class ArbiterFactBuilderTests
             "harness",
             DocsConfig());
 
-        var dirs = Assert.IsAssignableFrom<IReadOnlyList<string>>(facts.Facts["config.planning-dirs"].Value);
-        Assert.Equal(["docs/plans", "docs/specs", "docs/todo"], dirs);
+        IReadOnlyList<string> dirs =
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(facts.Facts["config.planning-dirs"].Value);
+        Assert.Equal(["docs/plans/**", "docs/specs/**", "docs/todo/**"], dirs);
         Assert.Equal(ArbiterFactLabel.Derived, facts.Facts["config.planning-dirs"].Label);
     }
 
