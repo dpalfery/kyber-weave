@@ -55,7 +55,16 @@ export type RefreshLockOutcome =
   | { outcome: 'acquired'; handle: RefreshLockHandle }
   | { outcome: 'completed-by-other' }
   | { outcome: 'timed-out' }
-  | { outcome: 'unavailable' }
+  | {
+      outcome: 'unavailable'
+      /**
+       * Why the lock could not be taken, when the failure was an error the
+       * caller can act on (a directory that cannot be created, a file that
+       * cannot be read). Absent means the lock was taken by a path this
+       * module does not report a reason for.
+       */
+      reason?: string
+    }
 
 const defaultClock: RefreshLockClock = {
   monotonicNow: () => Number(process.hrtime.bigint()) / 1_000_000,
@@ -598,8 +607,11 @@ export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}):
     }
     leave()
     return { outcome: 'timed-out' }
-  } catch {
+  } catch (err) {
     leave()
-    return { outcome: 'unavailable' }
+    return {
+      outcome: 'unavailable',
+      reason: err instanceof Error ? err.message : String(err),
+    }
   }
 }

@@ -98,6 +98,16 @@ export type SessionReadState = {
   lastSeen: string
   /** When the pass last read the session. */
   readAtMs: number
+  /**
+   * Whether the session had nothing to read.
+   *
+   * A session with no transcript — or one whose transcript carries no calls
+   * yet — is not read again on the interval: it is read again when the
+   * plugin's own records advance, which is when the transcript can have grown.
+   * Without this, one absent companion file cost a scan on every tick for the
+   * whole window the session stays eligible for.
+   */
+  readonly empty: boolean
 }
 
 /**
@@ -114,9 +124,53 @@ const processReadStates = new Map<string, SessionReadState>()
 /** How many sessions the throttle remembers. */
 const MAX_READ_STATES = 500
 
-function factoryRootOf(explicit: string | undefined): string {
-  if (explicit !== undefined && explicit !== '') return explicit
-  return process.env['FACTORY_DIR'] ?? join(homedir(), '.factory')
+/** The most sessions one pass may read, whatever the caller asks for. */
+const HARD_MAX_SESSIONS = 1_000
+
+/**
+ * A session count the pass can act on.
+ *
+ * The count reaches a SQL `LIMIT`, so a value that is not a positive safe
+ * integer would reach SQLite as an unbounded or negative limit. The caller's
+ * value is bounded here instead.
+ */
+function boundedSessionCount(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback
+  return Math.min(Math.floor(value), HARD_MAX_SESSIONS)
+}
+
+/**
+ * Remember what the pass read for a session.
+ *
+ * The map is bounded: the oldest entry is dropped when it grows past its
+ * limit, and a dropped entry costs one extra read.
+ */
+function rememberRead(
+  readStates: Map<string, SessionReadState>,
+  sessionId: string,
+  lastSeen: string,
+  readAtMs: number,
+  empty: boolean,
+): void {
+  readStates.set(sessionId, { lastSeen, readAtMs, empty })
+  if (readStates.size > MAX_READ_STATES) {
+    const oldest = readStates.keys().next()
+    if (oldest.done !== true) readStates.delete(oldest.value)
+  }
+}
+
+/**
+ * The Factory root the pass reads.
+ *
+ * An empty `FACTORY_DIR` is an absent root, not the current directory: a
+ * relative `sessions` path would read whatever happens to sit beside the
+ * process.
+ */
+export function factoryRootOf(explicit: string | undefined): string {
+  if (explicit !== undefined && explicit.trim() !== '') return explicit
+  const fromEnv = process.env['FACTORY_DIR']
+  if (fromEnv !== undefined && fromEnv.trim() !== '') return fromEnv
+  return join(homedir(), '.factory')
 }
 
 /**
@@ -168,10 +222,28 @@ async function workspaceDirectories(sessionsRoot: string): Promise<string[]> {
   let entries: Dirent<string>[]
   try {
     entries = await readdir(sessionsRoot, { withFileTypes: true })
-  } catch {
-    return []
+  } catch (err) {
+    // A root that is not there is a root with no sessions. A root that is
+    // there and cannot be read is a failure the owner must see: reporting it
+    // as an empty list would read as "no Factory sessions", which is a
+    // different statement.
+    if (isAbsentPathError(err)) return []
+    throw new Error(
+      `the Factory sessions root could not be read: ${sessionsRoot} (${messageOf(err)})`,
+    )
   }
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+}
+
+/** Whether an error says the path is not there, rather than that it failed. */
+function isAbsentPathError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/** The message of an error, whatever kind it is. */
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 /** The working directory the plugin recorded for a session, or undefined. */
@@ -182,9 +254,14 @@ function workingDirectoryOf(attributes: Record<string, unknown> | undefined): st
 
 /** A call's timestamp as an instant, or undefined when it names none. */
 function instantOf(call: ParsedProviderCall): number | undefined {
-  const raw = call.timestamp?.trim() ?? ''
-  if (raw === '') return undefined
-  const parsed = Date.parse(raw)
+  // The value comes out of a JSON transcript, so its type is the file's
+  // claim and not the parser's: a transcript that names a number must not
+  // abort the whole pass.
+  const raw: unknown = call.timestamp
+  if (typeof raw !== 'string') return undefined
+  const text = raw.trim()
+  if (text === '') return undefined
+  const parsed = Date.parse(text)
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
@@ -233,19 +310,25 @@ export async function syncFactoryLiveCounters(
   const nowMs = options.now?.() ?? Date.now()
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS
   const minIntervalMs = options.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS
-  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS
+  const maxSessions = boundedSessionCount(options.maxSessions ?? DEFAULT_MAX_SESSIONS, DEFAULT_MAX_SESSIONS)
   const factoryRoot = factoryRootOf(options.factoryRoot)
   const sessionsRoot = join(factoryRoot, 'sessions')
   const readStates = options.readStates ?? processReadStates
 
   // The lock, not a peek at it: a refresh that starts after a probe would
   // otherwise write the same sessions under this pass.
+  const lockDirectory = options.stateDir ?? stateDir()
   const lock = await acquireStoreRefreshLock({
-    directory: options.stateDir ?? stateDir(),
+    directory: lockDirectory,
     waitMs: 0,
   })
   if (lock.outcome === 'unavailable') {
-    return { outcome: 'failed', reason: 'the store refresh lock could not be read or created' }
+    return {
+      outcome: 'failed',
+      reason:
+        `the store refresh lock could not be read or created under ${lockDirectory}` +
+        (lock.reason !== undefined ? ` (${lock.reason})` : ''),
+    }
   }
   if (lock.outcome !== 'acquired') return { outcome: 'busy' }
 
@@ -275,8 +358,12 @@ export async function syncFactoryLiveCounters(
       if (!Number.isFinite(lastSeenMs) || nowMs - lastSeenMs > maxAgeMs) continue
 
       const state = readStates.get(candidate.session_id)
-      const advanced = state === undefined || state.lastSeen !== candidate.last_seen
-      const dueAgain = state !== undefined && nowMs - state.readAtMs >= minIntervalMs
+      // The throttle compares INSTANTS, not the strings they were written
+      // as: the same instant written two ways is the same read, and a string
+      // comparison would re-read the session on every tick.
+      const advanced = state === undefined || Date.parse(state.lastSeen) !== lastSeenMs
+      const dueAgain =
+        state !== undefined && !state.empty && nowMs - state.readAtMs >= minIntervalMs
       // A session that is still producing records is re-read on the interval; a
       // session that stopped is read once more when its last record arrives and
       // not again.
@@ -296,7 +383,13 @@ export async function syncFactoryLiveCounters(
 
       const cwd = workingDirectoryOf(store.spanAttributes(spanRow.span_id))
       const transcriptPath = findSessionTranscript(sessionsRoot, workspaces, candidate.session_id)
-      if (transcriptPath === undefined) continue
+      if (transcriptPath === undefined) {
+        // Nothing to read for this session: remember it, so the pass does not
+        // look for it again on every tick. The session is read again when its
+        // own records advance, which is when a transcript can have appeared.
+        rememberRead(readStates, candidate.session_id, candidate.last_seen, nowMs, true)
+        continue
+      }
 
       const records = await readCounterRecords(
         transcriptPath,
@@ -304,16 +397,12 @@ export async function syncFactoryLiveCounters(
         factoryRoot,
         nowMs,
       )
+      rememberRead(readStates, candidate.session_id, candidate.last_seen, nowMs, records.length === 0)
       if (records.length === 0) continue
 
       store.upsertMany(records)
       written += records.length
       sessions += 1
-      readStates.set(candidate.session_id, { lastSeen: candidate.last_seen, readAtMs: nowMs })
-      if (readStates.size > MAX_READ_STATES) {
-        const oldest = readStates.keys().next()
-        if (oldest.done !== true) readStates.delete(oldest.value)
-      }
     }
 
     return { outcome: 'completed', sessions, records: written }
