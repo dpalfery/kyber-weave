@@ -214,6 +214,45 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         Assert.Contains("RESULT={\"content\":[{\"type\":\"text\",\"text\":\"nope\"}]}", output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void KiloShim_ResolvesRepositoryRootFromPluginLocation()
+    {
+        // The host may run with a cwd outside the repository, so the shim cannot
+        // trust the harness-reported directory. It must walk up from its own
+        // location to the nearest `.kyber-weave/kyber-weave.yml`, falling back to
+        // `.git`, and use that root for everything that follows.
+        string content = ArbiterPluginShim.Render("kilo");
+
+        Assert.Contains(".kyber-weave/kyber-weave.yml", content, StringComparison.Ordinal);
+        Assert.Contains(".git", content, StringComparison.Ordinal);
+        Assert.True(
+            content.Contains("import.meta", StringComparison.Ordinal) ||
+            content.Contains("__dirname", StringComparison.Ordinal) ||
+            content.Contains("dirname", StringComparison.Ordinal),
+            "shim must resolve the repository root from its own plugin location, not the harness cwd");
+
+        int configMarker = content.IndexOf(".kyber-weave/kyber-weave.yml", StringComparison.Ordinal);
+        int gitMarker = content.IndexOf(".git", StringComparison.Ordinal);
+        Assert.True(
+            configMarker >= 0 && gitMarker > configMarker,
+            "shim must prefer .kyber-weave/kyber-weave.yml and fall back to .git");
+    }
+
+    [Fact]
+    public void KiloShim_BindsSpawnAndEnvelopeCwdToResolvedRoot()
+    {
+        // Both the spawned hook process's cwd and the envelope's cwd must be the
+        // resolved repository root. Passing the raw harness `directory` through
+        // lets a host whose cwd is not the repo make the hook fail closed with
+        // KW-ARB-HOOK-001.
+        string content = ArbiterPluginShim.Render("kilo");
+
+        Assert.Contains("cwd:", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("cwd: directory", content, StringComparison.Ordinal);
+        Assert.Contains("runArbiterHook(envelope,", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("runArbiterHook(envelope, directory)", content, StringComparison.Ordinal);
+    }
+
     private const string PiDriver = """
         import ext from "./ext.ts";
         const handlers: Record<string, (event: any) => Promise<any>> = {};
