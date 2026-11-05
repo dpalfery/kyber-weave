@@ -86,22 +86,39 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The install is project-scoped: <c>--global</c> is rejected with exit 2 before
-    /// any write, so a project install can never spray hooks into the home tree.
+    /// An explicit <c>--global</c> is accepted and behaves exactly like the default
+    /// global scope: it writes under the user home, records the target in the user
+    /// config, and exits 0. The mutually exclusive <c>--global --project</c> case is
+    /// covered by the dedicated rule-id test.
     /// </summary>
     [Fact]
-    public void Install_GlobalScope_IsRejectedWithExitTwo()
+    public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Global = true }));
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+                Global = true,
+            }));
 
-        Assert.Equal(2, execution.ExitCode);
+        Assert.Equal(0, execution.ExitCode);
         Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(_store.Writes);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
+
+        string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
+        Assert.True(Directory.Exists(globalRoot), "the explicit global install should write beneath the target's global root");
+
+        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
