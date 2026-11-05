@@ -114,7 +114,7 @@ public static class TriggerFactBuilder
             ? agent.CapabilityProfile
             : null;
         IReadOnlyList<string> delegatesTo = caller is not null
-            && catalog.Agents.TryGetValue(caller, out ArbiterSquadAgent? callerAgent)
+                                            && catalog.Agents.TryGetValue(caller, out ArbiterSquadAgent? callerAgent)
             ? callerAgent.DelegatesTo
             : [];
         Dictionary<string, string> descriptions = new(StringComparer.Ordinal);
@@ -125,7 +125,7 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("LENS", out string? lens);
         string? applicability = lens is not null
-            && catalog.Lenses.TryGetValue(lens, out ArbiterSquadLens? lensEntry)
+                                && catalog.Lenses.TryGetValue(lens, out ArbiterSquadLens? lensEntry)
             ? lensEntry.Applicability
             : null;
         IReadOnlyList<string> planningDirs = PlanningDirs(config);
@@ -153,7 +153,7 @@ public static class TriggerFactBuilder
                 "roster.caller.delegates-to" => delegatesTo,
                 "roster.descriptions" => descriptions,
                 "harness.observes-returns" => observesReturns,
-                _ => null,
+                _ => null
             };
 
             facts = facts.With(name, value, LabelFor(name, callerSource));
@@ -165,6 +165,7 @@ public static class TriggerFactBuilder
     private static IReadOnlyList<string> PlanningDirs(KyberWeaveConfig config)
     {
         IReadOnlyList<ConfigRegEntry> entries = config.ConfigReg.Resolve(config.Ontology);
+
         string? Find(string name)
         {
             foreach (ConfigRegEntry entry in entries)
@@ -176,11 +177,23 @@ public static class TriggerFactBuilder
             return null;
         }
 
-        return [
-            DirectoryOf(Find(ConfigRegConfig.PlanIndexProperty)),
-            DirectoryOf(Find(ConfigRegConfig.SpecificationIndexProperty)),
-            DirectoryOf(Find(ConfigRegConfig.TodoIndexProperty)),
+        return
+        [
+            PlanningGlobOf(Find(ConfigRegConfig.PlanIndexProperty)),
+            PlanningGlobOf(Find(ConfigRegConfig.SpecificationIndexProperty)),
+            PlanningGlobOf(Find(ConfigRegConfig.TodoIndexProperty))
         ];
+    }
+
+    /// <summary>
+    /// The index's directory as a directory-prefix glob, so a rule matches a plan file
+    /// beneath it rather than only the bare directory. An unresolved index keeps the
+    /// empty result: a host with no planning directories offers nothing to match.
+    /// </summary>
+    private static string PlanningGlobOf(string? indexPath)
+    {
+        string directory = DirectoryOf(indexPath);
+        return directory.Length == 0 ? string.Empty : directory + "/**";
     }
 
     private static string DirectoryOf(string? path)

@@ -768,6 +768,72 @@ public sealed class UpdateCommandTests : IDisposable
             line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
     }
 
+    // ---- arbiter hook refresh (T6: update refreshes arbiter hooks) ----
+
+    /// <summary>
+    /// When an arbiter binary is installed, <c>update</c> invokes the injected arbiter-refresh
+    /// seam for registered projects with <c>arbiter.enabled</c>. The seam is injected, never shelled out.
+    /// RED: <c>IArbiterHookRefresher</c> does not exist and <c>SelfUpdater</c> takes no such seam.
+    /// </summary>
+    [Fact]
+    public void RunInvokesArbiterRefreshSeamWhenArbiterInstalled()
+    {
+        InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        RecordingArbiterHookRefresher refresher = new();
+        List<string> log = [];
+
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal(1, refresher.Calls);
+    }
+
+    /// <summary>
+    /// When no arbiter binary is installed, the arbiter-refresh seam is not invoked.
+    /// RED: <c>IArbiterHookRefresher</c> does not exist and <c>SelfUpdater</c> takes no such seam.
+    /// </summary>
+    [Fact]
+    public void RunSkipsArbiterRefreshSeamWhenNoArbiterInstalled()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        RecordingArbiterHookRefresher refresher = new();
+        List<string> log = [];
+
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal(0, refresher.Calls);
+    }
+
+    private sealed class RecordingArbiterHookRefresher : IArbiterHookRefresher
+    {
+        public int Calls { get; private set; }
+
+        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
+        {
+            ArgumentNullException.ThrowIfNull(projectRoots);
+            Calls++;
+            return new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
+        }
+    }
+
     // ---- tray delegation (task 9.3, Requirements 15.1-15.7) ----
 
     /// <summary>

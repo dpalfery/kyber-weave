@@ -1186,13 +1186,13 @@
     {
       "file": "src/KyberWeave.Core/Arbiter/Credentials/MacKeychainCredentialStore.cs",
       "text": "ProcessStartInfo startInfo = new(\"security\")",
-      "count": 2,
+      "count": 3,
       "bound": "Started by ProcessRunner.Run in the store with its timeout; the security command self-exits."
     },
     {
       "file": "src/KyberWeave.Core/Arbiter/Credentials/SecretServiceCredentialStore.cs",
       "text": "ProcessStartInfo startInfo = new(\"secret-tool\")",
-      "count": 2,
+      "count": 3,
       "bound": "Started by ProcessRunner.Run in the store with its timeout; secret-tool self-exits."
     },
     {

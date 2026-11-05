@@ -193,15 +193,20 @@ export async function stopServer(
 }
 
 /**
- * Wait for any pending lock file unlink from the job-host teardown, then recursively
- * remove the temporary state directory with backstop retries.
+ * Wait for the job-host teardown's pending lock unlinks, then recursively remove the
+ * temporary state directory with backstop retries.
+ *
+ * The lease release creates `jobs.lock.takeover`, unlinks `jobs.lock`, then unlinks the
+ * guard (`removeIfOwned` in refresh/lock.ts). Waiting on the lock alone leaves the guard
+ * in the directory while `rm` runs, so both are waited for, in release order.
  */
 export async function removeTempStateDir(dir: string | undefined): Promise<void> {
   if (!dir) return
-  const lock = join(dir, JOBS_LOCK_FILE)
   const deadline = Date.now() + 3_000
-  while (probeExists(lock) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
+  for (const path of [join(dir, JOBS_LOCK_FILE), join(dir, `${JOBS_LOCK_FILE}.takeover`)]) {
+    while (probeExists(path) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
   }
   await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 }
