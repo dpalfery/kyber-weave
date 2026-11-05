@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -229,6 +230,91 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("shared", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Null(_store.Read(origin));
+    }
+
+    /// <summary>
+    /// A global uninstall defaults to the user home root, removes only the Arbiter-owned Claude
+    /// block, and leaves the operator's own config bytes intact. This is the global install scope
+    /// that the project-scoped default never touched.
+    /// </summary>
+    [Fact]
+    public void Uninstall_DefaultScope_GlobalRemovesOnlyOwnedClaudeBlockAndPreservesForeignBytes()
+    {
+        string home = NewDir("uninstall-global-default");
+        string settingsPath = Path.Combine(home, ".claude", "settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        File.WriteAllText(
+            settingsPath,
+            """
+            {
+              "model": "sonnet",
+              "permissions": { "allow": ["Bash"] },
+              "custom": { "keep": "this stays" },
+              "kyber-arbiter": {
+                "command": "kyber-weave-arbiter hook --harness claude",
+                "args": ["--scope", "global"]
+              },
+              "user": "keep me"
+            }
+            """);
+
+        ArbiterUninstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "claude" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        string after = File.ReadAllText(settingsPath);
+        Assert.DoesNotContain("kyber-arbiter", after, StringComparison.Ordinal);
+        Assert.Contains("custom", after, StringComparison.Ordinal);
+        Assert.Contains("keep me", after, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>--path</c> is only legal for an explicit project uninstall. A bare global uninstall
+    /// should reject it before touching anything.
+    /// </summary>
+    [Fact]
+    public void Uninstall_PathWithoutProject_ExitsTwoWithScopeError()
+    {
+        string home = NewDir("uninstall-path-without-project");
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterUninstallCommand>("uninstall"));
+            });
+            return app.Run(["arbiter", "uninstall", "--target", "claude", "--path", home]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("--project", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--path", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The scope flags are mutually exclusive: a global uninstall does not also opt into project
+    /// scope. The command must fail with the install-rule id rather than silently picking one.
+    /// </summary>
+    [Fact]
+    public void Uninstall_GlobalAndProject_ExitsTwoWithKwArbInstall001()
+    {
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterUninstallCommand>("uninstall"));
+            });
+            return app.Run(["arbiter", "uninstall", "--target", "claude", "--global", "--project"]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("KW-ARB-INSTALL-001", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
