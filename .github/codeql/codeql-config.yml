@@ -3,5 +3,29 @@
 # Everything is analysed, `dash/**` included. `dash/` was a vendored subtree of
 # the upstream CodeBurn project whose directories this config once excluded;
 # since the one-time fork (ADR 0020) all of it is first-party code under the
-# same analysis as the rest of the repository.
+# same analysis as the rest of the repository. One rule is turned off below, and
+# it is turned off by rule id, never by path: no file or directory is excluded.
+#
+# `js/http-to-file-access` is excluded because its one sink is the evidence
+# writer in `dash/scripts/opencode-live-gate/run.mjs`: the live gate records
+# kyberDash and OpenCode responses into evidence files, which is the thing the
+# gate exists to prove, so "network response data reaches a file" is the feature
+# and not a defect. No code guard can clear it: the query has no default
+# sanitizer, the file names are plain names inside a gate-owned directory, and
+# redaction and a byte cap do not break the flow, so the only "fix" would be to
+# stop recording the responses. This is the same shape as the Semgrep rule
+# exclusion in `.github/workflows/ci.yml`, and keeping the reason here keeps it
+# visible to review instead of in a source comment.
+#
+# Cost, stated so review can weigh it: a rule-wide exclusion also covers any
+# future sink of the same rule, including `npm/lib/download.js`, whose streamed
+# release download raises no alert today.
+#
+# Owner: dpalfery. Review date: 2027-11-04 - reopen the rule if the gate stops
+# writing response bodies, and do not let this entry outlive its reason. This
+# date is a review convention, not a gate: no rule reads this file except the
+# CodeQL action.
 name: KyberWeave CodeQL
+query-filters:
+  - exclude:
+      id: js/http-to-file-access
