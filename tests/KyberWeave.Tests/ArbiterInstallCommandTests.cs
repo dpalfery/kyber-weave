@@ -1,8 +1,10 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -290,6 +292,120 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             StringComparison.Ordinal);
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
         Assert.Equal(key, _store.Read(TypeSafeOrigin));
+    }
+
+    /// <summary>
+    /// A default install writes under the user home (global scope) rather than the project
+    /// root, and it records the harness in the user config so later refreshes know which
+    /// global hooks to maintain. The command stays in the home tree even when the project
+    /// path is set, because a global install is intentionally user-scoped.
+    /// </summary>
+    [Fact]
+    public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
+    {
+        string host = NewDir("install-global-default");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
+
+        string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
+        Assert.True(Directory.Exists(globalRoot), "the default install should write beneath the target's global root");
+
+        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The D13 table is shaped for each configured harness: the target token, the tier, the
+    /// exact path written, the reason code and the trust step or off-switch that still needs
+    /// a user action. Output must be informative even when the harness is a fallback-only or
+    /// partial case under global scope.
+    /// </summary>
+    [Fact]
+    public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
+    {
+        string host = NewDir("install-d13");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("tier", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reason", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("warp", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("copilot", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("chat.useHooks", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// <c>--path</c> is only legal for an explicit project install. A bare global install must
+    /// reject it before any side effects so the command cannot accidentally write a project file
+    /// or user config from the wrong scope.
+    /// </summary>
+    [Fact]
+    public void Install_PathWithoutProject_ExitsTwoWithScopeError()
+    {
+        string host = NewDir("install-path-without-project");
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
+            });
+            return app.Run(["arbiter", "install", "--target", "claude", "--path", host]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("--project", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--path", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The scope flags are mutually exclusive: a global install cannot also opt into project
+    /// scope. The command must fail with the install-rule id rather than silently picking one.
+    /// </summary>
+    [Fact]
+    public void Install_GlobalAndProject_ExitsTwoWithKwArbInstall001()
+    {
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
+            });
+            return app.Run(["arbiter", "install", "--target", "claude", "--global", "--project"]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("KW-ARB-INSTALL-001", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
