@@ -752,7 +752,7 @@ The quarantine **list** stays light and never serves payloads.
 The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
 is built on projection and stored in the derived `session` row
 ([skills view contract](architecture.md#skills-view-contract)). The skills work set
-`DETECTOR_VERSION` to **4** (`dash/src/canon/store.ts`). A store stamped with generation **3**
+`DETECTOR_VERSION` to **4** (`dash/src/canon/store-schema.ts`). A store stamped with generation **3**
 reports its findings as outdated until they are rebuilt. A session row stored before the change
 has no `skills` key, so it renders "not yet projected".
 
