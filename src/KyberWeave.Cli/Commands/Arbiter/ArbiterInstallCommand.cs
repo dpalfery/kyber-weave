@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -128,7 +129,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 $"prefer --key-stdin or {Markup.Escape(ArbiterKeyResolver.EnvVarName)}.");
         }
 
-        string endpoint = ResolveEndpoint(root, settings.Config);
+        string endpoint = ResolveEndpoint(root, settings.Config, isProjectScope);
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
@@ -255,8 +256,12 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
         }
 
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadUserPaths resolvedUserPaths = _userPaths ?? new SquadCommandComposition.CliSquadUserPaths(
+            ArbiterCommandComposition.HomeDirectory(),
+            string.IsNullOrWhiteSpace(ArbiterCommandComposition.GetEnvironmentVariable("APPDATA"))
+                ? Path.Combine(ArbiterCommandComposition.HomeDirectory(), ".config")
+                : ArbiterCommandComposition.GetEnvironmentVariable("APPDATA")!);
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(resolvedUserPaths, _environmentReader);
 
         SquadReceipt? existingReceipt;
         try
@@ -324,7 +329,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
         else
         {
-            configLoad = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
+            configLoad = isProjectScope
+                ? KyberWeaveConfigLoader.TryLoad(root, settings.Config)
+                : KyberWeaveConfigLoader.TryLoadUserConfig(root, settings.Config);
         }
 
         if (!configLoad.Success || configLoad.Config is null)
@@ -404,7 +411,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             WriteGlobalScopeTable(root);
         }
 
-        if (!settings.DryRun && !Verify(root, settings.Config, endpoint, needsKey))
+        if (!settings.DryRun && !Verify(root, settings.Config, endpoint, needsKey, isProjectScope))
             return 1;
 
         return 0;
@@ -518,9 +525,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return _environmentReader ?? Environment.GetEnvironmentVariable;
     }
 
-    private string ResolveEndpoint(string root, string? configOption)
+    private string ResolveEndpoint(string root, string? configOption, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, configOption);
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
         if (loaded.Success
             && loaded.Config is not null
             && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
@@ -673,9 +682,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static bool Verify(string root, string? configOption, string endpoint, bool needsKey)
+    private static bool Verify(string root, string? configOption, string endpoint, bool needsKey, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, configOption);
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
         if (!loaded.Success || loaded.Config is null || !loaded.Config.Arbiter.Enabled)
         {
             WriteError(
@@ -750,8 +761,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     {
         ISquadReleaseSource releaseSource = _releaseSource ?? ResolveReleaseSource();
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots =
-            SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        ISquadGlobalRootResolver globalRoots = new SquadGlobalRoots(
+            _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
+            ArbiterCommandComposition.HomeDirectory());
         return new SquadLifecycleService(
             releaseSource,
             renderer,
