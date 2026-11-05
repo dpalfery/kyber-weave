@@ -67,7 +67,7 @@ public static class ArbiterPluginShim
             ? ArbiterHookWiring.HookCommandLine(harnessToken, scope)
             : string.Empty;
         string globalCommandLineStatement = scope == SquadDeploymentScope.Global
-            ? $"const commandLine = {JsonSerializer.Serialize(commandLine)};"
+            ? $"const commandLine = {JsonSerializer.Serialize(commandLine)};\n"
             : string.Empty;
 
         // JSON string encoding, so the token lands inside the TypeScript literal as data.
@@ -189,9 +189,7 @@ public static class ArbiterPluginShim
                 "(looked for .kyber-weave/kyber-weave.yml, falling back to .git)");
             }
 
-            {{globalCommandLineStatement}}
-
-            async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
+            {{globalCommandLineStatement}}async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
                 proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}{{scopeSuffix}}], {

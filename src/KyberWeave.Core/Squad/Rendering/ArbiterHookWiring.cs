@@ -137,12 +137,12 @@ public static class ArbiterHookWiring
                 "Trust the project so that `.pi/extensions/` loads. " +
                 "Until trust is granted the extension does not load and dispatches stay ungated.",
             [SquadTarget.Warp] =
-                "Squad writes no MCP configuration for Warp, so register `kyber-weave-arbiter " +
-                "serve --repo-root <root>` as an MCP server in Warp's own MCP configuration. " +
+                "Squad writes no MCP configuration for Warp, so register the `kyber-weave-arbiter " +
+                "serve --repo-root <root>` server in Warp's own MCP configuration at `~/.warp/.mcp.json`. " +
                 "Until it is registered only the advisory marker fallback enforces there.",
             [SquadTarget.ZCode] =
-                "Squad writes no MCP configuration for ZCode, so register `kyber-weave-arbiter " +
-                "serve --repo-root <root>` as an MCP server in ZCode's own MCP configuration. " +
+                "Squad writes no MCP configuration for ZCode, so register the `kyber-weave-arbiter " +
+                "serve --repo-root <root>` server in ZCode's own MCP configuration at `~/.zcode/.mcp.json`. " +
                 "Until it is registered only the advisory marker fallback enforces there."
         };
 
@@ -303,8 +303,27 @@ public static class ArbiterHookWiring
     /// </remarks>
     public static IReadOnlyList<SquadDegradationRecord> TargetDegradations(
         IEnumerable<SquadTarget> targets,
-        SquadDeploymentScope scope) =>
-        TargetDegradations(targets, scope, HookedTargets, FallbackTargets);
+        SquadDeploymentScope scope)
+    {
+        List<SquadDegradationRecord> records = [];
+        foreach (SquadTarget target in targets)
+        {
+            string token = SquadTargetCatalog.GetToken(target);
+            string? reason = DegradationReason(token, scope, HookedTargets, FallbackTargets);
+            if (reason is not null)
+            {
+                records.Add(new SquadDegradationRecord(
+                    Target: token,
+                    CanonicalIdentity: ArbiterIdentity,
+                    OutputIdentity: ArbiterIdentity,
+                    Code: DegradationCode,
+                    InstructionDigest: string.Empty,
+                    Details: reason));
+            }
+        }
+
+        return records;
+    }
 
     /// <summary>The set-parameterized derivation <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> delegates to.</summary>
     /// <remarks>
@@ -358,7 +377,7 @@ public static class ArbiterHookWiring
                 return PartialReason;
             }
 
-            if (token is "opencode" or "kilo")
+            if (token is "commandcode" or "opencode" or "kilo")
             {
                 return DispatchUnconfirmedReason;
             }
@@ -374,6 +393,11 @@ public static class ArbiterHookWiring
         if (fallbackTargets.Contains(token))
         {
             return FallbackOnlyReason;
+        }
+
+        if (token == "commandcode")
+        {
+            return DispatchUnconfirmedReason;
         }
 
         return hookedTargets.Contains(token) ? null : ProjectOnlyReason;

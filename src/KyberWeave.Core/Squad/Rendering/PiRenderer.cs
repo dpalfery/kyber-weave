@@ -401,7 +401,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
             ? ArbiterHookWiring.HookCommandLine("pi", scope)
             : string.Empty;
         string globalCommandLineStatement = scope == SquadDeploymentScope.Global
-            ? $"const commandLine = {System.Text.Json.JsonSerializer.Serialize(commandLine)};"
+            ? $"const commandLine = {System.Text.Json.JsonSerializer.Serialize(commandLine)};\n"
             : string.Empty;
 
         return $$"""
@@ -439,9 +439,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
               return decision;
             }
 
-            {{globalCommandLineStatement}}
-
-            function runArbiterHook(envelope: unknown): ArbiterDecision {
+            {{globalCommandLineStatement}}function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
                 const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"{{scopeSuffix}}], {
                   input: JSON.stringify(envelope),

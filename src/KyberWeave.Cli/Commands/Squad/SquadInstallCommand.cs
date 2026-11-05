@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
@@ -219,17 +217,14 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
                 // Until trust is granted the hooks stay off (§10.7), so the install names
                 // each selected target's trust gate where the audit cannot observe the gap.
+                // Global Warp stays fallback-only: the install still prints the MCP registration
+                // guidance, but it never mutates ~/.warp/.mcp.json.
                 WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
-
-                // Warp has no hook primitive, so a global-scope install also owns the target's
-                // Arbiter MCP server entry in the target's own .mcp.json. The write is explicit,
-                // idempotent and additive: it never mutates foreign entries and it never rewrites
-                // a user-owned JSON document beyond the single owned server it appends.
-                if (scope == SquadDeploymentScope.Global && decision.Targets.Contains(SquadTarget.Warp))
+                if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
                 {
-                    WriteGlobalWarpArbiterMcpEntry(
-                        homeRoot: targetRoot,
-                        warpRoot: _globalRoots is null ? Path.Combine(targetRoot, ".warp") : _globalRoots.ResolveGlobalRoot(SquadTarget.Warp));
+                    string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
+                    string configPath = targetToken == "warp" ? "~/.warp/.mcp.json" : "~/.zcode/.mcp.json";
+                    Console.WriteLine(RegistrationStepMessage(configPath));
                 }
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
@@ -280,6 +275,11 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         return Execute(context, settings, CancellationToken.None);
     }
 
+    private static string RegistrationStepMessage(string configPath)
+    {
+        return $"Register kyber-weave-arbiter in {configPath}: kyber-weave-arbiter serve --repo-root <root>";
+    }
+
     /// <summary>
     /// Prints the Arbiter trust gate for each selected target that has one.
     /// </summary>
@@ -292,7 +292,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         IReadOnlyList<SquadTarget> targets,
         SquadArbiterWiring wiring)
     {
-        if (!wiring.Enabled)
+        bool shouldEmitFallbackInstructions = targets.Contains(SquadTarget.Warp) || targets.Contains(SquadTarget.ZCode);
+        if (!wiring.Enabled && !shouldEmitFallbackInstructions)
         {
             return;
         }
@@ -313,89 +314,4 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         });
     }
 
-    private static void WriteGlobalWarpArbiterMcpEntry(string homeRoot, string warpRoot)
-    {
-        string configPath = Path.Combine(warpRoot, ".mcp.json");
-
-        Directory.CreateDirectory(warpRoot);
-
-        JsonNode? document;
-        JsonObject servers;
-        if (File.Exists(configPath))
-        {
-            try
-            {
-                document = JsonNode.Parse(File.ReadAllText(configPath));
-            }
-            catch (JsonException)
-            {
-                return;
-            }
-
-            if (document is not JsonObject root)
-            {
-                return;
-            }
-
-            if (root.TryGetPropertyValue("mcpServers", out JsonNode? serversNode) && serversNode is JsonObject existingServers)
-            {
-                servers = existingServers;
-            }
-            else
-            {
-                servers = new JsonObject();
-                root["mcpServers"] = servers;
-            }
-        }
-        else
-        {
-            document = new JsonObject();
-            servers = new JsonObject();
-            document["mcpServers"] = servers;
-        }
-
-        string serverName = "kyber-weave-arbiter";
-        if (servers.TryGetPropertyValue(serverName, out JsonNode? existingValue) && IsOwnedWarpArbiterServer(existingValue, warpRoot))
-        {
-            return;
-        }
-
-        JsonObject entry = new()
-        {
-            ["command"] = "kyber-weave",
-            ["args"] = new JsonArray(
-                "arbiter",
-                "serve",
-                "--repo-root",
-                warpRoot)
-        };
-
-        servers[serverName] = entry;
-
-        File.WriteAllText(configPath, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-    }
-
-    private static bool IsOwnedWarpArbiterServer(JsonNode? value, string warpRoot)
-    {
-        if (value is not JsonObject server)
-        {
-            return false;
-        }
-
-        if (server["command"] is not JsonValue command || command.GetValue<string>() != "kyber-weave")
-        {
-            return false;
-        }
-
-        if (server["args"] is not JsonArray args)
-        {
-            return false;
-        }
-
-        string[] parsed = args.Select(item => item?.GetValue<string>() ?? string.Empty).ToArray();
-        return parsed.Contains("arbiter", StringComparer.Ordinal)
-            && parsed.Contains("serve", StringComparer.Ordinal)
-            && parsed.Contains("--repo-root", StringComparer.Ordinal)
-            && parsed.Contains(warpRoot, StringComparer.Ordinal);
-    }
 }
