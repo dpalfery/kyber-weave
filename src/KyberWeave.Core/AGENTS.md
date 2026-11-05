@@ -1,7 +1,20 @@
 # KyberWeave.Core
 
-The engine. Everything the CLI and the MCP server do is implemented here; those two are
-thin hosts over this assembly.
+The engine. Everything the CLI and the MCP server do is implemented here and in its two
+feature assemblies; the hosts are thin.
+
+| Assembly | Holds | Referenced by |
+|---|---|---|
+| `KyberWeave.Core` | Everything shared, plus Skills, Agents, Review, Arbiter, Utilities | every host |
+| [`KyberWeave.Core.Docs`](../KyberWeave.Core.Docs) | The DocGraph engine | CLI, MCP server |
+| [`KyberWeave.Core.Squad`](../KyberWeave.Core.Squad) | The Kyber-Squad engine | CLI |
+
+The two feature assemblies reference Core and never each other. Namespaces did not move with
+the split. Each feature assembly's name is its root namespace, and Core keeps the few Squad and
+Docs types its own code reads (`SquadTarget`, `SquadPathPolicy`, `DocType`) in their original
+namespaces. Move a type down into Core only when Core code needs it. See
+[ADR 0057](../../docs/adr/0057-squad-and-docs-are-their-own-assemblies.md). This file's rules
+apply to all three.
 
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
 
@@ -23,7 +36,6 @@ belongs in the caller.
 
 | Directory | Holds |
 |---|---|
-| `Docs/` | Parsing, search, validation, export, scaffolding — the DocGraph engine |
 | `Skills/`, `Agents/` | Governance per artifact class |
 | `Security/` | `InstructionSurfaceScanner`, shared by skill and agent scanning |
 | `Diagnostics/` | `Diagnostic`, `DiagnosticReport`, `Severity` |
@@ -37,8 +49,8 @@ Declared as `public const string` on the validator or linter that emits them, so
 and the condition cannot drift apart. They are permanent — see the repository rules.
 
 A `Diagnostic` carries `Code`, `Severity`, `Message`, `Subject`, `Path`, and `Hint`. Fill
-the hint whenever the fix is knowable; `DocSpecValidator.Nearest` computes an edit-distance
-suggestion and is offered only when the distance is plausibly a typo.
+the hint whenever the fix is knowable; `StringDistance.Nearest` (in `Text/`) computes an
+edit-distance suggestion and is offered only when the distance is plausibly a typo.
 
 ## Configuration merges by replacement
 

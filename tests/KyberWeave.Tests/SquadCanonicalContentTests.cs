@@ -518,8 +518,8 @@ public sealed class SquadCanonicalContentTests
         Assert.True(
             File.Exists(defaultPath),
             $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
-        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
-        XDocument project = XDocument.Load(Path.Combine(corePath, "KyberWeave.Core.csproj"));
+        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core.Squad");
+        XDocument project = XDocument.Load(Path.Combine(corePath, "KyberWeave.Core.Squad.csproj"));
 
         string? canonical = project
             .Descendants("CanonicalResponseGuidance")
