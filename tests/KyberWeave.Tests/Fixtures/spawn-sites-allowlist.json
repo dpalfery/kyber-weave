@@ -806,7 +806,7 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at AnalysisCacheSafety.cs:119 with GitTimeout = 60 s."
@@ -926,19 +926,19 @@
       "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s (CodeGraphResolverAdapter.cs:36); the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with GitTimeout = 60 s (AnalysisCacheSafety.cs:16); the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
       "text": "result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with SqliteBatchTimeout = 120 s (SqliteAnalysisPersistence.cs:35); the tree is killed on expiry. sqlite's own busy timeout is separate and does not bound the process."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;",
       "count": 1,
       "bound": "ProcessRunner.Run with SqliteVersionProbeTimeout = 30 s (SqliteAnalysisPersistence.cs:38); the tree is killed on expiry."

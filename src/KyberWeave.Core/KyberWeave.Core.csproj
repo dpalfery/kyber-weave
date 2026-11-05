@@ -33,24 +33,13 @@
     <InternalsVisibleTo Include="KyberWeave.Tests" />
     <!-- The Squad engine is its own assembly and still reads Core's path semantics. -->
     <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
+    <!-- The Docs engine is its own assembly and still reads Core's ontology defaults. -->
+    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Rich coding standards templates embedded from products/kyber-squad/standards -->
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\README.md" LogicalName="Standards.azure.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\README.md" LogicalName="Standards.csharp.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\README.md" LogicalName="Standards.data-access-layer.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\README.md" LogicalName="Standards.github-actions.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\README.md" LogicalName="Standards.go.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\README.md" LogicalName="Standards.maui.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\README.md" LogicalName="Standards.pulumi.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\README.md" LogicalName="Standards.python.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\README.md" LogicalName="Standards.react.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\README.md" LogicalName="Standards.rust.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\README.md" LogicalName="Standards.sql.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
+    <!-- Each technology's gate catalogue, embedded from products/kyber-squad/standards. The
+         standards templates beside them belong to KyberWeave.Core.Docs. -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\gates.yml" LogicalName="Gates.csharp.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\gates.yml" LogicalName="Gates.typescript.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
