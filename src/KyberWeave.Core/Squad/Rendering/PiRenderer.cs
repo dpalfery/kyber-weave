@@ -287,12 +287,22 @@ public sealed class PiRenderer : SquadHarnessRenderer
     /// <summary>The owned extension shim, only for an enabled wiring.</summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context)
     {
-        if (context.EnabledArbiter is { } arbiter)
+        if (context.EnabledArbiter is not { } arbiter)
+        {
+            return;
+        }
+
+        if (context.Scope == SquadDeploymentScope.Global)
         {
             context.Files.Add(context.CreateFile(
-                ArbiterExtensionFileRelativePath,
-                RenderArbiterExtension(arbiter.HookTimeoutSeconds, context.Scope)));
+                "extensions/kyber-arbiter.ts",
+                ArbiterPluginShim.Render("pi", SquadDeploymentScope.Global)));
+            return;
         }
+
+        context.Files.Add(context.CreateFile(
+            ArbiterExtensionFileRelativePath,
+            RenderArbiterExtension(arbiter.HookTimeoutSeconds, context.Scope)));
     }
 
     private static SquadDeploymentFile RenderSubagentAgent(
@@ -386,7 +396,8 @@ public sealed class PiRenderer : SquadHarnessRenderer
     private static string RenderArbiterExtension(int timeoutSeconds, SquadDeploymentScope scope)
     {
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
-        string scopeArgs = scope == SquadDeploymentScope.Global ? "\"--scope\", \"global\"" : string.Empty;
+        string commandLine = ArbiterHookWiring.HookCommandLine("pi", scope);
+        string commandLineLiteral = System.Text.Json.JsonSerializer.Serialize(commandLine);
 
         return $$"""
             import { spawnSync } from "node:child_process";
@@ -425,7 +436,8 @@ public sealed class PiRenderer : SquadHarnessRenderer
 
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
-                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi", {{scopeArgs}}], {
+                const argv = {{commandLineLiteral}}.split(" ");
+                const result = spawnSync(argv[0], argv.slice(1), {
                   input: JSON.stringify(envelope),
                   encoding: "utf8",
                   timeout: {{timeoutMs}},

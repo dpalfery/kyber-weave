@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -50,7 +51,7 @@ public static class ArbiterPluginShim
     /// through could not break out of the literal it lands in.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when the token is not a plain lowercase token.</exception>
-    public static string Render(string harnessToken)
+    public static string Render(string harnessToken, SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
         if (!TokenPattern.IsMatch(harnessToken))
@@ -61,8 +62,11 @@ public static class ArbiterPluginShim
                 nameof(harnessToken));
         }
 
-        // JSON string encoding, so the token lands inside the TypeScript literal as data.
+        string commandLine = ArbiterHookWiring.HookCommandLine(harnessToken, scope);
+
+        // JSON string encoding, so the command line lands inside the TypeScript literal as data.
         string literal = JsonSerializer.Serialize(harnessToken);
+        string commandLineLiteral = JsonSerializer.Serialize(commandLine);
         return $$"""
             import type { Plugin } from "@opencode-ai/plugin";
             import { existsSync } from "node:fs";
@@ -183,7 +187,8 @@ public static class ArbiterPluginShim
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
-                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}], {
+                const argv = {{commandLineLiteral}}.split(" ");
+                proc = Bun.spawn(argv, {
                   stdin: "pipe",
                   stdout: "pipe",
                   cwd,

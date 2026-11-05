@@ -164,7 +164,7 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
     }
 
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
-        context.AddArbiterPluginShim(".opencode/plugins/kyber-arbiter.ts");
+        context.AddArbiterPluginShim(".opencode/plugins/kyber-arbiter.ts", "plugins/kyber-arbiter.ts");
 
 
     /// <summary>

@@ -153,7 +153,7 @@ public sealed class KiloRenderer : SquadHarnessRenderer
     /// Kilo loads Bun plugins from <c>.kilo/plugin/*.ts</c> with OpenCode's plugin API.
     /// </summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
-        context.AddArbiterPluginShim(".kilo/plugin/kyber-arbiter.ts");
+        context.AddArbiterPluginShim(".kilo/plugin/kyber-arbiter.ts", "plugin/kyber-arbiter.ts");
 
     private static SquadDegradationRecord? BuildDegradationRecord(SquadHarnessRenderContext context, SquadAgent agent)
     {

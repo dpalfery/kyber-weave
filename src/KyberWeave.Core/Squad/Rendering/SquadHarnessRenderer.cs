@@ -501,12 +501,18 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
-    public void AddArbiterPluginShim(string relativePath)
+    public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
     {
-        if (EnabledArbiter is not null)
+        if (EnabledArbiter is null)
         {
-            Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token)));
+            return;
         }
+
+        string relativePath = Scope == SquadDeploymentScope.Global
+            ? globalRelativePath ?? projectRelativePath
+            : projectRelativePath;
+
+        Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token, Scope)));
     }
 
     /// <summary>
