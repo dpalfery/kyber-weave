@@ -18,13 +18,20 @@ host. For what it is and why, see the [architecture](architecture.md).
 
 ## Hooks
 
-The one-command install is `kyber-weave arbiter install --target <t>`: it ensures
-`.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets `arbiter.enabled:
-true` non-destructively, renders the target through the existing Squad install pipeline when
-the project's `arbiter.enabled` is true, applies the provider, stores the key in the OS
-credential store, verifies, and prints the target's trust step. `--provider ""` means `none`.
-A second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
-when the project's `arbiter.enabled` is true. Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
+The one-command install defaults to global scope: `kyber-weave arbiter install --target <t>`
+ensures `~/.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), records the
+installed target in `arbiter.global.targets`, sets `arbiter.enabled: true` non-destructively,
+renders the target in the user scope through the existing Squad install pipeline, applies the
+provider, stores the key in the OS credential store, verifies, and prints the target's trust
+step. `--project` opts into a repository root instead, `--path` is valid only with it, and
+`--global --project` exits `2` with `KW-ARB-INSTALL-001`. `--provider ""` means `none`. A
+second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
+when the project's `arbiter.enabled` is true. A global hook resolves the project config first:
+when that project enables Arbiter it logs `deferred-to-project`, writes no ledger entry, and
+lets the project configuration decide. Otherwise the user-level config is used and the
+per-root ledger lives under `~/.kyber-weave/arbiter/projects/<root-key>/`.
+
+Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
 `.agent.md` hooks), Copilot CLI (`.github/hooks/kyber-arbiter.json`), and OpenCode (the
 plugin shim). Phase 2 adds Pi (the `.pi/extensions/kyber-arbiter.ts` shim), Codex (the
 owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the shared
@@ -128,16 +135,18 @@ The one-command install replaces the old multi-step sequence. The key is never s
 never stored in a file:
 
 ```bash
-kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"  # one command: config, hooks, provider, key, verify, trust step
-kyber-weave arbiter install --target kilo --provider "" --key-stdin  # safer: key on stdin, never argv
+kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"  # default global scope: config, hooks, provider, key, verify, trust step
+kyber-weave arbiter install --project --path . --target kilo --provider "" --key-stdin  # repo-scope opt-in; --path valid only with --project
 kyber-weave arbiter uninstall --target kilo  # remove only Squad-owned files/blocks; add --remove-key to delete the stored key
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
-kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value
+kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value; reports by scope
 kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI, Codex and Cursor post-dispatch advisory limitations
 ```
 
 `--target` is required and validated against the Squad target roster; `--provider ""` means
-`none`; `--global` is rejected; a second install is an idempotent no-op. `--arbiter-key` is
+`none`; the install defaults to the user/global scope and `--project` is the opt-in for a
+repository install. `--path` is valid only with `--project`, and `--global --project` exits
+`2` with `KW-ARB-INSTALL-001`. A second install is an idempotent no-op. `--arbiter-key` is
 visible in argv and shell history (a one-line warning says so); `--key-stdin` and
 `TYPESAFE_API_KEY` stay the safer paths. A keyed provider with no resolving key surfaces
 `KW-ARB-KEY-001`. Exit `2` for client-input errors, `1` for operational failures, `0` for

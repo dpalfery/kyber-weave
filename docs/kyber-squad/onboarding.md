@@ -1050,17 +1050,21 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
 
 ## Arbiter hooks
 
-`kyber-weave arbiter install --target <t>` is the one-command path: it ensures
-`.kyber-weave/kyber-weave.yml`, sets `arbiter.enabled: true` non-destructively, and renders
-[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks alongside the agents through
-the existing Squad install pipeline, then applies the provider, stores the key, verifies, and
-prints the trust step. `squad install` and `squad update` render the same hooks when the
-project's `arbiter.enabled` is true. `--provider ""` means `none`; a second install is an
-idempotent no-op.
+`kyber-weave arbiter install --target <t>` is the one-command path: by default it writes in
+user/global scope, updates `~/.kyber-weave/kyber-weave.yml`, records the target in
+`arbiter.global.targets`, sets `arbiter.enabled: true` non-destructively, and renders
+[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks through the existing Squad
+install pipeline. Use `--project` to opt into repository scope and `--path <PATH>` only with
+that flag. `squad install` and `squad update` render the same hooks when the project's
+`arbiter.enabled` is true. `--provider ""` means `none`; a second install is an idempotent
+no-op. The runtime `--scope global` hook resolves the project config first; when the project
+has `arbiter.enabled: true` it logs `deferred-to-project`, writes no ledger entry, and lets the
+project decision win.
+
 Ten targets are hooked: `claude`, `copilot`, `opencode`, `pi`, `codex`, `cursor`, `kilo`,
 `antigravity`, `factory`, and `devin`. `warp` and `zcode` render no hooks — they are
-fallback-only, and any global-scope install (which has no project configuration to read)
-renders no hooks either — and record `arbiter-not-enforced` in the receipt.
+fallback-only — and a global-scope install records the same `arbiter-not-enforced` tier when
+no project configuration is available.
 
 | Target | What is rendered |
 |---|---|

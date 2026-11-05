@@ -125,7 +125,7 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 `returns-unobservable`, which allows and is logged; the in-flight overlap check still
 runs.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` and `KW-ARB-INSTALL-001`
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-011` and `KW-ARB-INSTALL-001`
 for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
@@ -143,6 +143,14 @@ enabled. A host may tune a shipped rule's `enabled`, confidence/probability thre
 never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_API_KEY`,
 then the OS credential-store entry for the endpoint origin. Full shape and merge rules are
 in [configuration](../configuration.md).
+
+The install surface defaults to global scope. `kyber-weave arbiter install --target <t>`
+stores the target list in `~/.kyber-weave/kyber-weave.yml` under `arbiter.global.targets`,
+while `--project` opts into repository scope and `--path` is valid only with that flag. The
+project config still wins when it has `arbiter.enabled: true`: a global runtime hook emits
+`deferred-to-project`, leaves the ledger untouched, and the project decision remains the one
+that actually gates the dispatch. The user-level check remains the fallback when no project
+config is present, and the per-root ledger stays under `~/.kyber-weave/arbiter/projects/<root-key>/`.
 
 ## Provider and models
 
