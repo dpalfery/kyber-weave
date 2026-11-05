@@ -128,7 +128,7 @@ Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
 | Working on | Read |
 |---|---|
 | Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
-| The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
+| The engine — `KyberWeave.Core`, `KyberWeave.Core.Docs` and `KyberWeave.Core.Squad` | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |

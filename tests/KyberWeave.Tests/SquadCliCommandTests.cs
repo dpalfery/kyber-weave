@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -67,12 +68,14 @@ public sealed class SquadCliCommandTests : IDisposable
 
         Assert.Null(SquadPackSourceLocator.Resolve(childDir));
 
-        // Assert CLI and Core assemblies have no embedded resource for products/kyber-squad corpus
+        // Assert CLI, Core and Squad assemblies have no embedded resource for products/kyber-squad corpus
         Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
-        Assembly coreAssembly = typeof(SquadSource).Assembly;
+        Assembly coreAssembly = typeof(KyberWeaveConfig).Assembly;
+        Assembly squadAssembly = typeof(SquadSource).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
+        string[] squadResources = squadAssembly.GetManifestResourceNames();
 
         Assert.DoesNotContain(cliResources, name => name.Contains("products", StringComparison.OrdinalIgnoreCase) ||
                                                     name.Contains("kyber-squad", StringComparison.OrdinalIgnoreCase) ||
@@ -81,6 +84,10 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.DoesNotContain(coreResources, name => name.Contains("products", StringComparison.OrdinalIgnoreCase) ||
                                                      name.Contains("kyber-squad", StringComparison.OrdinalIgnoreCase) ||
                                                      name.EndsWith("squad.yml", StringComparison.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(squadResources, name => name.Contains("products", StringComparison.OrdinalIgnoreCase) ||
+                                                      name.Contains("kyber-squad", StringComparison.OrdinalIgnoreCase) ||
+                                                      name.EndsWith("squad.yml", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

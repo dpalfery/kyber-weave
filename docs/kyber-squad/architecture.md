@@ -3,7 +3,7 @@ id: squad/architecture
 title: Kyber-Squad architecture
 doc-type: architecture
 component: KyberSquad
-source-root: src/KyberWeave.Core/Squad
+source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
 last-reviewed: 2026-11-04
 status: current
@@ -19,6 +19,7 @@ decided-by:
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0034-factory-droid-entry-point-skill
   - adr/0056-squad-renderers-share-one-render-pipeline
+  - adr/0057-squad-and-docs-are-their-own-assemblies
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope

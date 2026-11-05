@@ -1,6 +1,7 @@
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -69,7 +70,7 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
             {
                 if (_resolver.ResolveRoute(endpoint).Count > 0) continue;
 
-                string? nearest = DocSpecValidator.Nearest(endpoint, routes);
+                string? nearest = StringDistance.Nearest(endpoint, routes);
                 report.Add(new Diagnostic(
                     UnresolvedEndpoint, Severity.Error,
                     $"api-endpoints entry '{endpoint}' matches no indexed route.",
@@ -104,7 +105,7 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
             return;
         }
 
-        string? nearest = DocSpecValidator.Nearest(symbol, _resolver.CandidateNames(symbol));
+        string? nearest = StringDistance.Nearest(symbol, _resolver.CandidateNames(symbol));
         string message = sectionSlug is null
             ? $"code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index."
             : $"section '{sectionSlug}': code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index.";
