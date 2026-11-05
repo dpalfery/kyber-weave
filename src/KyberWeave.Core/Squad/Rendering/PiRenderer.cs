@@ -396,8 +396,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
     private static string RenderArbiterExtension(int timeoutSeconds, SquadDeploymentScope scope)
     {
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
-        string commandLine = ArbiterHookWiring.HookCommandLine("pi", scope);
-        string commandLineLiteral = System.Text.Json.JsonSerializer.Serialize(commandLine);
+        string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
 
         return $$"""
             import { spawnSync } from "node:child_process";
@@ -436,8 +435,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
 
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
-                const argv = {{commandLineLiteral}}.split(" ");
-                const result = spawnSync(argv[0], argv.slice(1), {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"{{scopeSuffix}}], {
                   input: JSON.stringify(envelope),
                   encoding: "utf8",
                   timeout: {{timeoutMs}},

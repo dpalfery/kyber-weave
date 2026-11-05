@@ -62,11 +62,10 @@ public static class ArbiterPluginShim
                 nameof(harnessToken));
         }
 
-        string commandLine = ArbiterHookWiring.HookCommandLine(harnessToken, scope);
+        string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
 
-        // JSON string encoding, so the command line lands inside the TypeScript literal as data.
+        // JSON string encoding, so the token lands inside the TypeScript literal as data.
         string literal = JsonSerializer.Serialize(harnessToken);
-        string commandLineLiteral = JsonSerializer.Serialize(commandLine);
         return $$"""
             import type { Plugin } from "@opencode-ai/plugin";
             import { existsSync } from "node:fs";
@@ -187,8 +186,7 @@ public static class ArbiterPluginShim
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
-                const argv = {{commandLineLiteral}}.split(" ");
-                proc = Bun.spawn(argv, {
+                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}{{scopeSuffix}}], {
                   stdin: "pipe",
                   stdout: "pipe",
                   cwd,
