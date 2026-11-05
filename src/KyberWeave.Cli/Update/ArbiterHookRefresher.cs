@@ -216,13 +216,22 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (string.IsNullOrWhiteSpace(command))
             return false;
 
-        string signature = $"kyber-weave-arbiter hook --harness {targetToken}";
-        int index = command.IndexOf(signature, StringComparison.Ordinal);
-        if (index < 0)
+        const string hookSignature = "kyber-weave-arbiter hook";
+        int hookIndex = command.IndexOf(hookSignature, StringComparison.Ordinal);
+        if (hookIndex < 0)
             return false;
 
-        string remainder = command[(index + signature.Length)..];
-        return remainder.TrimStart().StartsWith("--scope global", StringComparison.Ordinal)
-            || remainder.TrimStart().StartsWith(" --scope global", StringComparison.Ordinal);
+        string remainder = command[(hookIndex + hookSignature.Length)..];
+        const string harnessSignature = "--harness ";
+        int harnessIndex = remainder.IndexOf(harnessSignature, StringComparison.Ordinal);
+        if (harnessIndex < 0)
+            return false;
+
+        string harnessAndRemainder = remainder[(harnessIndex + harnessSignature.Length)..];
+        if (!harnessAndRemainder.StartsWith(targetToken, StringComparison.Ordinal))
+            return false;
+
+        string afterHarness = harnessAndRemainder[targetToken.Length..];
+        return afterHarness.TrimStart().StartsWith("--scope global", StringComparison.Ordinal);
     }
 }
