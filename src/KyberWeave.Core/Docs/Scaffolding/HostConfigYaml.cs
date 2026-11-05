@@ -507,6 +507,14 @@ public static partial class HostConfigYaml
         return lines;
     }
 
+    /// <summary>Temporary contract stub for the user-level global target list.</summary>
+    public static string WithArbiterGlobalTargets(string yaml, IReadOnlyList<string> targets)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(targets);
+        return yaml;
+    }
+
     /// <summary>
     /// Returns <paramref name="yaml"/> with <paramref name="technologies"/> merged into
     /// <c>ontology.technologies</c>. If <c>ontology:</c> does not exist, an ontology block

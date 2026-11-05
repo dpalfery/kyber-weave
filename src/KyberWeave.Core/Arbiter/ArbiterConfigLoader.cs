@@ -93,6 +93,13 @@ public static class ArbiterConfigLoader
         return Merge(defaults, document.Arbiter);
     }
 
+    /// <summary>Temporary contract stub for loading the user-level host config YAML.</summary>
+    public static ArbiterConfig LoadUserConfig(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        return new ArbiterConfig { Global = new ArbiterGlobalConfig([]) };
+    }
+
     /// <summary>
     /// Applies the user override (<c>~/.config/kyber-weave/arbiter.yml</c>) to the
     /// repository provider field by field. It may hold <c>provider:</c> and nothing else.
