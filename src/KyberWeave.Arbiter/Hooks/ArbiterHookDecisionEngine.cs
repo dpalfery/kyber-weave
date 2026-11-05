@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -145,7 +146,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         bool asserted = resolved is not null
             && string.Equals(harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
         string repoRoot = context.RepoRoot;
-        string arbiterDirectory = Path.Combine(repoRoot, "artifacts", "arbiter");
+        string arbiterDirectory = ResolveArbiterDirectory(repoRoot, context.Scope, context.HomeDirectory);
         KyberWeaveConfig effective;
         try
         {
@@ -372,6 +373,25 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         string.IsNullOrWhiteSpace(message)
             ? "unknown error"
             : message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
+
+    private static string ResolveArbiterDirectory(string repoRoot, HookScope scope, string? homeDirectory)
+    {
+        if (scope == HookScope.Global)
+        {
+            string effectiveHome = Composition.ResolveHomeDirectory(homeDirectory);
+            string rootKey = ProjectRootKey(repoRoot);
+            return Path.Combine(effectiveHome, ".kyber-weave", "arbiter", "projects", rootKey);
+        }
+
+        return Path.Combine(repoRoot, "artifacts", "arbiter");
+    }
+
+    private static string ProjectRootKey(string projectRoot)
+    {
+        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexStringLower(hash);
+    }
 
     private static HookOutcome BlockWithError(
         string harness, string? caller, string? message, string decisionId, bool isPost)

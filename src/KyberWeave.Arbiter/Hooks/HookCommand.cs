@@ -50,7 +50,9 @@ public sealed class HookCommand
         string? caller,
         string stdin,
         TextWriter stdout,
-        TextWriter log)
+        TextWriter log,
+        HookScope scope = HookScope.Project,
+        string? homeDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(harness);
         ArgumentNullException.ThrowIfNull(stdin);
@@ -82,7 +84,22 @@ public sealed class HookCommand
             }
 
             string repoRoot = RepoRootOf(adapter, payload);
-            KyberWeaveConfig config = _configLoader(repoRoot);
+            string? effectiveHome = Composition.ResolveHomeDirectory(homeDirectory);
+            if (scope == HookScope.Global)
+            {
+                bool deferToProject = IsGlobalScopeProjectDefer(repoRoot);
+                if (deferToProject)
+                {
+                    log.WriteLine("Arbiter global scope: deferred-to-project.");
+                    return 0;
+                }
+
+                log.WriteLine("Arbiter global scope: evaluating with the user config.");
+            }
+
+            KyberWeaveConfig config = scope == HookScope.Global
+                ? Composition.LoadHostConfig(repoRoot, scope, effectiveHome)
+                : _configLoader(repoRoot);
             if (!config.Arbiter.Enabled)
             {
                 log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
@@ -97,7 +114,13 @@ public sealed class HookCommand
                 return 0;
             }
 
-            HookContext context = new(repoRoot, _newDecisionId, log, adapter.ObservesReturns);
+            HookContext context = new(
+                repoRoot,
+                _newDecisionId,
+                log,
+                adapter.ObservesReturns,
+                effectiveHome,
+                scope);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {
@@ -161,6 +184,14 @@ public sealed class HookCommand
             && !string.IsNullOrWhiteSpace(cwd.GetString())
                 ? cwd.GetString()!
                 : Directory.GetCurrentDirectory());
+
+    private static bool IsGlobalScopeProjectDefer(string repoRoot)
+    {
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        return loaded.Success
+            && loaded.Config is not null
+            && loaded.Config.Arbiter.Enabled;
+    }
 
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal)

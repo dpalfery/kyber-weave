@@ -44,11 +44,19 @@ public sealed record HookOutcome(
 /// <c>harness.observes-returns</c> always carries a value: true for every harness
 /// except the adapters that declare otherwise. Never null-by-absence — a missing
 /// fact must not silently disable an enforced rule.</param>
+public enum HookScope
+{
+    Project,
+    Global,
+}
+
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
     TextWriter Log,
-    bool ObservesReturns = true);
+    bool ObservesReturns = true,
+    string? HomeDirectory = null,
+    HookScope Scope = HookScope.Project);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
