@@ -246,11 +246,23 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Single(receipt.Blocks);
 
         Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(RemoveJsonProperty(valid, "blocks")));
-        Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(AddJsonProperty(valid, "layout", "per-target-roots")));
-        Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(valid.Replace(
-            "\"scope\": \"project\"",
-            "\"scope\": \"global\"",
-            StringComparison.Ordinal)));
+
+        SquadReceipt withLayoutReceipt = store.DeserializeReceipt(AddJsonProperty(valid, "layout", "per-target-roots"));
+        Assert.Equal(SquadDeploymentScope.Project, withLayoutReceipt.Scope);
+        Assert.Equal(SquadReceiptLayout.PerTargetRoots, withLayoutReceipt.Layout);
+        Assert.Single(withLayoutReceipt.Blocks);
+
+        string globalScopeJson = AddJsonProperty(
+            valid.Replace(
+                "\"scope\": \"project\"",
+                "\"scope\": \"global\"",
+                StringComparison.Ordinal),
+            "layout",
+            "per-target-roots");
+        SquadReceipt globalScopeReceipt = store.DeserializeReceipt(globalScopeJson);
+        Assert.Equal(SquadDeploymentScope.Global, globalScopeReceipt.Scope);
+        Assert.Equal(SquadReceiptLayout.PerTargetRoots, globalScopeReceipt.Layout);
+        Assert.Single(globalScopeReceipt.Blocks);
     }
 
     [Fact]
