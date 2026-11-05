@@ -357,8 +357,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { rid: darwin-arm64, os: macos-14,    exe: "",    archive: tar.gz }
-          - { rid: darwin-x64,   os: macos-14,    exe: "",    archive: tar.gz }
+          - { rid: darwin-arm64, os: macos-latest, exe: "",   archive: tar.gz }
+          - { rid: darwin-x64,   os: macos-latest, exe: "",   archive: tar.gz }
           - { rid: linux-arm64,  os: ubuntu-latest, exe: "",  archive: tar.gz }
           - { rid: linux-x64,    os: ubuntu-latest, exe: "",  archive: tar.gz }
           - { rid: win-x64,      os: ubuntu-latest, exe: ".exe", archive: zip }
@@ -615,8 +615,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { rid: darwin-arm64, os: macos-14,        target: aarch64-apple-darwin,   asset: kyberdash-tray-darwin-arm64.zip }
-          - { rid: darwin-x64,   os: macos-14,        target: x86_64-apple-darwin,    asset: kyberdash-tray-darwin-x64.zip }
+          - { rid: darwin-arm64, os: macos-latest,    target: aarch64-apple-darwin,   asset: kyberdash-tray-darwin-arm64.zip }
+          - { rid: darwin-x64,   os: macos-latest,    target: x86_64-apple-darwin,    asset: kyberdash-tray-darwin-x64.zip }
           - { rid: win-x64,      os: windows-latest,  target: x86_64-pc-windows-msvc, asset: kyberdash-tray-win-x64-setup.exe }
     env:
       NODE_VERSION: "24.22.1"
