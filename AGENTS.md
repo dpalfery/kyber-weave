@@ -22,6 +22,9 @@ gate before Ready / Kilo review. Map changed files to tests:
   `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
   `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
   Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
+- Repository policy (scripts, workflows, gate configuration, docs prose, source scans): the
+  same commands against `tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj`.
+  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`.
 - KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
   (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
   zero tests. Check the run reports a non-zero test count.
@@ -62,7 +65,7 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
-`dotnet test` and dash `ts-test` gates in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
+`dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
 already run through it. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
