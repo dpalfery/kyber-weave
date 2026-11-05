@@ -969,9 +969,10 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadOwnedBlock>? ownedBlocks = null)
     {
         IReadOnlyList<SquadOwnedBlock> blocks = ownedBlocks ?? [];
-        // The in-memory schema follows the writer: a project receipt that owns a block reads
-        // v3, everything else keeps today's value (v1 — Global upgrades to v2 at write time).
-        string schema = blocks.Count > 0 && scope == SquadDeploymentScope.Project
+        // The in-memory schema follows the writer: a receipt that owns a block reads v3,
+        // regardless of whether the scope is project or global; everything else keeps the
+        // pre-block schema (v1, with Global upgrading to v2 at write time).
+        string schema = blocks.Count > 0 && scope != SquadDeploymentScope.Instance
             ? SquadStateStore.ReceiptSchemaV3
             : SquadStateStore.ReceiptSchemaV1;
         return new SquadReceipt(
@@ -997,20 +998,21 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Blocks are a project-scope ownership kind: the v3 receipt that records them exists for
-    /// project scope only. A block arriving with any other scope is a renderer contract
-    /// violation, refused loudly rather than silently dropped.
+    /// Blocks are a shared-file ownership kind rather than a project-only one: they are valid for
+    /// both project and global scope, while instance scope is still rejected. This keeps the
+    /// project contract unchanged while allowing a global install to own hook blocks and home-owned
+    /// files under the home-level state directory.
     /// </summary>
     private static void RequireProjectScopeForBlocks(
         SquadDeploymentScope scope,
         bool hasBlocks,
         string operation)
     {
-        if (scope != SquadDeploymentScope.Project && hasBlocks)
+        if (scope == SquadDeploymentScope.Instance && hasBlocks)
         {
             throw new SquadDeploymentConflictException(
                 $"Squad hook blocks cannot be {operation} under '{scope}' scope: " +
-                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project scope only.");
+                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project and global scope only.");
         }
     }
 

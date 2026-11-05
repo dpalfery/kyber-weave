@@ -442,13 +442,11 @@ public sealed class SquadStateStore
 
     /// <summary>
     /// Serializes a receipt as stable, indented JSON with portable relative paths. A Global
-    /// receipt is always written on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
-    /// plus its required <c>layout</c> — since v2 exists for Global receipts only (A3); a
-    /// project receipt without blocks is written byte-identical to every receipt this store
-    /// has ever produced, on <see cref="ReceiptSchemaV1"/> with no <c>layout</c> field; a
-    /// project receipt that owns at least one block is written on
-    /// <see cref="ReceiptSchemaV3"/> — the v1 project field set plus its required
-    /// <c>blocks</c>. The write schema is derived from <see cref="SquadReceipt.Scope"/>
+    /// receipt without blocks stays on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
+    /// plus its required <c>layout</c> — while every receipt that owns at least one hook block is
+    /// serialized on <see cref="ReceiptSchemaV3"/>; a project block receipt stays byte-identical to
+    /// the project contract, and a global block receipt uses the same schema while preserving the
+    /// home-root layout. The write schema is derived from <see cref="SquadReceipt.Scope"/>
     /// and <see cref="SquadReceipt.Blocks"/> alone, never from the schema string already on
     /// <paramref name="receipt"/> — so a receipt built directly through the record's
     /// constructor upgrades to v2 or v3 the moment it is written for the scope and content
@@ -460,13 +458,13 @@ public sealed class SquadStateStore
         ValidateReceipt(receipt);
 
         bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
-        bool isV3 = !isGlobal && receipt.Blocks.Count > 0;
+        bool isV3 = receipt.Blocks.Count > 0 && receipt.Scope != SquadDeploymentScope.Instance;
 
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, ReceiptWriterOptions))
         {
             writer.WriteStartObject();
-            writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : isV3 ? ReceiptSchemaV3 : ReceiptSchemaV1);
+            writer.WriteString("schema", isV3 ? ReceiptSchemaV3 : isGlobal ? ReceiptSchemaV2 : ReceiptSchemaV1);
             writer.WriteString("scope", receipt.Scope switch
             {
                 SquadDeploymentScope.Project => "project",
@@ -561,8 +559,9 @@ public sealed class SquadStateStore
         {
             (true, _, _) => SquadDeploymentScope.Global,
             (_, true, "project") => SquadDeploymentScope.Project,
+            (_, true, "global") => SquadDeploymentScope.Global,
             (_, true, _) => throw new InvalidDataException(
-                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only, but found " +
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project or global scope only, but found " +
                 $"scope '{scopeText ?? "null"}'."),
             (_, _, "project") => SquadDeploymentScope.Project,
             (_, _, "global") => SquadDeploymentScope.Global,
@@ -593,7 +592,7 @@ public sealed class SquadStateStore
                 : [];
 
         SquadReceiptLayout layout;
-        if (isV2)
+        if (isV2 || (isV3 && scope == SquadDeploymentScope.Global))
         {
             string? layoutText = root.GetProperty("layout").GetString();
             layout = layoutText switch
@@ -1215,10 +1214,10 @@ public sealed class SquadStateStore
                 $"Squad receipt schema must be '{ReceiptSchemaV1}', '{ReceiptSchemaV2}' or '{ReceiptSchemaV3}'.");
 
         bool isV3 = string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
-        if (isV3 && receipt.Scope != SquadDeploymentScope.Project)
+        if (isV3 && receipt.Scope is not (SquadDeploymentScope.Project or SquadDeploymentScope.Global))
         {
             throw new InvalidDataException(
-                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only.");
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project or global scope only.");
         }
 
         if (isV3 && receipt.Blocks.Count == 0)
@@ -1625,8 +1624,23 @@ public sealed class SquadStateStore
         RequireExactJsonFields(
             root,
             ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files", "blocks"],
-            "receipt");
-        RequireCanonicalJsonEnum(root, "scope", ["project"], "receipt");
+            "receipt",
+            ["layout", "homeFiles"]);
+
+        string? scopeToken = root.GetProperty("scope").GetString();
+        if (scopeToken is not ("project" or "global"))
+            throw new InvalidDataException(
+                $"Squad receipt schema '{ReceiptSchemaV3}' accepts scopes 'project' or 'global' only, but found " +
+                $"'{scopeToken ?? "null"}'.");
+
+        if (string.Equals(scopeToken, "global", StringComparison.Ordinal))
+        {
+            JsonElement layout = root.GetProperty("layout");
+            string? layoutToken = layout.ValueKind == JsonValueKind.String ? layout.GetString() : null;
+            if (layoutToken is not ("single-root" or "per-target-roots"))
+                throw new InvalidDataException(
+                    "Squad receipt field 'layout' must be 'single-root' or 'per-target-roots' for a global v3 receipt.");
+        }
     }
 
     private static void ValidateReceiptJsonShapeV2(JsonElement root)
