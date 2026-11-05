@@ -855,6 +855,7 @@ jobs:
   dash-e2e:
     name: Dash harness-collection e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: changes
     if: needs.changes.outputs.dash == 'true'
     permissions:
@@ -880,9 +881,20 @@ jobs:
         working-directory: dash
         run: npm ci --no-audit --no-fund
 
+      # Chromium only: playwright.isolated.config.ts declares no projects, so Playwright runs its
+      # default Chromium. Each attempt is capped at 5 minutes and retried once, so a stalled
+      # download fails fast instead of holding CI for GitHub's 360-minute default.
       - name: Install Playwright browsers
         working-directory: dash
-        run: npx playwright install --with-deps
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2; do
+            if timeout --kill-after=30 300 npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::Playwright install attempt $attempt failed or timed out."
+          done
+          exit 1
 
       - name: Harness-collection conformance spec
         run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
