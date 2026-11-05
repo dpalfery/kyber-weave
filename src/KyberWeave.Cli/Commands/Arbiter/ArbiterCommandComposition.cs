@@ -221,6 +221,11 @@ public static class ArbiterCommandComposition
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(settings.Path, settings.Config);
         if (!loaded.Success)
         {
+            if (TryLoadProjectConfigWithoutGlobal(settings, out config, out configPath))
+            {
+                return true;
+            }
+
             report.Add(MapLoadFailure(loaded.Error ?? "Failed to load kyber-weave.yml.", loaded.ConfigPath));
             config = KyberWeaveConfig.ProductDefaults;
             configPath = loaded.ConfigPath;
@@ -257,6 +262,152 @@ public static class ArbiterCommandComposition
         }
 
         return true;
+    }
+
+    private static bool TryLoadProjectConfigWithoutGlobal(
+        ArbiterSettings settings,
+        out KyberWeaveConfig config,
+        out string? configPath)
+    {
+        string? repoConfigPath = ResolveProjectConfigPath(settings.Path, settings.Config);
+        if (string.IsNullOrWhiteSpace(repoConfigPath) || !File.Exists(repoConfigPath))
+        {
+            config = KyberWeaveConfig.ProductDefaults;
+            configPath = repoConfigPath;
+            return false;
+        }
+
+        string yaml = File.ReadAllText(repoConfigPath);
+        string sanitized = StripProjectGlobalTargets(yaml);
+        if (string.Equals(yaml, sanitized, StringComparison.Ordinal))
+        {
+            config = KyberWeaveConfig.ProductDefaults;
+            configPath = repoConfigPath;
+            return false;
+        }
+
+        try
+        {
+            config = KyberWeaveConfigLoader.LoadFromYaml(sanitized);
+            configPath = repoConfigPath;
+            return true;
+        }
+        catch (YamlException)
+        {
+            config = KyberWeaveConfig.ProductDefaults;
+            configPath = repoConfigPath;
+            return false;
+        }
+    }
+
+    private static string? ResolveProjectConfigPath(string repoRoot, string? configPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            return Path.IsPathRooted(configPath)
+                ? configPath
+                : Path.Combine(repoRoot, configPath);
+        }
+
+        string defaultPath = Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml");
+        if (File.Exists(defaultPath))
+        {
+            return defaultPath;
+        }
+
+        string legacyPath = Path.Combine(repoRoot, "kyber-weave.yml");
+        return File.Exists(legacyPath) ? legacyPath : null;
+    }
+
+    private static string StripProjectGlobalTargets(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        string normalized = yaml.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string[] lines = normalized.Split('\n');
+        List<string> result = new(lines.Length);
+
+        bool inArbiter = false;
+        int arbiterIndent = -1;
+        bool inGlobal = false;
+        int globalIndent = -1;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            string trimmed = line.TrimStart();
+
+            if (!inArbiter)
+            {
+                if (trimmed.StartsWith("arbiter:", StringComparison.Ordinal))
+                {
+                    inArbiter = true;
+                    arbiterIndent = CountIndent(line);
+                    result.Add(line);
+                }
+                else
+                {
+                    result.Add(line);
+                }
+
+                continue;
+            }
+
+            if (!inGlobal)
+            {
+                if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+                {
+                    result.Add(line);
+                    continue;
+                }
+
+                if (CountIndent(line) <= arbiterIndent)
+                {
+                    inArbiter = false;
+                    arbiterIndent = -1;
+                    result.Add(line);
+                    continue;
+                }
+
+                if (trimmed.StartsWith("global:", StringComparison.Ordinal))
+                {
+                    inGlobal = true;
+                    globalIndent = CountIndent(line);
+                    continue;
+                }
+
+                result.Add(line);
+                continue;
+            }
+
+            if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (CountIndent(line) <= globalIndent)
+            {
+                inGlobal = false;
+                globalIndent = -1;
+                result.Add(line);
+                continue;
+            }
+        }
+
+        return string.Join('\n', result);
+    }
+
+    private static int CountIndent(string line)
+    {
+        int count = 0;
+        while (count < line.Length && char.IsWhiteSpace(line[count]))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     /// <summary>
