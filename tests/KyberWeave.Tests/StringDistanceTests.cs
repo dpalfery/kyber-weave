@@ -106,4 +106,11 @@ public sealed class StringDistanceTests
     {
         Assert.Throws<ArgumentNullException>(() => StringDistance.Levenshtein("test", null!));
     }
+
+    [Fact]
+    public void NearestRejectsANullValueOrCandidateList()
+    {
+        Assert.Throws<ArgumentNullException>(() => StringDistance.Nearest(null!, ["test"]));
+        Assert.Throws<ArgumentNullException>(() => StringDistance.Nearest("test", null!));
+    }
 }

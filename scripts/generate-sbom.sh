@@ -32,6 +32,7 @@
 #           dash/tray/ui/package-lock.json, npm/package-lock.json
 #   cargo   dash/tray/src-tauri/Cargo.lock
 #   nuget   src/KyberWeave.Cli/packages.lock.json, src/KyberWeave.Core/packages.lock.json,
+#           src/KyberWeave.Core.Docs/packages.lock.json, src/KyberWeave.Core.Squad/packages.lock.json,
 #           and — when the SDK is available — the staged *.deps.json of
 #           KyberWeave.Cli and KyberWeave.Mcp
 #

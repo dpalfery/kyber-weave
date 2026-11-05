@@ -31,39 +31,25 @@
     <!-- Internal helpers (link normalization, vocabulary parsing) are unit-tested
          directly rather than only through the public command surface. -->
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <!--
+      The feature assemblies need one internal each: Squad reads the shared path semantics
+      (SquadFileSystemPathSemantics), Docs reads the ontology default (OntologyConfig.DefaultDocsRoot).
+      The grant is assembly-wide, so it exposes every Core internal to them; reach for another
+      only by moving it into Core's public surface or stating why here. CoreAssemblySplitTests
+      holds the project references to the split ADR 0057 records.
+    -->
+    <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
+    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Rich coding standards templates embedded from products/kyber-squad/standards -->
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\README.md" LogicalName="Standards.azure.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\README.md" LogicalName="Standards.csharp.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\README.md" LogicalName="Standards.data-access-layer.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\README.md" LogicalName="Standards.github-actions.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\README.md" LogicalName="Standards.go.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\README.md" LogicalName="Standards.maui.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\README.md" LogicalName="Standards.pulumi.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\README.md" LogicalName="Standards.python.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\README.md" LogicalName="Standards.react.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\README.md" LogicalName="Standards.rust.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\README.md" LogicalName="Standards.sql.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
+    <!-- Each technology's gate catalogue, embedded from products/kyber-squad/standards. The
+         standards templates beside them belong to KyberWeave.Core.Docs. -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\gates.yml" LogicalName="Gates.csharp.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\gates.yml" LogicalName="Gates.typescript.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\gates.yml" LogicalName="Gates.go.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\gates.yml" LogicalName="Gates.python.yml" />
-    <!--
-      The user-home response guidance a global `squad update` deploys to
-      ~/.kyber-weave/response-guidance.md. The default text ships as a resource so an installed
-      tool needs no checkout beside it to know its own default; the copy is byte-identical to the
-      canonical product file, and the VerifyResponseGuidanceDefault target below fails the build if
-      the two ever diverge. It is deliberately not an EmbeddedResource of the product path: the
-      release-artifact rule keeps the Squad corpus out of these assemblies, and a Core-owned
-      resource is the shape that rule permits.
-    -->
-    <EmbeddedResource Include="Squad\Deployment\Resources\response-guidance.default.md" LogicalName="Squad.response-guidance.md" />
   </ItemGroup>
 
   <ItemGroup>
@@ -76,28 +62,6 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\agents\*.md" LogicalName="Arbiter.Roster.%(Filename).md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\skills\code-review\references\lenses\*.md" LogicalName="Arbiter.Lens.%(Filename).md" />
   </ItemGroup>
-
-  <ItemGroup>
-    <!--
-      Byte-for-byte drift guard for the response-guidance default above. The copy exists because a
-      deployed tool cannot read the product tree it was built from, and this is what keeps the copy
-      honest: editing either file alone fails the build instead of shipping two different defaults.
-    -->
-    <CanonicalResponseGuidance Include="$(MSBuildThisFileDirectory)..\..\products\kyber-squad\response-guidance.default.md" />
-    <ShippedResponseGuidance Include="$(MSBuildThisFileDirectory)Squad\Deployment\Resources\response-guidance.default.md" />
-  </ItemGroup>
-
-  <Target Name="VerifyResponseGuidanceDefault" BeforeTargets="PrepareForBuild">
-    <GetFileHash Files="@(CanonicalResponseGuidance)" Algorithm="SHA256">
-      <Output TaskParameter="Hash" PropertyName="_CanonicalResponseGuidanceHash" />
-    </GetFileHash>
-    <GetFileHash Files="@(ShippedResponseGuidance)" Algorithm="SHA256">
-      <Output TaskParameter="Hash" PropertyName="_ShippedResponseGuidanceHash" />
-    </GetFileHash>
-    <Error
-      Condition="'$(_CanonicalResponseGuidanceHash)' != '$(_ShippedResponseGuidanceHash)'"
-      Text="The response-guidance default shipped in KyberWeave.Core (src/KyberWeave.Core/Squad/Deployment/Resources/response-guidance.default.md) has drifted from its canonical source (products/kyber-squad/response-guidance.default.md). Update the copy so the deployed default is the one the canonical product file states." />
-  </Target>
 
   <ItemGroup>
     <!--

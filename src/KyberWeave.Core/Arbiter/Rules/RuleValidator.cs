@@ -1,7 +1,7 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Text;
 using KyberWeave.Core.Networking;
 
 namespace KyberWeave.Core.Arbiter.Rules;
@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Arbiter.Rules;
 /// <c>KW-ARB-CONFIG-001</c> to <c>-010</c> diagnostics. Every id is permanent.
 /// </summary>
 /// <remarks>
-/// Hints use <see cref="Docs.Validation.DocSpecValidator"/> nearest-match rule over
+/// Hints use the <see cref="Text.StringDistance.Nearest"/> nearest-match rule over
 /// <see cref="Text.StringDistance.Levenshtein"/> distance, so a typo'd fact, lens or
 /// answer points at what was meant. The loader stays lenient and throws only on
 /// malformed structure; everything this validator can name becomes a diagnostic so
@@ -463,7 +463,7 @@ public static class RuleValidator
 
     private static string? NearestHint(string value, IEnumerable<string> candidates, string kind)
     {
-        string? nearest = DocSpecValidator.Nearest(value, candidates);
+        string? nearest = StringDistance.Nearest(value, candidates);
         return nearest is null
             ? null
             : $"Did you mean '{nearest}'? No other known {kind} is closer.";

@@ -806,7 +806,7 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at AnalysisCacheSafety.cs:119 with GitTimeout = 60 s."
@@ -860,19 +860,19 @@
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
       "bound": "Method definitions (two overloads). They start nothing; they return a ProcessStartInfo."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "ProcessStartInfo startInfo = new()",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "return BuildStartInfo(",
       "count": 1,
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
@@ -926,19 +926,19 @@
       "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s (CodeGraphResolverAdapter.cs:36); the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with GitTimeout = 60 s (AnalysisCacheSafety.cs:16); the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
       "text": "result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with SqliteBatchTimeout = 120 s (SqliteAnalysisPersistence.cs:35); the tree is killed on expiry. sqlite's own busy timeout is separate and does not bound the process."
     },
     {
-      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;",
       "count": 1,
       "bound": "ProcessRunner.Run with SqliteVersionProbeTimeout = 30 s (SqliteAnalysisPersistence.cs:38); the tree is killed on expiry."

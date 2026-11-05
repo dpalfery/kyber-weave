@@ -2,7 +2,7 @@ using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
-using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -116,7 +116,7 @@ public static class KyberStandardsTemplates
 
         if (!TryRender(technology, owner, date, out string? rendered))
         {
-            string? nearest = DocSpecValidator.Nearest(technology, CanonicalTechnologies);
+            string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
             string message = nearest is not null
                 ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
                 : $"Unknown technology '{technology}'.";
