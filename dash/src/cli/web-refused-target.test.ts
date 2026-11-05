@@ -7,7 +7,7 @@
 import { request as httpRequest } from 'node:http'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -17,6 +17,7 @@ import { CanonStore } from '../canon/store.js'
 import type { ChildResult, JobChild, JobSpawner } from '../jobs/host.js'
 import type { ReceiverProbe } from '../jobs/receiver-host.js'
 import { KyberBridge } from '../server/bridge.js'
+import { removeTempStateDir } from '../server/testing.js'
 import { SETTING_KEYS, writeSetting } from '../settings/shared-settings.js'
 import { currentSpawnRuntime, isSpawnRefusal, resolveJobSpawnTarget } from './spawn-target.js'
 import { runWebDashboard } from './web.js'
@@ -34,7 +35,7 @@ beforeEach(() => {
   stateDir = mkdtempSync(join(tmpdir(), 'kyber-web-refused-target-'))
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const name of ROLE_VARIABLES) {
     const prior = priorEnvironment.get(name)
     if (prior === undefined) delete process.env[name]
@@ -42,7 +43,10 @@ afterEach(() => {
   }
   priorEnvironment.clear()
   clearSpawnGuardHits()
-  rmSync(stateDir, { recursive: true, force: true })
+  // The host pair tears down fire-and-forget on server close: the jobs lease release is still
+  // creating and unlinking jobs.lock and its takeover guard here. Wait for the lease, then
+  // remove with retries, or rm races the release and fails with ENOTEMPTY.
+  await removeTempStateDir(stateDir)
 })
 
 /** Records every spawn it is asked for and starts nothing. */
