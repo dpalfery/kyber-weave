@@ -266,7 +266,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     {
         // Command Code joined the roster after the Arbiter phases and has no hook primitive,
         // so a project-scope derivation over the whole roster yields the two fallback-only
-        // records plus one no-hook-support record for Command Code.
+        // records plus one dispatch-unconfirmed record for Command Code.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             SquadTargetCatalog.All,
             SquadDeploymentScope.Project).ToList();
@@ -279,7 +279,53 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 .ToHashSet());
         Assert.Contains(
             records,
-            record => record.Target == "commandcode" && record.Details == "project-only");
+            record => record.Target == "commandcode" && record.Details == "dispatch-unconfirmed");
+    }
+
+    [Fact]
+    public void TargetDegradations_ProjectScope_ClassesCommandCodeAsDispatchUnconfirmed()
+    {
+        List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [SquadTarget.CommandCode],
+            SquadDeploymentScope.Project).ToList();
+
+        Assert.Collection(records, record =>
+        {
+            Assert.Equal("commandcode", record.Target);
+            Assert.Equal("dispatch-unconfirmed", record.Details);
+        });
+    }
+
+    [Fact]
+    public void TargetDegradations_GlobalScope_ClassesCommandCodeAsDispatchUnconfirmed()
+    {
+        List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [SquadTarget.CommandCode],
+            SquadDeploymentScope.Global).ToList();
+
+        Assert.Collection(records, record =>
+        {
+            Assert.Equal("commandcode", record.Target);
+            Assert.Equal("dispatch-unconfirmed", record.Details);
+        });
+    }
+
+    [Theory]
+    [InlineData(SquadTarget.CommandCode, SquadDeploymentScope.Project)]
+    [InlineData(SquadTarget.CommandCode, SquadDeploymentScope.Global)]
+    [InlineData(SquadTarget.Warp, SquadDeploymentScope.Project)]
+    [InlineData(SquadTarget.Warp, SquadDeploymentScope.Global)]
+    [InlineData(SquadTarget.ZCode, SquadDeploymentScope.Project)]
+    [InlineData(SquadTarget.ZCode, SquadDeploymentScope.Global)]
+    public void TargetDegradations_NoHookTargets_AreNeverClassedAsEnforcedGlobal(
+        SquadTarget target,
+        SquadDeploymentScope scope)
+    {
+        IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [target],
+            scope);
+
+        Assert.DoesNotContain(records, record => record.Details == "enforced-global");
     }
 
     [Fact]

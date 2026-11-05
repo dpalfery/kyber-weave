@@ -29,16 +29,17 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
         Assert.Equal("fallback-only", record.Details);
     }
 
-    [Fact]
-    public void Install_GlobalScope_WarpWritesOwnedArbiterServerEntryIntoWarpMcpConfig()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void GlobalWarpInstall_WritesNothingAndReportsMcpRegistration(bool withForeignConfig)
     {
         string home = Path.Combine(_temp.Path, "home");
         string warpRoot = Path.Combine(home, ".warp");
         Directory.CreateDirectory(warpRoot);
 
         string mcpConfigPath = Path.Combine(warpRoot, ".mcp.json");
-        File.WriteAllText(
-            mcpConfigPath,
+        byte[] originalBytes = Encoding.UTF8.GetBytes(
             """
             {
               "mcpServers": {
@@ -53,6 +54,11 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
               }
             }
             """);
+
+        if (withForeignConfig)
+        {
+            File.WriteAllBytes(mcpConfigPath, originalBytes);
+        }
 
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
@@ -77,39 +83,17 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.True(File.Exists(mcpConfigPath), $"global Warp install should create {mcpConfigPath}");
+        Assert.Contains("~/.warp/.mcp.json", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter serve", execution.Output, StringComparison.Ordinal);
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(mcpConfigPath));
-        JsonElement servers = document.RootElement.GetProperty("mcpServers");
-
-        bool foundArbiterServer = false;
-        foreach (JsonProperty property in servers.EnumerateObject())
+        if (withForeignConfig)
         {
-            if (property.Name.Equals("foreign", StringComparison.Ordinal)
-                || property.Name.Equals("kyber-weave", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            JsonElement value = property.Value;
-            string? serverCommand = value.TryGetProperty("command", out JsonElement commandElement)
-                ? commandElement.GetString()
-                : null;
-            if (!string.Equals(serverCommand, "kyber-weave", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string[] args = value.GetProperty("args").EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray();
-            Assert.Contains("arbiter", args, StringComparer.Ordinal);
-            Assert.Contains("serve", args, StringComparer.Ordinal);
-            Assert.Contains($"--repo-root", args, StringComparer.Ordinal);
-            Assert.Contains(Path.Combine(home, ".warp"), args, StringComparer.Ordinal);
-            foundArbiterServer = true;
-            break;
+            Assert.Equal(originalBytes, File.ReadAllBytes(mcpConfigPath));
         }
-
-        Assert.True(foundArbiterServer, $"expected the Warp global install to create the Arbiter MCP server entry, but the file was: {File.ReadAllText(mcpConfigPath)}");
+        else
+        {
+            Assert.False(File.Exists(mcpConfigPath), $"global Warp install must not create {mcpConfigPath}");
+        }
     }
 
     private static CommandExecution Capture(Func<int> execute)
