@@ -14,9 +14,10 @@ supersedes: []
 
 ## Status
 
-Accepted, 2026-10-31, with the MCP configuration wiring specification. It is deliberately a
-**new record rather than an amendment**: the rule ADR 0026 states stays true, word for word,
-for the component it governs.
+Accepted, 2026-10-31, with the MCP configuration wiring specification. The docs-branch
+`mcp-write` rule is unchanged and governs docs MCP configuration only. It does not restrict
+Squad-owned hook blocks or the Arbiter install; those are a different artifact and are governed by
+[ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md) and the Arbiter install flow.
 
 ## Context
 
@@ -117,10 +118,12 @@ user-scope configuration.**
    `kyber-weave-mcp` binary is absent, the finding says the Kyber-Weave installation itself is
    broken and points at `kyber-weave update` or the install script, not at harness configuration.
 
-5. **ADR 0026 stands, and D-no-settings stands.** Neither is amended. ADR 0026's rule remains
-   true without exception for Kyber Utilities, and Squad continues to write no harness
-   configuration for any harness. This record is the docs branch's own boundary, stated for its
-   own component; it borrows ADR 0026's reasoning and widens nothing that record decided.
+5. **The docs MCP rule is unchanged, and it is scoped to docs configuration.** This record does
+   not amend ADR 0026 or Squad's hook ownership rules; it governs the docs branch's repository-
+   scope MCP configuration only. Squad-owned hook blocks or owned files in a harness's global hook
+   location are governed by [ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md), and the
+   Arbiter install is governed by the Arbiter install flow and the user-scope default described in
+   [ADR 0037](0037-squad-state-in-user-home.md) and [ADR 0053](0053-kyber-arbiter-three-step-decision-gates.md).
 
 6. **The v1 write set is narrower than the catalog, deliberately.** Codex CLI and ZCode are
    checked and reported but written by nothing: Codex's repository-scope relative-path semantics

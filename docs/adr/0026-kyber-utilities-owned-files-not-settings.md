@@ -24,6 +24,15 @@ authoring, which the slice's rules forbid. OpenCode support is deferred to
 [issue #165](https://github.com/dpalfery/kyber-weave/issues/165). The ownership decision itself
 is unchanged; this note only narrows the harness set.
 
+**Amendment, 2026-11-05.** This ADR remains scoped to Kyber Utilities' status-line ownership.
+Squad's Arbiter hook installation may add or remove only its own marked/owned hook block or
+owned file in a harness's global hook location, including auto-loaded plugin directories such as
+OpenCode `~/.config/opencode/plugins/` and Kilo `~/.config/kilo/plugin/`, and only when the
+user explicitly runs the install command. Squad never touches any other content in a shared hook
+file or file it does not own. The install output names every path written and whether each
+harness is enforced or fallback-only. Kyber Utilities' status-line activation stays manual unless
+this ADR says otherwise.
+
 ## Context
 
 The developer runs Claude Code, the Antigravity CLI (`agy`), Pi, and OpenCode side by side, each
@@ -40,30 +49,45 @@ places. Second, **some harness roots auto-load**: Pi discovers extensions in
 `~/.config/opencode/plugins/`. A file placed in an auto-load directory is active the moment it
 lands, with no user action and no way to tell whether it was wanted.
 
-A shared settings file is the user's state, not Kyber-Weave's. Writing it — even "helpfully",
-create-if-missing, or by merge — means the tool takes ownership of a file it did not author, in a
-format that changes between harness versions, and any wrong guess is hard for the user to undo.
-That is the boundary the sibling component already drew, and it is worth drawing again before a
-second component is tempted to cross it.
+The shared settings file boundary still governs Kyber Utilities, and it is worth drawing again
+before a second component is tempted to cross it. The user owns the shared settings file, so an
+install that writes or merges arbitrary config is a claim of ownership over a file the tool did not
+write and cannot safely reason about. The amendment here is narrower: Squad may add or remove
+only its own marked/owned Arbiter hook block or owned file in a harness's global hook location,
+including auto-loaded plugin directories such as OpenCode `~/.config/opencode/plugins/` and
+Kilo `~/.config/kilo/plugin/`, and only when the user explicitly runs the install command.
+Squad never touches any other content in the file or writes a new entry outside its own block or
+owned file. The status-line path remains the manual-activation path that Kyber Utilities owns; the
+Arbiter hook path is a separate decision, and it installs only by explicit user action.
 
 ## Decision
 
 1. **Kyber Utilities deploys only Kyber-owned files into a Kyber-owned staging location**, and
    records every file it owns, with its SHA-256 digest, in **its own receipt**. The receipt is
    separate from Kyber-Squad's; the two do not share state.
-2. **It never creates, edits, merges, backs up, restores, or reads a shared harness settings
-   file** — for any harness and any command, including `--dry-run`. It deploys nothing into a
-   directory a harness auto-loads.
-3. **Activation is manual.** The tool prints the exact snippet, with absolute paths, and the user
-   applies it to their own settings. A deployed file is inert until then.
-4. **`utilities statusline doctor` never reads settings.** It checks receipt checksums, the
+2. **Kyber Utilities never creates, edits, merges, backs up, restores, or reads a shared harness
+   settings file** — for any harness and any command, including `--dry-run`. It deploys nothing
+   into a directory a harness auto-loads. That boundary remains true for Kyber Utilities status
+   lines, and it is the reason the status-line path stays manual-activation.
+3. **Squad-owned Arbiter hook writes are a narrow, explicit-install exception.** When the user
+   explicitly runs the install command, Squad may add or remove only its own marked/owned hook
+   block or owned file in a harness's global hook location, including auto-loaded plugin
+   directories such as OpenCode `~/.config/opencode/plugins/` and Kilo
+   `~/.config/kilo/plugin/`. Squad never touches any other content in the shared file or writes
+   anywhere else in the harness. The install output lists exactly what was written and whether
+   each harness is enforced or fallback-only. The full contract is defined in
+   [ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md).
+4. **Activation is manual for Kyber Utilities status lines.** The tool prints the exact snippet,
+   with absolute paths, and the user applies it to their own settings. A deployed file is inert
+   until then.
+5. **`utilities statusline doctor` never reads settings.** It checks receipt checksums, the
    executable bit, and prerequisites (`jq`, `git`, and `awk` for Claude Code; `python3` and `git`
    for `agy`; `node` for Pi; the harness binary and its version; and `kyberdash` for the `agy`
    variant as a warning), then prints the activation snippet.
-5. **Scope is per-user, on macOS and Linux.** Windows is not supported in this slice; the
+6. **Scope is per-user, on macOS and Linux.** Windows is not supported in this slice; the
    implementation specifics are recorded in
    [issue #163](https://github.com/dpalfery/kyber-weave/issues/163).
-6. **It is not a wider utility platform.** No plugin registry, no generic utility schema, and no
+7. **It is not a wider utility platform.** No plugin registry, no generic utility schema, and no
    second utility type. The slice is one utility — status lines — for three harnesses (Claude
    Code, agy, and Pi; OpenCode is deferred under issue #165).
 
@@ -104,6 +128,8 @@ second component is tempted to cross it.
 - [Kyber Utilities status-line slice plan](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md)
 - [Kyber Utilities overview](../kyber-utilities/README.md)
 - [Kyber Utilities adoption and activation guide](../kyber-utilities/onboarding.md)
+- [ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md) — the narrow Squad-owned Arbiter
+  hook exception in a shared hook file or auto-loaded plugin directory
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — the sibling boundary that rejects
   owning settings files
 - [Kyber Utilities: Windows support for status-line deployment](https://github.com/dpalfery/kyber-weave/issues/163)
