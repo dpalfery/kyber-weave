@@ -3,7 +3,7 @@ id: squad/onboarding
 title: Kyber-Squad adoption and usage guide
 doc-type: onboarding
 component: KyberSquad
-source-root: src/KyberWeave.Core/Squad
+source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
 last-reviewed: 2026-11-04
 status: current

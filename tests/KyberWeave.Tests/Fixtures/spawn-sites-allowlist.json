@@ -860,19 +860,19 @@
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
       "bound": "Method definitions (two overloads). They start nothing; they return a ProcessStartInfo."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "ProcessStartInfo startInfo = new()",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
     },
     {
-      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "return BuildStartInfo(",
       "count": 1,
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."

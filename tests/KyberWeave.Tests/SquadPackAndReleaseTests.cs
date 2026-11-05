@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
@@ -513,13 +514,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void ReleaseArtifact_AssertsCliAndMcpArchivesContainNoEmbeddedSquadCorpus()
     {
-        // Assert that CLI, Core, and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
+        // Assert that CLI, Core, Squad and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
         Assembly cliAssembly = typeof(SquadPackCommand).Assembly;
-        Assembly coreAssembly = typeof(SquadSource).Assembly;
+        Assembly coreAssembly = typeof(KyberWeaveConfig).Assembly;
+        Assembly squadAssembly = typeof(SquadSource).Assembly;
         Assembly mcpAssembly = typeof(DocsTools).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
+        string[] squadResources = squadAssembly.GetManifestResourceNames();
         string[] mcpResources = mcpAssembly.GetManifestResourceNames();
 
         string[] forbiddenCorpusTokens =
@@ -536,6 +539,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         {
             Assert.DoesNotContain(cliResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(coreResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(squadResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(mcpResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -545,6 +549,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         [
             Path.Combine(toolRoot, "src", "KyberWeave.Cli", "KyberWeave.Cli.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Core", "KyberWeave.Core.csproj"),
+            Path.Combine(toolRoot, "src", "KyberWeave.Core.Squad", "KyberWeave.Core.Squad.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Mcp", "KyberWeave.Mcp.csproj")
         ];
 
