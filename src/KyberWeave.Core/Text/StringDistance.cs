@@ -76,8 +76,18 @@ public static class StringDistance
     }
 
     /// <summary>Closest candidate by edit distance, when one is plausibly a typo.</summary>
+    /// <param name="value">The unrecognised input.</param>
+    /// <param name="candidates">The known values; none may be null.</param>
+    /// <returns>
+    /// The candidate with the smallest case-insensitive <see cref="Levenshtein"/> distance (the first
+    /// on a tie), or <see langword="null"/> when there are no candidates or the closest is more than
+    /// <c>max(3, value.Length / 2)</c> edits away.
+    /// </returns>
     public static string? Nearest(string value, IEnumerable<string> candidates)
     {
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(candidates);
+
         string? best = null;
         int bestDistance = int.MaxValue;
 

@@ -3796,8 +3796,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "Containment must be centralized in SquadFileSystemPathSemantics.");
 
         List<string> offenders = new();
-        foreach (string sourcePath in Directory.EnumerateFiles(coreDeploymentRoot, "*.cs")
-                     .Concat(Directory.EnumerateFiles(squadDeploymentRoot, "*.cs")))
+        foreach (string sourcePath in Directory
+                     .EnumerateFiles(coreDeploymentRoot, "*.cs", SearchOption.AllDirectories)
+                     .Concat(Directory.EnumerateFiles(squadDeploymentRoot, "*.cs", SearchOption.AllDirectories)))
         {
             if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
                 continue;

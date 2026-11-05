@@ -41,7 +41,9 @@ and the Arbiter host carried both.
 
    A type moves down into Core only when Core code needs it. Moving a type down needs no ADR.
 4. **Core grants both assemblies internals access**, for the shared path semantics and the
-   ontology defaults. It is the one exception to keeping internals inside an assembly.
+   ontology defaults. It is the one exception to keeping internals inside an assembly. The grant
+   is assembly-wide, so nothing but review stops a feature assembly reading another Core
+   internal. `CoreAssemblySplitTests` holds the project references to this split.
 5. **Resources move with the type that reads them.** `KyberStandardsTemplates` reads `Standards.*`
    from the Docs assembly. The response-guidance default and its drift guard live in the Squad
    project. `GateCatalogue` and the Arbiter keep theirs in Core. Logical names are unchanged.
@@ -58,8 +60,8 @@ and the Arbiter host carried both.
 
 ## Consequences
 
-- An edge from Squad into Docs, or from Core into either, is now a compile error, not a review
-  comment.
+- A `using` from Squad into Docs, or from Core into either, is now a compile error, not a review
+  comment. Adding the project reference that would allow it fails `CoreAssemblySplitTests`.
 - A Docs-only or Squad-only change no longer rebuilds the other area. Core changes still rebuild
   both.
 - The release now packs `KyberWeave.Core.Squad` and `KyberWeave.Core.Docs` alongside
