@@ -563,27 +563,76 @@ public sealed class AnalysisPersistenceTests
         startInfo.ArgumentList.Add(databasePath);
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite lock fixture.");
-        process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
-        process.StandardInput.Flush();
 
-        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 1\nBEGIN IMMEDIATE;");
-            if (result.ExitCode != 0
-                && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
-                    || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
+            process.StandardInput.WriteLine(".timeout 60000");
+            process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
+            process.StandardInput.WriteLine("SELECT 'ACQUIRED';");
+            process.StandardInput.Flush();
+
+            using CancellationTokenSource cts = new(TimeSpan.FromSeconds(60));
+            string? line;
+            try
             {
-                return process;
+                line = process.StandardOutput.ReadLineAsync(cts.Token).AsTask().GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException exception)
+            {
+                throw new TimeoutException("sqlite lock fixture did not acquire an immediate transaction within deadline.", exception);
             }
 
-            Thread.Sleep(20);
-        }
+            if (!string.Equals(line?.Trim(), "ACQUIRED", StringComparison.Ordinal))
+            {
+                string stderr = process.StandardError.ReadToEndAsync().GetAwaiter().GetResult();
+                throw new InvalidOperationException(
+                    $"sqlite lock fixture did not acquire an immediate transaction. Output: '{line}', Error: '{stderr}'.");
+            }
 
-        process.StandardInput.WriteLine("ROLLBACK;");
-        process.StandardInput.Close();
-        process.WaitForExit();
-        throw new TimeoutException("sqlite lock fixture did not acquire an immediate transaction.");
+            DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < deadline)
+            {
+                ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 50\nBEGIN IMMEDIATE;");
+                if (result.ExitCode != 0
+                    && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                        || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return process;
+                }
+
+                Thread.Sleep(20);
+            }
+
+            throw new TimeoutException("sqlite lock fixture verified acquire, but concurrent transaction probe did not detect lock.");
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.StandardInput.WriteLine("ROLLBACK;");
+                    process.StandardInput.Close();
+                    process.WaitForExit(5_000);
+                }
+            }
+            catch
+            {
+                // Best effort cleanup
+            }
+
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Best effort cleanup
+            }
+
+            process.Dispose();
+            throw;
+        }
     }
 
     private static string QuerySqlite(string databasePath, string input)

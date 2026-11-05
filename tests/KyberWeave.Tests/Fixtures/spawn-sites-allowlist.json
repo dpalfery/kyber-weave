@@ -17,7 +17,7 @@
       "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
       "text": "Process process = Process.Start(startInfo)",
       "count": 1,
-      "bound": "Self-exiting on stdin EOF: the child is a sqlite3 that holds BEGIN IMMEDIATE and reads SQL from stdin. RequireLock's finally writes ROLLBACK, closes stdin and waits 5 s (AnalysisPersistenceTests.cs:433-437). The acquire loop in StartSqliteLock is capped at 30 s, and its failure path closes stdin before WaitForExit."
+      "bound": "Self-exiting on stdin EOF: the child is a sqlite3 that holds BEGIN IMMEDIATE and reads SQL from stdin. RequireLock's finally writes ROLLBACK, closes stdin and waits 5 s (AnalysisPersistenceTests.cs:433-437). The acquire loop in StartSqliteLock is capped at 60 s, and its failure path closes stdin before WaitForExit."
     },
     {
       "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
