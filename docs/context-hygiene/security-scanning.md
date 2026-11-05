@@ -66,7 +66,7 @@ metadata:
   version: 0.1.0
 ```
 
-Every `.apm/skills/*/SKILL.md` ships `metadata.author` and `metadata.version`.
+Every `.apm/skills/*/SKILL.md` ships `metadata.author`, `metadata.version`, and a `license`.
 `SkillProvenanceTests` parses each of them with the real parser and scanner, so the top-level
 hoist above fails the suite instead of passing silently.
 

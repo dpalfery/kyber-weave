@@ -608,7 +608,7 @@ sibling product repos — without Azure or container scans, which do not apply h
 | Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-docs-authoring`, `.apm/skills/kyber-docs-integrity-review`, `.apm/skills/kyber-docs-onboarding-and-assessment`, `.apm/skills/kyber-weave-cli`, and `.apm/skills/kyber-weave-model-profile`, plus `docs validate` |
 
 CodeQL excludes exactly one rule, `js/http-to-file-access`, by id and never by path: no file
-or directory is excluded. Its only sink is the live gate's evidence writer
+or directory is excluded. Its only open-alert sink is the live gate's evidence writer
 (`dash/scripts/opencode-live-gate/run.mjs`), which records kyberDash and OpenCode responses
 into evidence files — the thing the gate exists to prove — and the query has no default
 sanitizer, so no code guard can clear it. The owner and a review date live in
