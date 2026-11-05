@@ -263,7 +263,7 @@ public sealed class ProcGuardScriptTests
 
     private static string FixturePath(string fixtureName)
     {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests", "Fixtures", "proc-guard", fixtureName);
+        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.RepoPolicy.Tests", "Fixtures", "proc-guard", fixtureName);
     }
 
     /// <summary>
