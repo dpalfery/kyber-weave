@@ -95,25 +95,42 @@ function occupy(port: number): Promise<Server> {
 
 /** A free loopback port, found by binding ephemeral and letting go before use. */
 async function freePort(): Promise<number> {
-  const probe = await occupy(0)
-  const port = (probe.address() as AddressInfo).port
-  await new Promise<void>((done) => probe.close(() => done()))
+  const [port] = await freePorts(1)
   return port
+}
+
+/** An ephemeral loopback probe. `freePorts` closes it itself, so it registers no cleanup. */
+function probeEphemeral(): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      probe.off('error', reject)
+      resolve(probe)
+    })
+  })
 }
 
 /**
  * `count` distinct free loopback ports. Every probe stays bound until all are read, so the
- * OS cannot hand the same ephemeral port back twice — which back-to-back `freePort()`
- * calls allow, since each probe is closed before the next one binds. As with `freePort()`,
- * the ports are released before use, so another process can still take one first.
+ * OS cannot hand the same ephemeral port back twice — which back-to-back single probes
+ * allow, since each is closed before the next one binds. The ports are still released
+ * before use, so another process can take one first.
  */
 async function freePorts(count: number): Promise<number[]> {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 16) {
+    throw new RangeError(`freePorts: count must be an integer from 1 to 16, got ${count}`)
+  }
   const probes: Server[] = []
   try {
-    for (let i = 0; i < count; i++) probes.push(await occupy(0))
+    for (let i = 0; i < count; i++) probes.push(await probeEphemeral())
     return probes.map((probe) => (probe.address() as AddressInfo).port)
   } finally {
-    await Promise.all(probes.map((probe) => new Promise<void>((done) => probe.close(() => done()))))
+    await Promise.all(
+      probes.map(
+        (probe) => new Promise<void>((done, fail) => probe.close((error) => (error ? fail(error) : done()))),
+      ),
+    )
   }
 }
 
