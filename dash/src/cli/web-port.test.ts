@@ -95,10 +95,56 @@ function occupy(port: number): Promise<Server> {
 
 /** A free loopback port, found by binding ephemeral and letting go before use. */
 async function freePort(): Promise<number> {
-  const probe = await occupy(0)
-  const port = (probe.address() as AddressInfo).port
-  await new Promise<void>((done) => probe.close(() => done()))
-  return port
+  const [reservation] = await reservePorts(1)
+  await reservation.release()
+  return reservation.port
+}
+
+/** A loopback port held by a bound probe until `release()`; releasing twice is a no-op. */
+interface PortReservation {
+  readonly port: number
+  release(): Promise<void>
+}
+
+function probeEphemeral(): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      probe.off('error', reject)
+      resolve(probe)
+    })
+  })
+}
+
+function hold(probe: Server): PortReservation {
+  let released: Promise<void> | undefined
+  const release = (): Promise<void> =>
+    (released ??= new Promise<void>((done, fail) => probe.close((error) => (error ? fail(error) : done()))))
+  // A test that fails before releasing must not leave the port bound for later tests.
+  cleanups.push(release)
+  return { port: (probe.address() as AddressInfo).port, release }
+}
+
+/**
+ * `count` distinct loopback ports, each held by a bound probe until released. Holding them
+ * all at once stops the OS handing the same ephemeral port back twice. Release each one
+ * right before the bind that needs it: only that close-to-listen gap is left for another
+ * process to take the port.
+ */
+async function reservePorts(count: number): Promise<PortReservation[]> {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 16) {
+    throw new RangeError(`reservePorts: count must be an integer from 1 to 16, got ${count}`)
+  }
+  const reservations: PortReservation[] = []
+  try {
+    for (let i = 0; i < count; i++) reservations.push(hold(await probeEphemeral()))
+  } catch (error) {
+    // Let go of what was already held now, not at afterEach; keep the original error.
+    await Promise.allSettled(reservations.map((reservation) => reservation.release()))
+    throw error
+  }
+  return reservations
 }
 
 /**
@@ -405,12 +451,15 @@ describe('the persisted setting applies on the next startup, never to the runnin
     })
     const dbPath = join(root, 'canon.db')
     const stateDir = tempStateDir()
-    const secondPort = await freePort()
+    // Both ports stay held until right before the startup that binds each one.
+    const [secondReservation, firstReservation] = await reservePorts(2)
+    const secondPort = secondReservation.port
+    const firstPort = firstReservation.port
 
     // First startup takes an explicit CLI port for this run only; nothing is persisted.
-    const firstPort = await freePort()
     expect(secondPort).not.toBe(firstPort)
     const firstStore = new CanonStore(dbPath)
+    await firstReservation.release()
     const first = startDashboard({ port: firstPort, store: firstStore, stateDir })
     const firstServer = await first.started
     try {
@@ -436,6 +485,7 @@ describe('the persisted setting applies on the next startup, never to the runnin
     expect(readSetting(secondStore, SETTING_KEYS.dashboardPort)).toBe(secondPort)
     // Next startup resolves the persisted port on its own (no explicit port given).
     // The harness cleanup owns the store lifetime, so this test never closes it twice.
+    await secondReservation.release()
     const second = startDashboard({ store: secondStore, stateDir })
     const secondServer = await second.started
     try {
