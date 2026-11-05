@@ -7,6 +7,9 @@ repository-wide rules.
 This file is how to work in this project: which fixtures exist, and that internals are in
 scope. It does not restate the standard.
 
+Tests whose subject is the repository itself (scripts, workflows, gate configuration, docs
+prose, source scans) live in [`../KyberWeave.RepoPolicy.Tests`](../KyberWeave.RepoPolicy.Tests/AGENTS.md).
+
 ## Fixtures
 
 | Helper | For |

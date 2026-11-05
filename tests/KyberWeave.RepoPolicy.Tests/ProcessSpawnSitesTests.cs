@@ -5,13 +5,14 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Static audit of every place the .NET test project and the product code under <c>src/</c> start a
+/// Static audit of every place the .NET test projects and the product code under <c>src/</c> start a
 /// child process. An unbounded test spawn once fork-bombed node (536 processes) and crashed three developer
 /// Macs, so each spawn site must appear in Fixtures/spawn-sites-allowlist.json with a non-empty
 /// <c>bound</c> that says what stops it (a timeout, a kill in finally, a self-exiting
 /// command, or a fake). A site is keyed by its repository-relative file (prefixed with its scan root,
-/// <c>tests/KyberWeave.Tests/</c> or <c>src/</c>) and normalized line text with an occurrence
-/// count, so unrelated edits above a site do not invalidate its entry. Unlisted sites fail
+/// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
+/// normalized line text with an occurrence count, so unrelated edits above a site do not invalidate
+/// its entry. Unlisted sites fail
 /// with root-prefixed file:line, and entries that no longer match a site fail as stale.
 /// This test only reads source. It starts no process.
 /// </summary>
@@ -20,11 +21,12 @@ public sealed class ProcessSpawnSitesTests
     private const string AllowListFileName = "spawn-sites-allowlist.json";
     private const string ThisFileName = "ProcessSpawnSitesTests.cs";
 
-    // Scan roots relative to the repository root. The test project is scanned for C# and shell
+    // Scan roots relative to the repository root. The test projects are scanned for C# and shell
     // sources; product code under src/ is scanned for C# only. bin and obj are skipped under each root.
     private static readonly (string Root, string[] Extensions)[] ScanRoots =
     [
         ("tests/KyberWeave.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.RepoPolicy.Tests", [".cs", ".sh"]),
         ("src", [".cs"])
     ];
 
@@ -73,9 +75,9 @@ public sealed class ProcessSpawnSitesTests
 
         Assert.True(
             unlisted.Count == 0,
-            $"{unlisted.Count} process spawn site(s) under tests/KyberWeave.Tests or src/ are not on " +
+            $"{unlisted.Count} process spawn site(s) under tests/ or src/ are not on " +
             $"Fixtures/{AllowListFileName} with a bound. Add an entry keyed by the root-prefixed path " +
-            "(tests/KyberWeave.Tests/... or src/...) stating what bounds each one (timeout, kill in finally, " +
+            "(tests/<project>/... or src/...) stating what bounds each one (timeout, kill in finally, " +
             "self-exit, or fake), or remove the spawn:\n" +
             string.Join("\n", unlisted));
     }
@@ -257,7 +259,7 @@ public sealed class ProcessSpawnSitesTests
 
     private static List<AllowListEntry> LoadAllowList(string repoRoot)
     {
-        string path = Path.Combine(repoRoot, "tests", "KyberWeave.Tests", "Fixtures", AllowListFileName);
+        string path = Path.Combine(repoRoot, "tests", "KyberWeave.RepoPolicy.Tests", "Fixtures", AllowListFileName);
         Assert.True(File.Exists(path), $"Missing spawn-site allow-list: {path}");
 
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));

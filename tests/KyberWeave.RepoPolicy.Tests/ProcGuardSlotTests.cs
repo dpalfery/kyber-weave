@@ -615,7 +615,7 @@ public sealed class ProcGuardSlotTests : IDisposable
 
     private static string FixturePath(string fixtureName)
     {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests", "Fixtures", "proc-guard", fixtureName);
+        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.RepoPolicy.Tests", "Fixtures", "proc-guard", fixtureName);
     }
 
     private static string FixtureDirectory(string directoryName)

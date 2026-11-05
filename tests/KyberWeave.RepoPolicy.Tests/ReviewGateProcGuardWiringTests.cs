@@ -10,8 +10,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The <c>dotnet test</c> gate and the dash <c>ts-test</c> gate are the two review gates that start a test runner.
-/// Each must start with <c>scripts/proc-guard.sh run --</c>, so the cap and the leftover check apply when the review
+/// The two <c>dotnet test</c> gates (<c>test</c> and <c>test-policy</c>) and the dash <c>ts-test</c> gate are the review
+/// gates that start a test runner. Each must start with <c>scripts/proc-guard.sh run --</c>, so the cap and the leftover check apply when the review
 /// runs them. The wrapped command after <c>--</c> must stay the command the gate always ran.
 /// </para>
 /// <para>
@@ -42,17 +42,19 @@ public sealed class ReviewGateProcGuardWiringTests
     }
 
     /// <summary>
-    /// The <c>test</c> review gate (the <c>dotnet test</c> gate) starts with the watchdog wrapper and then runs
-    /// <c>dotnet test</c>.
+    /// The <c>test</c> and <c>test-policy</c> review gates (the <c>dotnet test</c> gates) start with the watchdog
+    /// wrapper and then run <c>dotnet test</c>.
     /// </summary>
     /// <remarks>
     /// The .NET test run is the process class that caused the original incident. The wrapper is the cap on it, and the
     /// review must not run it outside that cap.
     /// </remarks>
-    [Fact]
-    public void DotnetTestGateArgvStartsWithProcGuardRunAndKeepsDotnetTestCommand()
+    [Theory]
+    [InlineData("test")]
+    [InlineData("test-policy")]
+    public void DotnetTestGateArgvStartsWithProcGuardRunAndKeepsDotnetTestCommand(string gateId)
     {
-        string[] run = GateRunArgv("test");
+        string[] run = GateRunArgv(gateId);
 
         Assert.Equal(["scripts/proc-guard.sh", "run"], run.Take(2));
         int separator = Array.IndexOf(run, "--");
@@ -111,13 +113,20 @@ public sealed class ReviewGateProcGuardWiringTests
     {
         string[] gateFlags = GateRunArgv("test").Skip(2).TakeWhile(word => word != "--").ToArray();
         string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
-        string regenerate = Assert.Single(
-            script.Split('\n').Select(line => line.Trim()),
-            line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) && line.Contains("-xml", StringComparison.Ordinal));
-        string[] regenerateFlags = regenerate.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(2).TakeWhile(word => word != "--").ToArray();
+        string[] regenerates = script.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) && line.Contains("-xml", StringComparison.Ordinal))
+            .ToArray();
 
-        Assert.Equal(FlagValue(gateFlags, "--slot"), FlagValue(regenerateFlags, "--slot"));
-        Assert.Equal(FlagValue(gateFlags, "--slot-wait"), FlagValue(regenerateFlags, "--slot-wait"));
+        // One timing run per test project; each queues like the gate.
+        Assert.Equal(2, regenerates.Length);
+        foreach (string regenerate in regenerates)
+        {
+            string[] regenerateFlags = regenerate.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(2).TakeWhile(word => word != "--").ToArray();
+
+            Assert.Equal(FlagValue(gateFlags, "--slot"), FlagValue(regenerateFlags, "--slot"));
+            Assert.Equal(FlagValue(gateFlags, "--slot-wait"), FlagValue(regenerateFlags, "--slot-wait"));
+        }
     }
 
     /// <summary>

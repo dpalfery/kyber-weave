@@ -699,7 +699,7 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
 
-        Assert.Equal(33, gates.Count);
+        Assert.Equal(34, gates.Count);
         List<string> missing = [];
         foreach (ReviewGate gate in gates)
             if (gate.Include.Count == 0)
@@ -707,7 +707,7 @@ public sealed class ReviewTaskGatesConfigTests
 
         Assert.True(
             missing.Count == 0,
-            $"Expected all 30 review gates to declare non-empty include globs, but these {missing.Count} did not: {string.Join(", ", missing)}");
+            $"Expected all {gates.Count} review gates to declare non-empty include globs, but these {missing.Count} did not: {string.Join(", ", missing)}");
     }
 
     /// <summary>
@@ -751,6 +751,22 @@ public sealed class ReviewTaskGatesConfigTests
                     gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
                     $"Gate '{gate.Id}' include should NOT match '{path}'.");
         }
+    }
+
+    /// <summary>
+    ///     The <c>test-policy</c> gate runs <c>--no-build</c>, so every change that selects it must also select
+    ///     <c>build</c>: the two declare the same include globs, <c>applies-when</c> and <c>os</c>.
+    /// </summary>
+    [Fact]
+    public void TestPolicyGateIsSelectedExactlyWhereTheBuildGateIs()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        ReviewGate buildGate = Assert.Single(gates, gate => gate.Id == "build");
+        ReviewGate policyGate = Assert.Single(gates, gate => gate.Id == "test-policy");
+
+        Assert.Equal(buildGate.Include, policyGate.Include);
+        Assert.Equivalent(buildGate.AppliesWhen, policyGate.AppliesWhen);
+        Assert.Equal(buildGate.Os, policyGate.Os);
     }
 
     /// <summary>
