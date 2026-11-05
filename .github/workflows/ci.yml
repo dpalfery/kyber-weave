@@ -900,11 +900,13 @@ jobs:
         timeout-minutes: 12
         run: |
           for attempt in 1 2; do
-            if timeout --kill-after=30 300 npx playwright install --with-deps chromium; then
-              exit 0
-            fi
-            echo "::warning::Playwright install attempt $attempt failed or timed out."
+            status=0
+            timeout --kill-after=30 300 npx playwright install --with-deps chromium || status=$?
+            [ "$status" -eq 0 ] && exit 0
+            if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then reason="timed out"; else reason="failed with exit $status"; fi
+            echo "::warning::Playwright install attempt $attempt $reason."
           done
+          echo "::error::Playwright Chromium install failed after 2 attempts; the last attempt $reason."
           exit 1
 
       - name: Harness-collection conformance spec
