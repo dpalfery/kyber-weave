@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-04
 ---
 
 # Native metric points are stored and nothing projects them
@@ -19,7 +19,7 @@ does not restate D31, and it adds the question D31 leaves open.
 Factory's native OpenTelemetry export carries metrics, and the receiver accepts them. The decoded
 points are persisted in the canon store's own `metric_point` table — one row per **distinct**
 decoded point, since a point's identity is a content digest
-(`dash/src/canon/store.ts`; see the separate todo on that identity) — through the production
+(`dash/src/canon/store-rows.ts`; see the separate todo on that identity) — through the production
 sink's `upsertMetrics` and the `ingestMetricBatch` seam
 (`dash/src/canon/metric-ingest.ts`).
 

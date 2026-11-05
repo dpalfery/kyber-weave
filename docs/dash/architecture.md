@@ -407,7 +407,7 @@ report the consent state, so the drawer does not derive it.
 `ensureEngine` (ADR 0039) only when a live engine holds the endpoint, and starts nothing when none runs.
 `kyber-weave update` runs it after the binaries commit, then the tray step. `capture enable --harness
 opencode` also ensures the engine once. The detector generation is `DETECTOR_VERSION` `5`
-(`dash/src/canon/store.ts`). `projectionIsCurrent` (`dash/src/canon/projection.ts`) treats a store
+(`dash/src/canon/store-schema.ts`). `projectionIsCurrent` (`dash/src/canon/projection.ts`) treats a store
 stamped with any other value as stale, so the derived findings are rebuilt with the new rules rather
 than kept. The engine re-projects on its own start. `runWebDashboard` starts the job host, whose `start()`
 runs one tick at once, and that tick calls the maintenance pass (`runMaintenancePass`,
@@ -1610,7 +1610,7 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `DETECTOR_VERSION` is `5` (`dash/src/canon/store.ts`). Stores stamped with
+**Detector version.** `DETECTOR_VERSION` is `5` (`dash/src/canon/store-schema.ts`). Stores stamped with
 an older generation (for example `3` or `4`) report their findings as outdated; the engine re-projects
 them to the current generation on its next maintenance tick (see the engine and projection paragraph
 in the OpenCode V2 capture plugin pipeline section above).
@@ -1696,6 +1696,12 @@ Every `ADD COLUMN` in those steps is presence-guarded, so a store that already c
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
+
+The class lives in `store.ts`; the module-level code it is built on is split by concern, so a
+schema change and a mapper change touch different files: `store-schema.ts` holds the schema
+version and table SQL, `store-migrations.ts` the in-place migrations and their backfills, and
+`store-rows.ts` the row shapes and row-to-domain mappers. `store.ts` re-exports every name it
+exported before the split, so importers resolve the same names from it.
 
 Two `records` columns carry the grouping and content model. `session_id` holds the harness's
 own conversation id, promoted out of the raw payload so sessions group with a `GROUP BY`;
@@ -1926,6 +1932,11 @@ Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy ses
 session listing and payload, and that listing serves only derived sessions — record-only
 groups are excluded rather than synthesized
 (see [The shared canonical projection](#the-shared-canonical-projection)).
+
+The class lives in `bridge.ts`; its result types sit in `bridge-types.ts`, the session SQL in
+`bridge-session-sql.ts`, the content helpers in `bridge-content.ts`, refresh and ingest activity in
+`bridge-activity.ts`, and the captured-context traversal in `bridge-captured-context.ts`.
+`bridge.ts` re-exports every name it exported before the split.
 
 The session projection emits the ASAD payload directly ([ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md)).
 It preserves per-bucket measurability and reasons, so a source that cannot supply content, schemas,
