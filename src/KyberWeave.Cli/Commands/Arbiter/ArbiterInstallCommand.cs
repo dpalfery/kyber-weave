@@ -169,7 +169,19 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         if (existingText is null)
             return 1;
 
-        string desiredText = HostConfigYaml.WithArbiterProviderKind(HostConfigYaml.WithArbiterEnabled(existingText), kindName);
+        string desiredText;
+        try
+        {
+            desiredText = HostConfigYaml.WithArbiterProviderKind(
+                HostConfigYaml.WithArbiterEnabled(existingText),
+                kindName);
+        }
+        catch (InvalidDataException ex)
+        {
+            WriteError(ex.Message);
+            return 1;
+        }
+
         bool configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
 
         SquadStateStore stateStore =
@@ -180,9 +192,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             existingReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
         }
-        catch (Exception ex) when (ex is InvalidDataException
+        catch (Exception ex) when (ex is ArgumentException
+                                       or InvalidDataException
                                        or IOException
-                                       or UnauthorizedAccessException)
+                                       or UnauthorizedAccessException
+                                       or InvalidOperationException)
         {
             WriteError($"The Squad deployment state for '{root}' could not be read: {ex.Message}");
             return 1;
@@ -220,9 +234,12 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
 
         // A dry run writes no scaffold, so on a bare root there is no file to load. Preview
-        // against the configuration the real run would have written instead of failing.
+        // against the configuration the real run would have written instead of failing. An
+        // explicit --config keeps its normal load path, so a missing file is still reported.
         KyberWeaveConfigLoadResult configLoad;
-        if (settings.DryRun && !File.Exists(configPath))
+        if (settings.DryRun
+            && string.IsNullOrWhiteSpace(settings.Config)
+            && !File.Exists(configPath))
         {
             try
             {

@@ -19,6 +19,7 @@ namespace KyberWeave.Tests;
 /// <c>ArbiterKey</c> (--arbiter-key), <c>KeyStdin</c>, <c>Global</c>, over the inherited
 /// <c>Path</c>.
 /// </summary>
+[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterInstallCommandTests : IDisposable
 {
     private const string TypeSafeOrigin = "https://api.typesafe.ai";
@@ -313,6 +314,57 @@ public sealed class ArbiterInstallCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Dry-run", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.GetFileSystemEntries(host));
+    }
+
+    /// <summary>
+    /// A provider that is not a block mapping cannot be merged. The command reports the merge
+    /// refusal and leaves the file alone instead of letting the exception escape as a crash.
+    /// </summary>
+    [Fact]
+    public void Install_FlowProviderValue_FailsWithAnActionableErrorAndLeavesTheConfig()
+    {
+        const string yaml = "arbiter:\n  enabled: true\n  provider: {kind: kilo, extra: 1}\n";
+        string host = NewDir("install-flow-provider");
+        string directory = Path.Combine(host, ".kyber-weave");
+        Directory.CreateDirectory(directory);
+        string config = Path.Combine(directory, "kyber-weave.yml");
+        File.WriteAllText(config, yaml);
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none" }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("block mapping", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(yaml, File.ReadAllText(config));
+    }
+
+    /// <summary>
+    /// A dry run with an explicit <c>--config</c> that does not exist still reports the missing
+    /// file; only a bare root with no config option is previewed from the YAML a real run would
+    /// write.
+    /// </summary>
+    [Fact]
+    public void Install_DryRunWithMissingExplicitConfig_ReportsTheMissingFile()
+    {
+        string host = NewDir("install-dry-run-missing-config");
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "kilo",
+                Provider = "none",
+                DryRun = true,
+                Config = Path.Combine("custom", "missing.yml"),
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("not found", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(Directory.GetFileSystemEntries(host));
     }
 
