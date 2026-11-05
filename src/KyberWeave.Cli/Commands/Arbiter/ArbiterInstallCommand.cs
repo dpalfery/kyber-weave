@@ -168,7 +168,8 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                               && !string.IsNullOrEmpty(keyToStore)
                               && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
 
-        if (!settings.DryRun
+        if (isProjectScope
+            && !settings.DryRun
             && string.IsNullOrWhiteSpace(settings.Config)
             && FindConfigPath(root) is null)
         {

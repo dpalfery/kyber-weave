@@ -1,4 +1,5 @@
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
 
 namespace KyberWeave.Core.Configuration;
@@ -29,7 +30,7 @@ public static class UserHostConfig
         string updated = HostConfigYaml.WithArbiterEnabled(yaml);
         if (!File.Exists(path) || !string.Equals(yaml, updated, StringComparison.Ordinal))
         {
-            File.WriteAllText(path, updated);
+            AtomicFile.WriteAllText(path, updated);
         }
 
         return updated;
@@ -50,7 +51,7 @@ public static class UserHostConfig
         string updated = HostConfigYaml.WithArbiterGlobalTargets(yaml, targets);
         if (!string.Equals(yaml, updated, StringComparison.Ordinal))
         {
-            File.WriteAllText(path, updated);
+            AtomicFile.WriteAllText(path, updated);
         }
     }
 
