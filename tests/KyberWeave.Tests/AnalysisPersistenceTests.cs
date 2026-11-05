@@ -457,9 +457,23 @@ public sealed class AnalysisPersistenceTests
         }
         finally
         {
-            primaryLock.StandardInput.WriteLine("ROLLBACK;");
-            primaryLock.StandardInput.Close();
-            Assert.True(primaryLock.WaitForExit(5_000), "sqlite primary lock fixture did not exit.");
+            if (!primaryLock.HasExited)
+            {
+                try
+                {
+                    primaryLock.StandardInput.WriteLine("ROLLBACK;");
+                    primaryLock.StandardInput.Close();
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
+                {
+                    // Child process terminated before or during rollback write.
+                }
+            }
+
+            if (!primaryLock.HasExited)
+            {
+                Assert.True(primaryLock.WaitForExit(5_000), "sqlite primary lock fixture did not exit.");
+            }
         }
     }
 
