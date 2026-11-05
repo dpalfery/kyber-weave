@@ -181,6 +181,45 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// A product-suite failure does not stop the repository-policy run: both run, both statuses are
+    /// reported, and the loop still fails.
+    /// </summary>
+    [Fact]
+    public void ProductSuiteFailure_StillRunsThePolicyTestsAndFailsTheLoop()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.Tests/bin/*)
+                echo "Total: 1, Failed: 1"
+                exit 1
+                ;;
+              *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                echo "Total: 1, Passed: 1"
+                ;;
+            esac
+            exit 0
+            """);
+
+        File.WriteAllText(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
+
+        ProcessResult result = fixture.RunFastLoop();
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("KyberWeave.RepoPolicy.Tests.dll", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "tests failed: product suite exit 1, repository-policy tests exit 0",
+            result.StandardError,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The source scans the fast loop always runs are named by class in the script, so a renamed class
     /// would silently match nothing. Each name must be a test class in this project.
     /// </summary>
@@ -188,9 +227,12 @@ public sealed class FastLoopScriptTests
     public void PolicySourceScansNameTestClassesThatExist()
     {
         string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
-        string declaration = Assert.Single(
-            script.Split('\n'),
-            line => line.StartsWith("POLICY_SOURCE_SCANS=(", StringComparison.Ordinal));
+        // Read to the closing parenthesis, not the end of the line, so a wrapped array still parses.
+        int start = script.IndexOf("POLICY_SOURCE_SCANS=(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "scripts/fast-loop.sh no longer declares POLICY_SOURCE_SCANS.");
+        int end = script.IndexOf(')', start);
+        Assert.True(end > start, "POLICY_SOURCE_SCANS has no closing parenthesis.");
+        string declaration = script[start..(end + 1)];
         string[] classes = System.Text.RegularExpressions.Regex.Matches(declaration, @"-class ([\w.]+)")
             .Select(match => match.Groups[1].Value)
             .ToArray();

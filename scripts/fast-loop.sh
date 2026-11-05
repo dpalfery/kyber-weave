@@ -275,20 +275,29 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   # A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
   # The class list and a --class / --method filter name classes in either test project, so the
   # policy project runs with the same arguments and the total is read across both.
+  # Both runs always happen, so a product-suite failure cannot hide the policy results; the loop
+  # fails after both, naming each exit status. pipefail makes a pipeline's status the runner's.
   test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
-  scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}"
+  product_status=0
+  policy_status=0
+  scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}" || product_status=$?
   if [[ "${needs_policy}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
-    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}"
+    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
   else
     # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
     scan_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-scans.XXXXXX")"
-    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}"
-    if ! sed $'s/\x1b\\[[0-9;]*m//g' "${scan_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
+    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}" || policy_status=$?
+    if [[ "${policy_status}" -eq 0 ]] && ! sed $'s/\x1b\\[[0-9;]*m//g' "${scan_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
       printf 'the policy source scans ran no tests; check POLICY_SOURCE_SCANS\n' >&2
       exit 1
     fi
+  fi
+  if [[ "${product_status}" -ne 0 || "${policy_status}" -ne 0 ]]; then
+    printf '\ntests failed: product suite exit %s, repository-policy tests exit %s\n' \
+      "${product_status}" "${policy_status}" >&2
+    exit $(( product_status != 0 ? product_status : policy_status ))
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2
