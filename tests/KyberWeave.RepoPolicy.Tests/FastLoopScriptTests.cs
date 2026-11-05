@@ -128,9 +128,7 @@ public sealed class FastLoopScriptTests
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
 
-        string source = Path.Combine(fixture.Root, "src", "KyberWeave.Core", "Example.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
-        File.WriteAllText(source, "namespace Example;\n");
+        fixture.WriteProductSource();
 
         ProcessResult result = fixture.RunFastLoop();
         string log = fixture.GetCallLog();
@@ -169,9 +167,7 @@ public sealed class FastLoopScriptTests
             exit 0
             """);
 
-        string source = Path.Combine(fixture.Root, "src", "KyberWeave.Core", "Example.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
-        File.WriteAllText(source, "namespace Example;\n");
+        fixture.WriteProductSource();
 
         ProcessResult result = fixture.RunFastLoop();
 
@@ -218,6 +214,70 @@ public sealed class FastLoopScriptTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The same holds on the C#-only path: a failing product suite does not stop the policy source scans,
+    /// and both statuses are reported.
+    /// </summary>
+    [Fact]
+    public void ProductSuiteFailureOnACSharpOnlyChange_StillRunsTheSourceScans()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(FailingProductStub(policyReportsTests: true));
+        fixture.WriteProductSource();
+
+        ProcessResult result = fixture.RunFastLoop();
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "tests failed: product suite exit 1, repository-policy tests exit 0",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A source-scan run that matched nothing does not hide a product failure: both are reported before
+    /// the loop exits.
+    /// </summary>
+    [Fact]
+    public void EmptySourceScanRunWithAProductFailure_ReportsBoth()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(FailingProductStub(policyReportsTests: false));
+        fixture.WriteProductSource();
+
+        ProcessResult result = fixture.RunFastLoop();
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("the policy source scans ran no tests", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(
+            "tests failed: product suite exit 1, repository-policy tests exit 1",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>dotnet</c> stub whose product test run fails, and whose policy run reports one passing test or none.
+    /// </summary>
+    private static string FailingProductStub(bool policyReportsTests) =>
+        $$"""
+        #!/bin/sh
+        echo "dotnet $*" >> "$CALL_LOG"
+        case "$*" in
+          *tests/KyberWeave.Tests/bin/*)
+            echo "Total: 1, Failed: 1"
+            exit 1
+            ;;
+          *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+            {{(policyReportsTests ? "echo \"Total: 1, Passed: 1\"" : ":")}}
+            ;;
+        esac
+        exit 0
+        """;
 
     /// <summary>
     /// The source scans the fast loop always runs are named by class in the script, so a renamed class
@@ -293,6 +353,14 @@ public sealed class FastLoopScriptTests
             startInfo.Environment["CALL_LOG"] = CallLogPath;
 
             return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        }
+
+        /// <summary>Writes one product C# file, so the change is C#-only.</summary>
+        public void WriteProductSource()
+        {
+            string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(source, "namespace Example;\n");
         }
 
         /// <summary>Replaces the <c>dotnet</c> stub, for a test that needs a different runner reply.</summary>

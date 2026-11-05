@@ -289,9 +289,10 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     step "repository-policy source scans"
     scan_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-scans.XXXXXX")"
     scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}" || policy_status=$?
+    # A scan run that matched nothing is a policy failure, reported with the product status below.
     if [[ "${policy_status}" -eq 0 ]] && ! sed $'s/\x1b\\[[0-9;]*m//g' "${scan_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
       printf 'the policy source scans ran no tests; check POLICY_SOURCE_SCANS\n' >&2
-      exit 1
+      policy_status=1
     fi
   fi
   if [[ "${product_status}" -ne 0 || "${policy_status}" -ne 0 ]]; then
