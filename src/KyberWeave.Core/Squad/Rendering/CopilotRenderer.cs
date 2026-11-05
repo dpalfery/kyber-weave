@@ -202,7 +202,13 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         SquadArbiterWiring? arbiter = context.EnabledArbiter;
         if (plan.ArbiterHooks.Count > 0 || arbiter is not null)
         {
-            context.Files.Add(RenderCliHooksFile(arbiter?.HookTimeoutSeconds ?? plan.ArbiterHooks[0].TimeoutSeconds, context.Scope));
+            string relativePath = context.Scope == SquadDeploymentScope.Global
+                ? "hooks/kyber-arbiter.json"
+                : CliHooksFileRelativePath;
+            context.Files.Add(RenderCliHooksFile(
+                arbiter?.HookTimeoutSeconds ?? plan.ArbiterHooks[0].TimeoutSeconds,
+                context.Scope,
+                relativePath));
         }
     }
 
@@ -376,7 +382,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
     /// </remarks>
-    private static SquadDeploymentFile RenderCliHooksFile(int timeoutSeconds, SquadDeploymentScope scope)
+    private static SquadDeploymentFile RenderCliHooksFile(
+        int timeoutSeconds,
+        SquadDeploymentScope scope,
+        string relativePath)
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream))
@@ -390,7 +399,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             writer.WriteEndObject();
         }
 
-        return new SquadDeploymentFile(CliHooksFileRelativePath, stream.ToArray(), "copilot");
+        return new SquadDeploymentFile(relativePath, stream.ToArray(), "copilot");
     }
 
     private static void WriteCliHookEntry(Utf8JsonWriter writer, string eventName, int timeoutSeconds, SquadDeploymentScope scope)

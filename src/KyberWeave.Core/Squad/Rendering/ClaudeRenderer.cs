@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -184,6 +185,47 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     public ClaudeRenderer()
         : base(HarnessSpec)
     {
+    }
+
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is not { } arbiter || context.Scope != SquadDeploymentScope.Global)
+        {
+            return;
+        }
+
+        context.Blocks.Add(new SquadRenderedBlock(
+            "claude",
+            "settings.json",
+            SquadHookBlockFormat.Cursor,
+            [
+                new SquadRenderedBlockEntry(
+                    "PreToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = "^(Agent|Task)$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    }),
+                new SquadRenderedBlockEntry(
+                    "PostToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = "^(Agent|Task)$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    })
+            ]));
     }
 
     private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
