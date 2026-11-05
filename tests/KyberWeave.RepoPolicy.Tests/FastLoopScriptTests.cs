@@ -96,6 +96,51 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// A change to anything but C# source (here a script) runs the repository-policy tests as well
+    /// as the product suite, with the same class list.
+    /// </summary>
+    [Fact]
+    public void ChangedScript_RunsTheRepositoryPolicyTests()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+
+        File.WriteAllText(Path.Combine(fixture.Root, "scripts", "new-tool.sh"), "#!/bin/sh\nexit 0\n");
+
+        ProcessResult result = fixture.RunFastLoop();
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("KyberWeave.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests",
+            log,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A C#-only change to product code runs the product suite and skips the repository-policy
+    /// tests, which read the repository rather than the code.
+    /// </summary>
+    [Fact]
+    public void ChangedProductCSharpOnly_SkipsTheRepositoryPolicyTests()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+
+        string source = Path.Combine(fixture.Root, "src", "KyberWeave.Core", "Example.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllText(source, "namespace Example;\n");
+
+        ProcessResult result = fixture.RunFastLoop();
+        string log = fixture.GetCallLog();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("KyberWeave.Tests.dll", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("KyberWeave.RepoPolicy.Tests.dll", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Disposable temporary git repository fixture configured with stub toolchain executables.
     /// </summary>
     private sealed class FastLoopFixture : IDisposable
