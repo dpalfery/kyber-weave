@@ -507,12 +507,247 @@ public static partial class HostConfigYaml
         return lines;
     }
 
-    /// <summary>Temporary contract stub for the user-level global target list.</summary>
+    /// <summary>Returns <paramref name="yaml"/> with <c>arbiter.global.targets</c> merged in without duplicates.</summary>
     public static string WithArbiterGlobalTargets(string yaml, IReadOnlyList<string> targets)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(targets);
-        return yaml;
+
+        if (targets.Count == 0)
+            return yaml;
+
+        foreach (string target in targets)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(target);
+            if (target.Any(char.IsControl))
+                throw new ArgumentException("Target tokens may not contain control characters.", nameof(targets));
+        }
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+        int arbiter = IndexOfTopLevelKey(lines, "arbiter");
+        if (arbiter < 0)
+        {
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+                lines.Add(string.Empty);
+
+            lines.Add("arbiter:");
+            lines.Add(DefaultIndent + "enabled: true");
+            lines.Add(DefaultIndent + "global:");
+            lines.Add(DefaultIndent + DefaultIndent + "targets:");
+
+            foreach (string target in targets.Distinct(StringComparer.Ordinal))
+            {
+                lines.Add(DefaultIndent + DefaultIndent + DefaultIndent + "- " + QuoteScalar(target));
+            }
+
+            return lines.ToText();
+        }
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "global", out string lineIndent, out _, out _) ||
+                !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            int globalIndex = i;
+            int globalEnd = EndOfBlock(lines, globalIndex);
+            string globalIndent = BlockIndent(lines, globalIndex, globalEnd);
+
+            for (int j = globalIndex + 1; j < globalEnd; j++)
+            {
+                if (!TrySplitKeyedLine(lines[j], "targets", out string targetsIndent, out _, out string rest) ||
+                    !string.Equals(targetsIndent, globalIndent, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                (string value, _) = SplitScalarAndSuffix(rest);
+                if (value.StartsWith('['))
+                {
+                    return MergeTargetFlowSequence(yaml, lines, j, value, targets);
+                }
+
+                if (value.Length > 0)
+                {
+                    throw new InvalidDataException(
+                        "arbiter.global.targets is a scalar, not a sequence. Replace the scalar with a YAML sequence before adding targets.");
+                }
+
+                return MergeTargetBlockSequence(yaml, lines, j, globalIndent, globalEnd, targets);
+            }
+
+            return InsertTargetBlock(lines, globalIndex, globalIndent, globalEnd, targets);
+        }
+
+        return InsertGlobalBlock(lines, arbiter, blockIndent, blockEnd, targets);
+    }
+
+    private static string MergeTargetFlowSequence(
+        string originalYaml,
+        HostConfigLines lines,
+        int keyIndex,
+        string value,
+        IReadOnlyList<string> targets)
+    {
+        if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
+        {
+            throw new InvalidDataException(
+                "arbiter.global.targets looks like a flow sequence but its brackets do not balance. Fix the list by hand.");
+        }
+
+        if (!TryParseSequenceAllowEmpty("value: " + flow, out IReadOnlyList<string> existingTargets))
+        {
+            throw new InvalidDataException(
+                "arbiter.global.targets looks like a flow sequence but could not be read. Fix the list by hand.");
+        }
+
+        List<string> toAdd = targets
+            .Where(target => !existingTargets.Contains(target, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (toAdd.Count == 0)
+            return originalYaml;
+
+        int depth = 0;
+        int closeLineIndex = keyIndex;
+        int closeBracketCol = -1;
+
+        for (int i = keyIndex; i < lines.Count; i++)
+        {
+            string lineText = i == keyIndex ? value : lines[i];
+            int prevDepth = depth;
+            depth += FlowBracketDepth(lineText);
+            if ((depth == 0 && prevDepth != 0) || (i == keyIndex && depth == 0))
+            {
+                closeLineIndex = i;
+                closeBracketCol = lines[i].LastIndexOf(']');
+                break;
+            }
+        }
+
+        if (closeBracketCol < 0)
+        {
+            closeLineIndex = keyIndex;
+            closeBracketCol = lines[keyIndex].LastIndexOf(']');
+        }
+
+        string targetLine = lines[closeLineIndex];
+        string beforeBracket = targetLine[..closeBracketCol];
+        string afterBracket = targetLine[closeBracketCol..];
+
+        string addition = existingTargets.Count > 0
+            ? ", " + string.Join(", ", toAdd.Select(QuoteScalar))
+            : string.Join(", ", toAdd.Select(QuoteScalar));
+
+        lines[closeLineIndex] = beforeBracket + addition + afterBracket;
+        return lines.ToText();
+    }
+
+    private static string MergeTargetBlockSequence(
+        string originalYaml,
+        HostConfigLines lines,
+        int keyIndex,
+        string blockIndent,
+        int blockEnd,
+        IReadOnlyList<string> targets)
+    {
+        List<string> existing = new();
+        int lastItemIndex = keyIndex;
+        string itemIndent = blockIndent + DefaultIndent;
+
+        for (int i = keyIndex + 1; i < blockEnd; i++)
+        {
+            string trimmed = lines[i].TrimStart();
+            if (trimmed.Length == 0 || trimmed[0] == '#')
+                continue;
+
+            int indent = lines[i].Length - trimmed.Length;
+            if (indent < blockIndent.Length)
+                break;
+
+            if (trimmed[0] == '-')
+            {
+                lastItemIndex = i;
+                int dashIndex = lines[i].IndexOf('-', StringComparison.Ordinal);
+                itemIndent = lines[i][..dashIndex];
+
+                string afterDash = trimmed[1..].TrimStart();
+                (string itemValue, _) = SplitScalarAndSuffix(afterDash);
+                itemValue = itemValue.Trim('\'', '"');
+                if (!string.IsNullOrEmpty(itemValue))
+                    existing.Add(itemValue);
+            }
+            else if (indent <= blockIndent.Length)
+            {
+                break;
+            }
+        }
+
+        List<string> toAdd = targets
+            .Where(target => !existing.Contains(target, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (toAdd.Count == 0)
+            return originalYaml;
+
+        List<string> newLines = new();
+        foreach (string target in toAdd)
+        {
+            newLines.Add(itemIndent + "- " + QuoteScalar(target));
+        }
+
+        lines.InsertRange(lastItemIndex + 1, newLines);
+        return lines.ToText();
+    }
+
+    private static string InsertTargetBlock(
+        HostConfigLines lines,
+        int globalIndex,
+        string blockIndent,
+        int blockEnd,
+        IReadOnlyList<string> targets)
+    {
+        List<string> toInsert =
+        [
+            blockIndent + "targets:"
+        ];
+
+        foreach (string target in targets.Distinct(StringComparer.Ordinal))
+        {
+            toInsert.Add(blockIndent + DefaultIndent + "- " + QuoteScalar(target));
+        }
+
+        lines.InsertRange(globalIndex + 1, toInsert);
+        return lines.ToText();
+    }
+
+    private static string InsertGlobalBlock(
+        HostConfigLines lines,
+        int arbiterIndex,
+        string blockIndent,
+        int blockEnd,
+        IReadOnlyList<string> targets)
+    {
+        List<string> toInsert =
+        [
+            blockIndent + "global:",
+            blockIndent + DefaultIndent + "targets:"
+        ];
+
+        foreach (string target in targets.Distinct(StringComparer.Ordinal))
+        {
+            toInsert.Add(blockIndent + DefaultIndent + DefaultIndent + "- " + QuoteScalar(target));
+        }
+
+        lines.InsertRange(blockEnd, toInsert);
+        return lines.ToText();
     }
 
     /// <summary>

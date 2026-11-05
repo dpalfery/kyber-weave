@@ -22,6 +22,12 @@ public static class ArbiterConfigLoader
         if (section is null)
             return defaults;
 
+        if (section.Global is not null)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.UserGlobalTargetsForbidden}] arbiter.global is only valid in the user-level config file; project config may not declare global targets.");
+        }
+
         // A rule id may expand to one rule per trigger, so shipped rules are keyed
         // by distinct id rather than by row.
         IReadOnlyDictionary<string, ArbiterRule> shippedById = defaults.Rules
@@ -93,11 +99,24 @@ public static class ArbiterConfigLoader
         return Merge(defaults, document.Arbiter);
     }
 
-    /// <summary>Temporary contract stub for loading the user-level host config YAML.</summary>
+    /// <summary>Loads the user-level host config YAML, where <c>arbiter.global.targets</c> is valid.</summary>
     public static ArbiterConfig LoadUserConfig(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        return new ArbiterConfig { Global = new ArbiterGlobalConfig([]) };
+
+        ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
+        IReadOnlyList<string> targets = section?.Global?.Targets is null
+            ? []
+            : [.. section.Global.Targets
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.Ordinal)];
+
+        return new ArbiterConfig
+        {
+            Enabled = section?.Enabled ?? false,
+            Global = new ArbiterGlobalConfig(targets),
+            Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
+        };
     }
 
     /// <summary>

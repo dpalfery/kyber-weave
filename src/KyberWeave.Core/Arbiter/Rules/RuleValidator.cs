@@ -8,7 +8,7 @@ namespace KyberWeave.Core.Arbiter.Rules;
 
 /// <summary>
 /// Validates Arbiter rules and configuration against the permanent
-/// <c>KW-ARB-CONFIG-001</c> to <c>-010</c> diagnostics. Every id is permanent.
+/// <c>KW-ARB-CONFIG-001</c> to <c>-011</c> diagnostics. Every id is permanent.
 /// </summary>
 /// <remarks>
 /// Hints use <see cref="Docs.Validation.DocSpecValidator"/> nearest-match rule over
@@ -48,6 +48,9 @@ public static class RuleValidator
 
     /// <summary>A non-loopback endpoint uses <c>http</c>. The key is never sent over plain HTTP.</summary>
     public const string PlainHttpEndpoint = "KW-ARB-CONFIG-010";
+
+    /// <summary><c>arbiter.global</c> appears in a project-level config; it is valid only in the user config.</summary>
+    public const string UserGlobalTargetsForbidden = "KW-ARB-CONFIG-011";
 
     /// <summary>
     /// Validates the effective configuration: facts (<c>-002</c>), lenses (<c>-003</c>),
