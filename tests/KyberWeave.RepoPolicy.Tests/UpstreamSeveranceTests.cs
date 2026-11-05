@@ -59,7 +59,7 @@ public sealed class UpstreamSeveranceTests
     {
         "dash/LICENSE",
         "dash/THIRD_PARTY_NOTICES.md",
-        "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs"
+        "tests/KyberWeave.RepoPolicy.Tests/UpstreamSeveranceTests.cs"
     };
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class UpstreamSeveranceTests
         // The guard's own file is exempt, and it is exempt because it contains
         // them — if it stopped containing them, the exemption is dead weight.
         string self = File.ReadAllText(
-            Path.Combine(RepoRoot, "tests", "KyberWeave.Tests", "UpstreamSeveranceTests.cs"));
+            Path.Combine(RepoRoot, "tests", "KyberWeave.RepoPolicy.Tests", "UpstreamSeveranceTests.cs"));
         Assert.True(
             BannedMarkers.Any(marker => self.Contains(marker, StringComparison.OrdinalIgnoreCase)),
             "UpstreamSeveranceTests.cs no longer names the markers it bans, so its " +

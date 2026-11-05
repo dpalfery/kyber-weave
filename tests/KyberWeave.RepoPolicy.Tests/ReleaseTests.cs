@@ -3106,19 +3106,6 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// The arbiter answers <c>--version</c> with exit 0 and <c>--help</c> with a usage
-    /// error, which is why the CI smoke may drop <c>|| true</c> for it.
-    /// </summary>
-    [Fact]
-    public async Task ArbiterBinaryAnswersVersionAndRejectsHelp()
-    {
-        Assert.Equal(0, await KyberWeave.Arbiter.Composition.DispatchAsync(
-            ["--version"], TextReader.Null, TextWriter.Null, TextWriter.Null));
-        Assert.Equal(2, await KyberWeave.Arbiter.Composition.DispatchAsync(
-            ["--help"], TextReader.Null, TextWriter.Null, TextWriter.Null));
-    }
-
-    /// <summary>
     /// Req 22.1: the checksum verifier's list grows from 20 to 25 assets.
     /// </summary>
     [Fact]
