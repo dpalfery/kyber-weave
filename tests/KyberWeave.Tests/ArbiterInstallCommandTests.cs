@@ -351,6 +351,35 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A default global install must create the user-level config but must not scaffold the
+    /// injected home itself, because the home is a runtime user directory and not the project root
+    /// the docs scaffolder is meant to populate.
+    /// </summary>
+    [Fact]
+    public void Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
+    {
+        string host = NewDir("install-global-default-empty-home");
+        Assert.False(File.Exists(UserHostConfig.GetPath(_home.Path)));
+        Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")));
+        Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")));
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.True(File.Exists(UserHostConfig.GetPath(_home.Path)), "the default global install should create the user config");
+        Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")), "a global install must not scaffold docs under the home directory");
+        Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")), "a global install must not scaffold AGENTS.md under the home directory");
+    }
+
+    /// <summary>
     /// The D13 table is shaped for each configured harness: the target token, the tier, the
     /// exact path written, the reason code and the trust step or off-switch that still needs
     /// a user action. Output must be informative even when the harness is a fallback-only or

@@ -52,6 +52,31 @@ public sealed class UserHostConfigTests
     }
 
     [Fact]
+    public void UserConfigWritesAreAtomicAndLeaveNoTempFiles()
+    {
+        string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(home);
+
+        string path = UserHostConfig.GetPath(home);
+        string configDirectory = Path.GetDirectoryName(path)!;
+
+        UserHostConfig.EnsureUserConfig(home);
+        UserHostConfig.WriteGlobalTargets(home, ["harness-token-01", "harness-token-02"]);
+
+        string expected = "arbiter:\n" +
+                          "  enabled: true\n" +
+                          "  global:\n" +
+                          "    targets:\n" +
+                          "      - 'harness-token-01'\n" +
+                          "      - 'harness-token-02'\n";
+
+        Assert.Equal(expected, File.ReadAllText(path));
+        Assert.DoesNotContain(
+            Directory.EnumerateFiles(configDirectory),
+            file => Path.GetFileName(file).Contains(".tmp", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void WritesGlobalTargetsToTheUserConfigAndReadsThemBack()
     {
         string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
