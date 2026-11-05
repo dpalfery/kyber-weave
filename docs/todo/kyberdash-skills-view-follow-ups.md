@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-04
 ---
 
 # KyberDash skills view follow-ups
@@ -27,7 +27,7 @@ These items were raised when the [skills view plan](../archive/plans/2026-10-13-
 
 **(e) Live visual check.** The Skills section was verified only by component tests and a build. Check it in a live dashboard session for every state: populated, not measurable with its reason, not yet projected, empty rows, and the skill drawer. This is an owner gate.
 
-**(g) Bound skill listing size.** This item comes from the Kilo review of PR #351. `synth.ts` copies Claude listings verbatim onto `raw` (names and descriptions), and `bridge.ts` serves them in the turn-content `skills` entry with no size cap. Clipping at the route would truncate silently, which that route's design rejects. Capping descriptions at the producer would corrupt the derived-token measurement. The safe options are a count sanity cap (for example 1000 skills) with an explicit marker at `listedSkillsOf` in `dash/src/synth/synth.ts`, and documenting the `skills` entry as exempt from the response budget (`CONTENT_RESPONSE_BUDGET`, `dash/src/server/bridge.ts`).
+**(g) Bound skill listing size.** This item comes from the Kilo review of PR #351. `synth.ts` copies Claude listings verbatim onto `raw` (names and descriptions), and `bridge.ts` serves them in the turn-content `skills` entry with no size cap. Clipping at the route would truncate silently, which that route's design rejects. Capping descriptions at the producer would corrupt the derived-token measurement. The safe options are a count sanity cap (for example 1000 skills) with an explicit marker at `listedSkillsOf` in `dash/src/synth/synth.ts`, and documenting the `skills` entry as exempt from the response budget (`CONTENT_RESPONSE_BUDGET`, `dash/src/server/bridge-types.ts`).
 
 **(f) First-observed description on every turn.** A skill's listed description is the first one observed in the session, and every turn shows it, even when a later listing changes it. This is a documented limit ([architecture, Known limits](../dash/architecture.md#skills-view-contract)). Decide whether it is acceptable or whether turns need their own text.
 
