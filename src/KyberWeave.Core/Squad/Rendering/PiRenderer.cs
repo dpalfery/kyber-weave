@@ -397,6 +397,12 @@ public sealed class PiRenderer : SquadHarnessRenderer
     {
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
         string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
+        string commandLine = scope == SquadDeploymentScope.Global
+            ? ArbiterHookWiring.HookCommandLine("pi", scope)
+            : string.Empty;
+        string globalCommandLineStatement = scope == SquadDeploymentScope.Global
+            ? $"const commandLine = {System.Text.Json.JsonSerializer.Serialize(commandLine)};"
+            : string.Empty;
 
         return $$"""
             import { spawnSync } from "node:child_process";
@@ -432,6 +438,8 @@ public sealed class PiRenderer : SquadHarnessRenderer
               }
               return decision;
             }
+
+            {{globalCommandLineStatement}}
 
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {

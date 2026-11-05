@@ -63,6 +63,12 @@ public static class ArbiterPluginShim
         }
 
         string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
+        string commandLine = scope == SquadDeploymentScope.Global
+            ? ArbiterHookWiring.HookCommandLine(harnessToken, scope)
+            : string.Empty;
+        string globalCommandLineStatement = scope == SquadDeploymentScope.Global
+            ? $"const commandLine = {JsonSerializer.Serialize(commandLine)};"
+            : string.Empty;
 
         // JSON string encoding, so the token lands inside the TypeScript literal as data.
         string literal = JsonSerializer.Serialize(harnessToken);
@@ -182,6 +188,8 @@ public static class ArbiterPluginShim
                 "kyber-arbiter: cannot resolve repository root from the plugin location or the harness directory " +
                 "(looked for .kyber-weave/kyber-weave.yml, falling back to .git)");
             }
+
+            {{globalCommandLineStatement}}
 
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
