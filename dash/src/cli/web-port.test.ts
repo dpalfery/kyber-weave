@@ -137,7 +137,13 @@ async function reservePorts(count: number): Promise<PortReservation[]> {
     throw new RangeError(`reservePorts: count must be an integer from 1 to 16, got ${count}`)
   }
   const reservations: PortReservation[] = []
-  for (let i = 0; i < count; i++) reservations.push(hold(await probeEphemeral()))
+  try {
+    for (let i = 0; i < count; i++) reservations.push(hold(await probeEphemeral()))
+  } catch (error) {
+    // Let go of what was already held now, not at afterEach; keep the original error.
+    await Promise.allSettled(reservations.map((reservation) => reservation.release()))
+    throw error
+  }
   return reservations
 }
 
