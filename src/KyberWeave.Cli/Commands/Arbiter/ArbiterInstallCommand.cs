@@ -79,12 +79,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             return 2;
         }
 
-        if (settings.Global)
+        if (settings.Global && !settings.Project)
         {
-            WriteError(
-                "--global is not supported for 'arbiter install': " +
-                "the install is project-scoped and never writes to the home tree.");
-            return 2;
+            // The install defaults to global scope, so an explicit --global is accepted as a
+            // redundant alias for the default home-scoped behavior. The conflict remains hard
+            // when the user tries to combine it with an explicit project install.
         }
 
         if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
