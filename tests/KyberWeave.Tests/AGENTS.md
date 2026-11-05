@@ -19,6 +19,7 @@ scope. It does not restate the standard.
 
 ## Internals are in scope
 
-`InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
-normalization, vocabulary parsing, and docs-root detection are tested directly. Marking a
-helper `internal` is not a reason to test it only through a command.
+`InternalsVisibleTo` exposes the internals of `KyberWeave.Core`, `KyberWeave.Core.Docs` and
+`KyberWeave.Core.Squad` here, so helpers like link normalization, vocabulary parsing, and
+docs-root detection are tested directly. Marking a helper `internal` is not a reason to test
+it only through a command.

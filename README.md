@@ -285,13 +285,13 @@ surface of both binaries — plus every canonical install, update, and configure
 ```
 src/
   KyberWeave.Core/        shared engine
-    Docs/                   Feature 1 — parsing, search, validation, export
     Skills/ Agents/         Feature 2 — governance per artifact class
     Security/               Feature 2 — shared instruction-surface scanner
-    Squad/                  Feature 3 — multi-harness deployment engine & transaction store
     Diagnostics/            Feature 4 — rule ids, severities, reports
     CodeGraph/              read-only port over the CodeGraph index
     Configuration/ Text/ Parsing/
+  KyberWeave.Core.Docs/   Feature 1 — parsing, search, validation, export
+  KyberWeave.Core.Squad/  Feature 3 — multi-harness deployment engine & transaction store
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
