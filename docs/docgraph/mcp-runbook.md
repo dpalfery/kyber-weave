@@ -1301,8 +1301,8 @@ read.
 
 ```
 code joins:
-  DocumentIndex -> src/KyberWeave.Core/Docs/Search/DocumentIndex.cs:23 [class]
-  Authority -> src/KyberWeave.Core/Docs/Search/DocumentIndex.cs:357 [method] (+2 other same-named)
+  DocumentIndex -> src/KyberWeave.Core.Docs/Search/DocumentIndex.cs:23 [class]
+  Authority -> src/KyberWeave.Core.Docs/Search/DocumentIndex.cs:357 [method] (+2 other same-named)
 ```
 
 Two annotations mean the resolver had to guess and you should verify:
