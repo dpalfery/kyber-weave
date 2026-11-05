@@ -117,6 +117,26 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
         Assert.Contains("{ decision: \"allow\" }", content, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RenderAsync_Shim_BlocksWhenNoRepositoryRootResolves()
+    {
+        // A host whose cwd is not the repo leaves the shim with no repository
+        // root. The shim must throw a block with a clear reason instead of
+        // spawning the hook, so the failure reads as a refusal rather than a
+        // crash that fails closed with KW-ARB-HOOK-001.
+        string content = await ShimContentAsync();
+
+        Assert.Contains("throw", content, StringComparison.Ordinal);
+        Assert.Contains("root", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".kyber-weave", content, StringComparison.Ordinal);
+
+        int rootGuard = content.IndexOf("root", StringComparison.OrdinalIgnoreCase);
+        int spawn = content.IndexOf("Bun.spawn", StringComparison.Ordinal);
+        Assert.True(
+            rootGuard >= 0 && spawn > rootGuard,
+            "shim must resolve the repository root before spawning the hook so an unresolvable root blocks");
+    }
+
     [Theory]
     [InlineData("null")]
     [InlineData("disabled")]

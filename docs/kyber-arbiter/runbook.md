@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-04
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -18,8 +18,13 @@ host. For what it is and why, see the [architecture](architecture.md).
 
 ## Hooks
 
-Hooks render through `squad install` / `squad update` when the project's `arbiter.enabled`
-is true. Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
+The one-command install is `kyber-weave arbiter install --target <t>`: it ensures
+`.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets `arbiter.enabled:
+true` non-destructively, renders the target through the existing Squad install pipeline when
+the project's `arbiter.enabled` is true, applies the provider, stores the key in the OS
+credential store, verifies, and prints the target's trust step. `--provider ""` means `none`.
+A second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
+when the project's `arbiter.enabled` is true. Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
 `.agent.md` hooks), Copilot CLI (`.github/hooks/kyber-arbiter.json`), and OpenCode (the
 plugin shim). Phase 2 adds Pi (the `.pi/extensions/kyber-arbiter.ts` shim), Codex (the
 owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the shared
@@ -42,6 +47,15 @@ carrying the `KYBER-ARBITER: true` marker and carries no `--caller`. `codex`, `c
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 
+`arbiter uninstall --target <t>` removes only Squad-owned arbiter files/blocks for that
+target (owned plugin/extension files, owned hook blocks); `--remove-key` also deletes the
+stored key, and without it the key is untouched.
+
+The Kilo plugin shim resolves and verifies the repo root from its own plugin location
+(walking up to the nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds that root
+into both the spawn `cwd` and the envelope `cwd`, and blocks clearly when no root resolves —
+never spawning with a possibly-wrong cwd.
+
 ## Trust steps
 
 A hook that never runs enforces nothing, and the audit cannot see dispatches no hook
@@ -57,7 +71,7 @@ observed — so grant trust at install time:
 | ZCode | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for ZCode, so register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in ZCode's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
-`squad install` and `squad update` print the applicable step for the rendered targets.
+`arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
 
 ## Fail-closed behaviour
 
@@ -110,14 +124,24 @@ the conductor and code-reviewer.
 
 ## Setup, doctor, audit
 
-Three commands cover the provider lifecycle; the key is never shown and never stored in a
-file:
+The one-command install replaces the old multi-step sequence. The key is never shown and
+never stored in a file:
 
 ```bash
+kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"  # one command: config, hooks, provider, key, verify, trust step
+kyber-weave arbiter install --target kilo --provider "" --key-stdin  # safer: key on stdin, never argv
+kyber-weave arbiter uninstall --target kilo  # remove only Squad-owned files/blocks; add --remove-key to delete the stored key
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
 kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value
 kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI, Codex and Cursor post-dispatch advisory limitations
 ```
+
+`--target` is required and validated against the Squad target roster; `--provider ""` means
+`none`; `--global` is rejected; a second install is an idempotent no-op. `--arbiter-key` is
+visible in argv and shell history (a one-line warning says so); `--key-stdin` and
+`TYPESAFE_API_KEY` stay the safer paths. A keyed provider with no resolving key surfaces
+`KW-ARB-KEY-001`. Exit `2` for client-input errors, `1` for operational failures, `0` for
+success or no-op.
 
 Read-only inspection:
 

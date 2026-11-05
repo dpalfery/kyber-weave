@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-11-04
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -86,8 +86,12 @@ judgement about meaning is made without a confidence attached.
     Ollama is detected; `tev1` stays selectable, and `setup` warns against it because its
     ~2,000-token input is too small for most shipped rules.
 15. **Keys never rest in config (D18).** Resolution order is `TYPESAFE_API_KEY`, then the OS
-    credential store entry for the endpoint origin, then no key; loopback needs none. Writes
-    travel on stdin, never argv; the key appears in no file and no log.
+    credential store entry for the endpoint origin, then no key; loopback needs none. The key
+    is stored only in the OS credential store and appears in no config file, log, receipt, or
+    git history. Writes travel on stdin (`--key-stdin`) or the `TYPESAFE_API_KEY` env var as the
+    safer paths. Explicit exception in force: `kyber-weave arbiter install --arbiter-key <key>`
+    accepts the key on argv for the one-command path, and prints a one-line warning that it is
+    visible in process argv and shell history, naming the safer alternatives.
 16. **No provider by default (D19).** Provider `none` switches model rules off: step 0 and
     step 2 still run, step 1 reports not evaluated, and `doctor` warns.
 17. **TypeSafe's skill is reference only (D20).** The documentation links it; nothing installs,
@@ -95,10 +99,18 @@ judgement about meaning is made without a confidence attached.
 18. **Delegation identity is explicit headers (D21, D27).** The conductor writes `PLAN_FILE:`
     and `TASK:`; code-reviewer writes `LENS:` and `REFUTE:` alongside the marker. Index
     inference is diagnosis only, never a decision input.
-19. **Three-part install (D22).** Binary via `install.sh`/`update` with `--no-arbiter`;
-    hook wiring via `squad install`/`update` when `arbiter.enabled` is true; provider and key
-    via `arbiter setup` into the user override and the credential store. A global install
-    renders no hooks and records `arbiter-not-enforced`.
+19. **One-command install (D22).** `kyber-weave arbiter install --target <t>` is the install
+    path in force: it ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold),
+    sets `arbiter.enabled: true` non-destructively, renders the target through the existing
+    Squad install pipeline, applies the provider, stores the key in the OS credential store,
+    verifies, and prints the target's trust step. It replaces the three-part sequence (`docs
+    init`, hand-edit `arbiter.enabled`, `squad install --target <t>`, `arbiter setup`). The
+    binary still ships via `install.sh`/`kyber-weave update` with `--no-arbiter`, and
+    `kyber-weave update` re-renders the arbiter hooks/scripts for registered projects with
+    `arbiter.enabled` after replacing binaries (`--no-arbiter` or an absent arbiter skips it).
+    `arbiter uninstall --target <t>` removes only Squad-owned files/blocks; key deletion is
+    opt-in (`--remove-key`). A global install renders no hooks and records
+    `arbiter-not-enforced`.
 20. **Size is justified, not cut to fit (D26, D29).** Each phase documents estimated changed
     lines by area as information. Correctness comes before line-count targets; the Phase 1
     size escalation past the review ceiling is accepted.
