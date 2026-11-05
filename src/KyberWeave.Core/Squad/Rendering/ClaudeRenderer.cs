@@ -217,6 +217,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
             context.EnabledArbiter,
+            context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets);
@@ -251,6 +252,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
             context.EnabledArbiter,
+            context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets);
@@ -279,6 +281,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     private static Dictionary<string, object?>? BuildArbiterHooks(
         SquadAgent agent,
         SquadArbiterWiring? arbiter,
+        SquadDeploymentScope scope,
         IReadOnlySet<string> dispatcherAgents,
         IReadOnlySet<string> guardedAgents,
         IReadOnlySet<string> dispatchTargets)
@@ -297,7 +300,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             return null;
         }
 
-        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name);
+        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope);
 
         Dictionary<string, object?> HookEntry(string matcher) => new(StringComparer.Ordinal)
         {

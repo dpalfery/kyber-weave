@@ -40,10 +40,23 @@ public static class ArbiterHookWiring
 {
     private const string ArbiterIdentity = "arbiter";
     private const string DegradationCode = "arbiter-not-enforced";
-    private const string NoHookSupportReason = "no-hook-support";
+    private const string ProjectOnlyReason = "project-only";
     private const string FallbackOnlyReason = "fallback-only";
-    private const string GlobalScopeReason = "global-scope";
+    private const string EnforcedGlobalReason = "enforced-global";
+    private const string PartialReason = "partial";
+    private const string DispatchUnconfirmedReason = "dispatch-unconfirmed";
+    private const string HooksDisabledByHarnessReason = "hooks-disabled-by-harness";
     private const string CommandName = "kyber-weave-arbiter";
+
+    private static readonly HashSet<string> KnownReasonCodes = new(StringComparer.Ordinal)
+    {
+        ProjectOnlyReason,
+        FallbackOnlyReason,
+        EnforcedGlobalReason,
+        PartialReason,
+        DispatchUnconfirmedReason,
+        HooksDisabledByHarnessReason
+    };
 
     /// <summary>The shape every agent name and harness token written into a hook command takes.</summary>
     private const string CallerPatternText = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
@@ -168,8 +181,12 @@ public static class ArbiterHookWiring
     }
 
     /// <summary>Builds the hook command line that gates one agent's dispatches on one target.</summary>
-    public static string HookCommandLine(SquadTarget target, string caller) =>
-        HookCommandLine(SquadTargetCatalog.GetToken(target), caller);
+    public static string HookCommandLine(SquadTarget target, string caller, SquadDeploymentScope scope = SquadDeploymentScope.Project) =>
+        HookCommandLine(SquadTargetCatalog.GetToken(target), caller, scope);
+
+    /// <summary>Builds the global or project-scoped hook command line for a target token.</summary>
+    public static string HookCommandLine(SquadTarget target, SquadDeploymentScope scope = SquadDeploymentScope.Project) =>
+        HookCommandLine(SquadTargetCatalog.GetToken(target), scope);
 
     /// <summary>
     /// Builds the hook command line for one harness token and one caller.
@@ -185,11 +202,12 @@ public static class ArbiterHookWiring
     /// </remarks>
     /// <param name="harnessToken">The harness token passed to <c>--harness</c>.</param>
     /// <param name="caller">The agent name passed to <c>--caller</c>.</param>
+    /// <param name="scope">The deployment scope, which decides whether the command carries the global <c>--scope</c> flag.</param>
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="caller"/> is not <c>^[A-Za-z0-9][A-Za-z0-9_-]*$</c>, or when
     /// <paramref name="harnessToken"/> is not a plain token.
     /// </exception>
-    public static string HookCommandLine(string harnessToken, string caller)
+    public static string HookCommandLine(string harnessToken, string caller, SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(caller);
         if (!CallerPattern.IsMatch(caller))
@@ -202,16 +220,24 @@ public static class ArbiterHookWiring
         }
 
         ValidateHarnessToken(harnessToken);
-        return $"{CommandName} hook --harness {harnessToken} --caller {caller}";
+        return AppendScope($"{CommandName} hook --harness {harnessToken} --caller {caller}", scope);
     }
 
     /// <summary>Builds the project-wide hook command line, which carries no caller.</summary>
     /// <param name="harnessToken">The harness token passed to <c>--harness</c>.</param>
+    /// <param name="scope">The deployment scope, which decides whether the command carries the global <c>--scope</c> flag.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="harnessToken"/> is not a plain token.</exception>
-    public static string HookCommandLine(string harnessToken)
+    public static string HookCommandLine(string harnessToken, SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
         ValidateHarnessToken(harnessToken);
-        return $"{CommandName} hook --harness {harnessToken}";
+        return AppendScope($"{CommandName} hook --harness {harnessToken}", scope);
+    }
+
+    private static string AppendScope(string commandLine, SquadDeploymentScope scope)
+    {
+        return scope == SquadDeploymentScope.Global
+            ? $"{commandLine} --scope global"
+            : commandLine;
     }
 
     private static void ValidateHarnessToken(string harnessToken)
@@ -269,11 +295,11 @@ public static class ArbiterHookWiring
     /// condition. The reason lands in <see cref="SquadDegradationRecord.Details"/> and the
     /// receipt keeps the <see cref="DegradationCode"/>. The records are target-scoped
     /// rather than agent-scoped, so the identity fields carry the arbiter wiring itself and
-    /// the instruction digest is empty — no instruction body is involved. An unhooked
-    /// target degrades with <c>no-hook-support</c>; a fallback-only target with
-    /// <c>fallback-only</c>, where the marker is advisory and planner investigator
-    /// dispatches stay ungated (R7); and under global scope every target degrades with
-    /// <c>global-scope</c>, hooked or not (Req 22.4).
+    /// the instruction digest is empty — no instruction body is involved. A project-scoped
+    /// target that cannot enforce hooks degrades with <c>project-only</c>, while a
+    /// fallback-only target records <c>fallback-only</c> and planner investigator dispatches
+    /// stay ungated (R7). Under global scope, the decision is a tiered enforcement record,
+    /// not a blanket scope flag (Req 22.4).
     /// </remarks>
     public static IReadOnlyList<SquadDegradationRecord> TargetDegradations(
         IEnumerable<SquadTarget> targets,
@@ -298,7 +324,7 @@ public static class ArbiterHookWiring
         foreach (SquadTarget target in targets)
         {
             string token = SquadTargetCatalog.GetToken(target);
-            string? reason = DegradationReason(token, scope, hookedTargets, fallbackTargets);
+            string? reason = NormalizeReason(DegradationReason(token, scope, hookedTargets, fallbackTargets));
             if (reason is not null)
             {
                 records.Add(new SquadDegradationRecord(
@@ -322,7 +348,27 @@ public static class ArbiterHookWiring
     {
         if (scope == SquadDeploymentScope.Global)
         {
-            return GlobalScopeReason;
+            if (fallbackTargets.Contains(token))
+            {
+                return FallbackOnlyReason;
+            }
+
+            if (token == "pi")
+            {
+                return PartialReason;
+            }
+
+            if (token is "opencode" or "kilo")
+            {
+                return DispatchUnconfirmedReason;
+            }
+
+            if (token is "copilot-vscode")
+            {
+                return HooksDisabledByHarnessReason;
+            }
+
+            return EnforcedGlobalReason;
         }
 
         if (fallbackTargets.Contains(token))
@@ -330,6 +376,16 @@ public static class ArbiterHookWiring
             return FallbackOnlyReason;
         }
 
-        return hookedTargets.Contains(token) ? null : NoHookSupportReason;
+        return hookedTargets.Contains(token) ? null : ProjectOnlyReason;
+    }
+
+    private static string? NormalizeReason(string? reason)
+    {
+        if (reason is not null && KnownReasonCodes.Contains(reason))
+        {
+            return reason;
+        }
+
+        return null;
     }
 }

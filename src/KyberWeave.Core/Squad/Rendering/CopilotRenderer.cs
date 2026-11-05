@@ -199,9 +199,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private protected override void RenderArbiter(SquadHarnessRenderContext context)
     {
         CopilotPlan plan = context.GetOrCreateState(CopilotPlan.Create);
-        if (plan.ArbiterHooks.Count > 0)
+        SquadArbiterWiring? arbiter = context.EnabledArbiter;
+        if (plan.ArbiterHooks.Count > 0 || arbiter is not null)
         {
-            context.Files.Add(RenderCliHooksFile(plan.ArbiterHooks[0].TimeoutSeconds));
+            context.Files.Add(RenderCliHooksFile(arbiter?.HookTimeoutSeconds ?? plan.ArbiterHooks[0].TimeoutSeconds, context.Scope));
         }
     }
 
@@ -275,7 +276,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         SquadArbiterHook? arbiterHook = plan.ArbiterHooks.FirstOrDefault(hook => hook.Caller == agent.Name);
         if (arbiterHook is not null)
         {
-            frontmatter["hooks"] = ArbiterHooksFrontmatter(plan.Dispatchers.Contains(agent.Name), arbiterHook);
+            frontmatter["hooks"] = ArbiterHooksFrontmatter(plan.Dispatchers.Contains(agent.Name), arbiterHook, context.Scope);
         }
 
         string authoredBody = plan.GlobalAgentsRoot is null
@@ -343,27 +344,27 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// only need the <c>PreToolUse</c> gate, because only their planning-path reads are
     /// audited, not an output the hook would have to block after the fact.
     /// </remarks>
-    private static Dictionary<string, object?> ArbiterHooksFrontmatter(bool isDispatcher, SquadArbiterHook hook)
+    private static Dictionary<string, object?> ArbiterHooksFrontmatter(bool isDispatcher, SquadArbiterHook hook, SquadDeploymentScope scope)
     {
         Dictionary<string, object?> hooks = new(StringComparer.Ordinal)
         {
-            ["PreToolUse"] = new List<object?> { HookEntry(hook) }
+            ["PreToolUse"] = new List<object?> { HookEntry(hook, scope) }
         };
 
         if (isDispatcher)
         {
-            hooks["PostToolUse"] = new List<object?> { HookEntry(hook) };
+            hooks["PostToolUse"] = new List<object?> { HookEntry(hook, scope) };
         }
 
         return hooks;
     }
 
-    private static Dictionary<string, object?> HookEntry(SquadArbiterHook hook) => new(StringComparer.Ordinal)
+    private static Dictionary<string, object?> HookEntry(SquadArbiterHook hook, SquadDeploymentScope scope) => new(StringComparer.Ordinal)
     {
         ["type"] = "command",
         // The shared helper, not a second interpolation: Copilot runs this through a shell,
         // so the caller has to pass the same validation every other hook surface applies.
-        ["command"] = ArbiterHookWiring.HookCommandLine(VsCodeHarnessToken, hook.Caller),
+        ["command"] = ArbiterHookWiring.HookCommandLine(VsCodeHarnessToken, hook.Caller, scope),
         ["timeout"] = hook.TimeoutSeconds
     };
 
@@ -375,7 +376,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
     /// </remarks>
-    private static SquadDeploymentFile RenderCliHooksFile(int timeoutSeconds)
+    private static SquadDeploymentFile RenderCliHooksFile(int timeoutSeconds, SquadDeploymentScope scope)
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream))
@@ -383,8 +384,8 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             writer.WriteStartObject();
             writer.WriteNumber("version", 1);
             writer.WriteStartObject("hooks");
-            WriteCliHookEntry(writer, "preToolUse", timeoutSeconds);
-            WriteCliHookEntry(writer, "postToolUse", timeoutSeconds);
+            WriteCliHookEntry(writer, "preToolUse", timeoutSeconds, scope);
+            WriteCliHookEntry(writer, "postToolUse", timeoutSeconds, scope);
             writer.WriteEndObject();
             writer.WriteEndObject();
         }
@@ -392,13 +393,13 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         return new SquadDeploymentFile(CliHooksFileRelativePath, stream.ToArray(), "copilot");
     }
 
-    private static void WriteCliHookEntry(Utf8JsonWriter writer, string eventName, int timeoutSeconds)
+    private static void WriteCliHookEntry(Utf8JsonWriter writer, string eventName, int timeoutSeconds, SquadDeploymentScope scope)
     {
         writer.WriteStartArray(eventName);
         writer.WriteStartObject();
         writer.WriteString("type", "command");
         writer.WriteString("matcher", "task");
-        string command = ArbiterHookWiring.HookCommandLine(CliHarnessToken);
+        string command = ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope);
         writer.WriteString("bash", command);
         writer.WriteString("powershell", command);
         writer.WriteNumber("timeoutSec", timeoutSeconds);
