@@ -43,7 +43,34 @@ public sealed class SkillProvenanceTests
 
         IReadOnlyList<string> issues = SkillProvenanceIssues(skills.Root);
 
-        Assert.Contains(issues, issue => issue.Contains("parse", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            issues,
+            issue => issue.Contains("broken", StringComparison.Ordinal)
+                     && issue.Contains("parse", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(issues, issue => issue.Contains("healthy", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A skill that exists at enumeration time but cannot be read still leaves the other
+    /// skills checked, on the same abort shape as a parse failure.
+    /// </summary>
+    [Fact]
+    public void UnreadableSkillIsReportedInsteadOfAbortingTheScan()
+    {
+        using TempSkillsDir skills = TempSkillsDir.Create();
+        skills.Add("broken", ValidSkill("broken"));
+        skills.Add("healthy", ValidSkill("healthy"));
+
+        IReadOnlyList<string> issues = SkillProvenanceIssues(
+            skills.Root,
+            path => path.Contains("broken", StringComparison.Ordinal)
+                ? throw new IOException("the file is locked")
+                : SkillParser.ParseFile(path));
+
+        Assert.Contains(
+            issues,
+            issue => issue.Contains("broken", StringComparison.Ordinal)
+                     && issue.Contains("read", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(issues, issue => issue.Contains("healthy", StringComparison.Ordinal));
     }
 
@@ -70,10 +97,16 @@ public sealed class SkillProvenanceTests
 
         IReadOnlyList<string> issues = SkillProvenanceIssues(skills.Root);
 
-        Assert.Contains(issues, issue => issue.Contains("author", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            issues,
+            issue => issue.Contains("hoisted", StringComparison.Ordinal)
+                     && issue.Contains("author", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static IReadOnlyList<string> SkillProvenanceIssues(string skillsRoot)
+    private static IReadOnlyList<string> SkillProvenanceIssues(string skillsRoot) =>
+        SkillProvenanceIssues(skillsRoot, SkillParser.ParseFile);
+
+    private static IReadOnlyList<string> SkillProvenanceIssues(string skillsRoot, Func<string, Skill> parse)
     {
         string[] skillFiles = Directory
             .EnumerateFiles(skillsRoot, "SKILL.md", SearchOption.AllDirectories)
@@ -91,11 +124,21 @@ public sealed class SkillProvenanceTests
             Skill skill;
             try
             {
-                skill = SkillParser.ParseFile(skillFile);
+                skill = parse(skillFile);
             }
             catch (SkillParseException exception)
             {
                 issues.Add($"{relative}: cannot parse front matter: {exception.Message}");
+                continue;
+            }
+            catch (IOException exception)
+            {
+                issues.Add($"{relative}: cannot read skill: {exception.Message}");
+                continue;
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                issues.Add($"{relative}: cannot read skill: {exception.Message}");
                 continue;
             }
 
