@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
@@ -219,6 +221,17 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 // each selected target's trust gate where the audit cannot observe the gap.
                 WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
 
+                // Warp has no hook primitive, so a global-scope install also owns the target's
+                // Arbiter MCP server entry in the target's own .mcp.json. The write is explicit,
+                // idempotent and additive: it never mutates foreign entries and it never rewrites
+                // a user-owned JSON document beyond the single owned server it appends.
+                if (scope == SquadDeploymentScope.Global && decision.Targets.Contains(SquadTarget.Warp))
+                {
+                    WriteGlobalWarpArbiterMcpEntry(
+                        homeRoot: targetRoot,
+                        warpRoot: _globalRoots is null ? Path.Combine(targetRoot, ".warp") : _globalRoots.ResolveGlobalRoot(SquadTarget.Warp));
+                }
+
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
 
                 // A project with no task gates learns where they come from. Squad writes no
@@ -298,5 +311,91 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 }
             }
         });
+    }
+
+    private static void WriteGlobalWarpArbiterMcpEntry(string homeRoot, string warpRoot)
+    {
+        string configPath = Path.Combine(warpRoot, ".mcp.json");
+
+        Directory.CreateDirectory(warpRoot);
+
+        JsonNode? document;
+        JsonObject servers;
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                document = JsonNode.Parse(File.ReadAllText(configPath));
+            }
+            catch (JsonException)
+            {
+                return;
+            }
+
+            if (document is not JsonObject root)
+            {
+                return;
+            }
+
+            if (root.TryGetPropertyValue("mcpServers", out JsonNode? serversNode) && serversNode is JsonObject existingServers)
+            {
+                servers = existingServers;
+            }
+            else
+            {
+                servers = new JsonObject();
+                root["mcpServers"] = servers;
+            }
+        }
+        else
+        {
+            document = new JsonObject();
+            servers = new JsonObject();
+            document["mcpServers"] = servers;
+        }
+
+        string serverName = "kyber-weave-arbiter";
+        if (servers.TryGetPropertyValue(serverName, out JsonNode? existingValue) && IsOwnedWarpArbiterServer(existingValue, warpRoot))
+        {
+            return;
+        }
+
+        JsonObject entry = new()
+        {
+            ["command"] = "kyber-weave",
+            ["args"] = new JsonArray(
+                "arbiter",
+                "serve",
+                "--repo-root",
+                warpRoot)
+        };
+
+        servers[serverName] = entry;
+
+        File.WriteAllText(configPath, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+    }
+
+    private static bool IsOwnedWarpArbiterServer(JsonNode? value, string warpRoot)
+    {
+        if (value is not JsonObject server)
+        {
+            return false;
+        }
+
+        if (server["command"] is not JsonValue command || command.GetValue<string>() != "kyber-weave")
+        {
+            return false;
+        }
+
+        if (server["args"] is not JsonArray args)
+        {
+            return false;
+        }
+
+        string[] parsed = args.Select(item => item?.GetValue<string>() ?? string.Empty).ToArray();
+        return parsed.Contains("arbiter", StringComparer.Ordinal)
+            && parsed.Contains("serve", StringComparer.Ordinal)
+            && parsed.Contains("--repo-root", StringComparer.Ordinal)
+            && parsed.Contains(warpRoot, StringComparer.Ordinal);
     }
 }
