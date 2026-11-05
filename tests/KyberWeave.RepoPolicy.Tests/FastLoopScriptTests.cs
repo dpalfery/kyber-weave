@@ -119,11 +119,11 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
-    /// A C#-only change to product code runs the product suite and skips the repository-policy
-    /// tests, which read the repository rather than the code.
+    /// A C#-only change to product code runs the product suite and, of the repository-policy tests, only
+    /// the two that read source text: the spawn-site audit and the upstream-name scan.
     /// </summary>
     [Fact]
-    public void ChangedProductCSharpOnly_SkipsTheRepositoryPolicyTests()
+    public void ChangedProductCSharpOnly_RunsOnlyThePolicySourceScans()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
@@ -136,8 +136,35 @@ public sealed class FastLoopScriptTests
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("KyberWeave.Tests.dll", log, StringComparison.Ordinal);
-        Assert.DoesNotContain("KyberWeave.RepoPolicy.Tests.dll", log, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests " +
+            "-class KyberWeave.Tests.UpstreamSeveranceTests",
+            log,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests",
+            log,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The source scans the fast loop always runs are named by class in the script, so a renamed class
+    /// would silently match nothing. Each name must be a test class in this project.
+    /// </summary>
+    [Fact]
+    public void PolicySourceScansNameTestClassesThatExist()
+    {
+        string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+        string declaration = Assert.Single(
+            script.Split('\n'),
+            line => line.StartsWith("POLICY_SOURCE_SCANS=(", StringComparison.Ordinal));
+        string[] classes = System.Text.RegularExpressions.Regex.Matches(declaration, @"-class ([\w.]+)")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+
+        Assert.Equal(2, classes.Length);
+        Assert.All(classes, name => Assert.NotNull(typeof(FastLoopScriptTests).Assembly.GetType(name)));
     }
 
     /// <summary>

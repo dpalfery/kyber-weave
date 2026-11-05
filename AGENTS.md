@@ -24,7 +24,8 @@ gate before Ready / Kilo review. Map changed files to tests:
   Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
 - Repository policy (scripts, workflows, gate configuration, docs prose, source scans): the
   same commands against `tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj`.
-  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`.
+  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`,
+  and runs its two source scans (spawn sites, upstream names) on every .NET loop.
 - KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
   (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
   zero tests. Check the run reports a non-zero test count.

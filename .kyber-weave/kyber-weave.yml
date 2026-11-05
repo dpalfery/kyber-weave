@@ -76,10 +76,11 @@ review:
       blocking: true
     # The repository-policy tests (tests/KyberWeave.RepoPolicy.Tests): scripts, workflows, this
     # file, docs and source scans. A gate of their own so `test` coverage stays a measure of
-    # product code. They read the whole tree, so any change selects them. No slot: the slot is
-    # for the full product suite, and this run takes about 30 seconds.
+    # product code. Same paths as `build` and `test`, which is when they ran before they moved,
+    # and the reason `--no-build` is safe: whatever selects this gate also selects `build`.
+    # No slot: the slot is for the full product suite, and this run takes about 30 seconds.
     - id: test-policy
-      include: ["**"]
+      include: *net-test-paths
       run: [scripts/proc-guard.sh, run, --, dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build]
       blocking: true
     # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a

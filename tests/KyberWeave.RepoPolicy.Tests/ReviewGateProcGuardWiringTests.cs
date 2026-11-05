@@ -119,7 +119,7 @@ public sealed class ReviewGateProcGuardWiringTests
             .ToArray();
 
         // One timing run per test project; each queues like the gate.
-        Assert.NotEmpty(regenerates);
+        Assert.Equal(2, regenerates.Length);
         foreach (string regenerate in regenerates)
         {
             string[] regenerateFlags = regenerate.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(2).TakeWhile(word => word != "--").ToArray();

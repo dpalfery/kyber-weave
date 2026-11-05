@@ -237,6 +237,8 @@ public sealed class ProcGuardScriptTests
 
         Assert.Equal(2, regenerateLines.Length);
         Assert.All(regenerateLines, line => Assert.Contains("--slot dotnet-test", line, StringComparison.Ordinal));
+        Assert.Single(regenerateLines, line => line.Contains("\"${TEST_DLL}\"", StringComparison.Ordinal));
+        Assert.Single(regenerateLines, line => line.Contains("\"${POLICY_TEST_DLL}\"", StringComparison.Ordinal));
     }
 
     private static bool IsDotnetTestInvocation(string code)

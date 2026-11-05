@@ -754,6 +754,20 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
+    ///     The <c>test-policy</c> gate runs <c>--no-build</c>, so every change that selects it must also select
+    ///     <c>build</c>: the two declare the same include globs.
+    /// </summary>
+    [Fact]
+    public void TestPolicyGateIsSelectedExactlyWhereTheBuildGateIs()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        ReviewGate buildGate = Assert.Single(gates, gate => gate.Id == "build");
+        ReviewGate policyGate = Assert.Single(gates, gate => gate.Id == "test-policy");
+
+        Assert.Equal(buildGate.Include, policyGate.Include);
+    }
+
+    /// <summary>
     ///     The .NET source-only gates (format-whitespace, format-style, inspectcode, duplicates) must match C#
     ///     and solution files, but must not match embedded markdown products, review guidance, general docs, or dash.
     /// </summary>

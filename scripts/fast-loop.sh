@@ -38,8 +38,8 @@
 # tests/KyberWeave.RepoPolicy.Tests holds the tests whose subject is the repository itself:
 # scripts, workflows, gate configuration, docs and source scans. They run here only when a
 # changed file is something other than C# under src/ or tests/KyberWeave.Tests/, with the same
-# class list or filter as the product suite. The one policy failure a C#-only edit can cause is
-# an unlisted process spawn, and the full suite still catches that.
+# class list or filter as the product suite. A C#-only edit runs only the two policy tests that
+# read source text (POLICY_SOURCE_SCANS): the rest read scripts, workflows, project files and docs.
 #
 # WHAT MAKES THE EXCLUDED CLASSES SLOW
 #
@@ -65,14 +65,20 @@ CONFIGURATION=Release
 TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
 CLASS_LIST="scripts/fast-loop-classes.txt"
+# The two policy tests that read source text. A C#-only edit can trip them (an unlisted process
+# spawn, a banned upstream name), and they only read files, so they run on every .NET loop.
+POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests)
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
 test_log=""
+generated_timings=()
 cleanup() {
   if [[ -n "${test_log:-}" && -f "${test_log}" ]]; then
     rm -f "${test_log}"
   fi
+  # Only the timings files this run created; files passed to --regenerate belong to the caller.
+  rm -f "${generated_timings[@]+"${generated_timings[@]}"}"
 }
 trap cleanup EXIT
 
@@ -88,7 +94,8 @@ Options:
   --method FQN     Run one specific .NET test method.
   --full           Run all declared repository gates unscoped (--all).
   --scoped         Run declared repository gates scoped to changed files.
-  --regenerate     Regenerate scripts/fast-loop-classes.txt timing list.
+  --regenerate [PRODUCT.xml POLICY.xml]
+                   Regenerate scripts/fast-loop-classes.txt from both test projects' timings.
   --help, -h       Show this help message.
 EOF
   exit 0
@@ -97,12 +104,19 @@ fi
 # Regenerate the fast-tier class list from a fresh timing run. Takes ~90s, so it
 # is a deliberate act rather than something the loop does on its own. Re-run it when a
 # class is added, renamed, or found to have gotten materially slower.
-# Pass an existing timings XML (`--regenerate path.xml`) to skip the collection run.
+# Pass existing timings XMLs, the product suite's then the policy suite's
+# (`--regenerate product.xml policy.xml`), to skip the collection run.
 if [[ "${1:-}" == "--regenerate" ]]; then
   timings=("${@:2}")
+  # One file alone would silently drop the other project's classes from the list.
+  if [[ ${#timings[@]} -ne 0 && ${#timings[@]} -ne 2 ]]; then
+    printf -- '--regenerate takes no timings files, or two: the product suite'"'"'s, then the policy suite'"'"'s\n' >&2
+    exit 2
+  fi
   if [[ ${#timings[@]} -eq 0 ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings=("$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")" "$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")")
+    generated_timings=("${timings[@]}")
     # Waits as long as the declared `test` gate does (--slot-wait 900): same slot, same bound.
     # One list covers both test projects: the classes share a namespace, so a name means one test.
     scripts/proc-guard.sh run --slot dotnet-test --slot-wait 900 -- dotnet "${TEST_DLL}" -xml "${timings[0]}" >/dev/null
@@ -220,8 +234,8 @@ else
               needs_docs=1
               ;;
           esac
-          # A C# edit to product code or product tests cannot change what the repository-policy
-          # tests read, short of a new process spawn, which the full suite still catches.
+          # A C#-only edit to product code or product tests runs only the policy source scans:
+          # the rest of the policy tests read scripts, workflows, project files and docs.
           case "$file" in
             src/*.cs | tests/KyberWeave.Tests/*.cs) ;;
             *) needs_policy=1 ;;
@@ -262,6 +276,9 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   if [[ "${needs_policy}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
     scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}"
+  else
+    step "repository-policy source scans"
+    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee -a "${test_log}"
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2
