@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
@@ -40,6 +41,23 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        if (settings.Project && settings.Global)
+        {
+            AnsiConsole.MarkupLine(
+                "[red]kyber-weave arbiter: error: " +
+                "--global and --project are mutually exclusive. " +
+                $"[bold]{RuleValidator.InstallScopeConflict}[/] is the permanent rule id for this scope conflict.[/]");
+            return 2;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
+        {
+            AnsiConsole.MarkupLine(
+                "[red]kyber-weave arbiter: error: --path is only valid with --project. " +
+                "Use --project to target a project root, or omit --path for the default global scope.[/]");
+            return 2;
+        }
+
         if (!SquadTargetCatalog.TryResolve(settings.Target, out SquadTarget target))
         {
             string roster = string.Join(", ", SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
@@ -50,8 +68,16 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return 2;
         }
 
-        string root = Path.GetFullPath(
-            string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path);
+        string root;
+        if (settings.Project)
+        {
+            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption) ? settings.Path : settings.PathOption);
+        }
+        else
+        {
+            root = Path.GetFullPath(
+                string.IsNullOrWhiteSpace(settings.Path) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : settings.Path);
+        }
 
         SquadStateStore stateStore;
         bool deployed;

@@ -125,8 +125,9 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 `returns-unobservable`, which allows and is logged; the in-flight overlap check still
 runs.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` for configuration and rules,
-`KW-ARB-KEY-001` for a missing key, `KW-ARB-LOG-001` for an un-ignored log directory,
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` and `KW-ARB-INSTALL-001`
+for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
+`KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
 `KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
 and `KW-ARB-HOOK-001` for a fail-closed hook error. See the

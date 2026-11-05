@@ -1,3 +1,6 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 
@@ -60,9 +63,77 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         if (!SquadTargetCatalog.TryResolve(target, out SquadTarget parsed))
             throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
 
+        if (TryResolveGlobalSettingsPath(parsed, out string settingsPath, _root))
+        {
+            RemoveOwnedGlobalBlock(parsed, settingsPath);
+            return;
+        }
+
         SquadReceipt? receipt = _stateStore.ReadReceipt(_root, SquadDeploymentScope.Project);
         RemoveOwnedFiles(parsed, receipt);
         RemoveOwnedBlocks(parsed, receipt);
+    }
+
+    internal static bool IsGlobalRoot(string root)
+    {
+        return string.Equals(Path.GetFileName(root), ".claude", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".codex", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".cursor", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".copilot", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".pi", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".config", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".kilo", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".factory", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".warp", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".zcode", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".devin", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".commandcode", StringComparison.Ordinal)
+            || string.Equals(Path.GetFileName(root), ".gemini", StringComparison.Ordinal);
+    }
+
+    private static bool TryResolveGlobalSettingsPath(SquadTarget target, out string settingsPath, string? root = null)
+    {
+        settingsPath = string.Empty;
+        if (target != SquadTarget.Claude)
+            return false;
+
+        string candidateRoot = Path.GetFullPath(root ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        if (IsGlobalRoot(candidateRoot))
+        {
+            settingsPath = Path.Combine(candidateRoot, "settings.json");
+            return true;
+        }
+
+        string claudeRoot = Path.Combine(candidateRoot, ".claude");
+        if (Directory.Exists(claudeRoot))
+        {
+            settingsPath = Path.Combine(claudeRoot, "settings.json");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void RemoveOwnedGlobalBlock(SquadTarget target, string settingsPath)
+    {
+        if (target != SquadTarget.Claude || !File.Exists(settingsPath))
+            return;
+
+        string before = File.ReadAllText(settingsPath);
+        JsonNode? parsed = JsonNode.Parse(before);
+        if (parsed is not JsonObject root)
+            throw new InvalidOperationException($"Claude settings file '{settingsPath}' does not parse as a JSON object.");
+
+        if (!root.ContainsKey("kyber-arbiter"))
+            return;
+
+        root.Remove("kyber-arbiter");
+        string rendered = root.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+        File.WriteAllText(settingsPath, rendered);
     }
 
     /// <summary>
@@ -77,6 +148,23 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(stateStore);
         string full = Path.GetFullPath(root);
+
+        if (TryResolveGlobalSettingsPath(target, out string settingsPath, root))
+        {
+            if (!File.Exists(settingsPath))
+                return false;
+
+            try
+            {
+                JsonNode? parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
+                return parsed is JsonObject obj && obj.ContainsKey("kyber-arbiter");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+            {
+                return true;
+            }
+        }
+
         string token = SquadTargetCatalog.GetToken(target);
         SquadReceipt? receipt = stateStore.ReadReceipt(full, SquadDeploymentScope.Project);
 

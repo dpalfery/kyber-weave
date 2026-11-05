@@ -52,6 +52,9 @@ public static class RuleValidator
     /// <summary><c>arbiter.global</c> appears in a project-level config; it is valid only in the user config.</summary>
     public const string UserGlobalTargetsForbidden = "KW-ARB-CONFIG-011";
 
+    /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
+    public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
+
     /// <summary>
     /// Validates the effective configuration: facts (<c>-002</c>), lenses (<c>-003</c>),
     /// answer coverage (<c>-004</c>), the provider-switched-off notice (<c>-006</c>),
