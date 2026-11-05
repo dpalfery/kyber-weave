@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-04
 ---
 
 # Installing Kyber-Weave
@@ -504,7 +504,10 @@ kyberdash menubar --update
 
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
-arbiter and reports an absent one rather than creating it. `--no-kyberdash` at install time is an opt-out that update respects, and
+arbiter and reports an absent one rather than creating it. After replacing binaries, update
+also re-renders the arbiter hooks/scripts for each registered project with `arbiter.enabled`
+(reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render.
+`--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
 logged. To add it later, re-run `install.sh`. Updating to a release below the version floor
 leaves `kyberdash` alone for the same reason the install skips it.
@@ -558,6 +561,25 @@ files, in both cases printing the delete-then-`squad update` steps and pointing
 at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
 
 ## Then initialize your repository
+
+For an Arbiter-enforced repository, one command does everything the old multi-step
+sequence did (`docs init`, hand-edit `arbiter.enabled: true`, `squad install --target <t>`,
+`arbiter setup`):
+
+```bash
+kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"
+```
+
+It ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets
+`arbiter.enabled: true` non-destructively, renders the target through the existing Squad
+install pipeline, applies the provider (`--provider ""` means `none`), stores the key in the
+OS credential store, verifies, and prints the target's trust step. `--target` is required and
+validated against the Squad target roster; `--global` is rejected; a second run is an
+idempotent no-op. `--arbiter-key` is visible in argv and shell history — `--key-stdin` and
+`TYPESAFE_API_KEY` stay the safer paths. See the [Kyber Arbiter runbook](kyber-arbiter/runbook.md#setup-doctor-audit)
+and [ADR 0053](adr/0053-kyber-arbiter-three-step-decision-gates.md).
+
+Without the Arbiter, scaffold the repository directly:
 
 ```bash
 kyber-weave docs init .

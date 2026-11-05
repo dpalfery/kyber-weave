@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -27,7 +28,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// style the file uses most.
 /// </para>
 /// </remarks>
-internal static partial class HostConfigYaml
+public static partial class HostConfigYaml
 {
     /// <summary>Indentation used for keys this type inserts, matching the emitted template.</summary>
     private const string DefaultIndent = "  ";
@@ -149,7 +150,7 @@ internal static partial class HostConfigYaml
         // A block sequence lives on the lines below the key. Its items may be indented past
         // the key or sit at the key's own indent — both are valid YAML — so an item is
         // recognised by its '-', and the first line that is not one ends the sequence.
-        List<string> items = new List<string>();
+        List<string> items = new();
         for (int i = keyIndex + 1; i < lines.Count; i++)
         {
             string trimmed = lines[i].TrimStart();
@@ -265,8 +266,8 @@ internal static partial class HostConfigYaml
         roots = [];
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader(document);
+            YamlStream stream = new();
+            using StringReader reader = new(document);
             stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             if (!root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node) ||
@@ -275,7 +276,7 @@ internal static partial class HostConfigYaml
                 return false;
             }
 
-            List<string> values = new List<string>();
+            List<string> values = new();
             foreach (YamlNode child in sequence.Children)
             {
                 if (child is not YamlScalarNode { Value: { } scalar }) return false;
@@ -285,7 +286,7 @@ internal static partial class HostConfigYaml
             roots = values;
             return values.Count > 0;
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -306,15 +307,15 @@ internal static partial class HostConfigYaml
     {
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader("value: " + token);
+            YamlStream stream = new();
+            using StringReader reader = new("value: " + token);
             stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             return root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node)
-                && node is YamlScalarNode scalar
-                && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
+                   && node is YamlScalarNode scalar
+                   && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -435,6 +436,78 @@ internal static partial class HostConfigYaml
     }
 
     /// <summary>
+    /// Returns <paramref name="yaml"/> with <c>arbiter.enabled</c> set to <c>true</c>.
+    /// An existing <c>enabled: false</c> is flipped in place; a missing <c>arbiter:</c>
+    /// block is appended. Returns the input unchanged when it already enables the arbiter.
+    /// </summary>
+    /// <remarks>
+    /// Like the other editors on this type, the change is done as text: one line changes
+    /// and the rest of the file is returned verbatim, so comments, key order, and line
+    /// endings survive.
+    /// </remarks>
+    public static string WithArbiterEnabled(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+
+        int arbiter = IndexOfArbiterKey(lines);
+        if (arbiter < 0)
+            return AppendArbiterBlock(lines).ToText();
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            Match match = ArbiterEnabledKey().Match(lines[i]);
+            if (!match.Success || !string.Equals(
+                    match.Groups["indent"].Value,
+                    blockIndent,
+                    StringComparison.Ordinal))
+                continue;
+
+            (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+
+            if (ScalarEquals(value, "true"))
+                return yaml;
+
+            // Any other value — 'false', an empty key, or a differently-cased scalar —
+            // means the arbiter is not enabled: enabling means the key reads 'true'.
+            // Only the value changes, so an inline comment in the suffix survives.
+            string enabledPrefix = match.Groups["prefix"].Value;
+            if (enabledPrefix.EndsWith(':')) enabledPrefix += " ";
+
+            lines[i] = enabledPrefix + "true" + suffix;
+            return lines.ToText();
+        }
+
+        lines.Insert(arbiter + 1, blockIndent + "enabled: true");
+        return lines.ToText();
+    }
+
+    /// <summary>Index of the top-level <c>arbiter:</c> key, or -1.</summary>
+    private static int IndexOfArbiterKey(HostConfigLines lines)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (ArbiterKey().IsMatch(lines[i]))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static HostConfigLines AppendArbiterBlock(HostConfigLines lines)
+    {
+        if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+            lines.Add(string.Empty);
+
+        lines.Add("arbiter:");
+        lines.Add(DefaultIndent + "enabled: true");
+        return lines;
+    }
+
+    /// <summary>
     /// Returns <paramref name="yaml"/> with <paramref name="technologies"/> merged into
     /// <c>ontology.technologies</c>. If <c>ontology:</c> does not exist, an ontology block
     /// is created. If <c>ontology.technologies</c> does not exist, it is inserted with proper
@@ -462,7 +535,8 @@ internal static partial class HostConfigYaml
             ArgumentException.ThrowIfNullOrWhiteSpace(tech);
             if (tech.Any(char.IsControl))
             {
-                throw new ArgumentException("Technology names may not contain control characters.", nameof(technologies));
+                throw new ArgumentException("Technology names may not contain control characters.",
+                    nameof(technologies));
             }
         }
 
@@ -596,7 +670,7 @@ internal static partial class HostConfigYaml
         int blockEnd,
         IReadOnlyList<string> technologies)
     {
-        List<string> existingTechs = new List<string>();
+        List<string> existingTechs = new();
         int lastItemIndex = keyIndex;
         string itemIndent = blockIndent + DefaultIndent;
 
@@ -649,7 +723,7 @@ internal static partial class HostConfigYaml
             return originalYaml;
         }
 
-        List<string> newLines = new List<string>();
+        List<string> newLines = new();
         foreach (string tech in toAdd)
         {
             newLines.Add(itemIndent + "- " + QuoteScalar(tech));
@@ -711,8 +785,8 @@ internal static partial class HostConfigYaml
         items = [];
         try
         {
-            YamlStream stream = new YamlStream();
-            using StringReader reader = new StringReader(document);
+            YamlStream stream = new();
+            using StringReader reader = new(document);
             stream.Load(reader);
             if (stream.Documents.Count == 0)
             {
@@ -726,7 +800,7 @@ internal static partial class HostConfigYaml
                 return false;
             }
 
-            List<string> values = new List<string>();
+            List<string> values = new();
             foreach (YamlNode child in sequence.Children)
             {
                 if (child is not YamlScalarNode { Value: { } scalar })
@@ -740,7 +814,7 @@ internal static partial class HostConfigYaml
             items = values;
             return true;
         }
-        catch (YamlDotNet.Core.YamlException)
+        catch (YamlException)
         {
             return false;
         }
@@ -855,6 +929,253 @@ internal static partial class HostConfigYaml
     private static partial Regex TechnologiesKey();
 
     /// <summary>
+    /// The top-level <c>arbiter:</c> key, tolerating a byte-order mark ahead of it.
+    /// </summary>
+    [GeneratedRegex(@"^\uFEFF?arbiter[ \t]*:[ \t]*(#.*)?$")]
+    private static partial Regex ArbiterKey();
+
+    /// <summary>
+    /// Splits an <c>enabled</c> line into the part before its value and the remaining text.
+    /// </summary>
+    [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)enabled[ \t]*:[ \t]*)(?<rest>.*)$")]
+    private static partial Regex ArbiterEnabledKey();
+
+    /// <summary>
+    /// Sets <c>arbiter.provider.kind</c> without disturbing the rest of the document. When the
+    /// arbiter block or the provider key is absent, they are inserted in place; an existing
+    /// matching kind leaves the input unchanged.
+    /// </summary>
+    /// <remarks>
+    /// A scalar or flow <c>provider:</c> value is refused rather than rewritten: replacing it
+    /// with a block would silently drop whatever the operator wrote there, the same hazard
+    /// <see cref="WithTechnologies"/> rejects for a scalar <c>technologies</c>.
+    /// </remarks>
+    public static string WithArbiterProviderKind(string yaml, string kind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+        int arbiter = IndexOfTopLevelKey(lines, "arbiter");
+        if (arbiter < 0)
+        {
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+                lines.Add(string.Empty);
+
+            lines.Add("arbiter:");
+            lines.Add(DefaultIndent + "enabled: true");
+            lines.Add(DefaultIndent + "provider:");
+            lines.Add(DefaultIndent + DefaultIndent + "kind: " + kind);
+            return lines.ToText();
+        }
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+
+        int provider = -1;
+        string providerIndent = blockIndent;
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "provider", out string lineIndent, out _, out _)
+                || !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+                continue;
+
+            provider = i;
+            providerIndent = lineIndent;
+            break;
+        }
+
+        if (provider < 0)
+        {
+            int anchor = arbiter;
+            for (int i = arbiter + 1; i < blockEnd; i++)
+            {
+                if (TrySplitKeyedLine(lines[i], "enabled", out string lineIndent, out _, out _)
+                    && string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+                {
+                    anchor = i;
+                    break;
+                }
+            }
+
+            lines.Insert(anchor + 1, blockIndent + "provider:");
+            lines.Insert(anchor + 2, blockIndent + DefaultIndent + "kind: " + kind);
+            return lines.ToText();
+        }
+
+        (string providerValue, _) = SplitScalarAndSuffix(ProviderRest(lines[provider]));
+
+        // A hash where the value would start is a comment, not a value: 'provider: # note'
+        // is an empty block key and the kind can be inserted beneath it.
+        if (providerValue.Trim().Length > 0 && providerValue.TrimStart()[0] != '#')
+        {
+            throw new InvalidDataException(
+                "arbiter.provider holds a scalar or flow mapping, not a block mapping. " +
+                "Replace it with a block mapping (provider: followed by indented keys) before " +
+                "setting the provider kind — rewriting it as a block would silently drop the " +
+                "existing value.");
+        }
+
+        int providerEnd = lines.Count;
+        for (int i = provider + 1; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            if (LeadingWhitespace(line).Length <= providerIndent.Length)
+            {
+                providerEnd = i;
+                break;
+            }
+        }
+
+        string subIndent = providerIndent + "  ";
+        int shallowest = int.MaxValue;
+        for (int i = provider + 1; i < providerEnd; i++)
+        {
+            string line = lines[i];
+            if (line.Trim().Length == 0 || line.TrimStart()[0] == '#')
+                continue;
+
+            int length = LeadingWhitespace(line).Length;
+            if (length > providerIndent.Length && length < shallowest)
+                shallowest = length;
+        }
+
+        if (shallowest != int.MaxValue)
+            subIndent = new string(' ', shallowest);
+
+        for (int i = provider + 1; i < providerEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "kind", out string lineIndent, out string prefix, out string rest))
+                continue;
+
+            // Only a direct child of the provider block uses its computed sub-indent.
+            // A deeper 'kind:' belongs to a nested mapping (options.kind) and must not be
+            // mistaken for provider.kind.
+            if (!string.Equals(lineIndent, subIndent, StringComparison.Ordinal))
+                continue;
+
+            (string value, string suffix) = SplitScalarAndSuffix(rest);
+            if (string.Equals(UnquoteScalar(value), kind, StringComparison.Ordinal))
+                return yaml;
+
+            string separator = prefix.EndsWith(':') ? " " : string.Empty;
+            lines[i] = prefix + separator + kind + suffix;
+            return lines.ToText();
+        }
+
+        lines.Insert(provider + 1, subIndent + "kind: " + kind);
+        return lines.ToText();
+    }
+
+    private static string ProviderRest(string providerLine)
+    {
+        if (TrySplitKeyedLine(providerLine, "provider", out _, out _, out string rest))
+            return rest;
+
+        return string.Empty;
+    }
+
+    private static int IndexOfTopLevelKey(HostConfigLines lines, string name)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (IsTopLevelKey(lines[i], name))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool IsTopLevelKey(string line, string name)
+    {
+        string text = line.Length > 0 && line[0] == '\uFEFF' ? line[1..] : line;
+        if (text.Length == 0 || text[0] == ' ' || text[0] == '\t' || text[0] == '#')
+            return false;
+
+        if (!text.StartsWith(name, StringComparison.Ordinal))
+            return false;
+
+        int i = name.Length;
+        if (i < text.Length && text[i] != ' ' && text[i] != '\t' && text[i] != ':' && text[i] != '#')
+            return false;
+
+        while (i < text.Length && (text[i] == ' ' || text[i] == '\t'))
+            i++;
+
+        if (i >= text.Length || text[i] != ':')
+            return false;
+
+        i++;
+        while (i < text.Length && (text[i] == ' ' || text[i] == '\t'))
+            i++;
+
+        return i >= text.Length || text[i] == '#';
+    }
+
+    private static string LeadingWhitespace(string line)
+    {
+        int i = 0;
+        while (i < line.Length && (line[i] == ' ' || line[i] == '\t'))
+            i++;
+
+        return line[..i];
+    }
+
+    private static bool TrySplitKeyedLine(
+        string line,
+        string name,
+        out string indent,
+        out string prefix,
+        out string rest)
+    {
+        indent = string.Empty;
+        prefix = string.Empty;
+        rest = string.Empty;
+
+        string trimmed = line.TrimStart(' ', '\t');
+        if (trimmed.StartsWith('#'))
+            return false;
+
+        indent = line[..(line.Length - trimmed.Length)];
+        if (!trimmed.StartsWith(name, StringComparison.Ordinal))
+            return false;
+
+        int i = name.Length;
+        if (i < trimmed.Length && trimmed[i] != ' ' && trimmed[i] != '\t' && trimmed[i] != ':')
+            return false;
+
+        while (i < trimmed.Length && (trimmed[i] == ' ' || trimmed[i] == '\t'))
+            i++;
+
+        if (i >= trimmed.Length || trimmed[i] != ':')
+            return false;
+
+        i++;
+        int valueStart = i;
+        while (valueStart < trimmed.Length && (trimmed[valueStart] == ' ' || trimmed[valueStart] == '\t'))
+            valueStart++;
+
+        prefix = indent + trimmed[..valueStart];
+        rest = trimmed[valueStart..];
+        return true;
+    }
+
+    private static string UnquoteScalar(string value)
+    {
+        string trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '\'' && trimmed[^1] == '\'')
+            return trimmed[1..^1].Replace("''", "'", StringComparison.Ordinal);
+
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+            return trimmed[1..^1];
+
+        return trimmed;
+    }
+
+    /// <summary>
     /// A host configuration read as lines, each carrying the line break that ended it.
     /// </summary>
     /// <remarks>
@@ -877,7 +1198,10 @@ internal static partial class HostConfigYaml
         private readonly List<string> _terminators = [];
         private readonly string _newline;
 
-        private HostConfigLines(string newline) => _newline = newline;
+        private HostConfigLines(string newline)
+        {
+            _newline = newline;
+        }
 
         public int Count => _content.Count;
 

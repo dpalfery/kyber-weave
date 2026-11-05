@@ -112,6 +112,30 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
     private static string TargetFor(string origin) => $"{Service}:{origin}";
 
+    /// <inheritdoc />
+    public void Delete(string origin)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "The Windows credential store is only available on Windows.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+
+        if (NativeMethods.CredDeleteW(TargetFor(origin), GenericType, 0))
+            return;
+
+        // Deleting an absent entry is already the desired end state, so item-not-found
+        // succeeds; any other failure surfaces, or a lost key would read as removed.
+        const int errorNotFound = 1168;
+        if (Marshal.GetLastWin32Error() == errorNotFound)
+            return;
+
+        throw new InvalidOperationException(
+            "The Windows credential store delete failed.");
+    }
+
     /// <summary>Raw <c>advapi32</c> entry points. Windows-only; callers gate first.</summary>
     [SupportedOSPlatform("windows")]
     private static partial class NativeMethods
@@ -125,6 +149,11 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool CredReadW(string targetName, uint type, uint flags, out nint credential);
+
+        [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool CredDeleteW(string targetName, uint type, uint flags);
 
         [LibraryImport("advapi32.dll")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

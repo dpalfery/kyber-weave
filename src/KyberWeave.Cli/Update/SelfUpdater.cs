@@ -3,7 +3,10 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Cli.Update;
 
@@ -72,11 +75,16 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, string?> _readEnvironment;
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
+    private readonly IArbiterHookRefresher? _arbiterHookRefresher;
 
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
     /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the guidance
     /// lines depend on what the verb printed. Tests pass a fake so no reconciliation starts a real process.
+    /// </param>
+    /// <param name="arbiterHookRefresher">
+    /// Refreshes rendered arbiter hooks after the binaries move, for registered projects with
+    /// <c>arbiter.enabled</c>. Injected, never shelled out: tests pass a recording fake.
     /// </param>
     internal SelfUpdater(
         HttpMessageHandler handler,
@@ -85,7 +93,8 @@ internal sealed class SelfUpdater : IDisposable
         Func<string, string?>? readEnvironment = null,
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
-        Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null)
+        Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
+        IArbiterHookRefresher? arbiterHookRefresher = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
@@ -93,6 +102,7 @@ internal sealed class SelfUpdater : IDisposable
         _log = log ?? (_ => { });
         _runProcess = runProcess ?? RunProcess;
         _captureProcess = captureProcess ?? RunCapture;
+        _arbiterHookRefresher = arbiterHookRefresher;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
@@ -107,9 +117,12 @@ internal sealed class SelfUpdater : IDisposable
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "HttpClient takes ownership of the handler (disposeHandler: true).")]
-    internal static SelfUpdater Create(SelfUpdateHost host, Action<string>? log = null)
+    internal static SelfUpdater Create(
+        SelfUpdateHost host,
+        Action<string>? log = null,
+        IArbiterHookRefresher? arbiterHookRefresher = null)
     {
-        return new SelfUpdater(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log);
+        return new SelfUpdater(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log, arbiterHookRefresher: arbiterHookRefresher);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
@@ -173,6 +186,7 @@ internal sealed class SelfUpdater : IDisposable
             // Nothing to download, but a new kyberdash can still be running an old engine, a tray, or an
             // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
             ReconcileKyberDash(options, version, windows, false);
+            RefreshArbiterHooks(options, windows);
             return new SelfUpdateOutcome(0, $"already on {version}");
         }
 
@@ -295,6 +309,7 @@ internal sealed class SelfUpdater : IDisposable
         // After the binaries are in place, so every step that runs is the new kyberdash, and the tray
         // installer resolves the release this update just installed.
         ReconcileKyberDash(options, version, windows, true);
+        RefreshArbiterHooks(options, windows);
 
         string installed = Path.Combine(
             _host.InstallDirectory,
@@ -395,6 +410,91 @@ internal sealed class SelfUpdater : IDisposable
 
         UpdateCapturePlugin(windows);
         UpdateFactoryCapturePlugin(windows);
+    }
+
+    /// <summary>
+    /// Re-renders arbiter hooks for registered projects with <c>arbiter.enabled</c>, after the
+    /// binaries move. Runs only when an arbiter is installed: update replaces what is installed,
+    /// it does not add a surface the owner left out. Never shells out; the refresh travels through
+    /// the injected seam. A failed refresh is a warning — the binaries are already committed.
+    /// </summary>
+    private void RefreshArbiterHooks(SelfUpdateOptions options, bool windows)
+    {
+        if (options.NoArbiter || _arbiterHookRefresher is null)
+            return;
+
+        string installed = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(ArbiterBaseName, windows));
+        if (!File.Exists(installed))
+        {
+            _log("kyber-weave-arbiter is not installed; leaving arbiter hooks unchanged");
+            return;
+        }
+
+        (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
+        if (!loaded)
+            return;
+
+        ArbiterHookRefreshResult outcome;
+        try
+        {
+            outcome = _arbiterHookRefresher.Refresh(roots);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException
+            or IOException
+            or UnauthorizedAccessException
+            or InvalidDataException
+            or HttpRequestException
+            or TimeoutException
+            or OperationCanceledException)
+        {
+            _log($"warning: the arbiter hook refresh step failed: {ex.Message}");
+            return;
+        }
+
+        if (roots.Count == 0)
+            _log("arbiter hooks are checked");
+        else if (outcome.Failed > 0)
+            _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +
+                 $"{outcome.Failed} failed");
+        else
+            _log($"refreshed arbiter hooks for {outcome.Refreshed} project(s)");
+    }
+
+    /// <summary>
+    /// The registered, non-stale projects whose configuration enables the arbiter. A project whose
+    /// configuration cannot be read is skipped; an unreadable registry is reported as failed so the
+    /// caller does not print a success line for a check that never happened.
+    /// </summary>
+    private (bool Loaded, IReadOnlyList<string> Roots) CollectArbiterEnabledProjectRoots()
+    {
+        try
+        {
+            ISquadUserPaths userPaths = SquadCommandComposition.ResolveUserPaths(null, _readEnvironment);
+            SquadStateStore stateStore = new(userPaths);
+            List<string> roots = [];
+            foreach (SquadProjectRegistryEntry entry in stateStore.ListProjects())
+            {
+                if (entry.Stale)
+                    continue;
+
+                KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(entry.Path);
+                if (loaded.Success && loaded.Config?.Arbiter.Enabled == true)
+                    roots.Add(entry.Path);
+            }
+
+            return (true, roots);
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or InvalidDataException
+            or InvalidOperationException)
+        {
+            _log("warning: arbiter hooks could not be checked because the project registry " +
+                 $"could not be read: {ex.Message}");
+            return (false, []);
+        }
     }
 
     /// <summary>Asks the installed kyberdash to replace a running engine of another version. Starts nothing when none runs.</summary>

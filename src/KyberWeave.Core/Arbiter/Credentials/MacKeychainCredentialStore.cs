@@ -108,6 +108,43 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         }
     }
 
+    /// <inheritdoc />
+    public void Delete(string origin)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        if (HasNewline(origin))
+        {
+            throw new ArgumentException(
+                "The macOS keychain origin cannot contain newline characters.", nameof(origin));
+        }
+
+        ProcessStartInfo startInfo = new("security")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("delete-generic-password");
+        startInfo.ArgumentList.Add("-s");
+        startInfo.ArgumentList.Add(Service);
+        startInfo.ArgumentList.Add("-a");
+        startInfo.ArgumentList.Add(origin);
+
+        ProcessResult result = _runner.Run(startInfo, string.Empty);
+        if (result.ExitCode == ItemNotFoundExitCode)
+        {
+            // errSecItemNotFound: nothing matched, which is already the desired end state.
+            return;
+        }
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"The macOS keychain delete failed with exit code {result.ExitCode}.");
+        }
+    }
+
     private static bool HasNewline(string value) =>
         value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal);
 
