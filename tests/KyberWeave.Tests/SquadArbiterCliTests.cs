@@ -163,7 +163,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         Assert.Contains(
             ArbiterHookWiring.TargetDegradations([SquadTarget.Codex], SquadDeploymentScope.Global),
             r => string.Equals(r.Code, "arbiter-not-enforced", StringComparison.Ordinal)
-                && string.Equals(r.Details, "global-scope", StringComparison.Ordinal));
+                && string.Equals(r.Details, "enforced-global", StringComparison.Ordinal));
     }
 
     [Fact]

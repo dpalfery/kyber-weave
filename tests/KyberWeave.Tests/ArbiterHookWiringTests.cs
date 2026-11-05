@@ -279,7 +279,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 .ToHashSet());
         Assert.Contains(
             records,
-            record => record.Target == "commandcode" && record.Details == "no-hook-support");
+            record => record.Target == "commandcode" && record.Details == "project-only");
     }
 
     [Fact]
@@ -288,7 +288,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
         // The public derivation always passes the declared rosters; the set-parameterized
         // overload pins that membership alone decides the record kind: a fallback-set target
         // is advisory-only (R7), a hooked target is enforced, and a target in neither set
-        // still records no-hook-support.
+        // still records project-only.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [SquadTarget.Warp, SquadTarget.Pi, SquadTarget.Devin],
             SquadDeploymentScope.Project,
@@ -301,14 +301,14 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 "pi", "arbiter", "arbiter", DegradationCode, string.Empty, "fallback-only"));
         Assert.Contains(records, record =>
             record == new SquadDegradationRecord(
-                "devin", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
+                "devin", "arbiter", "arbiter", DegradationCode, string.Empty, "project-only"));
     }
 
     [Fact]
     public void TargetDegradations_GlobalScope_RecordsGlobalScopeForEveryTarget()
     {
         // Req 22.4: a global install reads no project configuration, so even a hooked
-        // target degrades — every requested target gets exactly the global-scope record.
+        // target degrades — every requested target gets the tiered global enforcement reason.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [SquadTarget.Claude, SquadTarget.Cursor],
             SquadDeploymentScope.Global).ToList();
@@ -317,7 +317,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
         Assert.All(records, record =>
         {
             Assert.Equal(DegradationCode, record.Code);
-            Assert.Equal("global-scope", record.Details);
+            Assert.Equal("enforced-global", record.Details);
         });
         Assert.Equal(
             new HashSet<string> { "claude", "cursor" },
