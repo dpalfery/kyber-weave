@@ -244,7 +244,9 @@ internal sealed class SquadHarnessRenderContext
     /// output of an omitted or disabled wiring.
     /// </summary>
     public SquadArbiterWiring? EnabledArbiter =>
-        Request.Arbiter is { Enabled: true } ? Request.Arbiter : null;
+        Request.Scope == SquadDeploymentScope.Project && Request.Arbiter is { Enabled: true }
+            ? Request.Arbiter
+            : null;
 
     /// <summary>
     /// The harness's own per-render state, created once on first use: a renderer is shared across

@@ -1408,15 +1408,58 @@ public sealed class SquadDeploymentPlan
             }
 
             if (string.Equals(entry.Container, "PreToolUse", StringComparison.OrdinalIgnoreCase))
-                pre.Add(entry.Entry);
-            else if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
-                post.Add(entry.Entry);
-            else
             {
-                throw new SquadDeploymentConflictException(
-                    $"Rendered Squad block '{block.RelativePath}' names unknown hook container " +
-                    $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
+                pre.Add(entry.Entry);
+                continue;
             }
+
+            if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
+            {
+                post.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "kyber-arbiter", StringComparison.OrdinalIgnoreCase))
+            {
+                if (entry.Entry is not JsonObject group)
+                {
+                    throw new SquadDeploymentConflictException(
+                        $"Rendered Antigravity block '{block.RelativePath}' names the managed " +
+                        "group container but carries a non-object payload. Fix the upstream render before deploying it.");
+                }
+
+                foreach ((string container, List<JsonNode> destination) in new[]
+                         {
+                             ("PreToolUse", pre),
+                             ("PostToolUse", post),
+                         })
+                {
+                    JsonNode? payload = group[container];
+                    if (payload is JsonArray array)
+                    {
+                        foreach (JsonNode? node in array)
+                        {
+                            if (node is not null)
+                            {
+                                destination.Add(node);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (payload is not null)
+                    {
+                        destination.Add(payload);
+                    }
+                }
+
+                continue;
+            }
+
+            throw new SquadDeploymentConflictException(
+                $"Rendered Squad block '{block.RelativePath}' names unknown hook container " +
+                $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
         }
 
         return (pre, post);
