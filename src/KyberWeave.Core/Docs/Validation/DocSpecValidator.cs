@@ -267,7 +267,7 @@ public sealed class DocSpecValidator
                 UnknownCatalogValue, Severity.Error,
                 $"component '{fm.Component}' is not a Component in the catalog.",
                 doc.Subject, doc.RelativePath,
-                Nearest(fm.Component, set.Components) is { } nearC
+                StringDistance.Nearest(fm.Component, set.Components) is { } nearC
                     ? $"Closest catalog component: '{nearC}'."
                     : "Add a catalog row before referencing a new component."));
         }
@@ -280,7 +280,7 @@ public sealed class DocSpecValidator
                 UnknownCatalogValue, Severity.Error,
                 $"owner '{fm.Owner}' is not an Owner in the catalog.",
                 doc.Subject, doc.RelativePath,
-                Nearest(fm.Owner, set.Owners) is { } nearO
+                StringDistance.Nearest(fm.Owner, set.Owners) is { } nearO
                     ? $"Closest catalog owner: '{nearO}'."
                     : null));
         }
@@ -319,7 +319,7 @@ public sealed class DocSpecValidator
                     BadReference, Severity.Error,
                     $"decided-by references unknown document id '{reference}'.",
                     doc.Subject, doc.RelativePath,
-                    Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
+                    StringDistance.Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
             }
         }
 
@@ -331,7 +331,7 @@ public sealed class DocSpecValidator
                     BadReference, Severity.Error,
                     $"supersedes references unknown document id '{reference}'.",
                     doc.Subject, doc.RelativePath,
-                    Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
+                    StringDistance.Nearest(reference, knownIds) is { } near ? $"Closest known id: '{near}'." : null));
             }
         }
 
@@ -413,7 +413,7 @@ public sealed class DocSpecValidator
                 InvalidVocabulary, Severity.Error,
                 $"technology '{technology}' is not declared by this repository.",
                 doc.Subject, doc.RelativePath,
-                Nearest(technology, _config.Technologies) is { } near
+                StringDistance.Nearest(technology, _config.Technologies) is { } near
                     ? $"Closest declared technology: '{near}'."
                     : "Add it to ontology.technologies in .kyber-weave/kyber-weave.yml and " +
                       "re-run docs init, which creates its folder and publishes its registry property."));
@@ -802,7 +802,7 @@ public sealed class DocSpecValidator
                     $"Link fragment '#{link.Fragment}' does not match any heading in '{targetLabel}'.",
                     doc.Subject,
                     doc.RelativePath,
-                    Nearest(link.Fragment, slugs) is { } near
+                    StringDistance.Nearest(link.Fragment, slugs) is { } near
                         ? $"Closest heading anchor: '#{near}'."
                         : null,
                     doc.BodyStartLine + link.Line - 1,
@@ -811,26 +811,6 @@ public sealed class DocSpecValidator
         }
     }
 
-    /// <summary>Closest candidate by edit distance, when one is plausibly a typo.</summary>
-    internal static string? Nearest(string value, IEnumerable<string> candidates)
-    {
-        string? best = null;
-        int bestDistance = int.MaxValue;
-
-        foreach (string candidate in candidates)
-        {
-            int distance = StringDistance.Levenshtein(value, candidate, true);
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = candidate;
-            }
-        }
-
-        if (best is null) return null;
-        int threshold = Math.Max(3, value.Length / 2);
-        return bestDistance <= threshold ? best : null;
-    }
 
     /// <summary>
     /// Closest section slug for <see cref="UnknownSectionSlug"/> hints — suffix typos such as

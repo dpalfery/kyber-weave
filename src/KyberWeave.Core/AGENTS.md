@@ -37,8 +37,8 @@ Declared as `public const string` on the validator or linter that emits them, so
 and the condition cannot drift apart. They are permanent — see the repository rules.
 
 A `Diagnostic` carries `Code`, `Severity`, `Message`, `Subject`, `Path`, and `Hint`. Fill
-the hint whenever the fix is knowable; `DocSpecValidator.Nearest` computes an edit-distance
-suggestion and is offered only when the distance is plausibly a typo.
+the hint whenever the fix is knowable; `StringDistance.Nearest` (in `Text/`) computes an
+edit-distance suggestion and is offered only when the distance is plausibly a typo.
 
 ## Configuration merges by replacement
 

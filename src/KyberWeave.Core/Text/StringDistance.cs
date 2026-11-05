@@ -74,4 +74,25 @@ public static class StringDistance
 
         return previous[b.Length];
     }
+
+    /// <summary>Closest candidate by edit distance, when one is plausibly a typo.</summary>
+    public static string? Nearest(string value, IEnumerable<string> candidates)
+    {
+        string? best = null;
+        int bestDistance = int.MaxValue;
+
+        foreach (string candidate in candidates)
+        {
+            int distance = Levenshtein(value, candidate, true);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        if (best is null) return null;
+        int threshold = Math.Max(3, value.Length / 2);
+        return bestDistance <= threshold ? best : null;
+    }
 }

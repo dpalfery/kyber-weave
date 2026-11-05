@@ -107,7 +107,7 @@ public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
 
     /// <summary>
     /// The unknown-technology message for <paramref name="technology"/>, with the nearest-match
-    /// hint. The hint lives behind the internal <c>DocSpecValidator.Nearest</c>, and
+    /// hint. The hint comes from <c>StringDistance.Nearest</c>, but
     /// <see cref="KyberStandardsTemplates.Render"/> is the public surface that owns the message,
     /// so the hint is harvested from its failure rather than reimplemented where it could drift.
     /// </summary>
