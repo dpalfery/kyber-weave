@@ -755,7 +755,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     /// <summary>
     ///     The <c>test-policy</c> gate runs <c>--no-build</c>, so every change that selects it must also select
-    ///     <c>build</c>: the two declare the same include globs.
+    ///     <c>build</c>: the two declare the same include globs, <c>applies-when</c> and <c>os</c>.
     /// </summary>
     [Fact]
     public void TestPolicyGateIsSelectedExactlyWhereTheBuildGateIs()
@@ -765,6 +765,8 @@ public sealed class ReviewTaskGatesConfigTests
         ReviewGate policyGate = Assert.Single(gates, gate => gate.Id == "test-policy");
 
         Assert.Equal(buildGate.Include, policyGate.Include);
+        Assert.Equivalent(buildGate.AppliesWhen, policyGate.AppliesWhen);
+        Assert.Equal(buildGate.Os, policyGate.Os);
     }
 
     /// <summary>

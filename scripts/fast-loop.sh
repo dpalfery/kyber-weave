@@ -72,10 +72,14 @@ POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class Kyber
 step() { printf '\n=== %s ===\n' "$1"; }
 
 test_log=""
+scan_log=""
 generated_timings=()
 cleanup() {
   if [[ -n "${test_log:-}" && -f "${test_log}" ]]; then
     rm -f "${test_log}"
+  fi
+  if [[ -n "${scan_log:-}" && -f "${scan_log}" ]]; then
+    rm -f "${scan_log}"
   fi
   # Only the timings files this run created; files passed to --regenerate belong to the caller.
   rm -f "${generated_timings[@]+"${generated_timings[@]}"}"
@@ -277,8 +281,14 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
     scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}"
   else
+    # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
-    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee -a "${test_log}"
+    scan_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-scans.XXXXXX")"
+    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}"
+    if ! sed $'s/\x1b\\[[0-9;]*m//g' "${scan_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
+      printf 'the policy source scans ran no tests; check POLICY_SOURCE_SCANS\n' >&2
+      exit 1
+    fi
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2

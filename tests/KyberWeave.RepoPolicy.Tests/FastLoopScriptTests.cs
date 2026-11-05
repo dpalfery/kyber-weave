@@ -149,6 +149,38 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// The source-scan run is checked on its own, so a scan run that matched no tests fails the loop even
+    /// though the product suite ran: a renamed scan class cannot pass as clean.
+    /// </summary>
+    [Fact]
+    public void PolicySourceScansThatRunNoTests_FailTheLoop()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+        fixture.ReplaceDotnetStub(
+            """
+            #!/bin/sh
+            echo "dotnet $*" >> "$CALL_LOG"
+            case "$*" in
+              *tests/KyberWeave.Tests/bin/*)
+                echo "Total: 1, Passed: 1"
+                ;;
+            esac
+            exit 0
+            """);
+
+        string source = Path.Combine(fixture.Root, "src", "KyberWeave.Core", "Example.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllText(source, "namespace Example;\n");
+
+        ProcessResult result = fixture.RunFastLoop();
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("the policy source scans ran no tests", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The source scans the fast loop always runs are named by class in the script, so a renamed class
     /// would silently match nothing. Each name must be a test class in this project.
     /// </summary>
@@ -221,6 +253,9 @@ public sealed class FastLoopScriptTests
             return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
         }
 
+        /// <summary>Replaces the <c>dotnet</c> stub, for a test that needs a different runner reply.</summary>
+        public void ReplaceDotnetStub(string script) => WriteExecutableStub(Path.Combine(BinDir, "dotnet"), script);
+
         public string GetCallLog()
         {
             return File.Exists(CallLogPath) ? File.ReadAllText(CallLogPath) : string.Empty;
@@ -234,7 +269,7 @@ public sealed class FastLoopScriptTests
                 #!/bin/sh
                 echo "dotnet $*" >> "$CALL_LOG"
                 case "$*" in
-                  *tests/KyberWeave.Tests/bin/*)
+                  *tests/KyberWeave.Tests/bin/* | *tests/KyberWeave.RepoPolicy.Tests/bin/*)
                     echo "Total: 1, Passed: 1"
                     ;;
                 esac
