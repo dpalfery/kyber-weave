@@ -433,7 +433,12 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
-        if (!loaded)
+
+        string? home = _readEnvironment("HOME");
+        bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
+            && UserHostConfig.ReadGlobalTargets(home).Count > 0;
+
+        if (!loaded && !hasConfiguredGlobalTargets)
             return;
 
         ArbiterHookRefreshResult outcome;
@@ -453,7 +458,7 @@ internal sealed class SelfUpdater : IDisposable
             return;
         }
 
-        if (roots.Count == 0)
+        if (roots.Count == 0 && !hasConfiguredGlobalTargets)
             _log("arbiter hooks are checked");
         else if (outcome.Failed > 0)
             _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +

@@ -1,3 +1,6 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -25,8 +28,6 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
     public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
     {
         ArgumentNullException.ThrowIfNull(projectRoots);
-        if (projectRoots.Count == 0)
-            return default;
 
         SquadLifecycleService lifecycle =
             SquadCommandComposition.CreateLifecycleService(environmentReader: _environmentReader);
@@ -83,6 +84,145 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             }
         }
 
-        return new ArbiterHookRefreshResult(refreshed, failed);
+        int globalRefreshed = 0;
+        int globalFailed = 0;
+        foreach ((string? targetToken, string? hookPath) in ResolveGlobalHookTargets())
+        {
+            if (string.IsNullOrWhiteSpace(hookPath))
+                continue;
+
+            if (!File.Exists(hookPath))
+                continue;
+
+            try
+            {
+                if (RefreshGlobalHook(hookPath, targetToken))
+                {
+                    globalRefreshed++;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException
+                or IOException
+                or UnauthorizedAccessException
+                or JsonException)
+            {
+                _log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
+                globalFailed++;
+            }
+        }
+
+        return new ArbiterHookRefreshResult(refreshed + globalRefreshed, failed + globalFailed);
+    }
+
+    private IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets()
+    {
+        string? home = _environmentReader is null
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : _environmentReader("HOME");
+
+        if (string.IsNullOrWhiteSpace(home))
+            yield break;
+
+        foreach (string token in UserHostConfig.ReadGlobalTargets(home))
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                continue;
+
+            if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+                continue;
+
+            string? hookPath = ResolveGlobalHookPath(target, home);
+            if (!string.IsNullOrWhiteSpace(hookPath))
+                yield return (SquadTargetCatalog.GetToken(target), hookPath);
+        }
+    }
+
+    private static string? ResolveGlobalHookPath(SquadTarget target, string home)
+    {
+        SquadGlobalRoots roots = new(_ => null, home);
+        string root = roots.ResolveGlobalRoot(target);
+        return target switch
+        {
+            SquadTarget.Claude => Path.Combine(root, "settings.json"),
+            SquadTarget.Cursor => Path.Combine(root, "hooks.json"),
+            SquadTarget.Codex => Path.Combine(root, "hooks.json"),
+            SquadTarget.Factory => Path.Combine(root, "hooks.json"),
+            SquadTarget.Devin => Path.Combine(root, "hooks.v1.json"),
+            SquadTarget.Antigravity => Path.Combine(root, "hooks.json"),
+            _ => null,
+        };
+    }
+
+    private static bool RefreshGlobalHook(string hookPath, string? targetToken)
+    {
+        if (string.IsNullOrWhiteSpace(targetToken))
+            return false;
+
+        string before = File.ReadAllText(hookPath);
+        if (string.IsNullOrWhiteSpace(before))
+            return false;
+
+        JsonNode? parsed = JsonNode.Parse(before);
+        if (parsed is not JsonObject root)
+            return false;
+
+        bool changed = false;
+        RewriteManagedCommand(root, targetToken, ref changed);
+        if (!changed)
+            return false;
+
+        string rendered = root.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+        File.WriteAllText(hookPath, rendered);
+        return true;
+    }
+
+    private static void RewriteManagedCommand(JsonNode? node, string targetToken, ref bool changed)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach ((string key, JsonNode? value) in obj)
+            {
+                if (string.Equals(key, "command", StringComparison.Ordinal)
+                    && value is JsonValue commandValue
+                    && commandValue.TryGetValue<string>(out string? command)
+                    && IsManagedGlobalHookCommand(command, targetToken))
+                {
+                    obj[key] = ArbiterHookWiring.HookCommandLine(targetToken, SquadDeploymentScope.Global);
+                    changed = true;
+                    continue;
+                }
+
+                RewriteManagedCommand(value, targetToken, ref changed);
+            }
+
+            return;
+        }
+
+        if (node is JsonArray array)
+        {
+            foreach (JsonNode? child in array)
+            {
+                RewriteManagedCommand(child, targetToken, ref changed);
+            }
+        }
+    }
+
+    private static bool IsManagedGlobalHookCommand(string command, string targetToken)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+            return false;
+
+        string signature = $"kyber-weave-arbiter hook --harness {targetToken}";
+        int index = command.IndexOf(signature, StringComparison.Ordinal);
+        if (index < 0)
+            return false;
+
+        string remainder = command[(index + signature.Length)..];
+        return remainder.TrimStart().StartsWith("--scope global", StringComparison.Ordinal)
+            || remainder.TrimStart().StartsWith(" --scope global", StringComparison.Ordinal);
     }
 }
