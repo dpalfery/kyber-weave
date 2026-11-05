@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -12,6 +13,7 @@ namespace KyberWeave.Tests;
 /// artifacts, honors <c>--remove-key</c>, and reports misuse without side effects.
 /// RED: <c>ArbiterUninstallCommand</c> and <c>ArbiterUninstallSettings</c> do not exist yet.
 /// </summary>
+[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterUninstallCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
@@ -229,6 +231,19 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Null(_store.Read(origin));
     }
 
+    /// <summary>
+    /// The shared-key warning is best effort. A store that cannot even resolve its home throws
+    /// <see cref="ArgumentException"/>; that must not escape the helper and crash <c>--remove-key</c>.
+    /// </summary>
+    [Fact]
+    public void AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing()
+    {
+        SquadStateStore store = new(new BlankHomeUserPaths(Path.Combine(_temp.Path, "blank-home")));
+
+        Assert.False(
+            ArbiterUninstallCommand.AnotherTargetIsDeployed(_temp.Path, SquadTarget.Kilo, store));
+    }
+
     private SquadStateStore NewStateStore(string name)
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name));
@@ -257,6 +272,14 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     private static SquadOwnedFile OwnedFile(string relativePath, string target)
     {
         return new SquadOwnedFile(relativePath, new string('0', 64), target, Adopted: false);
+    }
+
+    /// <summary>A user-paths stub with no home, so any state read fails on an unresolved home.</summary>
+    private sealed class BlankHomeUserPaths(string applicationDataDirectory) : ISquadUserPaths
+    {
+        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
+
+        public string HomeDirectory => string.Empty;
     }
 
     private string NewDir(string name)

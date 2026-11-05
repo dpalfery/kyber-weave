@@ -172,7 +172,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
     /// The warning is best effort: an unreadable receipt says nothing about the other targets,
     /// and <c>--remove-key</c> is the operator's explicit request either way.
     /// </remarks>
-    private static bool AnotherTargetIsDeployed(
+    internal static bool AnotherTargetIsDeployed(
         string root,
         SquadTarget target,
         SquadStateStore stateStore)
@@ -182,7 +182,8 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         {
             receipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
         }
-        catch (Exception ex) when (ex is IOException
+        catch (Exception ex) when (ex is ArgumentException
+                                       or IOException
                                        or UnauthorizedAccessException
                                        or InvalidDataException
                                        or InvalidOperationException)
