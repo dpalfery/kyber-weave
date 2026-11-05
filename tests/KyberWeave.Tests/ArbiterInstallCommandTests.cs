@@ -116,7 +116,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true }));
 
         Assert.Equal(0, execution.ExitCode);
         string config = File.ReadAllText(ConfigPath(host));
@@ -144,6 +144,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -198,6 +199,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
         CommandExecution second = Capture(() => command.Execute(
             null!,
@@ -207,6 +209,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
 
         Assert.Equal(0, first.ExitCode);
@@ -236,7 +239,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
         Assert.Equal(0, execution.ExitCode);
         string config = File.ReadAllText(ConfigPath(host));
@@ -281,6 +284,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Provider = "systemone",
                 ArbiterKey = key,
                 Yes = true,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -426,6 +430,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "none",
                 DryRun = true,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -450,7 +455,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("block mapping", execution.Output, StringComparison.OrdinalIgnoreCase);
