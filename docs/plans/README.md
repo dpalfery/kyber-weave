@@ -35,6 +35,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-11-04-arbiter-global-install](2026-11-04-arbiter-global-install.md) | Ready | 2026-11-04 | — | ADR 0053, ADR 0037, ADR 0026 and ADR 0052 (amended in place); `docs/rules/global-scope-by-default.md`; Arbiter runbook/architecture; `cli-command-surface.md`; `install.md`; `configuration.md` | `arbiter install`/`uninstall` default to the user (`--global`) scope with `--project` opt-in, render user-level hooks per harness, and refresh them on `update`. |
 
 ## Archived Plans
 
