@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -233,41 +235,217 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     }
 
     /// <summary>
-    /// A global uninstall defaults to the user home root, removes only the Arbiter-owned Claude
-    /// block, and leaves the operator's own config bytes intact. This is the global install scope
-    /// that the project-scoped default never touched.
+    /// The default global uninstall removes the real Claude hook block from the user home, cleans
+    /// the global receipt, keeps the foreign config bytes, and unregisters the target from the
+    /// user-scoped global target ledger. The historical test invented a non-existent root key, so it
+    /// only proved the wrong thing and never exercised the real install path.
     /// </summary>
     [Fact]
-    public void Uninstall_DefaultScope_GlobalRemovesOnlyOwnedClaudeBlockAndPreservesForeignBytes()
+    public void Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes()
     {
-        string home = NewDir("uninstall-global-default");
+        string home = _home.Path;
         string settingsPath = Path.Combine(home, ".claude", "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
-        File.WriteAllText(
-            settingsPath,
-            """
+
+        string foreign = """
             {
               "model": "sonnet",
               "permissions": { "allow": ["Bash"] },
-              "custom": { "keep": "this stays" },
-              "kyber-arbiter": {
-                "command": "kyber-weave-arbiter hook --harness claude",
-                "args": ["--scope", "global"]
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "^Read$",
+                    "hooks": [
+                      { "type": "command", "command": "user-owned read hook" }
+                    ]
+                  }
+                ],
+                "PostToolUse": [
+                  {
+                    "matcher": "^Task$",
+                    "hooks": [
+                      { "type": "command", "command": "user-owned task hook" }
+                    ]
+                  }
+                ]
               },
+              "custom": { "keep": "this stays" },
               "user": "keep me"
             }
-            """);
+            """;
+        File.WriteAllText(settingsPath, foreign);
 
-        ArbiterUninstallCommand command = new();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterInstallCommand install = new();
+        CommandExecution installExecution = Capture(() => install.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = home,
+                Target = "claude",
+                Provider = "none",
+                Global = true,
+            }));
+
+        Assert.Equal(0, installExecution.ExitCode);
+        string installed = File.ReadAllText(settingsPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness claude", installed, StringComparison.Ordinal);
+        Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
+
+        SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(null, _ => null);
+        string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+        Assert.True(File.Exists(receiptPath), "the real global install must write a global receipt");
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "claude" }));
 
         Assert.Equal(0, execution.ExitCode);
         string after = File.ReadAllText(settingsPath);
-        Assert.DoesNotContain("kyber-arbiter", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-arbiter hook --harness claude", after, StringComparison.Ordinal);
+        Assert.Contains("user-owned read hook", after, StringComparison.Ordinal);
         Assert.Contains("custom", after, StringComparison.Ordinal);
         Assert.Contains("keep me", after, StringComparison.Ordinal);
+        Assert.DoesNotContain(UserHostConfig.ReadGlobalTargets(home), target =>
+            string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
+        Assert.False(File.Exists(receiptPath), "the global receipt must be removed after uninstall");
+        Assert.Null(stateStore.ReadReceipt(home, SquadDeploymentScope.Global));
+
+        Assert.Contains("this stays", after, StringComparison.Ordinal);
+        Assert.Contains("keep me", after, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Cursor and Codex share a single hook file, so uninstall must remove only the owned block and
+    /// leave the user's bytes beside it untouched. A whole-file rewrite would re-encode unrelated
+    /// hook entries and silently change user content.
+    /// </summary>
+    [Fact]
+    public void Uninstall_GlobalCodexHook_RemovesOnlyOwnedBlockAndPreservesForeignBytes()
+    {
+        string home = _home.Path;
+        string hooksPath = Path.Combine(home, ".codex", "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hooksPath)!);
+
+        const string foreign = """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "^Read$",
+                    "hooks": [
+                      { "type": "command", "command": "user-owned read hook" }
+                    ]
+                  }
+                ],
+                "PostToolUse": [
+                  {
+                    "matcher": "^Task$",
+                    "hooks": [
+                      { "type": "command", "command": "user-owned task hook" }
+                    ]
+                  }
+                ]
+              },
+              "custom": { "keep": "codex stays" },
+              "version": 1
+            }
+            """;
+        File.WriteAllText(hooksPath, foreign);
+
+        ArbiterInstallCommand install = new();
+        CommandExecution installExecution = Capture(() => install.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = home,
+                Target = "codex",
+                Provider = "none",
+                Global = true,
+            }));
+
+        Assert.Equal(0, installExecution.ExitCode);
+        string installed = File.ReadAllText(hooksPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness codex", installed, StringComparison.Ordinal);
+        Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "codex" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        string after = File.ReadAllText(hooksPath);
+        Assert.DoesNotContain("kyber-weave-arbiter hook --harness codex", after, StringComparison.Ordinal);
+        Assert.Contains("user-owned read hook", after, StringComparison.Ordinal);
+        Assert.Contains("codex stays", after, StringComparison.Ordinal);
+        Assert.Contains("custom", after, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// OpenCode installs its owned shim under the target's true global root, not under the project
+    /// convention it would otherwise guess from the home directory. A global uninstall must remove
+    /// the actual plugin file and leave the home-owned operator file alone.
+    /// </summary>
+    [Fact]
+    public void Uninstall_GlobalOpenCodePlugin_RemovesOwnedFileUnderTheRealGlobalRoot()
+    {
+        string home = _home.Path;
+        string globalRoot = new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.OpenCode);
+        string owned = Path.Combine(globalRoot, "plugins", "kyber-arbiter.ts");
+        string nonOwned = Path.Combine(home, ".opencode", "plugins", "custom.ts");
+        Directory.CreateDirectory(Path.GetDirectoryName(owned)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(nonOwned)!);
+        File.WriteAllText(owned, "// receipt-owned kyber-arbiter shim\n");
+        File.WriteAllText(nonOwned, "// operator-owned plugin, never touched\n");
+
+        ArbiterInstallCommand install = new();
+        CommandExecution installExecution = Capture(() => install.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = home,
+                Target = "opencode",
+                Provider = "none",
+                Global = true,
+            }));
+
+        Assert.Equal(0, installExecution.ExitCode);
+        Assert.True(File.Exists(owned), "the real install should write the OpenCode shim beneath the target's global root");
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "opencode" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.False(File.Exists(owned), "the installed OpenCode shim must be deleted under the real global root");
+        Assert.True(File.Exists(nonOwned), "operator-owned files next to the target root must stay intact");
+    }
+
+    /// <summary>
+    /// Uninstalling one global target must not disturb any other target that remains installed in the
+    /// same user home. A target ledger can hold multiple global hooks; removing one should rewrite only
+    /// that target's entry.
+    /// </summary>
+    [Fact]
+    public void Uninstall_OneGlobalTarget_LeavesOtherGlobalTargetsInstalled()
+    {
+        string home = _home.Path;
+
+        InstallGlobal(home, "claude");
+        InstallGlobal(home, "codex");
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "claude" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home);
+        Assert.DoesNotContain(targets, target => string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(targets, target => string.Equals(target, "codex", StringComparison.OrdinalIgnoreCase));
+        Assert.True(File.Exists(Path.Combine(home, ".codex", "hooks.json")));
     }
 
     /// <summary>
@@ -328,6 +506,22 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
 
         Assert.False(
             ArbiterUninstallCommand.AnotherTargetIsDeployed(_temp.Path, SquadTarget.Kilo, store));
+    }
+
+    private void InstallGlobal(string home, string target)
+    {
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = home,
+                Target = target,
+                Provider = "none",
+                Global = true,
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
     }
 
     private SquadStateStore NewStateStore(string name)
