@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-06
 ---
 
 # Wiring Kyber-Weave into CI
@@ -102,6 +102,12 @@ github.event.before }}`), and anything else against the remote default branch
 (`origin/HEAD`). Full history is a hard requirement — the template checks out with
 `fetch-depth: 0`, because `--base` resolves through `git merge-base`, which a
 single-commit checkout cannot answer. The `--out` report lands in `artifacts/`.
+
+The template passes `--council` on its `review gates` call, because CI is the council for gates marked
+`full-suite: true` (`test`, `ts-test`, `cargo-test`). Without it those gates are refused. A host that
+pins an older `kyber-weave` must update it before `--council` works: an older CLI warns about the
+unknown key and runs the gates as before. The `ci.yml` in this repository is unchanged: its raw
+`dotnet test` steps are not wrapped in `review gates`, so they still run the full suite on the PR.
 
 Every toolchain step is disabled (`if: false`): set it to `true` for the technologies
 the repository uses, so the gates can run their formatters, linters, builds and tests —

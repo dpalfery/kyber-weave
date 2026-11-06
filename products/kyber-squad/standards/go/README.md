@@ -124,3 +124,6 @@ go build ./...
 go mod tidy -diff         # Go 1.23+; no output means go.mod and go.sum are tidy
 go test -race ./...
 ```
+
+The `go test` line is the gate the review council and CI run. A dev agent never runs the full
+suite; it runs the tests covering its change (`go test -race -run '<TestName>' ./<package>`).

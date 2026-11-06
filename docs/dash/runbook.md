@@ -1200,9 +1200,16 @@ Run each of these through the watchdog from the repository root
 
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
-scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
+scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
+
+`cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'` is the targeted form a dev agent runs.
+A `cargo test` with no name is the whole crate: a full run, refused by the guard, for the review council and CI
+only. Keep the three gates as separate commands. The guard does not parse `bash -c` strings, so a gate wrapped
+in one is not checked.
 
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
@@ -1560,10 +1567,17 @@ machine-wide test slot, shared by every process of one user account ([Taking tur
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
 scripts/proc-guard.sh run -- npm --prefix dash run test:locks
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"
 ```
+
+The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. The guard refuses a full run with exit 89 when it is
+started from a shell with no terminal (a dev agent's shell) and not passed `--council`. The refusal names
+the targeted alternatives and starts nothing. Only the review council (`code-reviewer`) and CI pass
+`--council`. Dev agents run a filtered set, for example `scripts/proc-guard.sh run -- dotnet test
+tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"`.
+`scripts/fast-loop.sh --full` and `--scoped` are refused the same way.
 
 The watchdog runs the command in its own process group and polls the process table about every
 half second. It has two caps, both absolute, not measured against a baseline. The only way to change
@@ -1602,9 +1616,10 @@ Exit codes:
 
 | Code | Meaning | What to do |
 |---|---|---|
-| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test`, and say in the PR why the default was too low. |
+| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test:related -- <files>`, and say in the PR why the default was too low. |
 | 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
 | 88 | `--slot-wait` elapsed and every slot stayed held. The command never started. | The message names the holder (pid, task, how long it has held the slot). Wait and rerun. Do not delete the lock by hand: a lock whose process is gone is recovered by the next caller. |
+| 89 | The command is a full test-suite run, and the caller passed neither `--council` nor a terminal. The command never started; nothing was queued. | Run a filtered set instead (the message names it). Only the review council and CI pass `--council`. |
 | 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
 | 143 | The guard itself was interrupted (SIGINT or SIGTERM), while queued for a slot or while the command ran; a running command's tree was killed first. A wrapped command that died of SIGTERM also exits 143, as its own code. | Someone or something stopped the run. Rerun it. |
 | any other | The wrapped command's own exit code. | Normal failure. |
@@ -1718,10 +1733,13 @@ The dash suites are co-located with the code they cover. The canonical gates are
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test        # excludes the refresh-lock files; run test:locks for those
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>  # <files> relative to dash/
 scripts/proc-guard.sh run -- npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
 scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
+
+The whole `npm --prefix dash run test` suite (which excludes the refresh-lock files) is run by CI and the
+review council, not by the author before a PR. Run `test:locks` for the lock files it excludes.
 
 Focused runs use the same runner, also through the watchdog:
 

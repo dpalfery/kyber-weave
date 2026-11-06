@@ -1228,14 +1228,16 @@ forbidden from reading), the conductor inlines five essential items directly int
 Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
 ```
 
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
 against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
 on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
 runs are reserved strictly for the final council review, which runs it once per run, on the
-integrated head. A worker's task end runs only the test classes its task touched. A task with no
+integrated head, and for CI. No worker runs the full suite, and the conductor never dispatches
+a full run, even for a cross-cutting change: the worker runs a targeted set and names what it
+did not run. A worker's task end runs only the test classes its task touched. A task with no
 covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
 
 ### Standardized 6-field completion digest

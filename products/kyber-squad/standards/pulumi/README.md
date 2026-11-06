@@ -124,3 +124,6 @@ pulumi up                   # apply a reviewed preview
 pulumi stack output         # read agreed cross-stack / CI contracts
 dotnet test                 # component and helper unit tests
 ```
+
+The `dotnet test` line is the gate the review council and CI run. A dev agent never runs the full suite;
+it runs the tests covering its change (`dotnet test --filter "FullyQualifiedName~<TestClass>"`).

@@ -43,9 +43,11 @@ Requires .NET SDK 10 (see `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~<TestClass>"
 dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
 ```
+
+The review council and CI run the full suite. A person may still run it from a terminal, but a dev agent never does.
 
 Run the CLI from source:
 
@@ -74,7 +76,7 @@ More detail: [README.md](README.md) and [docs/](docs/).
 
 - [ ] Change is focused and explained
 - [ ] Tests added or updated when behavior changes
-- [ ] `dotnet build` and the tests targeting your change pass locally (CI runs the full suite; run `scripts/fast-loop.sh --full` (`review gates . --all`) locally too for cross-cutting changes: `src/KyberWeave.Core` shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI workflows, migrations/schemas)
+- [ ] `dotnet build` and the tests targeting your change pass locally (the review council and CI run the full suite; agents never run it locally, even for cross-cutting changes)
 - [ ] Docs or samples updated when user-facing behavior changes
 - [ ] Linked issue (if applicable)
 

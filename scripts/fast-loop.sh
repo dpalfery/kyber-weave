@@ -2,10 +2,10 @@
 # The fast local inner loop. Answers "did this edit break something" in seconds.
 #
 #   scripts/fast-loop.sh                  # component-aware fast checks based on changed files
-#   scripts/fast-loop.sh --class Docs*    # one area (.NET)
+#   scripts/fast-loop.sh --class 'KyberWeave.Tests.Area*'  # one area (.NET); the pattern matches the full name
 #   scripts/fast-loop.sh --method <FQN>   # one test (.NET)
-#   scripts/fast-loop.sh --full           # the declared gate suite, all gates (--all)
-#   scripts/fast-loop.sh --scoped         # declared gate suite scoped to changed files
+#   scripts/fast-loop.sh --full           # the declared gate suite, all gates (--all); not for dev agents
+#   scripts/fast-loop.sh --scoped         # declared gate suite scoped to changed files; not for dev agents
 #
 # WHY THIS IS NOT A THINNER `review gates`
 #
@@ -94,16 +94,41 @@ Fast local inner loop for Kyber-Weave developers.
 
 Options:
   (no options)     Component-aware fast checks based on changed workspace files.
-  --class PATTERN  Run .NET fast tests matching class pattern.
+  --class PATTERN  Run .NET tests whose fully qualified class name matches
+                   (KyberWeave.Tests.Area*). A bare Area* matches nothing.
   --method FQN     Run one specific .NET test method.
   --full           Run all declared repository gates unscoped (--all).
+                   Includes the full test suite: not for dev agents.
   --scoped         Run declared repository gates scoped to changed files.
+                   Runs the full product suite on a .NET change: not for dev agents.
   --regenerate [PRODUCT.xml POLICY.xml]
                    Regenerate scripts/fast-loop-classes.txt from both test projects' timings.
   --help, -h       Show this help message.
+
+--full, --scoped and --regenerate exit 89 without running anything when stdin is not an
+interactive terminal (a dev agent's shell). Run them from a terminal, or use --class / --method.
 EOF
   exit 0
 fi
+
+# The full-suite modes belong to the review council and CI. A non-interactive caller (a dev agent)
+# is refused with exit 89 before any build or other work, the same rule proc-guard.sh applies.
+refuse_full_suite_mode() {
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+  printf 'fast-loop: refused: %s is a full test-suite run. Only the review council and CI run the full suite;\n' "$1" >&2
+  printf 'fast-loop: dev agents run targeted sets instead. Use one of these:\n' >&2
+  printf "fast-loop:   scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'\n" >&2
+  printf 'fast-loop:   scripts/fast-loop.sh --method <FQN>\n' >&2
+  printf 'fast-loop:   kyber-weave review gates . --agent <name>\n' >&2
+  printf 'fast-loop: to run the full suite on purpose from a terminal, run this script there directly.\n' >&2
+  exit 89
+}
+
+case "${1:-}" in
+  --full|--scoped|--regenerate) refuse_full_suite_mode "$1" ;;
+esac
 
 # Regenerate the fast-tier class list from a fresh timing run. Takes ~90s, so it
 # is a deliberate act rather than something the loop does on its own. Re-run it when a
@@ -349,4 +374,4 @@ if [[ "${needs_rust}" -eq 1 ]]; then
   (cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test)
 fi
 
-printf '\nFast tier clean. Push; CI runs the full suite. Use --full only for cross-cutting changes or to reproduce a CI failure.\n'
+printf '\nFast tier clean. Push; CI runs the full suite.\n'

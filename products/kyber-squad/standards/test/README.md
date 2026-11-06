@@ -149,9 +149,11 @@ HTTP.
 
 ```bash
 dotnet test --filter <TestClass>
-dotnet test
 pytest tests/<module>
-cargo nextest run --workspace --locked   # or: cargo test --workspace --locked
-go test -race ./...
+cargo nextest run -E 'test(<name>)'      # or: cargo test -p <crate> '<name>'
+go test -race -run '<TestName>' ./<package>
 npx vitest run <path>
 ```
+
+These are targeted runs. The whole-suite commands belong to the review council and CI: no dev
+agent runs them, even for a cross-cutting change.

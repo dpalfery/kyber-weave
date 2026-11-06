@@ -23,7 +23,11 @@ public sealed class ReviewGateProcGuardWiringTests
 {
     private const int DefaultGateTimeoutSeconds = 900;
 
-    private static readonly string[] Wrapper = ["scripts/proc-guard.sh", "run", "--"];
+    /// <summary>
+    /// The watchdog prefix of a full-suite gate. <c>--council</c> sits between <c>run</c> and the <c>--</c> separator, so
+    /// the watchdog consumes it and admits the full run; after <c>--</c> it would reach the wrapped command instead.
+    /// </summary>
+    private static readonly string[] CouncilWrapper = ["scripts/proc-guard.sh", "run", "--council", "--"];
 
     /// <summary>
     /// The <c>ts-test</c> review gate starts with the watchdog wrapper and then runs the dash test command unchanged.
@@ -37,8 +41,8 @@ public sealed class ReviewGateProcGuardWiringTests
     {
         string[] run = GateRunArgv("ts-test");
 
-        Assert.Equal(Wrapper, run.Take(3));
-        Assert.Equal(["npm", "run", "--prefix", "dash", "test"], run.Skip(3).Take(5));
+        Assert.Equal(CouncilWrapper, run.Take(4));
+        Assert.Equal(["npm", "run", "--prefix", "dash", "test", "--", "--coverage"], run.Skip(4).Take(7));
     }
 
     /// <summary>
@@ -47,16 +51,20 @@ public sealed class ReviewGateProcGuardWiringTests
     /// </summary>
     /// <remarks>
     /// The .NET test run is the process class that caused the original incident. The wrapper is the cap on it, and the
-    /// review must not run it outside that cap.
+    /// review must not run it outside that cap. Only the full-suite <c>test</c> gate carries <c>--council</c>; the
+    /// policy gate is partial and runs without it.
     /// </remarks>
     [Theory]
-    [InlineData("test")]
-    [InlineData("test-policy")]
-    public void DotnetTestGateArgvStartsWithProcGuardRunAndKeepsDotnetTestCommand(string gateId)
+    [InlineData("test", "--council")]
+    [InlineData("test-policy", "")]
+    public void DotnetTestGateArgvStartsWithProcGuardRunAndKeepsDotnetTestCommand(string gateId, string councilFlag)
     {
         string[] run = GateRunArgv(gateId);
+        string[] expectedPrefix = councilFlag.Length == 0
+            ? ["scripts/proc-guard.sh", "run"]
+            : ["scripts/proc-guard.sh", "run", councilFlag];
 
-        Assert.Equal(["scripts/proc-guard.sh", "run"], run.Take(2));
+        Assert.Equal(expectedPrefix, run.Take(expectedPrefix.Length));
         int separator = Array.IndexOf(run, "--");
         Assert.True(separator >= 2, "The test gate's proc-guard flags must end with '--' before the wrapped command.");
         Assert.Equal(["dotnet", "test"], run.Skip(separator + 1).Take(2));

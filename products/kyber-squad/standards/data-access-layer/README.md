@@ -86,6 +86,9 @@ fluentmigrator migrate
 fluentmigrator rollback
 ```
 
+The `dotnet test` line is the gate the review council and CI run. A dev agent never runs the full suite;
+it runs the tests covering its change (`dotnet test --filter "FullyQualifiedName~<TestClass>"`).
+
 `fluentmigrator rollback` only runs where the host has implemented `Down()` for the migration
 being rolled back. Where `Down()` is not implemented, correct forward with a new migration
 instead, per § Migrations.

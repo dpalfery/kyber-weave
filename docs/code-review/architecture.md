@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-06
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -500,6 +500,7 @@ since the shipped catalogue, `include`, `os`, `working-directory` and `fail-on-o
 | `os` | no | every platform | `windows` or `unix`; a gate on another platform is skipped (`KW-REVIEW-026`) |
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
+| `full-suite` | no | `false` | When `true`, the gate runs the full product suite. It runs only for the review council or CI (`--council`) or from a terminal; otherwise it is refused (`KW-REVIEW-033`) and not run |
 
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is

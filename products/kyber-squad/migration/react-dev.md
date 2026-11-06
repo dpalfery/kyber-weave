@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/react-dev.agent.md
 sources:
   .github/agents/react-dev.agent.md: 8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
-final-body-sha256: a36933562938e1d10c4ef1413f4392e14616c8ed1c623e3ea325b96f139ea51c
+final-body-sha256: 1d48407d7bfba26fa2fc9946e76a0b92ed399cb58cb3078358738f4aa81e9ae0
 ---
 # react-dev migration
 

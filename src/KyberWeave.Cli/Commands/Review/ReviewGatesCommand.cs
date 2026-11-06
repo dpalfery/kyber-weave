@@ -131,11 +131,21 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 $"{skip.Id}: skipped, {skip.Reason}.",
                 skip.Id));
 
+        // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
+        // error that never starts its gate, so it is reported as not started, never as a gate that ran and failed.
+        FullSuiteSelection fullSuite = FullSuiteGate.Select(plan.Run, settings.Council, !Console.IsInputRedirected);
+        foreach (FullSuiteRefusal refusal in fullSuite.Refused)
+            report.Add(new Diagnostic(
+                GateNotStarted,
+                Severity.Error,
+                $"{refusal.GateId}: refused. {refusal.Message}",
+                refusal.GateId));
+
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
         // configuration of their own and the runner itself stays unchanged. The changed set and base
         // are still passed so applies-when is evaluated from the same facts include was selected on.
         GateReport gates = GateRunner.Run(
-            new ReviewConfig { Gates = plan.Run },
+            new ReviewConfig { Gates = fullSuite.Admitted },
             root,
             settings.StopOnFailure,
             changed,

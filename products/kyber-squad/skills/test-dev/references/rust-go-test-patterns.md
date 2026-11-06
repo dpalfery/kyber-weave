@@ -60,10 +60,12 @@ async fn retry_waits_between_attempts() {
 ### Running
 
 ```bash
-cargo nextest run --workspace --locked      # unit + integration
-cargo test --doc --workspace --locked       # doctests (nextest skips these)
 cargo nextest run -E 'test(parse_port)'     # one test by filter
+cargo test --doc -p <crate> '<name>'        # one doctest (nextest skips these)
 ```
+
+The whole-workspace runs (`cargo nextest run --workspace --locked`, `cargo test --doc --workspace --locked`)
+belong to the review council and CI. A dev agent never runs them.
 
 ## Go
 
@@ -110,7 +112,7 @@ never a fixed path another parallel test could share.
 
 ### Race detector and leaks
 
-- Run `go test -race ./...`. A test that only fails under `-race` is reporting a real bug in the
+- Run tests with `-race`. A test that only fails under `-race` is reporting a real bug in the
   code under test — hand it to `go-dev`, do not weaken the test.
 - A test that starts goroutines cancels their context in `t.Cleanup` and waits for them, so a
   leak fails the test instead of the next one.
@@ -118,7 +120,9 @@ never a fixed path another parallel test could share.
 ### Running
 
 ```bash
-go test -race ./...
 go test -race -run 'TestParsePort/zero' ./internal/config   # one subtest
-go test -count=1 ./...                                      # bypass the test cache
+go test -race ./internal/config                             # one package
+go test -count=1 ./internal/config                          # bypass the test cache
 ```
+
+`go test -race ./...` belongs to the review council and CI. A dev agent never runs it.

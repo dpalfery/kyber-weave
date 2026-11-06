@@ -44,6 +44,11 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run all declared repository gates on the host OS without include path filtering.")]
     public bool All { get; set; }
 
+    [CommandOption("--council")]
+    [Description("Declare this run as the review council or CI, which alone may run gates marked full-suite. " +
+                 "Without it, full-suite gates are refused when stdin is not a terminal.")]
+    public bool Council { get; set; }
+
     /// <summary>
     ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
     ///     scope the repository-wide council gates, so they are not agent-only.
