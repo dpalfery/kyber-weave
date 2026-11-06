@@ -2,11 +2,11 @@
 id: plans/mcp-server-and-tool-rename
 title: Rename the three MCP servers and their 19 tools by purpose
 doc-type: plan
-status: current
+status: archived
 component: DocGraph
 owner: dpalfery
 created: 2026-11-05
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-06
 development-mode: test-first
 autonomy: autonomous
 documentation-impact: extends-component
@@ -15,9 +15,12 @@ impact-components: [DocGraph, KyberSquad, KyberDash, KyberArbiter, Distribution,
 
 # Rename the three MCP servers and their 19 tools by purpose
 
-**Status: Ready 2026-11-05: approved for execution** (`AUTONOMOUS_APPROVAL: approve-and-execute`,
-autonomous: recommendation accepted; recorded in `## Decisions` as AP1). Frontmatter records this as
-`status: current`, because the plan vocabulary has no `ready` value.
+**Status: Archived — complete 2026-11-06.** Every task in [Tasks](#tasks) shipped and the closeout
+ran at T16: the [Design harvest](#design-harvest) items are mapped to their destinations in
+[Closeout mapping](#closeout-mapping), and the evidence is in [Completion summary](#completion-summary).
+Frontmatter `status` is `archived` and the plan now lives in `docs/archive/plans/`. The
+`AUTONOMOUS_APPROVAL: approve-and-execute` gate that approved execution on 2026-11-05 is recorded in
+`## Decisions` as AP1, and that table is preserved intact.
 **Development mode:** `test-first` (packet value; the owner did not opt out).
 **Autonomy:** `autonomous` (packet value and the repository Config Reg **<autonomy>**). **Scale:**
 `extends-component`, components `DocGraph`, `KyberSquad`, `KyberDash`, `KyberArbiter`,
@@ -670,3 +673,88 @@ including D11's `claude mcp` commands, and re-run `docs mcp-migrate` in any othe
 | H6 | KyberDash | operations | Server key, tool names, manual client rename, per-tool stats split at the rename | `docs/dash/onboarding.md`, `docs/dash/runbook.md`, `docs/dash/architecture.md` |
 | H7 | KyberArbiter | architecture | Server key and tool names for the fallback path | `docs/kyber-arbiter/architecture.md`, `docs/kyber-arbiter/runbook.md` |
 | H8 | Distribution | operations | Upgrade steps and how the release communicates the break | `docs/install.md`, `docs/distribution.md` |
+
+## Closeout mapping
+
+Checked at T16 on 2026-11-06 by opening each destination named in [Design harvest](#design-harvest)
+and confirming the durable item it was harvested to is present and states what the harvest row says.
+"Verified" here is a documentation check: the item landed and says what was promised. It is not a
+live harness check; the surfaces nobody has exercised in a real session keep their
+`[NOT LIVE-VERIFIED]` marker in [Verification gates](#verification-gates).
+
+| ID | Destination | Verified |
+|---|---|---|
+| H1 | [adr/0058-mcp-servers-and-tools-are-named-by-purpose.md](../../adr/0058-mcp-servers-and-tools-are-named-by-purpose.md) | **Verified.** The ADR states the `kw-<area>` key shape, the `<area>_<verb>_<object…>` tool shape, the no-alias rule, and the name limits with the sources each figure came from |
+| H2 | [adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md](../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md) | **Verified.** Amended in place: the fourth writer, its key-only bound and its launch-proof rule are recorded, and §2's "never written and never read" for user scope stands |
+| H3 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#docs-mcp-migrate), [cli-command-surface.md](../../cli-command-surface.md) | **Verified.** `### docs mcp-migrate` carries the behaviour, the state table and the launch-proof paragraph; the state table holds the seven rows designed in [States, per file and per old key](#states-per-file-and-per-old-key) plus the home-directory refusal the review added after implementation. The runbook's renamed tool contract and its note that the check id `mcp.docs_explore` predates the rename are in place; the CLI surface table carries the verb's synopsis, flags and exit codes |
+| H4 | [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) | **Verified.** `KW-MCP-WIRE-007`, `-008` and `-009` each have a row with severity, cause list and remedy; T16 added the home-directory cause to `-009` after the review found it missing |
+| H5 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../../kyber-squad/requirements.md) | **Verified.** The roster key `kw-docs`, the grant spelling per target, `McpServerNames` as the one place the keys live, and the `squad doctor` `KW-MCP-WIRE-007`/`-008` notice with the exit code unchanged |
+| H6 | [dash/onboarding.md](../../dash/onboarding.md), [dash/runbook.md](../../dash/runbook.md), [dash/architecture.md](../../dash/architecture.md) | **Verified as documentation.** The `kw-dash` key, the eight names, D11's `claude mcp` commands for the user-scope entry, and the per-tool stats split at the rename. Running those commands on the owner's machine stays `[NOT LIVE-VERIFIED]` |
+| H7 | [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md), [kyber-arbiter/runbook.md](../../kyber-arbiter/runbook.md) | **Verified.** `kw-arbiter` as the fallback path's server key, taken from `McpServerNames.Arbiter`, with the three tool names and the unchanged `kyber-weave-arbiter serve` launch |
+| H8 | [install.md](../../install.md#renamed-mcp-servers-and-tools), [distribution.md](../../distribution.md) | **Verified.** The "Renamed MCP servers and tools" section carries the verbatim [Upgrade steps](#upgrade-steps), including every surface no tool reads; distribution.md states that a rename is not a new asset and points at that section for the operator-side work |
+
+Every row in the permanent [`## Decisions`](#decisions) table maps to the live document that now
+carries it. A decision whose substance is a process step or an approval leaves no lasting record and
+says so.
+
+| Decisions | Lasting record | What landed there |
+|---|---|---|
+| D1, D2, D6, D18, D26 | [adr/0058-mcp-servers-and-tools-are-named-by-purpose.md](../../adr/0058-mcp-servers-and-tools-are-named-by-purpose.md) | The name contract, the classification rule, the no-alias rule, the name limits with their sources, and the boundary that keeps C# and TypeScript symbols unchanged |
+| D3, D13, D25 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) | `McpServerNames` as the one place the keys live, the renderer and receipt path generated harness files take, and `kw-dash` staying outside the roster |
+| D4, D5, D28 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md) | The transport and `serverInfo` names that did not change, the note that the check id `mcp.docs_explore` predates the rename, and the mismatched-install remedy |
+| D7, D9, D10, D12, D16, D22 | [docgraph/mcp-runbook.md#docs-mcp-migrate](../../docgraph/mcp-runbook.md#docs-mcp-migrate) | The verb, the [states](#states-per-file-and-per-old-key) and proof tables, the declaration edit, the snippet-only harnesses, the receipt rebase, and this repository's own migrated files |
+| D8 | [adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md](../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md) | The launch proof an entry has to satisfy and the repository-scope bound that proof is held inside |
+| D14, D15 | [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) | `KW-MCP-WIRE-007`, `-008` and `-009` with their severities, causes and remedies, and the `-005` guard that stops `mcp-wire` creating the side-by-side state |
+| D11 | [dash/onboarding.md](../../dash/onboarding.md) | The manual user-scope rename: the `claude mcp remove` and `claude mcp add` commands no tool can run for the operator |
+| D17 | [dash/runbook.md](../../dash/runbook.md) | The per-tool statistics split at the rename, with past sessions left as they were captured |
+| D19 | [install.md#renamed-mcp-servers-and-tools](../../install.md#renamed-mcp-servers-and-tools), [distribution.md](../../distribution.md) | The upgrade steps and the release's statement that a rename adds no asset |
+| D20 | [adr/0058-mcp-servers-and-tools-are-named-by-purpose.md](../../adr/0058-mcp-servers-and-tools-are-named-by-purpose.md), [adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md](../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md) | The ADR disposition: 0058 created for the convention, 0052 amended in place, and the ADRs naming the old names edited in place |
+| D21 | [docgraph/governance.md](../../docgraph/governance.md) | The plan inventory lifecycle: a plan is closed once archived, and it is the index row and the links a live row carries that move — the archived documents themselves are history and stay untouched |
+| D27 | [standards/test/README.md](../../standards/test/README.md) | The zero-stash RED proof rule the throwaway-stub proof of T8 follows |
+| D24 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md) | The `mcp.root` row and its fix line are documented as they behave today. The false failure stays an **open, out-of-scope follow-up, not a pass**; it is not fixed by this change |
+| D23, D29, AP1 | Documentation waiver: plan-execution routing, the declared mode and autonomy, and the approve-and-execute gate are process provenance with no surviving architectural, operational or behavioural invariant. Each is stated in full in [`## Decisions`](#decisions): D23 changes no workflow, D29 carries the packet's `test-first` and `autonomous` values, and AP1 records the 2026-11-05 approval |
+
+## Completion summary
+
+**What shipped.**
+
+- The three MCP configuration keys and all 19 tool names, exactly as the [Name contract](#name-contract)
+  fixes them: `kyber-weave` → `kw-docs`, `kyberdash` → `kw-dash`, `kyber-weave-arbiter` → `kw-arbiter`,
+  and the tool table unchanged in spelling and order. Executables and argv, CLI verbs, dash operation
+  strings, the product name, `.kyber-weave/`, `kyber-weave.yml`, environment variables, every rule id
+  and the doctor check id `mcp.docs_explore` did not change (D2, D4, D5, D26).
+- `McpServerNames` in `src/KyberWeave.Core/Configuration/` is the one place the keys live, and the five
+  `ArbiterServer` constants plus `UniversalMcpServer` point at it (D3). Every renderer emits the new
+  grant spellings for its target; `kw-dash` appears in no roster (D25).
+- A new `kyber-weave docs mcp-migrate` verb (D7): proof-gated key rename, byte-exact duplicate removal,
+  host-declaration migration, receipt rebase so `mcp-unwire` still undoes the original wire (D16), the
+  `mcp-wire` guard (D15), and the permanent `KW-MCP-WIRE-007`/`-008`/`-009` ids with the finding
+  reports on `docs init` and `squad doctor` leaving both exit codes unchanged (D14).
+- Name-limit guards on both sides (D18): `McpToolNameContractTests` for the docs and Arbiter servers,
+  `tool-names.test.ts` for the eight dash tools, each pinning the exact map and the tightest figures
+  with their sources.
+- Documentation harvest H1 to H8, all mapped above; ADR 0058 created, ADR 0052 amended in place, and
+  the ADRs naming the old names edited in place rather than left as history (D20).
+- This repository's own configuration migrated through the verb, key lines only (T11, D22), and
+  `docs/install.md` carries the "Renamed MCP servers and tools" section with the upgrade steps (D19).
+
+**Verification evidence.**
+
+- Full unscoped gate suite at T15: **34 gates, 0 failed** (`review gates . --all`).
+- `McpRenameRepoGuardTests` **23/23** (T16 re-ran the class with
+  `RootAgentsOperationalPointerTests`; both green).
+- `DocsMcpMigrateCommandTests` **47/47** (T9's class, green through T15's CMD-FINAL).
+- `docs validate . --merge-ready` **0 findings** and `docs drift .` **0 findings**, re-run at T16 after
+  this plan moved to `docs/archive/plans/`.
+- Live `mcp.docs_explore` probe from branch builds: **passing** — `kyber-weave doctor --check --json`
+  reports the row for the renamed tool under the unchanged check id.
+- Whole-run review verdict: **APPROVE**.
+
+**What is not claimed.**
+
+- `[NOT LIVE-VERIFIED]` — the new names in a real session on each of the 13 harnesses, and D11's
+  `claude mcp` steps on the owner's machine. Nobody has exercised them, so they stay marked in
+  [Verification gates](#verification-gates); Kilo, Pi and Antigravity carry the same marker for their
+  name limits.
+- The run-start doctor's `mcp.root` failure is still a **false failure**, recorded as the out-of-scope
+  follow-up D24 and fixed in its own change. It is not a pass and is not counted as one here.

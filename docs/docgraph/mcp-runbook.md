@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-06
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -916,6 +916,7 @@ they are snippet-only for `docs mcp-wire`.
 | Old and new present, different launch | yes | refuse, zero bytes, show both | `KW-MCP-WIRE-009`, exit 1 |
 | Old present | no | never touched | `KW-MCP-WIRE-008`, with the manual edit |
 | Symlink, denied, malformed, foreign shape | n/a | refuse, zero bytes | `KW-MCP-WIRE-009`, exit 1 |
+| Root is the operator's home directory | n/a | refuse before the first read, zero bytes, no receipt | `KW-MCP-WIRE-009`, exit 1 |
 | Codex, ZCode, Copilot settings | n/a | report only | `KW-MCP-WIRE-008`, with the snippet |
 
 The bounds are [`docs mcp-wire`](#docs-mcp-wire)'s, held for the same reasons: the catalog-only
