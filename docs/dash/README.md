@@ -4,7 +4,7 @@ title: KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflow
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-11-05
 ---
 
 # KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflows
@@ -52,7 +52,7 @@ Both surfaces are display layers: they hold no feature logic, no scheduler, and 
 | **Canonical-Store Projection** | `~/.kyberdash/canon.db` stores rebuildable derived session, run, execution, and finding payloads over canonical records. Rebuildable via `kyber build`. |
 | **Multi-Signal Enrichment** | OTLP logs enrich their correlated span-shaped record rather than creating a second record. When a turn has both OTLP and file evidence, OTLP counters win and file content is used only if OTLP has no parts. |
 | **Tool & Subagent Trace Visualizer** | Displays deep hierarchical call graphs of MCP tool executions, subagent invocations, and return payloads. |
-| **Conversational Analytics over MCP** | Eight read-only stdio tools (`dash_status`, `dash_catalog`, `dash_query`, `dash_search_sessions`, `dash_inspect`, `dash_findings`, `dash_compare`, `dash_outcomes`) over `/api/kyber/analytics/*`, computed by the shared engine. Attaches to the running engine (`kyberdash mcp`); never starts, stops, migrates, or reprojections it. Bounded, evidence-linked answers with explicit unavailable-data and outcome caveats. |
+| **Conversational Analytics over MCP** | Eight read-only stdio tools (`dash_list_available_analytics_operations`, `dash_list_queryable_metrics_dimensions_limits`, `dash_query_session_cost_tokens_and_duration`, `dash_search_sessions_by_text_and_scope`, `dash_read_captured_run_session_or_turn_context`, `dash_list_detected_context_and_tool_problems`, `dash_compare_metrics_between_two_scopes`, `dash_get_run_success_or_failure_outcomes`) over `/api/kyber/analytics/*`, computed by the shared engine. The server is registered in a client under the configuration key `kw-dash`; it attaches to the running engine (`kyberdash mcp`) and never starts, stops, migrates, or reprojections it. Bounded, evidence-linked answers with explicit unavailable-data and outcome caveats. |
 
 ---
 
