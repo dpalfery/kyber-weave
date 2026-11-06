@@ -68,26 +68,106 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return 2;
         }
 
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(
+            null,
+            ArbiterCommandComposition.GetEnvironmentVariable);
+
+        SquadDeploymentScope scope;
         string root;
         if (settings.Project)
         {
-            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption) ? settings.Path : settings.PathOption);
+            scope = SquadDeploymentScope.Project;
+            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
+                ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
+                : settings.PathOption);
+        }
+        else if (settings.Global)
+        {
+            scope = SquadDeploymentScope.Global;
+            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
+                ? ArbiterCommandComposition.HomeDirectory()
+                : settings.Path);
         }
         else
         {
-            root = Path.GetFullPath(
-                string.IsNullOrWhiteSpace(settings.Path) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : settings.Path);
+            if (!string.IsNullOrWhiteSpace(settings.Path) && !string.Equals(settings.Path, ".", StringComparison.Ordinal))
+            {
+                string candidate = Path.GetFullPath(settings.Path);
+                string home = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+                if (string.Equals(candidate, home, StringComparison.Ordinal))
+                {
+                    scope = SquadDeploymentScope.Global;
+                    root = candidate;
+                }
+                else
+                {
+                    bool hasGlobalReceipt;
+                    try
+                    {
+                        hasGlobalReceipt = stateStore.ReadReceipt(candidate, SquadDeploymentScope.Global) is not null;
+                    }
+                    catch (Exception ex) when (ex is ArgumentException
+                                                   or IOException
+                                                   or UnauthorizedAccessException
+                                                   or JsonException
+                                                   or InvalidDataException
+                                                   or InvalidOperationException)
+                    {
+                        AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+                        return 1;
+                    }
+
+                    if (hasGlobalReceipt)
+                    {
+                        scope = SquadDeploymentScope.Global;
+                        root = candidate;
+                    }
+                    else
+                    {
+                        scope = SquadDeploymentScope.Project;
+                        root = candidate;
+                    }
+                }
+            }
+            else
+            {
+                string current = Path.GetFullPath(".");
+                bool hasProjectReceipt;
+                try
+                {
+                    hasProjectReceipt = stateStore.ReadReceipt(current, SquadDeploymentScope.Project) is not null;
+                }
+                catch (Exception ex) when (ex is ArgumentException
+                                               or IOException
+                                               or UnauthorizedAccessException
+                                               or JsonException
+                                               or InvalidDataException
+                                               or InvalidOperationException)
+                {
+                    AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
+                    return 1;
+                }
+
+                if (hasProjectReceipt)
+                {
+                    scope = SquadDeploymentScope.Project;
+                    root = current;
+                }
+                else
+                {
+                    scope = SquadDeploymentScope.Global;
+                    root = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+                }
+            }
         }
 
-        SquadStateStore stateStore;
+        ISquadGlobalRootResolver globalRoots = SquadCommandComposition.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+
         bool deployed;
         try
         {
-            stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(
-                null,
-                Environment.GetEnvironmentVariable);
             deployed = Directory.Exists(root)
-                       && ArbiterUninstaller.HasDeployment(root, target, stateStore);
+                       && ArbiterUninstaller.HasDeployment(root, target, stateStore, scope, globalRoots);
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
@@ -106,7 +186,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
-            if (settings.RemoveKey && !RemoveKey(root, settings, target, stateStore))
+            if (settings.RemoveKey && !RemoveKey(root, scope, settings, target, stateStore))
                 return 1;
 
             return 0;
@@ -114,7 +194,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         try
         {
-            IArbiterUninstaller uninstaller = _uninstaller ?? new ArbiterUninstaller(root, stateStore);
+            IArbiterUninstaller uninstaller = _uninstaller ?? new ArbiterUninstaller(root, scope, stateStore, globalRoots);
             uninstaller.Uninstall(SquadTargetCatalog.GetToken(target));
         }
         catch (Exception ex) when (ex is ArgumentException
@@ -128,7 +208,19 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return 1;
         }
 
-        if (settings.RemoveKey && !RemoveKey(root, settings, target, stateStore))
+        if (scope == SquadDeploymentScope.Global)
+        {
+            try
+            {
+                UserHostConfig.RemoveGlobalTarget(root, SquadTargetCatalog.GetToken(target));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                AnsiConsole.MarkupLine($"[yellow]warn:[/] Could not update user configuration: {Markup.Escape(ex.Message)}");
+            }
+        }
+
+        if (settings.RemoveKey && !RemoveKey(root, scope, settings, target, stateStore))
             return 1;
 
         AnsiConsole.MarkupLine(
@@ -145,11 +237,14 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
     private static bool RemoveKey(
         string root,
+        SquadDeploymentScope scope,
         ArbiterUninstallSettings settings,
         SquadTarget target,
         SquadStateStore stateStore)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
+        KyberWeaveConfigLoadResult loaded = scope == SquadDeploymentScope.Project
+            ? KyberWeaveConfigLoader.TryLoad(root, settings.Config)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, settings.Config);
         if (!loaded.Success)
         {
             AnsiConsole.MarkupLine(
@@ -206,7 +301,8 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         SquadReceipt? receipt;
         try
         {
-            receipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            receipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project)
+                      ?? stateStore.ReadReceipt(root, SquadDeploymentScope.Global);
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException

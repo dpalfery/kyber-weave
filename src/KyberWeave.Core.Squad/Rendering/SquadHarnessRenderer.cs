@@ -528,9 +528,13 @@ internal sealed class SquadHarnessRenderContext
         }
 
         string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
+        string relativePath = Scope == SquadDeploymentScope.Global
+            && SquadHookJsonBlock.RelativePath(format).StartsWith("." + Token + "/", StringComparison.OrdinalIgnoreCase)
+            ? SquadHookJsonBlock.RelativePath(format)[(Token.Length + 2)..]
+            : SquadHookJsonBlock.RelativePath(format);
         Blocks.Add(new SquadRenderedBlock(
             Token,
-            SquadHookJsonBlock.RelativePath(format),
+            relativePath,
             format,
             [
                 new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),

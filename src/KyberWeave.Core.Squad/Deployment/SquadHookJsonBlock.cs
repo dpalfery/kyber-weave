@@ -90,7 +90,14 @@ public static class SquadHookJsonBlock
 
         if (format == SquadHookBlockFormat.Cursor)
         {
-            return HasSignature(obj["command"], Harness(format));
+            if (obj["hooks"] is JsonArray cursorHooks)
+            {
+                return cursorHooks.Count > 0
+                    && cursorHooks.All(hook => hook is JsonObject hookObj
+                        && (HasSignature(hookObj["command"], Harness(format)) || HasSignature(hookObj["command"], "claude")));
+            }
+
+            return HasSignature(obj["command"], Harness(format)) || HasSignature(obj["command"], "claude");
         }
 
         return obj["hooks"] is JsonArray hooks
@@ -463,9 +470,16 @@ public static class SquadHookJsonBlock
     {
         JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
         List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "preToolUse", "postToolUse" })
+        foreach ((string lowerName, string pascalName) in new[] { ("preToolUse", "PreToolUse"), ("postToolUse", "PostToolUse") })
         {
+            string name = hooks.ContainsKey(pascalName) ? pascalName : lowerName;
             JsonArray? array = hooks[name] as JsonArray;
+            if (array is null && hooks[name == lowerName ? pascalName : lowerName] is JsonArray alternate)
+            {
+                name = name == lowerName ? pascalName : lowerName;
+                array = alternate;
+            }
+
             if (array is null)
             {
                 if (!create)
@@ -579,9 +593,9 @@ public static class SquadHookJsonBlock
             throw new InvalidOperationException("A managed hook entry must be a JSON object.");
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format == SquadHookBlockFormat.Cursor && obj["hooks"] is null)
         {
-            var projected = new JsonObject();
+            JsonObject projected = new();
             foreach (string field in new[] { "command", "matcher", "timeout", "failClosed" })
             {
                 if (obj[field] is JsonNode value)
@@ -678,7 +692,9 @@ public static class SquadHookJsonBlock
         // Exact equality: a user hook whose command merely starts with our prefix
         // (`--harness factory-evil`, `--harness factory --custom-flag`) is not ours,
         // and splicing or removing it would silently delete the user's entry.
-        && string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal);
+        // A global hook carries '--scope global'.
+        && (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
+            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal));
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch

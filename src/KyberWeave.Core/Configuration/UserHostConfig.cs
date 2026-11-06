@@ -5,8 +5,7 @@ using KyberWeave.Core.Parsing;
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>
-/// Temporary contract stub for the user-level host config path and global target ledger.
-/// Real behavior is intentionally left for the green implementation.
+/// User-level host config path and global target ledger.
 /// </summary>
 public static class UserHostConfig
 {
@@ -49,6 +48,25 @@ public static class UserHostConfig
             : EnsureUserConfig(home);
 
         string updated = HostConfigYaml.WithArbiterGlobalTargets(yaml, targets);
+        if (!string.Equals(yaml, updated, StringComparison.Ordinal))
+        {
+            AtomicFile.WriteAllText(path, updated);
+        }
+    }
+
+    public static void RemoveGlobalTarget(string home, string target)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+
+        string path = GetPath(home);
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        string yaml = File.ReadAllText(path);
+        string updated = HostConfigYaml.WithoutArbiterGlobalTarget(yaml, target);
         if (!string.Equals(yaml, updated, StringComparison.Ordinal))
         {
             AtomicFile.WriteAllText(path, updated);

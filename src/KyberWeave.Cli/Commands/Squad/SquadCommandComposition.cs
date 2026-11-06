@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Diagnostics;
@@ -71,7 +72,7 @@ internal static class SquadCommandComposition
         Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
         string? home = reader("HOME");
         if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-
+        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         string? appData = reader("APPDATA");
@@ -110,7 +111,7 @@ internal static class SquadCommandComposition
         Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
         string? home = reader("HOME");
         if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-
+        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         return new SquadGlobalRoots(

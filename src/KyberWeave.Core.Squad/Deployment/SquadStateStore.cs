@@ -667,7 +667,7 @@ public sealed class SquadStateStore
         return ResolveStateFile(targetRoot, scope, LockFileName);
     }
 
-    internal string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope)
+    public string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope)
     {
         return ResolveStateFile(targetRoot, scope, ReceiptFileName);
     }
@@ -798,9 +798,12 @@ public sealed class SquadStateStore
         return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
-    private string ResolveGlobalStateDirectory()
+    private string ResolveGlobalStateDirectory(string? targetRoot = null)
     {
-        return ResolveDirectoryUnder(ResolveHomeStateRoot(), GlobalStateRelativeDirectory);
+        string root = !string.IsNullOrWhiteSpace(targetRoot)
+            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot))
+            : ResolveHomeStateRoot();
+        return ResolveDirectoryUnder(root, GlobalStateRelativeDirectory);
     }
 
     private string ResolveInstanceStateDirectory(string targetRoot)
@@ -884,7 +887,7 @@ public sealed class SquadStateStore
                 ResolveProjectStateDirectory(targetRoot),
                 fileName),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
-                ResolveGlobalStateDirectory(),
+                ResolveGlobalStateDirectory(targetRoot),
                 fileName),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),

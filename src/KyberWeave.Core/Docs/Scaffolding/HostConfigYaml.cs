@@ -587,6 +587,161 @@ public static partial class HostConfigYaml
         return InsertGlobalBlock(lines, arbiter, blockIndent, blockEnd, targets);
     }
 
+    /// <summary>Returns <paramref name="yaml"/> with <paramref name="target"/> removed from <c>arbiter.global.targets</c>.</summary>
+    public static string WithoutArbiterGlobalTarget(string yaml, string target)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+        int arbiter = IndexOfTopLevelKey(lines, "arbiter");
+        if (arbiter < 0)
+            return yaml;
+
+        int blockEnd = EndOfBlock(lines, arbiter);
+        string blockIndent = BlockIndent(lines, arbiter, blockEnd);
+
+        for (int i = arbiter + 1; i < blockEnd; i++)
+        {
+            if (!TrySplitKeyedLine(lines[i], "global", out string lineIndent, out _, out _) ||
+                !string.Equals(lineIndent, blockIndent, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            int globalIndex = i;
+            int globalEnd = EndOfBlock(lines, globalIndex);
+            string globalIndent = BlockIndent(lines, globalIndex, globalEnd);
+
+            for (int j = globalIndex + 1; j < globalEnd; j++)
+            {
+                if (!TrySplitKeyedLine(lines[j], "targets", out string targetsIndent, out _, out string rest) ||
+                    !string.Equals(targetsIndent, globalIndent, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                (string value, _) = SplitScalarAndSuffix(rest);
+                if (value.StartsWith('['))
+                {
+                    return RemoveTargetFromFlowSequence(yaml, lines, j, value, target);
+                }
+
+                if (value.Length > 0)
+                {
+                    throw new InvalidDataException(
+                        "arbiter.global.targets is a scalar, not a sequence.");
+                }
+
+                return RemoveTargetFromBlockSequence(yaml, lines, j, globalIndent, globalEnd, target);
+            }
+
+            return yaml;
+        }
+
+        return yaml;
+    }
+
+    private static string RemoveTargetFromFlowSequence(
+        string originalYaml,
+        HostConfigLines lines,
+        int keyIndex,
+        string value,
+        string target)
+    {
+        if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
+        {
+            throw new InvalidDataException(
+                "arbiter.global.targets looks like a flow sequence but its brackets do not balance. Fix the list by hand.");
+        }
+
+        if (!TryParseSequenceAllowEmpty("value: " + flow, out IReadOnlyList<string> existingTargets))
+        {
+            throw new InvalidDataException(
+                "arbiter.global.targets looks like a flow sequence but could not be read. Fix the list by hand.");
+        }
+
+        if (!existingTargets.Any(t => string.Equals(t, target, StringComparison.OrdinalIgnoreCase)))
+            return originalYaml;
+
+        List<string> remaining = existingTargets
+            .Where(t => !string.Equals(t, target, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        int depth = 0;
+        int closeLineIndex = keyIndex;
+        for (int i = keyIndex; i < lines.Count; i++)
+        {
+            string lineText = i == keyIndex ? value : lines[i];
+            int prevDepth = depth;
+            depth += FlowBracketDepth(lineText);
+            if ((depth == 0 && prevDepth != 0) || (i == keyIndex && depth == 0))
+            {
+                closeLineIndex = i;
+                break;
+            }
+        }
+
+        int closeBracketCol = lines[closeLineIndex].LastIndexOf(']');
+        string suffix = closeBracketCol >= 0 ? lines[closeLineIndex][(closeBracketCol + 1)..] : string.Empty;
+
+        TrySplitKeyedLine(lines[keyIndex], "targets", out _, out string prefix, out _);
+
+        for (int i = closeLineIndex; i > keyIndex; i--)
+        {
+            lines.RemoveAt(i);
+        }
+
+        string formatted = remaining.Count == 0
+            ? "[]"
+            : "[" + string.Join(", ", remaining.Select(QuoteScalar)) + "]";
+
+        string separator = prefix.EndsWith(':') ? " " : string.Empty;
+        lines[keyIndex] = prefix + separator + formatted + suffix;
+        return lines.ToText();
+    }
+
+    private static string RemoveTargetFromBlockSequence(
+        string originalYaml,
+        HostConfigLines lines,
+        int keyIndex,
+        string blockIndent,
+        int blockEnd,
+        string target)
+    {
+        bool changed = false;
+        for (int i = keyIndex + 1; i < blockEnd; i++)
+        {
+            string trimmed = lines[i].TrimStart();
+            if (trimmed.Length == 0 || trimmed[0] == '#')
+                continue;
+
+            int indent = lines[i].Length - trimmed.Length;
+            if (indent < blockIndent.Length)
+                break;
+
+            if (trimmed[0] == '-')
+            {
+                string afterDash = trimmed[1..].TrimStart();
+                (string itemValue, _) = SplitScalarAndSuffix(afterDash);
+                itemValue = UnquoteScalar(itemValue);
+                if (string.Equals(itemValue, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    lines.RemoveAt(i);
+                    changed = true;
+                    i--;
+                    blockEnd--;
+                }
+            }
+            else if (indent <= blockIndent.Length)
+            {
+                break;
+            }
+        }
+
+        return changed ? lines.ToText() : originalYaml;
+    }
+
     private static string MergeTargetFlowSequence(
         string originalYaml,
         HostConfigLines lines,
@@ -1501,6 +1656,15 @@ public static partial class HostConfigYaml
             {
                 AppendAt(index, item, _newline);
                 index++;
+            }
+        }
+
+        public void RemoveAt(int index)
+        {
+            if (index >= 0 && index < _content.Count)
+            {
+                _content.RemoveAt(index);
+                _terminators.RemoveAt(index);
             }
         }
 

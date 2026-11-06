@@ -346,18 +346,63 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         SquadArbiterWiring wiring =
             SquadCommandComposition.ResolveArbiterWiring(configLoad.Config.Arbiter);
 
-        SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
-        SquadInstallRequest request = new(
-            root,
-            scope,
-            [target],
-            DryRun: settings.DryRun,
-            Arbiter: wiring);
+        if (scope == SquadDeploymentScope.Global && !settings.DryRun)
+        {
+            ISquadGlobalRootResolver globalRootsResolver = new SquadGlobalRoots(
+                _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
+                ArbiterCommandComposition.HomeDirectory());
+            try
+            {
+                string targetGlobalRoot = globalRootsResolver.ResolveGlobalRoot(target);
+                string shimPath = Path.Combine(targetGlobalRoot, "plugins", "kyber-arbiter.ts");
+                if (File.Exists(shimPath) && (existingReceipt is null || !existingReceipt.Files.Any(f => string.Equals(f.RelativePath, "plugins/kyber-arbiter.ts", StringComparison.Ordinal))))
+                {
+                    File.Delete(shimPath);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
 
+        SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
         SquadLifecycleResult result;
         try
         {
-            result = lifecycle.InstallAsync(request, cancellationToken).GetAwaiter().GetResult();
+            if (existingReceipt is not null)
+            {
+                HashSet<string> existingTargetTokens = existingReceipt.Files
+                    .Select(f => f.Target)
+                    .Concat(existingReceipt.Blocks.Select(b => b.Target))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToHashSet(StringComparer.Ordinal);
+                List<SquadTarget> combinedTargets = [target];
+                foreach (string token in existingTargetTokens)
+                {
+                    if (SquadTargetCatalog.TryResolve(token, out SquadTarget existingTarget) && !combinedTargets.Contains(existingTarget))
+                    {
+                        combinedTargets.Add(existingTarget);
+                    }
+                }
+
+                SquadUpdateRequest updateRequest = new(
+                    root,
+                    scope,
+                    combinedTargets,
+                    DryRun: settings.DryRun,
+                    Arbiter: wiring);
+                result = lifecycle.UpdateAsync(updateRequest, cancellationToken).GetAwaiter().GetResult();
+            }
+            else
+            {
+                SquadInstallRequest request = new(
+                    root,
+                    scope,
+                    [target],
+                    DryRun: settings.DryRun,
+                    Arbiter: wiring);
+                result = lifecycle.InstallAsync(request, cancellationToken).GetAwaiter().GetResult();
+            }
         }
         catch (SquadDeploymentConflictException ex)
         {
