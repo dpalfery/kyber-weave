@@ -840,6 +840,40 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains("forged: wired", execution.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <c>docs mcp-wire</c> refuses a target that holds a proven old key for a server it would add, with
+    /// zero bytes, and its hint names <c>docs mcp-migrate</c>. The wire would otherwise add the new name
+    /// beside the old entry the same launch already holds.
+    /// </summary>
+    [Fact]
+    public void WireRefusesBesideAProvenOldKeyAndNamesTheMigrateVerb()
+    {
+        WriteDeclaration();
+        WriteJson(
+            ".factory/mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = BinaryPath,
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            });
+        byte[] before = File.ReadAllBytes(InRepo(".factory/mcp.json"));
+
+        CapturedConsoleExecution<int> execution = Wire(Factory);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(".factory/mcp.json")));
+        Assert.Null(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+    }
+
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
             null!,

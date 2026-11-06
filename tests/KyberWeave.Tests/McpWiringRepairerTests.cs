@@ -312,6 +312,49 @@ public sealed class McpWiringRepairerTests : IDisposable
     }
 
     /// <summary>
+    /// A file holding a proven old key beside a server the repair would add is refused with the rule id and
+    /// zero bytes, and the hint names the migrate verb. Wiring the new name beside the old one would leave
+    /// one server under two names in the same file.
+    /// </summary>
+    [Fact]
+    public void AProvenOldKeyBesideAServerItWouldAddIsRefusedWithZeroBytesAndNamesTheMigrateVerb()
+    {
+        McpConfig config = McpWiringFixture.Declare(new RequiredMcpServer(
+            "kw-docs",
+            [Path.Combine(Bin, BinaryName), "--repo-root", "."],
+            McpProvenance.FirstParty));
+        Directory.CreateDirectory(Path.Combine(Repo, ".factory"));
+        McpWiringFixture.WriteText(
+            Repo,
+            ".factory/mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    [ServerName] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = Path.Combine(Bin, BinaryName),
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            }.ToJsonString());
+        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json"));
+
+        McpWiringRepairReport report = McpWiringRepairer.Repair(
+            Repo,
+            config,
+            new LaunchCommandResolver(Repo, []),
+            [Factory]);
+
+        McpWiringFileChange change = Assert.Single(report.Files);
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.Equal(RefusalCode, change.Code);
+        Assert.Contains("docs mcp-migrate", change.Hint ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
+    }
+
+    /// <summary>
     /// An entry with the same server name is refused, never merged or overwritten (5.5), and the
     /// file is left byte-identical.
     /// </summary>

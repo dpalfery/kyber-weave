@@ -836,6 +836,38 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             execution.Result == 0,
             $"docs init exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
 
+    /// <summary>
+    /// A proven old key is printed as <c>KW-MCP-WIRE-007</c> with the migrate verb, is not offered as a
+    /// wiring fix for the harness that holds it, and does not move <c>docs init</c>'s exit code.
+    /// </summary>
+    [Fact]
+    public void AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        DeclareServers(
+            repository,
+            """
+            kw-docs:
+              command: [kyber-weave-mcp, --repo-root, .]
+              provenance: first-party
+              level: required
+            """);
+        WriteFile(
+            repository,
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        string notice = TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
+        Assert.Contains(CursorConfigRelativePath, notice, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+    }
+
     private static string[] OutputLines(string output) =>
         [.. output.Split('\n').Select(line => line.TrimEnd('\r'))];
 

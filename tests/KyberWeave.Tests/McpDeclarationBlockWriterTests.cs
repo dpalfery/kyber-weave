@@ -29,7 +29,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
           # into the harnesses it detects; the declaration is host-owned from the moment it exists
           # and docs init never edits it again.
           required-servers:
-            kyber-weave:
+            kw-docs:
               command: [kyber-weave-mcp, --repo-root, .]
               provenance: first-party
               level: required
@@ -81,8 +81,10 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         KeyValuePair<string, RequiredMcpServer> declared = Assert.Single(config.Mcp.RequiredServers);
 
-        Assert.Equal("kyber-weave", declared.Key);
-        Assert.Equal("kyber-weave", declared.Value.Name);
+        // The scaffold names the shipped server kw-docs. The old kyber-weave key is retired and only
+        // existing installs carry it, so a fresh docs init must never write it.
+        Assert.Equal("kw-docs", declared.Key);
+        Assert.Equal("kw-docs", declared.Value.Name);
         Assert.Equal(["kyber-weave-mcp", "--repo-root", "."], declared.Value.Command);
         Assert.Equal(McpProvenance.FirstParty, declared.Value.Provenance);
         Assert.Equal(McpRequirementLevel.Required, declared.Value.Level);
