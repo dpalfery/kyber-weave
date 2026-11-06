@@ -413,10 +413,11 @@ public static class JsonServerSplice
         }
 
         // The member is the last one and has no comma of its own, so the comma that separates it
-        // from its neighbour is the one before it.
+        // from its neighbour is the one before it. The separator can be on an earlier line, so the
+        // walk back crosses the newline and the indentation as well as horizontal whitespace.
         int comma = start;
 
-        while (comma > 0 && body[comma - 1] is (byte)' ' or (byte)'\t')
+        while (comma > 0 && body[comma - 1] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
             comma--;
 
         return comma > 0 && body[comma - 1] == (byte)','

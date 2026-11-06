@@ -248,6 +248,28 @@ public sealed class JsonServerSpliceTests
     }
 
     /// <summary>
+    /// Removing the last member of a multi-line map takes the comma that separated it from the member
+    /// before it. A removal that left the comma would produce a document a strict JSON reader rejects,
+    /// even though the lenient re-parse used to verify the splice accepts it.
+    /// </summary>
+    [Fact]
+    public void RemovingTheLastMemberTakesThePrecedingCommaWithIt()
+    {
+        byte[] original = Encoding.UTF8.GetBytes("{\n  \"servers\": {\n    \"keep\": {},\n    \"drop\": {}\n  }\n}\n");
+
+        JsonSplicePlan plan = JsonServerSplice.PlanRemoval(original, [VsCodeServersKey], "drop");
+
+        Assert.Equal(JsonSpliceOutcome.Removed, plan.Outcome);
+        Assert.Equal(
+            "{\n  \"servers\": {\n    \"keep\": {}\n  }\n}\n",
+            Encoding.UTF8.GetString(plan.Document));
+
+        // Strict read: the harness's own parser does not accept a trailing comma.
+        using JsonDocument strict = JsonDocument.Parse(plan.Document);
+        Assert.True(strict.RootElement.GetProperty(VsCodeServersKey).TryGetProperty("keep", out _));
+    }
+
+    /// <summary>
     /// An entry already present is refused rather than merged or overwritten (5.5): the document is
     /// returned byte-identical and the plan names the server it would have clobbered.
     /// </summary>
