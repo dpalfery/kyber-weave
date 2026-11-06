@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "type": "stdio",
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."],
