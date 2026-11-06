@@ -96,16 +96,14 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
     }
 
     [Fact]
-    public void Render_Pi_EmitsBareFunctionDefaultExport()
+    public void Render_Pi_ThrowsInsteadOfEmittingAnOpenCodeShapedBody()
     {
-        // Pi's extension loader rejects a non-function default export
-        // (typeof factory !== "function" returns undefined), so the pi token
-        // must default-export the plugin function itself.
-        string content = ArbiterPluginShim.Render("pi");
-
-        Assert.Contains("export default KyberArbiter;", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("setup: KyberArbiter", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("server: KyberArbiter", content, StringComparison.Ordinal);
+        // Pi's Arbiter is rendered by PiRenderer.RenderArbiterExtension (Pi API,
+        // pi.on tool_call/tool_result), never by this Bun/OpenCode shaped shim.
+        // Default-exporting the Plugin body for "pi" would bind directory to
+        // undefined under the Pi host and register no Pi hooks: fail-open, the
+        // same silent-never-loads class this generator exists to fix.
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render("pi"));
     }
 
     [Fact]

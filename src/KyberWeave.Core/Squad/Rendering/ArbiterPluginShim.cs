@@ -19,10 +19,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// The default export is the shape each harness's loader reads: OpenCode v2
 /// reads only the default export and accepts <c>{ id, setup }</c>; Kilo's fork
-/// reads <c>{ id, server }</c>; Pi's extension loader requires the default
-/// export to be a bare function. Emitting only the named
-/// <c>KyberArbiter</c> export left the plugin unloaded under OpenCode v2
-/// (fail-open) because its loader never saw a default export.
+/// reads <c>{ id, server }</c>. Pi is not rendered by this generator (its
+/// Arbiter is <c>PiRenderer.RenderArbiterExtension</c>, in the Pi API) and is
+/// rejected as a token. Emitting only the named <c>KyberArbiter</c> export
+/// left the plugin unloaded under OpenCode v2 (fail-open) because its loader
+/// never saw a default export.
 /// </para>
 /// <para>
 /// The shim spawns by argv with <c>Bun.spawn</c> and no shell, writes the envelope
@@ -70,18 +71,18 @@ public static class ArbiterPluginShim
         }
 
         // The default export is the only thing each harness loader reads, and the
-        // three loaders disagree on its shape: OpenCode v2 wants { id, setup },
-        // Kilo's fork wants { id, server }, and Pi's loader requires a bare
-        // function. An unknown harness has no known loader contract, so it is
-        // rejected rather than guessed at with another harness's shape.
+        // two loaders disagree on its shape: OpenCode v2 wants { id, setup },
+        // Kilo's fork wants { id, server }. An unknown harness (including pi,
+        // whose Arbiter is a separate Pi-API renderer) has no known loader
+        // contract here, so it is rejected rather than guessed at with another
+        // harness's shape.
         string defaultExport = harnessToken switch
         {
             "opencode" => "export default {\n  id: \"kyber-arbiter\",\n  setup: KyberArbiter,\n};",
             "kilo" => "export default {\n  id: \"kyber-arbiter\",\n  server: KyberArbiter,\n};",
-            "pi" => "export default KyberArbiter;",
             _ => throw new ArgumentException(
                 $"Arbiter plugin harness token '{harnessToken}' has no known loader " +
-                $"default-export shape: expected one of opencode, kilo, pi.",
+                $"default-export shape: expected one of opencode, kilo.",
                 nameof(harnessToken)),
         };
 
