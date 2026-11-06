@@ -1154,18 +1154,18 @@ builds from it. The tightest figures anyone reports are:
 
 | Bound | Limit | Source |
 |---|---|---|
-| Tool name | `^[a-zA-Z0-9_-]{1,64}$`, and no `__` anywhere in it | the protocol's tool-name grammar |
-| Qualified `mcp__<server>__<tool>` | at most 64 characters | the qualified form a client registers |
-| Server and tool together | at most 60 characters | the sum that fits the qualified form |
+| Tool name | `^[a-zA-Z0-9_-]{1,64}$`, and no `__` — in the tool name or the server key | the protocol's tool-name grammar |
+| Qualified `mcp__<server>__<tool>` | at most 64 characters | older Claude Code reports and third-party documentation |
+| Server and tool together | at most 60 characters | Cursor's limit, reported in its forum rather than its documentation |
 
-These are the tightest figures any client reports, not a figure every vendor has verified, so the
-names are chosen against the smallest of them rather than the one that happens to be documented.
-The current maxima sit inside them: the longest tool name is 46 characters
-(`docs_find_duplicates_conflicts_ambiguous_terms` and
+These are the tightest figures any client reports, not a figure every vendor has verified — two of
+the three are not vendor documentation at all — so the names are chosen against the smallest of
+them rather than the one that happens to be written down. The current maxima sit inside them: the
+longest tool name is 46 characters (`docs_find_duplicates_conflicts_ambiguous_terms` and
 `dash_read_captured_run_session_or_turn_context`), the longest server-plus-tool pair is 55
 (`kw-arbiter` with `arbiter_check_configuration_and_key_readiness`), and the longest qualified name
-is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three, so
-a name that would break a client breaks the build instead.
+is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three
+bounds (`McpToolNameContractTests`), so a name that would break a client breaks the build instead.
 
 The names are long because a tool name is the routing metadata a model reads before it decides
 whether to look at the description at all, and `docs_query` or `arbiter_rules` states nothing about
