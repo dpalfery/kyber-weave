@@ -130,7 +130,7 @@ public sealed class SquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => ResolveProjectStateDirectory(targetRoot),
-            SquadDeploymentScope.Global => ResolveGlobalStateDirectory(),
+            SquadDeploymentScope.Global => ResolveGlobalStateDirectory(targetRoot),
             SquadDeploymentScope.Instance => ResolveInstanceStateDirectory(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
@@ -800,10 +800,18 @@ public sealed class SquadStateStore
 
     private string ResolveGlobalStateDirectory(string? targetRoot = null)
     {
-        string root = !string.IsNullOrWhiteSpace(targetRoot)
-            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot))
-            : ResolveHomeStateRoot();
-        return ResolveDirectoryUnder(root, GlobalStateRelativeDirectory);
+        if (!string.IsNullOrWhiteSpace(targetRoot))
+        {
+            string candidateRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot));
+            string candidateDir = Path.Combine(candidateRoot, GlobalStateRelativeDirectory);
+            if (File.Exists(Path.Combine(candidateDir, ReceiptFileName)) ||
+                File.Exists(Path.Combine(candidateDir, LockFileName)))
+            {
+                return ResolveDirectoryUnder(candidateRoot, GlobalStateRelativeDirectory);
+            }
+        }
+
+        return ResolveDirectoryUnder(ResolveHomeStateRoot(), GlobalStateRelativeDirectory);
     }
 
     private string ResolveInstanceStateDirectory(string targetRoot)
