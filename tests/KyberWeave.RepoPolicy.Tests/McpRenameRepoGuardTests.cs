@@ -72,8 +72,11 @@ public sealed class McpRenameRepoGuardTests
     // tail is restricted to a tool-shaped identifier or a wildcard on purpose — without that, the
     // guard matches the `.kyber-weave/kyber-weave.yml` path and the repository URL
     // `github.com/dpalfery/kyber-weave/issues`, neither of which is a tool namespace.
+    // The lookbehind rejects the `.kyber-weave/` directory: it is preceded by a dot, so it is a path
+    // glob rather than a tool namespace. A grant at the start of a string, after `[`, `,` or a space
+    // still matches.
     private static readonly Regex RetiredToolIdPattern = new(
-        @"\bkyber-weave[/_](?:\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)",
+        @"(?<![\w.])kyber-weave[/_](?:\*|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)",
         RegexOptions.CultureInvariant);
 
     // The host-qualified server namespace: `mcp__kyber-weave__docs_explore` on Claude and Command
@@ -143,7 +146,9 @@ public sealed class McpRenameRepoGuardTests
         };
 
     // The scope the rename has to reach: source, harness scripts, the squad product, the shipped
-    // skills and documentation, plus the root markdown a reader meets first.
+    // skills and documentation, plus every other tracked surface a consumer reads — the workflow
+    // templates, the install and guard scripts, the samples, and the distribution manifests. A
+    // grant or a tool name in any of them is shipped text, not history.
     private static readonly string[] InScopeRoots =
     [
         "src/",
@@ -151,7 +156,13 @@ public sealed class McpRenameRepoGuardTests
         "dash/scripts/",
         "products/",
         ".apm/",
-        "docs/"
+        "docs/",
+        "templates/",
+        "scripts/",
+        "samples/",
+        "homebrew/",
+        "npm/",
+        ".github/"
     ];
 
     // `docs/plans/` is the working plan, which has to name what it renames; `docs/archive/` is the
@@ -183,7 +194,14 @@ public sealed class McpRenameRepoGuardTests
         new AllowListEntry(
             "docs/adr/0058-mcp-servers-and-tools-are-named-by-purpose.md",
             "The decision record that decided the rename. Its subject is the retired naming, so it " +
-            "states the retired names.")
+            "states the retired names."),
+        new AllowListEntry(
+            "npm/package.json",
+            "Its `bin` map names the shipped executables — kyber-weave, kyber-weave-mcp and " +
+            "kyber-weave-arbiter — which the rename keeps. The file declares no MCP server key."),
+        new AllowListEntry(
+            "npm/package-lock.json",
+            "Generated mirror of npm/package.json's `bin` map: executable names, which the rename keeps.")
     ];
 
     /// <summary>
@@ -430,6 +448,7 @@ public sealed class McpRenameRepoGuardTests
         Assert.Empty(FindRetiredForms("command: kyber-weave-arbiter serve --repo-root ."));
         Assert.Empty(FindRetiredForms("kyber-weave docs validate ."));
         Assert.Empty(FindRetiredForms("edit .kyber-weave/kyber-weave.yml, then `.kyber-weave/squad.lock.yml`"));
+        Assert.Empty(FindRetiredForms("case \"$file\" in .kyber-weave/*) needs_docs=1 ;; esac"));
         Assert.Empty(FindRetiredForms("https://github.com/dpalfery/kyber-weave/issues/386"));
 
         // The doctor check id is a stable contract and outlives the rename.
@@ -455,7 +474,10 @@ public sealed class McpRenameRepoGuardTests
     [InlineData("tests/KyberWeave.RepoPolicy.Tests/UpstreamSeveranceTests.cs", false)]
     [InlineData("tests/KyberWeave.Tests/McpLiveProbeTests.cs", false)]
     [InlineData("dash/src/analysis/query/aggregate.test.ts", false)]
-    [InlineData("scripts/proc-guard.sh", false)]
+    [InlineData("scripts/proc-guard.sh", true)]
+    [InlineData("templates/github-actions/kyber-weave-docs-gate.yml", true)]
+    [InlineData(".github/workflows/ci.yml", true)]
+    [InlineData("samples/agents/README.md", true)]
     public void TheLegacyScanCoversTheSurfacesItClaims(string repoRelativePath, bool inScope)
     {
         Assert.Equal(inScope, IsInScope(repoRelativePath));
