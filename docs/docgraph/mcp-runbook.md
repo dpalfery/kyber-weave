@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-05
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -18,6 +18,8 @@ code-refs:
   - JsonServerSplice
   - LaunchCommandResolver
   - McpConfigurationLink
+  - McpServerNames
+  - McpServerRenamer
   - McpWiringFix
   - McpWiringFixes
   - McpWiringInspector
@@ -69,7 +71,7 @@ keys differ, and they differ more than you would expect:
 | [opencode](#opencode) | `opencode.json` | `mcp` | Command and arguments are one array |
 | [ZCode](#zcode) | `zcode.json`, or `.zcode/config.json` | `mcp.servers` | A nested key path, and the files are found by walking up to the worktree root |
 | [Command Code](#command-code) | `.mcp.json` (repo root) | `mcpServers` | Same shape as Claude Code; a subagent reaches a tool only when its own `tools` list names it |
-| [Kilo](#kilo) | `kilo.jsonc` | `mcp` | Per-agent reach is the agent frontmatter `permission` map entry `kyber-weave_*: allow` — an approval grant, not isolation |
+| [Kilo](#kilo) | `kilo.jsonc` | `mcp` | Per-agent reach is the agent frontmatter `permission` map entry `kw-docs_*: allow` — an approval grant, not isolation |
 | [Antigravity](#antigravity) | `.agents/mcp_config.json` (workspace) | `mcpServers` | The agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
 | [Pi](#pi) | `.mcp.json` (repo root), or `~/.config/mcp/mcp.json` | — | Read by the `pi-mcp-adapter` extension (6.0.0 or later) in the adapter's own schema; a project-scoped entry needs a trust approval on first use |
 | [Warp](#warp) | Warp's own MCP settings | — | Squad's Warp surface is role skills, which carry no tool scoping |
@@ -92,7 +94,7 @@ and the failure looks like a server that will not start rather than a missing bi
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "type": "stdio",
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
@@ -104,12 +106,15 @@ and the failure looks like a server that will not start rather than a missing bi
 Or write it from the CLI, which is equivalent:
 
 ```bash
-claude mcp add --scope project kyber-weave -- kyber-weave-mcp --repo-root .
+claude mcp add --scope project kw-docs -- kyber-weave-mcp --repo-root .
 ```
 
 Servers from a committed `.mcp.json` are **not trusted automatically** — a checkout cannot
 approve its own servers. Each user approves once on first run, and the server sits at
-`⏸ Pending approval` in `/mcp` until then.
+`⏸ Pending approval` in `/mcp` until then. After a rename the approval is worth re-checking:
+Claude Code's documentation does not say whether its record is keyed by server name, so
+`claude mcp reset-project-choices` — which resets the project choices outright — is the
+reliable move, and an inference about the key is not a substitute for it.
 
 ### Factory
 
@@ -119,7 +124,7 @@ project. The entry is the same shape as the Claude Code row:
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     }
@@ -138,10 +143,11 @@ So there are two grants, made by two owners, and only one of them is your config
 
 - **The droid-level whitelist** is written by Kyber-Squad's `FactoryRenderer`, into the droid
   file it owns. It is derived from the server names the squad itself declares in the `mcp.json`
-  beside its canonical source — today exactly `kyber-weave`, launched as
+  beside its canonical source — today exactly `kw-docs`, launched as
   `kyber-weave-mcp --repo-root .` — and it is granted to every droid whose capability profile
   allows `filesystem.read`, the pure orchestrator `conductor` included. One of that server's tools
-  is `agent_coding_standards`, and the orchestrator is asked to hold specialists to standards it
+  is `docs_get_coding_standard_for_technology`, and the orchestrator is asked to hold specialists
+  to standards it
   could not otherwise read, so the orchestration reasoning that used to exclude it does not reach
   this server ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). `mcpServers: []`
   remains the fail-closed value for a droid whose profile grants no read entitlement and for a
@@ -155,7 +161,8 @@ So there are two grants, made by two owners, and only one of them is your config
 
 Both have to hold for a dispatched droid to reach the corpus. Wire the file first, then confirm
 the droid names the server — and compare the provenance line rather than trusting the answer, as
-with every other client: call `docs_status`, which takes no arguments, and check that its
+with every other client: call `docs_get_source_repository_and_revision`, which takes no
+arguments, and check that its
 `root=` equals `git rev-parse --show-toplevel`.
 
 **CodeGraph, and the boundary that follows from it.** The same file can launch the CodeGraph
@@ -164,7 +171,7 @@ server:
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     },
@@ -178,14 +185,15 @@ server:
 
 Wiring it is not the same as reaching it from a droid, and this is the boundary worth stating
 plainly rather than implying: a dispatched droid sees **only** the servers its rendered whitelist
-names, and the squad declares only `kyber-weave`. `codegraph_explore` is therefore session-level
+names only `kw-docs`. `codegraph_explore` is therefore session-level
 on Factory today — available to you in the main conversation and not claimed as droid-visible.
 A role that needs it, such as `architect` or `research-agent`, gets it by dispatch from a
 session that has it, not by holding the tool itself. Leave the entry in place for your own use
 and do not read a green droid file as evidence that a droid can resolve symbols.
 
 `docs drift` reads a `.codegraph/` index and reports a missing or unreadable one as critical
-rather than passing, so `docs_drift` called from any client needs that index to exist. In this
+rather than passing, so `docs_detect_drift_between_documents_and_code` called from any client
+needs that index to exist. In this
 repository, `codegraph init .` at the repository root is pre-authorized by the root
 [`AGENTS.md`](../../AGENTS.md); record `git status --short` before and after, because
 initialization can rewrite the marked CodeGraph block there.
@@ -198,7 +206,7 @@ The shape matches Claude Code:
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     }
@@ -219,7 +227,7 @@ agent — `conductor` included — already reaches the server once the file exis
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     }
@@ -240,12 +248,12 @@ Kilo declares MCP servers under an `mcp` key in `kilo.jsonc`
 `permission` map on the agent frontmatter keyed `{server}_{tool}`, with wildcards supported
 (kilo.ai/docs/customize/custom-subagents, read 2026-10-31).
 
-**What Squad emits.** For every agent entitled to `kyber-weave` — `conductor` included —
+**What Squad emits.** For every agent entitled to `kw-docs` — `conductor` included —
 `KiloRenderer` writes one frontmatter key ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)):
 
 ```yaml
 permission:
-  kyber-weave_*: allow
+  kw-docs_*: allow
 ```
 
 An agent outside the entitlement renders no `permission` key at all. That absence is the
@@ -254,22 +262,25 @@ derive, since it declares no MCP capability.
 
 **An approval grant, not isolation.** Kilo's `permission` values are `ask`, `allow`, `deny`, or
 null, and `allow` means the call runs without the ask prompt. It hides nothing: only a `deny` whose
-pattern is `*` removes a tool from the model. The entry above is what keeps the eight `kyber-weave`
+pattern is `*` removes a tool from the model. The entry above is what keeps the eight `kw-docs`
 tools callable from a subagent nobody is watching, because an ask that no one answers fails
 closed. It restricts nothing, and deleting it from a rendered file would not hide the tools — it
 would put the prompt back.
 
 **The hyphen belongs in the key.** Kilo sanitizes the server name only for characters outside
-`[a-zA-Z0-9_-]`, so `kyber-weave` survives verbatim and the server wildcard is `kyber-weave_*`. A
-`kyber_weave_*` spelling parses cleanly and matches nothing. Verified against `@kilocode/cli`
+`[a-zA-Z0-9_-]`, so `kw-docs` survives verbatim and the server wildcard is `kw-docs_*`. A
+`kw_docs_*` spelling parses cleanly and matches nothing. Verified against `@kilocode/cli`
 7.8.18 (`Kilo-Org/kilocode` tag `v7.8.18`) by running Kilo's own matcher:
-`kyber-weave_docs_status` matches `kyber-weave_*`; `kyber_weave_docs_status` does not.
+`kw-docs_docs_get_source_repository_and_revision` matches `kw-docs_*`;
+`kw_docs_docs_get_source_repository_and_revision` does not. The verification predates the rename;
+the rewrite above keeps its outcome — the hyphen is still in the server key, and the sanitizer
+still leaves it alone.
 
-**Your half:** the server entry in `kilo.jsonc`'s `mcp` key, launched as
+**Your half:** the server entry in `kilo.jsonc`'s `mcp` key under the key `kw-docs`, launched as
 `kyber-weave-mcp --repo-root .`. An agent file cannot add a server and `squad install` writes no
 harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the root
-rather than assuming it — call `docs_status` (it takes no arguments) and confirm its `root=` equals
-`git rev-parse --show-toplevel` in the repository you meant.
+rather than assuming it — call `docs_get_source_repository_and_revision` (it takes no arguments)
+and confirm its `root=` equals `git rev-parse --show-toplevel` in the repository you meant.
 
 Do not hand-add a permission key to a rendered agent file: install and update own those bytes.
 
@@ -281,7 +292,7 @@ Workspace-scoped, at `.agents/mcp_config.json` in the repository
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     }
@@ -292,13 +303,13 @@ Workspace-scoped, at `.agents/mcp_config.json` in the repository
 MCP tools default to **Ask** on Antigravity, so approval goes through that client's
 `mcp(server/*)` policy patterns rather than through an agent file.
 
-**What Squad emits.** For every agent entitled to `kyber-weave` — `conductor` included — the
+**What Squad emits.** For every agent entitled to `kw-docs` — `conductor` included — the
 renderer adds one array entry to the agent file under `.agents/agents/<name>/agent.md`
 ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)):
 
 ```yaml
 mcpServers:
-  - name: kyber-weave
+  - name: kw-docs
     command: kyber-weave-mcp
     args: [--repo-root, .]
 ```
@@ -312,7 +323,7 @@ and which capability the entitlement rests on.
 **The entry shape is the probed one.** `{name, command, args}` was called successfully against
 `agy` 1.4.12, the live-validation discipline
 [ADR 0022](../adr/0022-antigravity-native-agents.md) established for every Antigravity capability.
-The single-key map spelling (`- kyber-weave: {command, args}`) listed and ran but was never
+The single-key map spelling (`- kw-docs: {command, args}`) listed and ran but was never
 actually invoked, so it is not emitted.
 
 **Three moves not to make, and why the shape must match exactly.** An MCP tool name must never be
@@ -328,15 +339,15 @@ the per-agent entry — keep the workspace file pointing at the same root.
 
 **Your half, beyond the agents:** the workspace `.agents/mcp_config.json` above has to name the
 server, and that client's own policy patterns decide whether a call is approved. Then compare the
-provenance rather than trusting the answer: call `docs_status` and check that its `root=` equals
-`git rev-parse --show-toplevel`.
+provenance rather than trusting the answer: call `docs_get_source_repository_and_revision` and
+check that its `root=` equals `git rev-parse --show-toplevel`.
 
 ### Pi
 
 Pi reaches MCP through the `pi-mcp-adapter` extension, which reads its servers from a project
 `.mcp.json`, a user-global `~/.config/mcp/mcp.json` or `~/.agents/mcp.json`, or Pi's own
 agent-directory `mcp.json`. A project-scoped server needs a trust approval the first time the
-project uses it. Declare `kyber-weave` there launched as `kyber-weave-mcp --repo-root .`; as on
+project uses it. Declare `kw-docs` there launched as `kyber-weave-mcp --repo-root .`; as on
 every other client, `squad install` writes none of those files, and the schema of the entry is the
 adapter's own — read the package's documentation for the key rather than copying a rendered agent
 file, which carries no server definition at all.
@@ -350,45 +361,47 @@ order:
 
 ```text
 ext:pi-mcp-adapter/mcp
-ext:pi-mcp-adapter/mcp__kyber_weave__agent_coding_standards
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_analysis_candidates
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_drift
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_explore
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_for_symbol
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_glossary
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_status
-ext:pi-mcp-adapter/mcp__kyber_weave__docs_validate
+ext:pi-mcp-adapter/mcp__kw_docs__docs_answer_question_from_repo_documentation
+ext:pi-mcp-adapter/mcp__kw_docs__docs_detect_drift_between_documents_and_code
+ext:pi-mcp-adapter/mcp__kw_docs__docs_find_documents_citing_code_symbol
+ext:pi-mcp-adapter/mcp__kw_docs__docs_find_duplicates_conflicts_ambiguous_terms
+ext:pi-mcp-adapter/mcp__kw_docs__docs_get_coding_standard_for_technology
+ext:pi-mcp-adapter/mcp__kw_docs__docs_get_source_repository_and_revision
+ext:pi-mcp-adapter/mcp__kw_docs__docs_look_up_glossary_term_definition
+ext:pi-mcp-adapter/mcp__kw_docs__docs_validate_governed_document_schema
 ```
 
 The emitted `tools` value is one CSV line: the capability-derived built-in names first, then the
 agent's own declared `pi-tools`, then the derived entries above. An agent that already declares one
 of them renders it once, and `research-agent` keeps its hand-authored `context7` pair beside the
-derived `kyber-weave` entries.
+derived `kw-docs` entries.
 
 **The namespace maps the hyphen to an underscore.** The adapter names a tool
 `mcp__<namespace>__<tool>` and maps every character outside `[A-Za-z0-9_]` to `_` in the server
-namespace first, so `kyber-weave` is reached as `kyber_weave`. An entry spelled
-`mcp__kyber-weave__<tool>` names no registered Pi tool. This differs from Claude, ZCode, Devin, and
+namespace first, so `kw-docs` is reached as `kw_docs`. An entry spelled
+`mcp__kw-docs__<tool>` names no registered Pi tool. This differs from Claude, ZCode, Devin, and
 Command Code on purpose: those pass the server name through verbatim, and Pi does not.
 
 **Version floor: `pi-mcp-adapter` 6.0.0, current release 7.0.0.** The deferred-tool surface this
 naming belongs to arrived in 6.0.0, whose changelog first records tools becoming a deferred tool
 named `mcp__<server>__<tool>`; 7.0.0 is the supported target. On 5.x there is no per-tool deferred
-registration at all — the tools would be named `kyber-weave_agent_coding_standards` — so the proxy
+registration at all — the tools would be named
+`kw-docs_docs_get_coding_standard_for_technology` — so the proxy
 entry `ext:pi-mcp-adapter/mcp` still works and only the enumerable per-tool names resolve to
 nothing. Upgrade the adapter rather than editing the names.
 
 **The lowered primary agent is the one exception.** `conductor` on Pi is a skill at
 `.pi/skills/conductor/SKILL.md`, and skill frontmatter carries no `tools` or `extensions` key, so
-the overlay is structurally inexpressible there. Its degradation record names `kyber-weave` and
+the overlay is structurally inexpressible there. Its degradation record names `kw-docs` and
 says the entry point reaches the server only through the session it runs in — the same reading as
 Devin's lowered conductor. Every entitled subagent file carries the full overlay.
 
 **What remains an owner probe** is the in-session listing: that a live session shows these names
 and answers a call. The spelling is not a probe — it was established by executing the adapter's
 published naming code over the roster and corroborated by a live MCP `tools/list`, where the
-adapter's own `doctor` reported `kyber-weave: ok, 8 tools`. Then compare provenance as everywhere
-else: call `docs_status`, whose `root=` must equal `git rev-parse --show-toplevel`.
+adapter's own `doctor` reported `kyber-weave: ok, 8 tools` — the report was read before the
+rename and names the key as it then stood. Then compare provenance as everywhere else: call
+`docs_get_source_repository_and_revision`, whose `root=` must equal `git rev-parse --show-toplevel`.
 
 ### Warp
 
@@ -407,7 +420,7 @@ at the root, and the key is **`servers`**, not `mcpServers`.
 ```json
 {
   "servers": {
-    "kyber-weave": {
+    "kw-docs": {
       "type": "stdio",
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "${workspaceFolder}"],
@@ -432,7 +445,7 @@ configuration**, not in a file in the tree. `type` and `tools` are both required
 ```json
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "type": "local",
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."],
@@ -469,7 +482,7 @@ TOML, not JSON, in `~/.codex/config.toml` — or `.codex/config.toml` in a trust
 Note the underscore: the table is `mcp_servers`, not `mcpServers`.
 
 ```toml
-[mcp_servers.kyber-weave]
+[mcp_servers.kw-docs]
 command = "kyber-weave-mcp"
 args = ["--repo-root", "/path/to/your/repo"]
 startup_timeout_sec = 10
@@ -478,7 +491,7 @@ startup_timeout_sec = 10
 Or from the CLI:
 
 ```bash
-codex mcp add kyber-weave -- kyber-weave-mcp --repo-root /path/to/your/repo
+codex mcp add kw-docs -- kyber-weave-mcp --repo-root /path/to/your/repo
 ```
 
 Codex has no workspace-variable substitution, so an absolute path is the only reliable
@@ -495,7 +508,7 @@ and the environment key is `environment`, not `env`:
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "kyber-weave": {
+    "kw-docs": {
       "type": "local",
       "command": ["kyber-weave-mcp", "--repo-root", "."],
       "enabled": true,
@@ -526,7 +539,7 @@ an entry inside `mcp.servers` is not pinned anywhere in this repository**, so no
 printed here and none is written: an invented body produces a configuration ZCode cannot
 load, which is worse than a step that is visibly the operator's. Read the body's keys from
 ZCode's own `mcpSchema` — the source the 2026-09-21 verification used — and declare the
-server named `kyber-weave` there, launched as `kyber-weave-mcp --repo-root .`.
+server named `kw-docs` there, launched as `kyber-weave-mcp --repo-root .`.
 
 The user tier (`<storage>/cli/config.json`) is **user scope**: the check never reads it and
 the repair never writes it. A server wired only there is reported as not wired for the
@@ -608,7 +621,10 @@ until the invalid config is fixed; they do not analyze on defaults.
 The recipes above are written by hand, one file and one key path at a time, and nothing
 above notices when one of them is missing. That gap is what the check and the two repair
 commands close: the repository declares which servers its agent instructions rely on,
-`docs init` reports where the declaration is not honoured, and a named repair writes it.
+`docs init` reports where the declaration is not honoured, and a named repair writes it. The keys
+themselves were renamed in this release, which is a separate command's job:
+[`docs mcp-migrate`](#docs-mcp-migrate) renames an old key where it can prove the entry is this
+product's, and reports every entry it cannot.
 
 ### The declaration
 
@@ -619,7 +635,7 @@ configuration every other setting lives in, and the full schema is in
 ```yaml
 mcp:
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required
@@ -661,10 +677,10 @@ retired-skill warnings and before its `Next:` block, and prints one unfolded sec
 
 ```text
 MCP wiring:
-  ok    factory: kyber-weave wired
-  warn  KW-MCP-WIRE-001 cursor: server 'kyber-weave' is not wired (.cursor/mcp.json)
+  ok    factory: kw-docs wired
+  warn  KW-MCP-WIRE-001 cursor: server 'kw-docs' is not wired (.cursor/mcp.json)
         Fix: kyber-weave docs mcp-wire --target cursor
-  warn  KW-MCP-WIRE-003 factory: server 'kyber-weave' is wired but 'kyber-weave-mcp' is not on PATH
+  warn  KW-MCP-WIRE-003 factory: server 'kw-docs' is wired but 'kyber-weave-mcp' is not on PATH
         This Kyber-Weave installation is broken; run: kyber-weave update
   info  KW-MCP-WIRE-004 claude-code: not checked (no '.mcp.json' and no marker to detect it)
 ```
@@ -818,8 +834,8 @@ kyber-weave docs mcp-wire [path] [--target <targets>] [--dry-run]
   the real run would have exited:
 
   ```text
-    would create .factory/mcp.json (factory) adding kyber-weave
-    would insert into .vscode/mcp.json (vscode) adding kyber-weave
+    would create .factory/mcp.json (factory) adding kw-docs
+    would insert into .vscode/mcp.json (vscode) adding kw-docs
   ```
 
   The real run prints the same lines with `created` and `inserted into` in place of `would
@@ -855,6 +871,63 @@ that cannot be read, that was written under another schema version, or whose sha
 cannot trust — a null file list, a record with no path or no digest — is treated as an empty
 receipt instead: Kyber-Weave only removes what it can show it wrote, so a receipt that proves
 nothing refuses everything rather than restoring from a record it cannot check.
+
+### `docs mcp-migrate`
+
+```bash
+kyber-weave docs mcp-migrate [path] [--target <slugs>] [--dry-run]
+```
+
+This release renames the three servers and their nineteen tools: `kyber-weave` is now `kw-docs`,
+`kyberdash` is now `kw-dash`, and `kyber-weave-arbiter` is now `kw-arbiter`. **The executables did
+not move** — `kyber-weave-mcp`, `kyberdash mcp` and `kyber-weave-arbiter serve` are launched
+exactly as before — so an existing wiring still starts a server, under a key the repository's
+declaration no longer names. Renaming the key is this verb's whole job, and it will not touch an
+entry it cannot prove is ours.
+
+`path` defaults to `.`, and the file set is the catalog's: the same repository-scope files
+[the check](#the-check) reads and [`docs mcp-wire`](#docs-mcp-wire) writes.
+
+- **No `--target`**: a preview. Every old key found is listed with its proof result and the
+  writable targets that would take it. Nothing is written, and it exits 0 — as it does when there
+  is nothing to do.
+- **A named target is written**, and the host declaration moves with it: the `mcp:` section of
+  `.kyber-weave/kyber-weave.yml` is migrated in the same run. `declaration` is a slug in its own
+  right, for a repository that has no harness files at all. A named target that refuses exits 1 and
+  the other named targets still proceed.
+- `--dry-run` prints the same report and writes nothing — no bytes, and no receipt. It exits what
+  the real run would have exited.
+
+**An old key alone is not proof, and it is not enough to rename.** The key is renamed only when the
+entry carrying it also proves the launch: `argv[0]`'s file name equals the shipped binary, in any
+directory, case-insensitively, with the optional `.exe` a Windows install appends — plus the
+argument that binary needs, which is `serve` for the arbiter and `mcp` for the dash. Anything else
+is reported with the edit to make by hand and left exactly as it stands. Codex, ZCode and the
+Copilot repository settings are reported with the snippet and never written, for the same reasons
+they are snippet-only for `docs mcp-wire`.
+
+| File state | Launch proven | Action | Reported as |
+|---|---|---|---|
+| Old key absent | n/a | nothing | nothing |
+| Old present, new absent | yes | rewrite the key's bytes only | `KW-MCP-WIRE-007`; renamed |
+| Old and new present, same launch | yes | remove the old member, byte-exact | `KW-MCP-WIRE-007`; removed duplicate |
+| Old and new present, different launch | yes | refuse, zero bytes, show both | `KW-MCP-WIRE-009`, exit 1 |
+| Old present | no | never touched | `KW-MCP-WIRE-008`, with the manual edit |
+| Symlink, denied, malformed, foreign shape | n/a | refuse, zero bytes | `KW-MCP-WIRE-009`, exit 1 |
+| Codex, ZCode, Copilot settings | n/a | report only | `KW-MCP-WIRE-008`, with the snippet |
+
+The bounds are [`docs mcp-wire`](#docs-mcp-wire)'s, held for the same reasons: the catalog-only
+file set, repository scope only — no user-scope file is read or written — the whole plan computed
+before the first byte moves, the receipt recorded before the bytes, every byte outside the renamed
+key preserved, and idempotence, so a second run over a migrated tree reports nothing to do at
+exit 0. The receipt is the journal in [The receipt](#the-receipt): a change this tool cannot record
+is a change it does not make.
+
+**A grant is not a key, and this verb does not rewrite one.** A rendered agent file that carries
+`mcp__kyber-weave__<tool>`, `kyber-weave_*` or `kyber-weave/*` is re-rendered by `kyber-weave squad
+update`, not edited here, and a harness's own permission allow-list that names an old tool is the
+operator's to change. [The upgrade steps](../install.md#renamed-mcp-servers-and-tools) name every
+surface no tool reads.
 
 ### The receipt
 
@@ -979,6 +1052,7 @@ path, the write path and the removal path cannot give three different answers:
 | the check | the linked file is not read; the finding says the path is a symbolic link and was not read; the harness is reported as not wired and is not offered as a repair | `KW-MCP-WIRE-001` |
 | the repair | refused **before** the read, so zero bytes of the target are opened and zero written; the diagnostic names the file and that it is a symbolic link | `KW-MCP-WIRE-005` |
 | the removal | refused ahead of the receipt lookup; zero bytes written; the diagnostic names the file | `KW-MCP-WIRE-006` |
+| the migration | refused before the read and again before the write; zero bytes written; the diagnostic names the file | `KW-MCP-WIRE-009` |
 
 **A path this process may not inspect is the second refusal**, and it is the one that used to
 be silent. `File.Exists` answers `false` for a file it cannot reach just as it does for one
@@ -1064,15 +1138,42 @@ merit — superseded documents are outside the corpus, so a match is current gui
 **Exclusions are properties, never noun lists.** `Do not use for source code, tests, CI
 logs` puts those nouns in permanently resident text held back only by a negation, and
 negation is the first thing to degrade when a model scans many tools at once. Read out of
-context it becomes a prohibition on reading tests. Only `docs_explore` carries an
-exclusion, because it is the broadest of the eight; the narrower seven state their territory
-positively so no request falls between them.
+context it becomes a prohibition on reading tests. Only
+`docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
+the eight; the narrower seven state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
-`charBudget` caps **`agent_coding_standards`** prose sits on that parameter, because a
-property description binds at the point of use. `docs_explore` has no budget parameters.
+`charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
+because a property description binds at the point of use. The explore tool has no budget
+parameters.
 
-### `docs_explore(query, cursor = null)`
+### Name limits, and why the names are long
+
+A tool is bounded twice: the name itself, and the qualified `mcp__<server>__<tool>` string a client
+builds from it. The tightest figures anyone reports are:
+
+| Bound | Limit | Source |
+|---|---|---|
+| Tool name | `^[a-zA-Z0-9_-]{1,64}$`, and no `__` anywhere in it | the protocol's tool-name grammar |
+| Qualified `mcp__<server>__<tool>` | at most 64 characters | the qualified form a client registers |
+| Server and tool together | at most 60 characters | the sum that fits the qualified form |
+
+These are the tightest figures any client reports, not a figure every vendor has verified, so the
+names are chosen against the smallest of them rather than the one that happens to be documented.
+The current maxima sit inside them: the longest tool name is 46 characters
+(`docs_find_duplicates_conflicts_ambiguous_terms` and
+`dash_read_captured_run_session_or_turn_context`), the longest server-plus-tool pair is 55
+(`kw-arbiter` with `arbiter_check_configuration_and_key_readiness`), and the longest qualified name
+is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three, so
+a name that would break a client breaks the build instead.
+
+The names are long because a tool name is the routing metadata a model reads before it decides
+whether to look at the description at all, and `docs_query` or `arbiter_rules` states nothing about
+what comes back. A name that states the question wins that decision on merit; a short one has to be
+explained before it can be chosen. The cost is paid in the qualified form, which is why the three
+figures above are a budget rather than a remark.
+
+### `docs_answer_question_from_repo_documentation(query, cursor = null)`
 
 One answer for a question, symbol, route, component, or document id — not a ranked list of
 documents. After the relevance floor, leaves inside qualifying documents compete; the
@@ -1103,7 +1204,7 @@ claims; see [the documentation ontology](../documentation-ontology.md) and [ADR
 A miss says so plainly, reports how many documents were considered, and suggests naming a
 component, doc-id, or symbol instead. Treat that as permission to fall back to grep.
 
-### `agent_coding_standards(technology, topic = null, charBudget = 12000)`
+### `docs_get_coding_standard_for_technology(technology, topic = null, charBudget = 12000)`
 
 The local answer for one stack: which standard this repository writes that technology by,
 and what it says. A portable agent arrives holding the standard its own stack ships; this
@@ -1123,7 +1224,8 @@ not quietly repaired into a hit.
 `topic` is what the caller is about to do (`naming`, `error handling`, `pull request
 review`). Omitted, the whole standard comes back in document order under budget. Provided,
 the sections that answer it are chosen by the same rarity-weighted section ranking
-[`Excerpt`](retrieval.md#excerpt-budgeting-agent_coding_standards) uses inside one standard.
+[`Excerpt`](retrieval.md#excerpt-budgeting-docs_get_coding_standard_for_technology) uses inside
+one standard.
 A topic no section clears returns no prose — it does not fall back to the whole standard.
 
 `charBudget` is total characters of prose across the standards returned, clamped to
@@ -1204,7 +1306,7 @@ Four replies are not a standard at all:
   so this reply never claims otherwise, and no prose comes back: the topic selected nothing, and
   a larger `charBudget` cannot fit a section the topic did not select.
 
-### `docs_for_symbol(symbol)`
+### `docs_find_documents_citing_code_symbol(symbol)`
 
 The documents whose `code-refs` **formally claim** a symbol — not those that mention it in
 prose, which is exactly the distinction grep cannot make. Run it before renaming, moving,
@@ -1213,7 +1315,7 @@ or deleting anything to find the documentation that must change with it.
 An empty result distinguishes the two cases the caller cares about: the symbol is
 undocumented, or it is discussed in prose that never claimed ownership of it.
 
-### `docs_analysis_candidates(kind?, cursor?, limit = 20, charBudget = 12000)`
+### `docs_find_duplicates_conflicts_ambiguous_terms(kind?, cursor?, limit = 20, charBudget = 12000)`
 
 Runs the repository's current configured documentation analysis and returns candidates in
 stable kind, term, and candidate-id order. `kind` is optional and accepts `duplicate`,
@@ -1226,7 +1328,7 @@ response keeps local cost/cache metrics and line-addressable evidence inside the
 budget. Use [`docs review export`](analysis.md#cli-and-exit-behavior) when a reviewing
 agent needs the versioned rubric and hashes for reusable verdicts.
 
-### `docs_glossary(term)`
+### `docs_look_up_glossary_term_definition(term)`
 
 Looks up one managed glossary term case-insensitively and returns its proposed, approved,
 and rejected senses, definitions, scopes, and aliases. An unknown term is an ordinary
@@ -1238,7 +1340,7 @@ glossary proposals enter through `docs glossary --write` at the CLI. The MCP rea
 the current config and corpus for each call; embeddings remain loopback-only and are not
 called unless the local cache is safely ignored.
 
-### `docs_validate(mergeReady = false, base = "origin/HEAD", charBudget = 12000)`
+### `docs_validate_governed_document_schema(mergeReady = false, base = "origin/HEAD", charBudget = 12000)`
 
 Runs the same schema conformance gate as [`kyber-weave docs validate`](governance.md) against
 the corpus the server already bound at startup. There is **no repository-path argument**: the
@@ -1273,13 +1375,15 @@ an omitted count so the caller knows how many more exist.
 The document walk reads the tree on disk, not `git ls-files`, so an untracked plan file under
 the active plans folder is visible to this gate the same way it is to the CLI.
 
-### `docs_drift(charBudget = 12000)`
+### `docs_detect_drift_between_documents_and_code(charBudget = 12000)`
 
 Runs the same entity-drift gate as [`kyber-weave docs drift`](governance.md) against the
 server's resolved repository root — again with no path argument and the same provenance
-contract as [`docs_validate`](#docs_validatemergeready--false-base--originhead-charbudget--12000).
+contract as
+[`docs_validate_governed_document_schema`](#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000).
 
-`charBudget` uses the same default, clamp, and truncation rules as `docs_validate`. Response
+`charBudget` uses the same default, clamp, and truncation rules as
+`docs_validate_governed_document_schema`. Response
 order matches: provenance, `result: pass` or `result: fail` with counts, then findings with
 errors and criticals before warnings.
 
@@ -1288,7 +1392,7 @@ findings when present. A missing or unreadable CodeGraph index is reported as cr
 `KW-DOC-DRIFT-001` with the existing "Drift cannot be verified" message — not as `result:
 pass`.
 
-### `docs_status()`
+### `docs_get_source_repository_and_revision()`
 
 Reports the provenance of the corpus this server is answering from, with no query and no
 arguments. This is the cheap session-start check: call it once before trusting any other
@@ -1337,9 +1441,12 @@ conductor and bug-crusher run-start step invoke through the CLI. The verb's flag
    repository-build fallback, so it proves what an agent will launch.
 4. **`mcp.handshake`**: the server answers `initialize` within the MCP budget. The probe then sends
    `notifications/initialized`.
-5. **`mcp.docs_explore`**: a `tools/call` to `docs_explore` with the query `README` returns a
-   non-error result. `docs_status` would prove only that the process is alive. `docs_explore`
-   also proves that the index loaded.
+5. **`mcp.docs_explore`**: a `tools/call` to `docs_answer_question_from_repo_documentation` with
+   the query `README` returns a non-error result. `docs_get_source_repository_and_revision` would
+   prove only that the process is alive; the explore tool also proves that the index loaded. **The
+   check id predates the rename and does not follow it**: tool names move, `doctor --json`
+   consumers branch on this string, so the id stays and the reason and fix lines name the tool that
+   is actually called.
 6. **`mcp.root`**: the `provenance: root=` line in that result names the git root. This catches a
    server that answers from another checkout.
 
@@ -1360,7 +1467,7 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
 | `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | `kyber-weave doctor --check --mcp-timeout <2 x current>` |
-| `mcp.docs_explore` | `docs_explore` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
+| `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
 
 ### Output contract
@@ -1454,20 +1561,20 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kyber-weave` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
-| A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kyber-weave` server in the ZCode MCP configuration, or the install does not pass |
-| A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kyber-weave`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kyber_weave_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
+| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
+| A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kw-docs` server in the ZCode MCP configuration, or the install does not pass |
+| A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kw-docs`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kw_docs_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
 | An Antigravity agent lists no MCP tools | Check the agent file's `mcpServers` entry and the workspace `.agents/mcp_config.json`, then the client's `mcp(server/*)` policy patterns — MCP tools default to Ask there. Adding an MCP tool name to `tools:` does not help and makes the executor construction fail with `unknown component` on stderr. See [Antigravity](#antigravity) |
-| A Pi subagent lists no MCP tools | Check the derived `ext:pi-mcp-adapter/mcp__kyber_weave__…` entries in the agent file, the adapter version (the per-tool names need `pi-mcp-adapter` 6.0.0 or later), and the adapter's own server configuration plus its first-use trust approval. A lowered primary agent is a skill and carries no overlay at all. See [Pi](#pi) |
+| A Pi subagent lists no MCP tools | Check the derived `ext:pi-mcp-adapter/mcp__kw_docs__…` entries in the agent file, the adapter version (the per-tool names need `pi-mcp-adapter` 6.0.0 or later), and the adapter's own server configuration plus its first-use trust approval. A lowered primary agent is a skill and carries no overlay at all. See [Pi](#pi) |
 | A droid lists no MCP tools on a target whose session has them | On Factory the droid's own `mcpServers` value governs; on Cursor, Codex, and Warp nothing per-agent governs it at all, because reach is inherited from the session. Identify which case you are in before editing a rendered file — install and update own those bytes |
 | Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
-| `docs_glossary` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
-| `agent_coding_standards` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
+| `docs_look_up_glossary_term_definition` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
+| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
-| Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: root=` line to `git rev-parse --show-toplevel`, call `docs_status`, and pin the server with `--expect-root` |
+| Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: root=` line to `git rev-parse --show-toplevel`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root` |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related
