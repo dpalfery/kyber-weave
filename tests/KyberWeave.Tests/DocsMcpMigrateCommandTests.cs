@@ -25,9 +25,10 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// The user-scope file the command must never touch is simulated by a fake home directory holding a
-/// <c>.claude.json</c>. The command takes its repository from the path it is given and has no seam to
-/// point it at this home, so that case pins that the file is left alone rather than proving the
-/// command was denied a look at it.
+/// <c>.claude.json</c>. The command takes its repository from the path it is given, and the case that
+/// runs against the repository pins that the file is left alone rather than proving the command was
+/// denied a look at it. The case that supplies the fake home as the root is the other half: there the
+/// home itself is the operator-named tree, so the refusal is the only outcome the fixtures can see.
 /// </para>
 /// </remarks>
 public sealed class DocsMcpMigrateCommandTests : IDisposable
@@ -51,6 +52,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     private const string NoTarget = "";
 
     private const string ClaudeCode = "claude-code";
+    private const string Cursor = "cursor";
     private const string Factory = "factory";
     private const string OpenCode = "opencode";
     private const string Codex = "codex";
@@ -61,6 +63,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     private const string ClaudeFile = ".mcp.json";
     private const string ClaudeKey = "mcpServers";
+    private const string CursorFile = ".cursor/mcp.json";
     private const string FactoryFile = ".factory/mcp.json";
     private const string OpenCodeFile = "opencode.json";
     private const string CodexFile = ".codex/config.toml";
@@ -88,8 +91,15 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// <summary>Where the fake launch binaries live: never on <c>PATH</c>, always declared by path.</summary>
     private string Bin => Path.Combine(_root.Path, "bin");
 
-    /// <summary>A stand-in for the user's home directory, holding a user-scope configuration file.</summary>
-    private string FakeHome => Path.Combine(_root.Path, "home");
+    /// <summary>
+    /// A stand-in for the user's home directory, holding a user-scope configuration file.
+    /// </summary>
+    /// <remarks>
+    /// The directory is deliberately not spelled <c>home</c>. The command prints the root it was given
+    /// on its first line, so a directory named <c>home</c> would satisfy "the refusal names the home
+    /// directory" from the path alone, and the assertion would pass on a run that refused nothing.
+    /// </remarks>
+    private string FakeHome => Path.Combine(_root.Path, "user-profile");
 
     /// <summary>The shipped server's binary, by absolute path.</summary>
     private string ShippedBinary => Path.Combine(Bin, "kyber-weave-mcp");
@@ -898,14 +908,257 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     // ----------------------------------------------------------------------------------------
+    // What a report-only target reports: the file it read, and the proof it did not have
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A Codex table is reported as a leftover key and never written, and the notice keeps its
+    /// qualifier whichever launch the table holds. The TOML reader reports table names and nothing
+    /// else, so the body — <c>command</c> and <c>args</c> — is never read, and nothing here proves
+    /// the entry is ours.
+    /// </summary>
+    /// <remarks>
+    /// The two rows are the point. A table launching <c>npx some-other-server</c> is plainly not
+    /// ours, and a table holding exactly the shipped launch looks exactly ours — and the report has
+    /// to be the same report for both, because the evidence is the same for both: none. A notice
+    /// that drops the qualifier claims a proof this command never obtained, and it tells an operator
+    /// to rename an entry nobody read.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ACodexTomlTableIsReportedAsALeftoverKeyAndNeverAsAProvenLaunch(bool shippedLaunch)
+    {
+        string body = shippedLaunch
+            ? $"command = \"{ShippedBinary}\"\nargs = [\"--repo-root\", \".\"]\n"
+            : "command = \"npx\"\nargs = [\"some-other-server\"]\n";
+        McpWiringFixture.WriteText(Repo, CodexFile, $"[mcp_servers.{OldKey}]\n{body}");
+        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(Codex);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
+
+        // The unqualified remedy is the claim that the entry is provably ours, and a body nobody
+        // read cannot earn it.
+        Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
+        Assert.True(
+            execution.Output.Contains("if that", StringComparison.Ordinal),
+            "a Codex table is reported without its launch being read, so the notice must keep the qualifier "
+                + "('if that entry is Kyber-Weave's', 'if that table launches …'), never an unqualified rename. "
+                + $"Output:{Environment.NewLine}{execution.Output}");
+    }
+
+    /// <summary>
+    /// A report-only file that was read and holds no retired key is nothing to do: no line naming an
+    /// old key, and no remedy for an entry the file does not hold.
+    /// </summary>
+    /// <remarks>
+    /// The failure this prevents is the fall-through that makes a clean file look like a leftover.
+    /// "The loop above added nothing" is true both of a file holding no old key and of a harness with
+    /// no file in the tree at all, and only the second has a snippet to hand out. Reporting a
+    /// <c>KW-MCP-WIRE-008</c> for the first tells the operator to rename a key the file does not
+    /// hold — and it is what a second run over a migrated tree would print instead of idempotence.
+    /// </remarks>
+    [Fact]
+    public void AReportOnlyFileWithNoRetiredKeyIsNothingToDoAndGetsNoLeftoverKeyLine()
+    {
+        McpWiringFixture.WriteText(Repo, ZCodeFile, """{"mcp":{"servers":{}}}""");
+        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(ZCode);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.DoesNotContain(InfoCode, execution.Output, StringComparison.Ordinal);
+        Assert.True(
+            execution.Output.Contains("nothing to do", StringComparison.OrdinalIgnoreCase),
+            "an empty server map holds no retired key, so the run has nothing to do. "
+                + $"Output:{Environment.NewLine}{execution.Output}");
+    }
+
+    /// <summary>
+    /// A report-only file this command cannot analyse is reported as that analysis problem, never as
+    /// a leftover key.
+    /// </summary>
+    /// <remarks>
+    /// "A key was left alone" is a statement about a key that was found in a readable file. This
+    /// file's content was never read, so the same line says the opposite of what happened: the
+    /// operator is pointed at a key to rename instead of at the document that needs fixing.
+    /// </remarks>
+    [Theory]
+    [InlineData("{ \"mcp\": { \"servers\": ")]
+    [InlineData("{ \"mcp\": { \"servers\": [ \"kyber-weave\" ] } }")]
+    public void AReportOnlyFileThatCannotBeAnalysedReportsTheProblemAndNotALeftoverKey(string content)
+    {
+        McpWiringFixture.WriteText(Repo, ZCodeFile, content);
+        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(ZCode);
+
+        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.True(
+            execution.Output.Contains("cannot be migrated", StringComparison.Ordinal),
+            "a file this command could not analyse has an analysis problem to report, and the report is the only "
+                + $"place an operator can learn it. Output:{Environment.NewLine}{execution.Output}");
+        Assert.DoesNotContain("was left alone", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A report-only target is idempotent: over a tree that already holds the new key and no old one,
+    /// the first run and the second both report nothing to do, exit 0 and write no byte.
+    /// </summary>
+    /// <remarks>
+    /// "A second run over a migrated tree reports nothing to do" is the bound the runbook states for
+    /// this verb, and it was only covered for a writable target, where the write itself proves the
+    /// first run happened. A report-only target has no write, so its idempotence is entirely the
+    /// report's: a leftover-key line invented for a clean file would survive every run and send an
+    /// operator to edit a file that is already correct.
+    /// </remarks>
+    [Fact]
+    public void ASecondRunOfAReportOnlyTargetOverAMigratedTreeReportsNothingToDo()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            CodexFile,
+            $"[mcp_servers.{NewKey}]\n"
+            + $"command = \"{ShippedBinary}\"\n"
+            + "args = [\"--repo-root\", \".\"]\n");
+        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+
+        CapturedConsoleExecution<int> first = Migrate(Codex);
+        CapturedConsoleExecution<int> second = Migrate(Codex);
+
+        CapturedConsoleExecution<int>[] runs = [first, second];
+
+        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        foreach (CapturedConsoleExecution<int> run in runs)
+        {
+            Assert.Equal(0, run.Result);
+            Assert.DoesNotContain(InfoCode, run.Output, StringComparison.Ordinal);
+            Assert.True(
+                run.Output.Contains("nothing to do", StringComparison.OrdinalIgnoreCase),
+                $"a tree holding '{NewKey}' and no retired key has nothing to do, on every run. "
+                    + $"Output:{Environment.NewLine}{run.Output}");
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // What a write records: Written means the bytes reached the file
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// One run over one file holding one proven old key and one unproven one reports both, and marks
+    /// only the proven row written: <c>Written</c> says whether bytes reached the file, so a
+    /// <c>KW-MCP-WIRE-008</c> row — a key reported and left alone — is never written.
+    /// </summary>
+    /// <remarks>
+    /// Both rules sit in one file because the flag is the file's, not the row's: the apply path used
+    /// to mark every row of a file it wrote, which turns "a key was left alone" into a claim that
+    /// the tool changed it. The record's own contract is the reason the distinction is worth a test
+    /// — anything reading the report takes <c>Written</c> at its word.
+    /// </remarks>
+    [Fact]
+    public void ARenamedRowIsWrittenAndALeftAloneRowInTheSameFileIsNot()
+    {
+        WriteClaudeTwoEntries(
+            (OldKey, ShippedBinary, ["--repo-root", "."]),
+            ("kyberdash", "npx", []));
+
+        IReadOnlyList<McpRenameChange> changes = McpServerRenamer.Migrate(Repo, [ClaudeCode]);
+
+        McpRenameChange renamed = Assert.Single(changes, change => change.OldKey == OldKey);
+        Assert.Equal(McpRenameOutcome.Renamed, renamed.Outcome);
+        Assert.True(renamed.Written, "the proven key was renamed in place, so its bytes reached the file");
+
+        McpRenameChange leftAlone = Assert.Single(changes, change => change.OldKey == "kyberdash");
+        Assert.Equal(InfoCode, leftAlone.Code);
+        Assert.Equal(McpRenameOutcome.Reported, leftAlone.Outcome);
+        Assert.False(
+            leftAlone.Written,
+            "a KW-MCP-WIRE-008 row is a key reported and left alone, so no byte of it reached the file");
+
+        // The flag is not the only evidence: the file shows the rename really happened and the
+        // unproven entry really survived, so "not written" describes a held-back edit and not a run
+        // that did nothing.
+        string after = File.ReadAllText(InRepo(ClaudeFile));
+        Assert.Contains($"\"{NewKey}\"", after, StringComparison.Ordinal);
+        Assert.Contains("\"kyberdash\"", after, StringComparison.Ordinal);
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // A root that is the operator's home directory
+    // ----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A root that is the operator's home directory is refused before a byte is read or written:
+    /// exit 1, <c>KW-MCP-WIRE-009</c>, the user-scope file byte-identical, no receipt — and the
+    /// refusal names the reason.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The catalog holds repository-relative paths, so every bound in this verb is containment under
+    /// the root the operator named. Point that root at a home directory and the same relative path —
+    /// <c>.cursor/mcp.json</c> — is the user-scope file ADR 0052 decision 2 says is never read or
+    /// written, and the command's own header promises the same. Containment alone is not the
+    /// guarantee either statement is written down as.
+    /// </para>
+    /// <para>
+    /// The fixture is a fake home under the temp directory and never the real one: the case must not
+    /// depend on what the developer's own <c>$HOME</c> holds, and the defect it pins would rewrite
+    /// the developer's own Cursor configuration. The verb takes its root from its one path argument,
+    /// so that is the only input this case supplies; a fix that resolves the operator's home through
+    /// an injected reader — as <c>RepositoryDoctor.Run</c> does, defaulting to the process
+    /// environment — is wired at the one <c>MigrateAt</c> call below, and none of these assertions
+    /// change with it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AHomeDirectoryRootIsRefusedAndLeavesTheUserScopeFileByteIdentical()
+    {
+        McpWiringFixture.WriteText(
+            FakeHome,
+            CursorFile,
+            StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
+
+        // A home directory is where a harness keeps its user-scope files, and this one holds the one
+        // this suite already stands in for: the reason the root is refused at all.
+        McpWiringFixture.WriteText(FakeHome, ".claude.json", """{"mcpServers": {}}""");
+
+        byte[] before = File.ReadAllBytes(InHome(CursorFile));
+        string receipt = Path.Combine(FakeHome, ".kyber-weave", "receipts", "mcp-wiring.json");
+
+        CapturedConsoleExecution<int> execution = MigrateAt(FakeHome, Cursor);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(InHome(CursorFile)));
+        Assert.False(File.Exists(receipt), "a refused root records nothing, so a write there could not be undone");
+        Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
+        Assert.True(
+            execution.Output.Contains("home", StringComparison.OrdinalIgnoreCase),
+            "the refusal must name the reason: the root is the operator's home directory, whose files this "
+                + $"command never reads or writes. Output:{Environment.NewLine}{execution.Output}");
+    }
+
+    // ----------------------------------------------------------------------------------------
     // Fixtures
     // ----------------------------------------------------------------------------------------
 
     /// <summary>Runs the migrate verb against the fixture repository.</summary>
     private CapturedConsoleExecution<int> Migrate(string targets, bool dryRun = false) =>
+        MigrateAt(Repo, targets, dryRun);
+
+    /// <summary>
+    /// Runs the migrate verb against a root the case names, rather than the fixture repository — the
+    /// fake home, for the cases about which tree the operator pointed the command at.
+    /// </summary>
+    private static CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand().Execute(
             null!,
-            new DocsMcpMigrateSettings { Path = Repo, Target = targets, DryRun = dryRun }));
+            new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
@@ -985,6 +1238,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     private string InRepo(string relativePath) =>
         Path.Combine(Repo, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>The path a fake-home case reads back: a user-scope file under the fake home.</summary>
+    private string InHome(string relativePath) =>
+        Path.Combine(FakeHome, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>The outcome of loading the host declaration back through the configuration loader.</summary>
     private sealed record LoadResult(bool Success, string? Error, IReadOnlyList<string> ServerNames);
