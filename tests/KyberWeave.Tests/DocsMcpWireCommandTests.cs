@@ -874,6 +874,39 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Null(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
     }
 
+    /// <summary>
+    /// The no-target preview reads a proven old key and prints the rename notice with the migrate verb,
+    /// and it writes no byte to the file and no receipt.
+    /// </summary>
+    [Fact]
+    public void ANoTargetPreviewHoldingAProvenOldKeyPrintsTheNoticeAndWritesNothing()
+    {
+        WriteDeclaration();
+        WriteJson(
+            ".mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = BinaryPath,
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            });
+        byte[] before = File.ReadAllBytes(InRepo(".mcp.json"));
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains("KW-MCP-WIRE-007", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(".mcp.json")));
+        Assert.False(File.Exists(ReceiptPath), "a preview must not write the receipt");
+    }
+
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
             null!,

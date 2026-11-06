@@ -53,6 +53,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     private const string ClaudeCode = "claude-code";
     private const string Factory = "factory";
     private const string OpenCode = "opencode";
+    private const string Codex = "codex";
+    private const string ZCode = "zcode";
+    private const string Copilot = "copilot-coding-agent";
+    private const string VsCode = "vscode";
     private const string Declaration = "declaration";
 
     private const string ClaudeFile = ".mcp.json";
@@ -60,6 +64,8 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     private const string FactoryFile = ".factory/mcp.json";
     private const string OpenCodeFile = "opencode.json";
     private const string CodexFile = ".codex/config.toml";
+    private const string ZCodeFile = "zcode.json";
+    private const string VsCodeFile = ".vscode/mcp.json";
 
     private const string DeclarationFile = ".kyber-weave/kyber-weave.yml";
 
@@ -322,6 +328,199 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains($"[mcp_servers.{NewKey}]", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ZCode's configuration holds a proven old key under <c>mcp.servers</c>. The command reports it with
+    /// the new key, in both the preview and a named run, and writes no byte to the file.
+    /// </summary>
+    [Fact]
+    public void AZCodeOldKeyIsReportedWithTheNewKeyInPreviewAndNamedRunAndNeverWritten()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ZCodeFile,
+            new JsonObject
+            {
+                ["mcp"] = new JsonObject
+                {
+                    ["servers"] = new JsonObject { [OldKey] = Entry(ShippedBinary, "--repo-root", ".") }
+                }
+            }.ToJsonString());
+        byte[] before = File.ReadAllBytes(InRepo(ZCodeFile));
+
+        CapturedConsoleExecution<int> preview = Migrate(NoTarget);
+        CapturedConsoleExecution<int> named = Migrate(ZCode);
+
+        Assert.Equal(0, preview.Result);
+        Assert.Equal(0, named.Result);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(ZCodeFile)));
+        Assert.Contains(InfoCode, preview.Output, StringComparison.Ordinal);
+        Assert.Contains(InfoCode, named.Output, StringComparison.Ordinal);
+        Assert.Contains(NewKey, named.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Named as a target, Codex is still report-only: exit 0, the file keeps every byte, and the
+    /// snippet with the new key is printed for the operator to paste.
+    /// </summary>
+    [Fact]
+    public void ACodexNamedTargetIsReportOnlyExitsZeroAndPrintsTheSnippet()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            CodexFile,
+            "[mcp_servers.kyber-weave]\n"
+            + $"command = \"{ShippedBinary}\"\n"
+            + "args = [\"--repo-root\", \".\"]\n");
+        byte[] before = File.ReadAllBytes(InRepo(CodexFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(Codex);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(CodexFile)));
+        Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains($"[mcp_servers.{NewKey}]", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Copilot coding agent keeps its MCP configuration in repository settings, which the command
+    /// cannot reach. A named run exits 0, creates no file or directory, and says the entry lives in
+    /// repository settings.
+    /// </summary>
+    [Fact]
+    public void ACopilotCodingAgentTargetIsReportOnlyWritesNoFileAndNamesRepositorySettings()
+    {
+        WriteDeclaration();
+
+        CapturedConsoleExecution<int> execution = Migrate(Copilot);
+
+        Assert.Equal(0, execution.Result);
+        Assert.False(Directory.Exists(InRepo(".github")), "a report-only target must create no directory");
+        Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("repository settings", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Removing a duplicate old member leaves every other byte exactly as it was. The member is removed
+    /// as its whole line, wherever it sits: first, middle, or last in a file with a byte-order mark,
+    /// a comment and another server. A re-serialising implementation would reorder or re-space these
+    /// bytes and fail here.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void RemovingTheDuplicateOldMemberLeavesEveryOtherByteExactlyAsItWas(int oldPosition)
+    {
+        string program = System.Text.Json.JsonSerializer.Serialize(ShippedBinary);
+        string oldLine = $"    \"{OldKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \".\"] }},\n";
+        string newLine = $"    \"{NewKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \".\"] }},\n";
+        const string otherLine = "    \"other\": { \"command\": \"other-mcp\" },\n";
+        const string header = "﻿// the team's servers; keep this comment\n{\n  // claude code reads this table\n  \"mcpServers\": {\n";
+        const string footer = "  }\n}\n";
+
+        List<string> entries = [otherLine, newLine];
+        entries.Insert(oldPosition, oldLine);
+
+        string original = header + string.Concat(entries) + footer;
+        string expected = header + string.Concat(entries.Where(line => line != oldLine)) + footer;
+        McpWiringFixture.WriteBytes(Repo, ClaudeFile, Encoding.UTF8.GetBytes(original));
+
+        CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(ClaudeFile)));
+        Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A difference in the harness root token alone is not a difference in the launch. The old entry
+    /// says <c>.</c> and the new one says <c>${workspaceFolder}</c>, which VS Code substitutes for the
+    /// same directory, so the old member is a duplicate and is removed byte-exact.
+    /// </summary>
+    [Fact]
+    public void AHarnessRootTokenDifferenceAloneCountsAsTheSameLaunchAndTheOldMemberIsRemoved()
+    {
+        string program = System.Text.Json.JsonSerializer.Serialize(ShippedBinary);
+        string oldLine = $"    \"{OldKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \".\"] }},\n";
+        string newLine = $"    \"{NewKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \"${{workspaceFolder}}\"] }},\n";
+        const string otherLine = "    \"other\": { \"command\": \"other-mcp\" },\n";
+        const string header = "{\n  \"servers\": {\n";
+        const string footer = "  }\n}\n";
+
+        string original = header + otherLine + oldLine + newLine + footer;
+        string expected = header + otherLine + newLine + footer;
+        McpWiringFixture.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
+
+        CapturedConsoleExecution<int> execution = Migrate(VsCode);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(VsCodeFile)));
+        Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A named harness run also renames the declared server, so the host declaration and the harness file
+    /// agree afterwards. The declaration's comments stay, and the file reloads under the new name.
+    /// </summary>
+    [Fact]
+    public void ANamedHarnessTargetAlsoRenamesTheDeclarationKeyOnItsOwnLine()
+    {
+        WriteDeclarationWithComments();
+        WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
+        string before = File.ReadAllText(InRepo(DeclarationFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(
+            before.Replace($"    {OldKey}:", $"    {NewKey}:", StringComparison.Ordinal),
+            File.ReadAllText(InRepo(DeclarationFile)));
+        Assert.Contains(NewKey, LoadConfig().ServerNames, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A dry run of a named harness target reports the declaration rename but writes neither the
+    /// declaration nor the harness file.
+    /// </summary>
+    [Fact]
+    public void ADryRunOfANamedHarnessTargetLeavesTheDeclarationKeyUnchanged()
+    {
+        WriteDeclarationWithComments();
+        WriteClaudeEntry(OldKey, ShippedBinary, "--repo-root", ".");
+        byte[] declarationBefore = File.ReadAllBytes(InRepo(DeclarationFile));
+        byte[] claudeBefore = File.ReadAllBytes(InRepo(ClaudeFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(ClaudeCode, dryRun: true);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(declarationBefore, File.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.Equal(claudeBefore, File.ReadAllBytes(InRepo(ClaudeFile)));
+    }
+
+    /// <summary>
+    /// A declared server whose launch is <c>npx kyber-weave-mcp</c> and whose provenance is third-party is
+    /// not ours. The declaration keeps every byte, the run reports it as info, and it exits 0.
+    /// </summary>
+    [Fact]
+    public void AThirdPartyDeclaredServerLaunchedThroughNpxIsUntouchedAndReportedAsInfo()
+    {
+        WriteFile(
+            DeclarationFile,
+            "mcp:\n"
+            + "  required-servers:\n"
+            + $"    {OldKey}:\n"
+            + "      command: [npx, kyber-weave-mcp]\n"
+            + "      provenance: third-party\n"
+            + "      level: required\n");
+        byte[] before = File.ReadAllBytes(InRepo(DeclarationFile));
+
+        CapturedConsoleExecution<int> execution = Migrate(Declaration);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
     }
 
     // ----------------------------------------------------------------------------------------
@@ -613,8 +812,9 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     /// <summary>
-    /// A user-scope configuration file holding a <c>kyberdash</c> entry is never read or written, and its
-    /// contents never reach the output. The command works in the repository only.
+    /// A user-scope configuration file holding a <c>kyberdash</c> entry keeps its bytes across a preview and
+    /// a named run, and its content never reaches the output. The command has no seam that points it at this
+    /// fake home, so this pins the observable outcome only. It does not prove the command never reads the file.
     /// </summary>
     [Fact]
     public void AUserScopeClaudeJsonStaysByteIdenticalAndItsContentNeverAppears()

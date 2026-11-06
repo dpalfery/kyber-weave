@@ -866,6 +866,38 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         Assert.Contains(CursorConfigRelativePath, notice, StringComparison.Ordinal);
         Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+
+        // The repair offers no write for cursor: the old key is the reason the wire would be refused, so
+        // the rename notice is the only thing the operator is offered for that file.
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repository);
+        McpWiringReport report = McpWiringInspector.Inspect(repository, config.Mcp);
+        IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, repository);
+        Assert.DoesNotContain(fixes, fix => fix.Harness == Cursor);
+    }
+
+    /// <summary>
+    /// A leftover old key is reported even when the declaration names no server at all: the notice does
+    /// not depend on the inspector, which returns nothing when nothing is declared. The exit code is unchanged.
+    /// </summary>
+    [Fact]
+    public void AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        WriteFile(
+            repository,
+            ".kyber-weave/kyber-weave.yml",
+            "ontology:\n  docs-root: docs\nmcp:\n  required-servers: {}\n");
+        WriteFile(
+            repository,
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
     }
 
     private static string[] OutputLines(string output) =>
