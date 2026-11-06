@@ -105,7 +105,7 @@ public sealed partial class ArchiveCloseoutValidator
                     Severity.Error,
                     exception.Message,
                     "archive",
-                    Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate again."));
+                    Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate_governed_document_schema again."));
                 continue;
             }
             List<string> failures = CheckCloseout(archived, live, byPath, todoFolder);
