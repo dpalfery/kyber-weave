@@ -94,10 +94,12 @@ user-scope configuration.**
    launch proves the same server. The launch proves it when `argv[0]`'s file name equals the
    shipped binary's — `kyber-weave-mcp` for `kw-docs`, `kyberdash` for `kw-dash`,
    `kyber-weave-arbiter` for `kw-arbiter` — in any directory, compared case-insensitively, with an
-   optional `.exe` suffix, *and* the argument the shipped launch requires next is present:
-   `--repo-root` for the documentation server, `mcp` for the dashboard, `serve` for the arbiter.
-   A matching key with a launch that does not prove it is some other server that happens to share
-   a name, and it is not this repository's to rename.
+   optional `.exe` suffix, *and* the argument that launch passes next is the one this server's
+   entry requires: `mcp` for the dashboard and `serve` for the arbiter. The documentation server
+   requires no next argument — the file name `kyber-weave-mcp` is the whole proof, and whatever
+   the entry passes afterwards, `--repo-root` included, is not compared. A matching key with a
+   launch that does not prove it is some other server that happens to share a name, and it is not
+   this repository's to rename.
 
 2. **User-scope configuration is never written and never read.** These commands never write and
    never read a user-scope configuration file: `~/.factory/mcp.json`, `~/.cursor/mcp.json`,

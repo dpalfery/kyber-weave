@@ -823,8 +823,10 @@ kyber-weave docs mcp-wire [path] [--target <targets>] [--dry-run]
   file: a slug the catalog does not know, a malformed or foreign document, an entry with the
   same server name already present, a harness the repair does not write, an absent binary, a
   configuration that is a symbolic link — refused before it is read, so not one byte of the
-  target is opened — a configuration this process may not inspect, and a receipt that could
-  not be persisted. Other named targets still proceed.
+  target is opened — a configuration this process may not inspect, a configuration that still
+  holds a proven retired MCP server key — where the wire command defers to `docs mcp-migrate`,
+  because adding the new entry beside the old one would be one server under two names — and a
+  receipt that could not be persisted. Other named targets still proceed.
 - **A write it cannot record is a write it does not make.** The undo record is persisted
   before the harness file is touched, so a target whose record cannot be written is refused
   (`KW-MCP-WIRE-005`) rather than left as a changed file with no account of what it held. See
