@@ -38,6 +38,7 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
 
         CommandExecution leftover = RunProjectDoctor(workingDir);
 
+        Assert.Contains("warn", leftover.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(WarningCode, leftover.Output, StringComparison.Ordinal);
         Assert.Contains(".mcp.json", leftover.Output, StringComparison.Ordinal);
         Assert.Contains(MigrateVerb, leftover.Output, StringComparison.Ordinal);
@@ -52,6 +53,10 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     /// <summary>
     /// A project with no old key says nothing about renaming, so a healthy project stays quiet.
     /// </summary>
+    /// <remarks>
+    /// The control project holds a proven old key and must be warned about: silence over the clean tree
+    /// is then doctor having read it and found nothing, not doctor having no rename check at all.
+    /// </remarks>
     [Fact]
     public void Doctor_ProjectWithoutAnOldKey_SaysNothingAboutRenaming()
     {
@@ -72,6 +77,13 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
 
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(MigrateVerb, execution.Output, StringComparison.Ordinal);
+
+        string controlDir = Path.Combine(_temp.Path, "doctor-no-old-key-control");
+        WriteProvenOldKey(controlDir);
+
+        CommandExecution control = RunProjectDoctor(controlDir);
+
+        Assert.Contains(WarningCode, control.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -84,8 +96,9 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
         WriteProvenOldKey(workingDir);
         byte[] before = File.ReadAllBytes(Path.Combine(workingDir, ".mcp.json"));
 
-        RunProjectDoctor(workingDir);
+        CommandExecution execution = RunProjectDoctor(workingDir);
 
+        Assert.Contains(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(workingDir, ".mcp.json")));
     }
 

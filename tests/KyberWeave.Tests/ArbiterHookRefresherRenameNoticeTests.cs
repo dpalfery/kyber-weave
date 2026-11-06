@@ -55,10 +55,12 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
         ArrangeEnabledProject(project);
         WriteProvenOldKey(project);
         byte[] before = File.ReadAllBytes(Path.Combine(project, ".mcp.json"));
+        List<string> log = [];
 
-        ArbiterHookRefresher refresher = new(_ => { }, EnvironmentWithHome());
+        ArbiterHookRefresher refresher = new(log.Add, EnvironmentWithHome());
         refresher.Refresh([project]);
 
+        Assert.Contains(log, line => line.Contains(WarningCode, StringComparison.Ordinal));
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(project, ".mcp.json")));
     }
 

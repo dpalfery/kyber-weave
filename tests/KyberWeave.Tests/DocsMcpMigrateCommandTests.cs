@@ -170,10 +170,17 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// <summary>
     /// A file with no old key is left alone and reports nothing about migration.
     /// </summary>
+    /// <remarks>
+    /// The positive control at the end is the point of this test. "Nothing happened" is also what a
+    /// command that does nothing at all produces, so the same run is repeated over a second harness
+    /// file that does hold a proven old key: that one must be renamed. The silence about the first
+    /// file is then the command having looked and found nothing, not the command being absent.
+    /// </remarks>
     [Fact]
     public void AFileWithNoOldKeyIsLeftAloneAndReportsNothing()
     {
         WriteClaudeEntry(NewKey, ShippedBinary, "--repo-root", ".");
+        WriteFile(FactoryFile, StdioDocument(ClaudeKey, OldKey, ShippedBinary, "--repo-root", "."));
         byte[] before = File.ReadAllBytes(InRepo(ClaudeFile));
 
         CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
@@ -183,6 +190,14 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(ErrorCode, execution.Output, StringComparison.Ordinal);
+
+        // The control: a file that does hold a proven old key is renamed by the same command.
+        CapturedConsoleExecution<int> control = Migrate(Factory);
+
+        Assert.Equal(0, control.Result);
+        string controlled = File.ReadAllText(InRepo(FactoryFile));
+        Assert.Contains($"\"{NewKey}\"", controlled, StringComparison.Ordinal);
+        Assert.DoesNotContain($"\"{OldKey}\"", controlled, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -266,6 +281,9 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
+
+        // The manual edit is only actionable if it says which file to make it in.
+        Assert.Contains(ClaudeFile, execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -358,6 +376,11 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Contains(InfoCode, preview.Output, StringComparison.Ordinal);
         Assert.Contains(InfoCode, named.Output, StringComparison.Ordinal);
         Assert.Contains(NewKey, named.Output, StringComparison.Ordinal);
+
+        // A report-only target that did not say which file holds the entry leaves the operator to
+        // search for it, in a harness whose configuration file is not one this tool writes.
+        Assert.Contains(ZCodeFile, preview.Output, StringComparison.Ordinal);
+        Assert.Contains(ZCodeFile, named.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -399,6 +422,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.False(Directory.Exists(InRepo(".github")), "a report-only target must create no directory");
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("repository settings", execution.Output, StringComparison.OrdinalIgnoreCase);
+
+        // The snippet is the whole report for a file the tree does not hold: it has to carry the new key
+        // the operator pastes into the settings page.
+        Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -484,6 +511,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// A dry run of a named harness target reports the declaration rename but writes neither the
     /// declaration nor the harness file.
     /// </summary>
+    /// <remarks>
+    /// The real run at the end is the control. It proves the dry run's silence is a held-back write and
+    /// not a command that never had one to make.
+    /// </remarks>
     [Fact]
     public void ADryRunOfANamedHarnessTargetLeavesTheDeclarationKeyUnchanged()
     {
@@ -497,6 +528,11 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Equal(0, execution.Result);
         Assert.Equal(declarationBefore, File.ReadAllBytes(InRepo(DeclarationFile)));
         Assert.Equal(claudeBefore, File.ReadAllBytes(InRepo(ClaudeFile)));
+
+        // The control: the same run without --dry-run writes both.
+        Assert.Equal(0, Migrate(ClaudeCode).Result);
+        Assert.NotEqual(declarationBefore, File.ReadAllBytes(InRepo(DeclarationFile)));
+        Assert.NotEqual(claudeBefore, File.ReadAllBytes(InRepo(ClaudeFile)));
     }
 
     /// <summary>
@@ -521,6 +557,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Equal(0, execution.Result);
         Assert.Equal(before, File.ReadAllBytes(InRepo(DeclarationFile)));
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
+
+        // Left alone, but told what to do: the notice names the declaration and the key to use instead.
+        Assert.Contains(DeclarationFile, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
     }
 
     // ----------------------------------------------------------------------------------------
@@ -690,6 +730,12 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         CapturedConsoleExecution<int> migrate = Migrate(Factory);
         Assert.Equal(0, migrate.Result);
 
+        // The rename really happened after the wire, so the receipt kept for this file is a rebased one
+        // and not the original the wire wrote.
+        string migrated = File.ReadAllText(InRepo(FactoryFile));
+        Assert.Contains($"\"{NewKey}\"", migrated, StringComparison.Ordinal);
+        Assert.DoesNotContain($"\"{OldKey}\"", migrated, StringComparison.Ordinal);
+
         CapturedConsoleExecution<int> unwire = Unwire(Factory);
 
         Assert.Equal(0, unwire.Result);
@@ -709,7 +755,13 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         McpWiringFixture.WriteBytes(Repo, FactoryFile, original);
 
         Assert.Equal(0, Wire(Factory).Result);
-        Assert.Equal(0, Migrate(Factory).Result);
+
+        CapturedConsoleExecution<int> migrate = Migrate(Factory);
+        Assert.Equal(0, migrate.Result);
+
+        string migrated = File.ReadAllText(InRepo(FactoryFile));
+        Assert.Contains($"\"{NewKey}\"", migrated, StringComparison.Ordinal);
+        Assert.DoesNotContain($"\"{OldKey}\"", migrated, StringComparison.Ordinal);
 
         CapturedConsoleExecution<int> unwire = Unwire(Factory);
 
@@ -787,6 +839,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(InRepo(DeclarationFile)));
+
+        // A refusal an operator cannot act on is only half a refusal: the edit to make is naming the new key.
+        Assert.Contains(NewKey, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(DeclarationFile, execution.Output, StringComparison.Ordinal);
     }
 
     // ----------------------------------------------------------------------------------------
@@ -830,9 +886,15 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         CapturedConsoleExecution<int> preview = Migrate(NoTarget);
         CapturedConsoleExecution<int> named = Migrate(ClaudeCode);
 
+        Assert.Equal(0, preview.Result);
+        Assert.Equal(0, named.Result);
         Assert.Equal(before, File.ReadAllBytes(userFile));
         Assert.DoesNotContain(marker, preview.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(marker, named.Output, StringComparison.Ordinal);
+
+        // The repository entry the named run was pointed at was renamed, so the user-scope file staying
+        // identical is the command writing only where it was told to, not the command writing nothing.
+        Assert.Contains($"\"{NewKey}\"", File.ReadAllText(InRepo(ClaudeFile)), StringComparison.Ordinal);
     }
 
     // ----------------------------------------------------------------------------------------
