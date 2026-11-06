@@ -562,7 +562,8 @@ smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the b
 `kyberdash web` serves the SPA rather than the "not built" page. The same loop and the
 release job also run `dash/scripts/sea-mcp-smoke.mjs` against the staged binary: it
 initializes over stdio with an isolated loopback fixture, lists exactly the eight
-`dash_*` tools, calls `dash_status`, then closes the child and asserts a clean exit —
+`dash_*` tools, calls `dash_list_available_analytics_operations`, then closes the child and
+asserts a clean exit —
 proving the bundled MCP SDK works from the single executable with no checkout and no
 access to the operator's state. The job is the authority.
 `ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and

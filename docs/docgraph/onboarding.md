@@ -86,13 +86,13 @@ operator-owned file.
 
 `docs init` also declares and checks the MCP servers your agent instructions rely on. The
 declaration is the `mcp:` section of `.kyber-weave/kyber-weave.yml`, scaffolded with one
-server — `kyber-weave`, launched `kyber-weave-mcp --repo-root .`, first-party — and yours
+server — `kw-docs`, launched `kyber-weave-mcp --repo-root .`, first-party — and yours
 from the moment it exists:
 
 ```yaml
 mcp:
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required
@@ -134,8 +134,11 @@ included — is reviewed alongside the code changes it accompanies. That is deli
 incidental: the declaration decides which servers your instructions depend on, and the
 scaffolded default is part of what a reviewer sees and approves.
 
-The per-harness recipes, the two repair verbs, their flags and exit codes, and the harnesses
-the repair will not write are in the [MCP runbook](mcp-runbook.md#checking-and-wiring). The
+A repository wired under a retired key — `kyber-weave`, `kyberdash`, or `kyber-weave-arbiter` —
+is renamed by [`docs mcp-migrate`](mcp-runbook.md#docs-mcp-migrate), which proves the launch
+before it touches a key. The per-harness recipes, the two repair verbs, their flags and exit
+codes, and the harnesses the repair will not write are in the
+[MCP runbook](mcp-runbook.md#checking-and-wiring). The
 schema and its keys are in [configuration](../configuration.md#mcp-servers).
 
 ### APM is an expected dependency
