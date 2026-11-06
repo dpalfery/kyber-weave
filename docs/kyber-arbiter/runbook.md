@@ -67,8 +67,8 @@ observed — so grant trust at install time:
 | Copilot in VS Code | Open the project as a trusted workspace and keep `chat.useHooks` enabled, or the hooks stay off. |
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
-| Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
-| ZCode | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for ZCode, so register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in ZCode's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
+| Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
+| ZCode | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for ZCode, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in ZCode's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 `arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
@@ -101,22 +101,29 @@ If Devin renames the arguments, every dispatch goes unmarked until the adapter i
 
 Warp documents no hooks, and project-level hooks are not executed in ZCode's current
 version, so the marker fallback is advisory there and the MCP fallback is the enforcement
-surface. Squad writes no MCP configuration for either, so register the server yourself in
-the harness's own MCP configuration:
+surface. Squad writes no MCP configuration for either, so declare the server yourself in
+the harness's own MCP configuration under the key `kw-arbiter`, launched as:
 
 ```bash
 kyber-weave-arbiter serve --repo-root <root>
 ```
 
-`serve` exposes three tools. `arbiter_evaluate(trigger, facts)` evaluates one event
+The key and the executable are separate contracts: `kw-arbiter` is the value of
+`McpServerNames.Arbiter`, so it is the same spelling every renderer grants, while the argv above
+is unchanged.
+
+`serve` exposes three tools. `arbiter_evaluate_agent_dispatch_or_return(trigger, facts)` evaluates
+one event
 exactly as the hook would — same facts, rules, ledger append and decision record — and
 returns the same allow, envelope or review note; the caller asserts the routing facts and
 the log records `caller-source: asserted`, so this path is advisory.
-`arbiter_rules(trigger?)` lists the rule catalogue, and `arbiter_status()` reports the
+`arbiter_list_effective_rules_by_trigger(trigger?)` lists the rule catalogue, and
+`arbiter_check_configuration_and_key_readiness()` reports the
 root, rule-set hash, rule count and provider state, never the key — both read-only. Every
 response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
-conductor calls `arbiter_evaluate` before each dispatch and after each return, and
+conductor calls `arbiter_evaluate_agent_dispatch_or_return` before each dispatch and after each
+return, and
 code-reviewer calls it once before the lens fan-out and once before the refutation
 fan-out. On Squad-rendered fallback targets the tools are granted through the
 `decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
