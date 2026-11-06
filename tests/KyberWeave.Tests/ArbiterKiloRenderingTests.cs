@@ -82,6 +82,48 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
     }
 
     [Fact]
+    public void Render_Kilo_EmitsDefaultExportObjectWithServer()
+    {
+        // Kilo is an OpenCode fork whose loader reads the default export as
+        // { id, server }, not OpenCode's { id, setup }.
+        string content = ArbiterPluginShim.Render("kilo");
+
+        Assert.Contains("export default", content, StringComparison.Ordinal);
+        Assert.Contains("id: \"kyber-arbiter\"", content, StringComparison.Ordinal);
+        Assert.Contains("server: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("setup: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.Contains("export const KyberArbiter", content, StringComparison.Ordinal);
+
+        // Contains alone passes with two defaults (SyntaxError in the host) or
+        // a default ahead of the named export it references (TDZ
+        // ReferenceError at import). Pin exactly one default, after it.
+        int defaultExport = content.IndexOf("export default", StringComparison.Ordinal);
+        Assert.True(defaultExport >= 0, "shim must default-export the plugin for the Kilo loader");
+        Assert.Equal(-1, content.IndexOf("export default", defaultExport + 1, StringComparison.Ordinal));
+        int namedExport = content.IndexOf("export const KyberArbiter", StringComparison.Ordinal);
+        Assert.True(
+            namedExport >= 0 && defaultExport > namedExport,
+            "default export must follow the named export it references");
+    }
+
+    [Fact]
+    public void Render_Pi_ThrowsInsteadOfEmittingAnOpenCodeShapedBody()
+    {
+        // Pi's Arbiter is rendered by PiRenderer.RenderArbiterExtension (Pi API,
+        // pi.on tool_call/tool_result), never by this Bun/OpenCode shaped shim.
+        // Default-exporting the Plugin body for "pi" would bind directory to
+        // undefined under the Pi host and register no Pi hooks: fail-open, the
+        // same silent-never-loads class this generator exists to fix.
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render("pi"));
+    }
+
+    [Fact]
+    public void Render_UnknownHarnessToken_ThrowsInsteadOfGuessingALoaderShape()
+    {
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render("warp"));
+    }
+
+    [Fact]
     public async Task RenderAsync_Shim_AssignsArgsAndAppendsOutputOnBlock()
     {
         string content = await ShimContentAsync();
