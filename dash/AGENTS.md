@@ -42,9 +42,15 @@ each through the process watchdog:
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
 scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
+
+`<files>` are relative to `dash/` (`src/foo.ts`, not `dash/src/foo.ts`). A repo-root path matches
+nothing and passes with zero tests, so check the run reports a non-zero test count.
+
+`npm --prefix dash run test` is the full KyberDash suite. The review council's `ts-test` gate and
+CI run it; no dev agent does.
 
 Editing `dash/tray/**` also means the tray's own gates — see
 [`dash/tray/AGENTS.md`](tray/AGENTS.md) for the Rust and popover-UI commands. Run those through

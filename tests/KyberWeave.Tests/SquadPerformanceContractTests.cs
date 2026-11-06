@@ -46,11 +46,23 @@ public sealed class SquadPerformanceContractTests
         "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
 
     private const string DirectAssemblyDll = "tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
+    /// <summary>
+    ///     Retired. The quiet reporter prints the same one banner line for a passing run and for a
+    ///     filter that matched nothing, so a worker can neither check the total nor fill in its
+    ///     <c>TESTS:</c> digest field from the output.
+    /// </summary>
     private const string QuietReporter = "-reporter quiet";
+
     private const string NoBuildFlag = "--no-build";
 
+    /// <summary>
+    ///     The class filter has to show the namespace: xUnit matches <c>-class</c> against the
+    ///     fully qualified name, so a short class name runs zero tests and still exits 0.
+    /// </summary>
     private const string DirectAssemblyRegex =
-        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+(?:""(?:<[^"">\r\n]+>|[^""\s\r\n]+)""|<[^"">\s\r\n]+>|[^""\s\r\n]+)\s+-reporter\s+quiet";
+        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+""<[Nn]amespace>\.<[^"">\r\n]+>""";
+
+    private const string NeverRunFullSuiteRegex = @"(?i)\bnever run the full test suite\b";
 
     private const string DigestTestCountersRegex =
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
@@ -152,7 +164,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
         Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Matches(@"(?i)\bpre-?computed\s+test\s+commands?\b", content);
     }
 
@@ -338,7 +350,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Contains(DirectAssemblyDll, content, StringComparison.Ordinal);
         Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
     }
 
@@ -460,7 +472,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(TestCodingStandardPath);
         Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
         Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
         Assert.True(
             HasBuildOnceReservationClause(content),
@@ -491,34 +503,87 @@ public sealed class SquadPerformanceContractTests
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
     [InlineData(TestCodingStandardPath)]
-    public void WorkerSurfacesAskTheConductorForOneFullRunOnSharedTestInfrastructure(string relativePath)
+    public void WorkerSurfacesRunATargetedSetOnSharedTestInfrastructure(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
-        Assert.Matches(@"(?i)\bask the conductor for one full run\b", content);
-        Assert.Matches(@"(?i)\binstead of starting your own\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.Matches(@"(?i)\bcross-cutting\b", content);
+        Assert.DoesNotMatch(@"(?i)\bask the conductor for one full run\b", content);
     }
 
     [Theory]
     [InlineData(ConductorExecutionPath)]
     [InlineData(ConductorAgentPath)]
-    public void ConductorSurfacesAloneDispatchOneFullRunOnSharedTestInfrastructure(string relativePath)
+    public void ConductorSurfacesNeverDispatchAFullRun(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
-        Assert.Matches(@"(?i)\bconductor alone dispatches one full run\b", content);
-        Assert.Matches(@"(?i)\bto a single worker\b", content);
-        Assert.Matches(@"(?i)\bworkers never start one\b", content);
+        Assert.Matches(@"(?i)\bconductor never dispatches a full run\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.DoesNotMatch(@"(?i)\bconductor alone dispatches one full run\b", content);
     }
 
     [Fact]
-    public void TestStandardBoundsSharedTestInfrastructureByCountAndByRun()
+    public void TestStandardDefinesSharedTestInfrastructureAndGivesNoFullRunRoute()
     {
         string content = ReadRepoFile(TestCodingStandardPath);
         Assert.Matches(@"(?i)\banything referenced by more than one test class\b", content);
         Assert.Matches(@"(?i)`codegraph_explore` on the type shows\b", content);
         Assert.Matches(@"(?i)\btest-project build settings, which every test class depends on\b", content);
-        Assert.Matches(@"(?i)\bat most one full run for the whole run\b", content);
+        Assert.Matches(@"(?i)\breview council's `test` gate\b", content);
+        Assert.Matches(@"(?i)\bno dev agent runs it\b", content);
+        Assert.DoesNotMatch(@"(?i)\bat most one full run\b", content);
+    }
+
+    /// <summary>
+    ///     Only the review council and CI run the full suite. It walks the agents directory, so a
+    ///     dev agent added later is covered without anyone remembering this list.
+    /// </summary>
+    [Fact]
+    public void EveryAgentThatRunsTheTaskGateIsToldNeverToRunTheFullTestSuite()
+    {
+        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
+        string[] gated = Directory.GetFiles(agents, "*.md")
+            .Where(path => File.ReadAllText(path).Contains("`task-gate` skill", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(gated);
+        string[] missing = gated
+            .Where(path => !Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .ToArray();
+        Assert.True(missing.Length == 0, "Missing the full-suite rule: " + string.Join(", ", missing));
+    }
+
+    [Theory]
+    [InlineData("products/kyber-squad/skills/bug-crusher/SKILL.md")]
+    [InlineData("products/kyber-squad/agents/bug-crusher-investigator.md")]
+    public void BugCrusherSurfacesAreToldNeverToRunTheFullTestSuite(string relativePath)
+    {
+        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(relativePath));
+    }
+
+    [Theory]
+    [InlineData("products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md")]
+    [InlineData("products/kyber-squad/skills/go-dev/references/gates-and-platforms.md")]
+    [InlineData("products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md")]
+    public void LanguageGateTablesGiveATargetedTestCommand(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.DoesNotMatch(@"(?i)but run it to prove you broke nothing", content);
+        Assert.Matches(NeverRunFullSuiteRegex, content);
+    }
+
+    [Fact]
+    public void KiloReviewLoopGivesNoLocalFullRunRoute()
+    {
+        string content = ReadRepoFile("products/kyber-squad/skills/kilo-review-loop/SKILL.md");
+        Assert.DoesNotMatch(@"(?i)\brun it locally only when\b", content);
+        Assert.Matches(@"(?i)\bdo not run the full suite locally\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.Matches(@"(?i)\bclasses or files CI reported\b", content);
     }
 
     [Theory]

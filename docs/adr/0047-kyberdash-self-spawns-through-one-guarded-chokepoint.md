@@ -156,7 +156,7 @@ each one decided its own spawn options and nothing else.
   Alternatives rejected: serialising every guarded command (builds and format checks do not
   compete with a test run), and an OS-level limit, which cannot tell a full test run from other
   work. The count, the wait and the directory are flags, never environment variables, like the
-  caps; the runbook documents the slot ([Taking turns: the test slot](../dash/runbook.md#taking-turns-the-test-slot)).
+  caps; the runbook documents the slot ([Taking turns: the test slot](../dash/runbook.md#taking-turns-the-test-slot)). The same wrapper also refuses a full test run from a developer agent, unless the review council passes `--council`; see [ADR 0059](0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
 - **Windows has no watchdog.** The guard and the refusals run on every platform, and the
   ledger runs on Windows in ledger-entry-only mode: it checks the children it recorded by pid
   liveness and skips the descendant and orphan scans. It cannot tell a reused pid from its child.

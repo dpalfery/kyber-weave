@@ -6,64 +6,55 @@ code without breaking the repository.
 
 ## Commands
 
-### The inner loop
+### Iterating locally
 
-While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It inspects
-modified files and routes to targeted checks for .NET, KyberDash, the tray crate, and
-governed docs. Use `--scoped` for declared gates limited to changed files, or `--full` for
-all gates unscoped (`review gates . --all`). It is **not** evidence and must never be cited
-as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)).
+**No dev agent runs the full test suite**, in or out of a Kyber-Squad run, and a cross-cutting change is no exception:
+run a targeted set instead. The council's `test` gate and CI run the full suite. To reproduce a CI failure, run the classes or files CI reported.
+A dev agent's full run is refused by the guard (best-effort; limits in the test standard): `scripts/proc-guard.sh run` exits 89 on an unfiltered
+`dotnet test`, `npm --prefix dash run test` or `cargo test`, and names the targeted alternative. The
+council and CI pass `--council`; a person at a terminal is not refused.
 
-**Targeted tests only in the inner loop and before push.** Run the tests that cover the files
-you changed, plus build/lint of the touched projects; the full suite is CI's job, and CI is the
-gate before Ready / Kilo review. Map changed files to tests:
+Inside a Squad run, your task packet names the test command and your agent rules say when to
+run it. Otherwise, run `scripts/fast-loop.sh` while iterating: it inspects modified files and
+routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. `--help` lists
+its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
+**not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 
-- .NET: `scripts/fast-loop.sh --class <Area>*` (builds first), or build then filter:
-  `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
-  `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
-  Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
-- Repository policy (scripts, workflows, gate configuration, docs prose, source scans): the
-  same commands against `tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj`.
-  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`,
-  and runs its two source scans (spawn sites, upstream names) on every .NET loop.
-- KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
-  (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
-  zero tests. Check the run reports a non-zero test count.
-- Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
-- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
-  The crate is one small test target, so this runs it whole, as `fast-loop.sh` does for any
-  change under `dash/tray/src-tauri/`. To narrow while iterating, add a quoted name filter
-  (`cargo test 'tray_menu'`) and check the result line shows a non-zero `passed` count.
-- Governed docs: `docs validate . --merge-ready` and `docs drift .`.
+Run the tests that cover your change, plus build/lint of the touched projects, and check each
+run reports a non-zero test count. The commands for each area:
 
-Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`
-shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI
-workflows, migrations/schemas) or to reproduce a CI failure.
+- .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#commands)
+- Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
+  [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
+- KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
+- Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 
 **Every local test, gate and e2e command runs through the process watchdog.** From the
 repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
 command's process tree at an absolute cap (exit 86) and fails a run that leaves children
 behind (exit 87). The caps change only by flag (`--max-node`, `--max-tree`), never by environment
-variable. `fast-loop.sh` already wraps its test and gate calls. A run of the full .NET suite adds
-`--slot dotnet-test`, so overlapping full runs on one machine queue (exit 88 if the wait runs out)
-instead of piling onto its cores; the `test` gate already does, and partial runs, builds and format
-checks never take a slot. Playwright runs only with
+variable. `fast-loop.sh` already wraps its test and gate calls. The `test` gate takes `--slot dotnet-test`, so
+overlapping full runs on one machine queue (exit 88 if the wait runs out) instead of piling onto its
+cores; partial runs, builds and format checks never take a slot. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely) and
 [ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).
 
 ### Before opening a PR
 
-Run the declared gate suite scoped to changed files (the default). Add `--all` only for the
-cross-cutting changes or CI reproduction listed above; otherwise CI runs the full suite:
+Run the build and the targeted tests above, the `task-gate` skill if you are a dev agent, and the
+docs gates:
 
 ```bash
-dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
-# Cross-cutting changes or CI reproduction only, instead of the line above:
-# dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
+
+`review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
+so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
+Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
+are not run: each is reported as a refused blocking failure (`KW-REVIEW-022`, exit `1`) that means "not run
+here", not a code finding. Only the `code-reviewer` council and CI pass `--council`; the other gates still run.
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
 `dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)

@@ -86,6 +86,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
 - Never author application services or test files.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 

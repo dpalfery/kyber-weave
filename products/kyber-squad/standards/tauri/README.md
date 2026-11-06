@@ -96,3 +96,6 @@ cargo clippy -- -D warnings
 cargo test
 npm run tauri build
 ```
+
+The `cargo test` line is the gate the review council and CI run. A dev agent never runs the whole crate's tests;
+it runs the tests covering its change (`cargo test '<name>'`).

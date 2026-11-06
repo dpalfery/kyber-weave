@@ -46,7 +46,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 2. Identify the sub-task and read **only** the matching `typescript-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 or the package's own documentation to confirm the current API of any library you are configuring — do not wait to be asked. Use the standard for which dependencies this repository actually takes.
 4. Implement the change. Match the host repository's existing module layout and naming unless the standard says otherwise.
-5. Run the typecheck, lint, and build commands the standard names, and the existing tests to prove you broke nothing, then hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
+5. Run the typecheck, lint, and build commands the standard names, and the existing tests covering your change to prove you broke nothing, then hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
 
 ## Coordination
 
@@ -71,6 +71,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never turn an unmeasured value into `0`, `''`, or a default that looks like data.
 - Never author test files, React components, CI workflows, or Dockerfiles.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Completion digest
 

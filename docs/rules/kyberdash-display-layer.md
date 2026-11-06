@@ -103,10 +103,10 @@ scheduling, TypeScript engine value imports, and TypeScript timers — and each 
 in-memory fixtures first, so a green repository scan means "no violations", never "the scanner
 found nothing". The one allowlisted timer is
 `dash/web/src/lib/storeGeneration.ts`, on the read-only-poll grounds above; adding another
-requires the same written argument. It runs under
+requires the same written argument. A dev agent runs it as a targeted set, under the watchdog:
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- src/architecture/display-layer.test.ts
 ```
 
 A rule enforced only by a reviewer's memory is a rule that decays. If a change requires
@@ -125,9 +125,12 @@ written reason, never around the rule.
    belongs on `TIMER_ALLOWLIST` with that reason; a timer that starts or re-drives work is not.
 4. Would the same answer have to be right in the CLI, the dashboard, and the tray? Put it
    in the engine once.
-5. Run `npm --prefix dash run typecheck lint test check:reachable`, plus the tray's
-   `cargo fmt --check && cargo clippy -- -D warnings && cargo test` when you touched Rust. Run each
-   through `scripts/proc-guard.sh run --` (see [dash/AGENTS.md](../../dash/AGENTS.md#tests-that-start-processes)).
+5. Run `npm --prefix dash run typecheck lint check:reachable`, plus `npm --prefix dash run test:related -- <files>`
+   for the files you changed (paths relative to `dash/`). The whole dash suite (`npm --prefix dash run test`)
+   is the review council's and CI's; no dev agent runs it. When you touched Rust, run the tray's
+   targeted `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test '<name>'` from
+   [dash/tray/AGENTS.md](../../dash/tray/AGENTS.md). Run each through `scripts/proc-guard.sh run --`
+   (see [dash/AGENTS.md](../../dash/AGENTS.md#tests-that-start-processes)).
 
 ## Related
 

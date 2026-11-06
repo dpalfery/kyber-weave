@@ -7,15 +7,28 @@
 # anything it started is still alive.
 #
 # Usage:
-#   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]
+#   scripts/proc-guard.sh run [--council] [--max-node N] [--max-tree N] [--timeout S] [--tty]
 #                             [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]
 #                             -- <cmd...>
+#   scripts/proc-guard.sh classify -- <cmd...>
 #   scripts/proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]
+#
+# Full-run guard: a "full" run is an unfiltered product suite: dotnet test (or the KyberWeave.Tests.dll
+# runner) with no narrowing flag and no target other than KyberWeave.Tests (a solution, a directory or no
+# target counts as full), npm --prefix dash run test with no path after "--", cargo test with no positional
+# filter. Leading env, timeout, nice, time, command and exec wrappers are stripped first. Shell strings
+# (sh -c, bash -c) are not parsed. Ambiguous input counts as full. Only the review council and CI run
+# those. `classify -- <cmd...>` prints exactly "full" or "partial" on stdout, exits 0
+# and starts nothing. `run` refuses a full run with exit 89 unless --council is given or stdin is an
+# interactive terminal; --council is a command-line flag only (never an environment variable) and is
+# consumed here, not forwarded to the command. The refusal starts no process and happens before the slot wait.
 #
 # Exit codes:
 #   86   a cap tripped (stderr names max-tree or max-node); the whole tree was killed
 #   87   processes survived the command (run: only when the command itself succeeded)
 #   88   --slot-wait elapsed while every slot stayed held; the command never started
+#   89   full-run refusal: the command is a full test-suite run, and neither --council nor an interactive
+#        terminal was given; the command never started (stderr names the targeted alternatives)
 #   124  --timeout elapsed; the whole tree was killed (same code as timeout(1))
 #   143  the guard itself got SIGINT or SIGTERM, queued or running; a running tree was killed first.
 #        A wrapped command that died of SIGTERM also exits 143, which is its own exit code.
@@ -73,6 +86,7 @@ set -uo pipefail
 readonly EXIT_CAP=86
 readonly EXIT_LEFTOVERS=87
 readonly EXIT_SLOT_WAIT=88
+readonly EXIT_FULL_RUN_REFUSED=89
 readonly EXIT_TIMEOUT=124
 readonly POLL_INTERVAL=0.5
 readonly KILL_GRACE=1
@@ -95,10 +109,297 @@ fi
 self_pid=$$
 
 usage() {
-  printf 'usage: proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]\n' >&2
+  printf 'usage: proc-guard.sh run [--council] [--max-node N] [--max-tree N] [--timeout S] [--tty]\n' >&2
   printf '                         [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]\n' >&2
   printf '                         -- <cmd...>\n' >&2
+  printf '       proc-guard.sh classify -- <cmd...>\n' >&2
   printf '       proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]\n' >&2
+}
+
+# Full-run classification. Each is_full_* returns 0 for a full run (an unfiltered product suite) and 1
+# for anything partial. A filter flag or a positional filter makes a run partial. Ambiguous input is
+# treated as full: a wrongly refused partial run is recoverable (--class, --council, a terminal), a
+# wrongly admitted full run defeats the rule.
+
+# True for a dotnet flag that selects tests (-class, -method, -trait, -treenode-filter, any --filter*).
+is_filter_flag() {
+  case "$1" in
+    -class|-method|-trait|-treenode-filter|-class=*|-method=*|-trait=*|-treenode-filter=*|--filter*) return 0 ;;
+  esac
+  return 1
+}
+
+# True for a dotnet test flag that takes a separate value, so that value is not read as a target.
+dotnet_flag_takes_value() {
+  case "$1" in
+    -c|--configuration|-f|--framework|-r|--runtime|-a|--arch|-o|--output|--os|-v|--verbosity|-l|--logger|-s|--settings|--results-directory|--diag|-e|--environment|--test-adapter-path|--coverlet-output-format|--coverlet-output|-m|--maxcpucount|--tl)
+      return 0 ;;
+  esac
+  return 1
+}
+
+# Prints the kind of one dotnet target word: "kw" for KyberWeave.Tests.csproj or .dll, "other" for any
+# other project or dll, "full" for a solution, a directory or anything that is not a project file.
+dotnet_target_kind() {
+  case "$1" in
+    *.csproj|*.dll|*.fsproj|*.vbproj)
+      case "${1##*/}" in
+        KyberWeave.Tests.csproj|KyberWeave.Tests.dll) printf 'kw\n' ;;
+        *) printf 'other\n' ;;
+      esac
+      ;;
+    *) printf 'full\n' ;;
+  esac
+}
+
+# dotnet test [flags] [targets], or the direct runner dotnet <path>.dll [args]. Full unless a filter flag is
+# present, or every named target is another project (no solution, directory or KyberWeave.Tests target).
+is_full_dotnet() {
+  local arg kind="" skip=0 pending=0 seen_other=0 seen_full=0
+  if [[ "${1:-}" == test ]]; then
+    shift
+  else
+    case "${1:-}" in
+      *.dll) ;;
+      *) return 1 ;;
+    esac
+  fi
+  for arg in "$@"; do
+    if ((skip == 1)); then
+      skip=0
+      continue
+    fi
+    if ((pending == 1)); then
+      pending=0
+      kind="$(dotnet_target_kind "${arg}")"
+    else
+      if is_filter_flag "${arg}"; then
+        return 1
+      fi
+      case "${arg}" in
+        --project|--solution|--directory)
+          pending=1
+          continue
+          ;;
+        --project=*|--solution=*|--directory=*)
+          kind="$(dotnet_target_kind "${arg#*=}")"
+          ;;
+        -*)
+          if dotnet_flag_takes_value "${arg}"; then
+            skip=1
+          fi
+          continue
+          ;;
+        *)
+          kind="$(dotnet_target_kind "${arg}")"
+          ;;
+      esac
+    fi
+    case "${kind}" in
+      other) seen_other=1 ;;
+      *) seen_full=1 ;;
+    esac
+  done
+  if ((seen_other == 1 && seen_full == 0)); then
+    return 1
+  fi
+  return 0
+}
+
+# True when an npm --prefix value names the dash directory: dash, dash/, ./dash, ./dash/.
+npm_prefix_is_dash() {
+  local value="$1"
+  while [[ "${value}" == ./* ]]; do
+    value="${value#./}"
+  done
+  while [[ "${value}" == */ ]]; do
+    value="${value%/}"
+  done
+  [[ "${value}" == dash ]]
+}
+
+# npm [--prefix dash] run test | run-script test | test | t, with no positional after "--" and no other prefix.
+is_full_npm() {
+  local arg skip="" dd=0 count=0 w1="" w2="" prefix_seen=0 prefix_bad=0
+  for arg in "$@"; do
+    if [[ -n "${skip}" ]]; then
+      if [[ "${skip}" == prefix ]]; then
+        prefix_seen=1
+        npm_prefix_is_dash "${arg}" || prefix_bad=1
+      fi
+      skip=""
+      continue
+    fi
+    if ((dd == 1)); then
+      case "${arg}" in
+        -*) continue ;;
+        *) return 1 ;;
+      esac
+    fi
+    case "${arg}" in
+      --) dd=1 ;;
+      --prefix) skip=prefix ;;
+      --prefix=*)
+        prefix_seen=1
+        npm_prefix_is_dash "${arg#--prefix=}" || prefix_bad=1
+        ;;
+      --loglevel|--workspace|-w|--registry|--userconfig|--cache) skip=other ;;
+      -*) ;;
+      *)
+        case "${count}" in
+          0) w1="${arg}" ;;
+          1) w2="${arg}" ;;
+          *) return 1 ;;
+        esac
+        count=$((count + 1))
+        ;;
+    esac
+  done
+  if ((prefix_seen == 0 || prefix_bad == 1)); then
+    return 1
+  fi
+  case "${count}" in
+    1)
+      [[ "${w1}" == test || "${w1}" == t ]] || return 1
+      ;;
+    2)
+      [[ "${w1}" == run || "${w1}" == run-script ]] || return 1
+      [[ "${w2}" == test ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# cargo [+toolchain] test with no positional filter after it; value-taking flags skip their value.
+is_full_cargo() {
+  local arg skip=0 dd=0 sub=""
+  for arg in "$@"; do
+    if ((skip == 1)); then
+      skip=0
+      continue
+    fi
+    if ((dd == 1)); then
+      case "${arg}" in
+        -*) continue ;;
+        *) return 1 ;;
+      esac
+    fi
+    case "${arg}" in
+      --) dd=1 ;;
+      +*)
+        # A toolchain selector (cargo +stable test) is allowed only before the subcommand.
+        [[ -z "${sub}" ]] || return 1
+        ;;
+      --manifest-path|-p|--package|--exclude|--features|-F|--target|--target-dir|--bin|--test|--example|--bench|-j|--jobs|--profile|--color|--message-format|--config|-Z)
+        skip=1
+        ;;
+      -*) ;;
+      *)
+        if [[ -z "${sub}" ]]; then
+          sub="${arg}"
+          [[ "${sub}" == test ]] || return 1
+        else
+          return 1
+        fi
+        ;;
+    esac
+  done
+  [[ "${sub}" == test ]] || return 1
+  return 0
+}
+
+# Entry point: "$@" is a command line. Leading wrappers (env, timeout, nice, time, command, exec) are
+# stripped first, so the real command is classified. Returns 0 for a full run, 1 for partial.
+# Shell strings (sh -c, bash -c) are not parsed: an accepted residual.
+is_full_run() {
+  while (($# > 0)); do
+    case "${1##*/}" in
+      env)
+        shift
+        while (($# > 0)); do
+          case "$1" in
+            -u|--unset|-C|--chdir|-S|--split-string)
+              shift
+              (($# > 0)) && shift
+              ;;
+            -*|*=*) shift ;;
+            *) break ;;
+          esac
+        done
+        ;;
+      timeout)
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -s|--signal|-k|--kill-after)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        # The DURATION word.
+        (($# > 0)) && shift
+        ;;
+      nice)
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -n|--adjustment)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        ;;
+      time|command|exec)
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          shift
+        done
+        ;;
+      *) break ;;
+    esac
+  done
+  if (($# == 0)); then
+    return 1
+  fi
+  local tool="${1##*/}"
+  shift
+  case "${tool}" in
+    dotnet) is_full_dotnet "$@" ;;
+    npm) is_full_npm "$@" ;;
+    cargo) is_full_cargo "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+# classify -- <cmd...>: print "full" or "partial"; starts nothing.
+classify_command() {
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+  if (($# == 0)); then
+    usage
+    return 2
+  fi
+  if is_full_run "$@"; then
+    printf 'full\n'
+  else
+    printf 'partial\n'
+  fi
+  return 0
+}
+
+# Stderr text for a refused full run; names the targeted alternatives.
+full_run_refusal() {
+  printf 'proc-guard: refused: %s is a full test-suite run. Only the review council and CI run the full suite;\n' "$*" >&2
+  printf 'proc-guard: dev agents run targeted sets instead. Use one of these:\n' >&2
+  printf "proc-guard:   kyber-weave review gates . --agent <name>\n" >&2
+  printf "proc-guard:   scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'\n" >&2
+  printf 'proc-guard: to run the full suite on purpose from a terminal, run it there directly; the council passes --council.\n' >&2
 }
 
 # Print the process table: "<pid> <ppid> <user> <comm> <args...>".
@@ -609,10 +910,16 @@ acquire_slot() {
 }
 
 run_guarded() {
-  local max_node=128 max_tree=64 timeout_s=0 keep_tty=0
+  # Read the caller's stdin state before anything else: the redirect below changes what [[ -t 0 ]] means.
+  local stdin_tty=0
+  if [[ -t 0 ]]; then
+    stdin_tty=1
+  fi
+  local max_node=128 max_tree=64 timeout_s=0 keep_tty=0 council=0
   local slot="" slot_given=0 slot_count=1 slot_wait="${SLOT_DEFAULT_WAIT}" task_label="" slot_dir="" extras_given=0
   while (($#)); do
     case "$1" in
+      --council) council=1; shift ;;
       --max-node) max_node="${2:-}"; shift 2 ;;
       --max-tree) max_tree="${2:-}"; shift 2 ;;
       --timeout) timeout_s="${2:-}"; shift 2 ;;
@@ -672,6 +979,13 @@ run_guarded() {
   if [[ -z "${KW_PROC_GUARD_PS:-}" && -z "$(table)" ]]; then
     printf 'proc-guard: cannot read the process table (ps failed); refusing to run unguarded\n' >&2
     return 2
+  fi
+
+  # Full-run guard: only the review council (--council) and CI start the whole product suite. Decided on
+  # the caller's stdin (captured at the top), and before the slot wait, so a refused run never queues or starts.
+  if ((council == 0 && stdin_tty == 0)) && is_full_run "$@"; then
+    full_run_refusal "$@"
+    return "${EXIT_FULL_RUN_REFUSED}"
   fi
 
   if ((slot_given == 1)); then
@@ -866,6 +1180,7 @@ main() {
   [[ $# -gt 0 ]] && shift
   case "${mode}" in
     run) run_guarded "$@" ;;
+    classify) classify_command "$@" ;;
     check-leftovers) check_leftovers "$@" ;;
     *) usage; return 2 ;;
   esac

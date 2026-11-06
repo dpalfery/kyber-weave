@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-06
 ---
 
 # CLI command surface
@@ -305,7 +305,7 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`review gates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
+| [`review gates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix`, `--council` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
 | [`review duplicates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes from findings and gates. |
@@ -330,6 +330,13 @@ changed, instead of running the repository-wide `review.gates`:
   decides the result. Requires `--agent`.
 - `--task` and `--fix` given without `--agent` are a client-input error (exit `2`).
   `--paths` and `--base` scope the council gates too and are accepted without `--agent`.
+- `--council` declares the run to be the review council or CI, the only callers that may run gates marked
+  `full-suite: true` (`test`, `ts-test`, `cargo-test`). Without it, when stdin is not a terminal, each
+  full-suite gate is not run: it is reported as a refused blocking failure (`KW-REVIEW-022`, severity Error)
+  that names `kyber-weave review gates . --agent <name> --paths <files>` and
+  `scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'`. A refusal means "not run here", not a code
+  finding. The other gates still run, and `--agent` task-gate runs are unaffected. The command exits `1`.
+  A pre-push self-review run never passes `--council`; CI runs the refused gates.
 - Two tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
   becomes one argument per changed file the gate's `include` matches, and `{task}`, which may
   sit inside an argument. Neither reaches a shell, and the program (the first element) is always
@@ -454,7 +461,7 @@ risk. The three rules below mirror the contract in
 | `docs mcp-unwire` | `0` when every named file was restored or deleted, or when no target was named; `1` on any refusal — no receipt record, a file that is gone, a digest that differs from the recorded one, a file that is a symbolic link, or a file this process may not read. A record whose file still holds the pre-write bytes is an interrupted write, not drift, and is reported at `0` |
 | `review verdict` | `0` approve, `1` request-changes |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
-| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). |
+| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). A full-suite gate refused for lack of `--council` (`KW-REVIEW-022`) is a blocking failure: exit `1`, with the other gates still run. |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
@@ -463,6 +470,16 @@ risk. The three rules below mirror the contract in
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
+
+### Repository scripts
+
+The two test-running scripts in `scripts/` share one full-suite refusal. Exit `89` means the
+command is a full test-suite run and the caller is not the council or CI: `scripts/proc-guard.sh run`
+(no `--council` and stdin not a terminal) and `scripts/fast-loop.sh --full`, `--scoped` or `--regenerate`
+(stdin not a terminal). Both exit `89` before any build or process starts, and print the targeted
+alternatives. `proc-guard.sh run` takes `--council` on its command line only; no environment variable lifts
+the refusal. `scripts/proc-guard.sh classify -- <argv>` prints `full` or `partial` for a command and starts
+nothing, so you can check a command before running it; shell strings such as `bash -c` are not parsed and count as `partial`. `scripts/fast-loop.sh --class` and `--method` are unchanged.
 
 ### `kyberdash`
 

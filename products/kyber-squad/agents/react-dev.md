@@ -61,6 +61,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never author backend services, native or mobile UI, the desktop/native core, or the formal test suites `test-dev` owns.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Key Deliverables
 - Clean, semantic HTML structure

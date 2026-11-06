@@ -1212,6 +1212,30 @@
       "text": "ProcessStartInfo startInfo = new(\"node\")",
       "count": 1,
       "bound": "Started by the ProcessRunner.Run below with a 60 s timeout that kills the child tree; the Node one-liner exits immediately."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardFullRunGuardTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Guard helper's ProcessRunner.Run with a 30 s timeout that kills the tree. The guard reads a fixture process table (KW_PROC_GUARD_PS), and PATH starts with stub dotnet, npm and cargo executables that only append to a marker and exit, so no real build or test runs."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardFullRunGuardTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The child is proc-guard.sh over a fixture process table with stub toolchain executables first on PATH; the stubs exit at once."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/FastLoopFullRunRefusalTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the RunFastLoop helper's ProcessRunner.Run with a 30 s timeout that kills the tree. The script runs in a temporary repository with stub dotnet, npm and cargo first on PATH (each appends to a marker and exits), TMPDIR and HOME point into the temp directory, and the process table is a fixture, so no real build or test runs."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/FastLoopFullRunRefusalTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, LoopTimeout);",
+      "count": 1,
+      "bound": "LoopTimeout (30 s) kills the tree. The child is fast-loop.sh in a temporary repository with stub toolchain executables first on PATH; the stubs exit at once."
     }
   ]
 }

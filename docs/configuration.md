@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-06
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -457,6 +457,11 @@ that names `{task}` refuses the run when no `--task` slug was given.
 review:
   max-concurrent-workers: 4
 ```
+
+A gate may set `full-suite: true` (a boolean, default `false`). It marks a gate that runs the full product
+suite; the shipped `test`, `ts-test` and `cargo-test` gates set it. Such a gate runs only when the caller
+declares itself the review council or CI with `--council`, or when stdin is a terminal. Otherwise the gate is
+reported as a refused blocking failure (`KW-REVIEW-022`) and not run. The other gates still run.
 
 ## Harness profiles
 

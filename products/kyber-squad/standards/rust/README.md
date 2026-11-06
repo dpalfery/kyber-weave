@@ -128,3 +128,6 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --locked
 cargo nextest run --workspace --locked   # or: cargo test --workspace --locked
 ```
+
+The test line is the gate the review council and CI run. A dev agent never runs the full suite;
+it runs the tests covering its change (`cargo nextest run -E 'test(<name>)'`).

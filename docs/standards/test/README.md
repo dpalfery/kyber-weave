@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-06
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -186,22 +186,56 @@ belong in a test: remove it or inject a fake.
 
 ## Commands
 
-Run every command through the watchdog, from the repository root:
+Run every command through the watchdog, from the repository root. **No dev agent runs the full
+test suite**: the review council's `test` gate and CI run it. Build once, then run the tests
+covering your change:
 
 ```bash
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 ```
+
+A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
+`-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its
+`.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter`, or any
+`--filter`). `npm --prefix dash run test` with no path after `--` is full, and so is `cargo test` with no positional
+filter. Leading `env`, `timeout`, `nice`, `time`, `command` and `exec` are skipped before the command is classified.
+Naming another project (the RepoPolicy project, for example) or a path narrows a run to a partial run, which dev agents
+may use. `npm run test:related` and `dotnet build` are never full runs. When a shape is ambiguous the classifier calls
+it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. `scripts/proc-guard.sh run` refuses a full run with exit 89 unless the caller
+passes `--council` or stdin is a terminal; the refusal names the targeted alternatives and starts nothing. Only the
+`code-reviewer` council and CI pass `--council`. Check a full run's argv with `scripts/proc-guard.sh classify -- <cmd>`.
+
+A filter that matches nothing exits 8 ("Zero tests ran"). Outside a Kyber-Squad run,
+`scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'` does the same for one area and builds
+first. Inside a run, the task packet names the command.
+
+### Limits of the guard
+
+The guard is best effort. It reads the command line and whether stdin is a terminal, so it does not stop everything an agent can do:
+
+- A shell with a pseudo-terminal looks like a person at a terminal and passes the terminal test. The Claude Code Bash tool has no terminal (checked 2026-11-06); other harnesses have not been checked.
+- An agent that types `--council` passes. The flag is the caller's claim, not proof of who is calling.
+- A raw `dotnet test` that skips the watchdog wrapper is not seen. Only a harness-level hook can see it.
+- A command inside a shell string (`sh -c '...'`), an `env -S` string, or behind a launcher such as `nohup`, `caffeinate` or `sudo` is not unwrapped, so it is classified as partial and runs.
+- `dotnet run --project <test project>` and `npm --prefix <absolute path to dash> run test` are not classified as full, so they run.
+- `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the whole tray crate for a tray Rust change, outside the watchdog.
+
+The real closure is a per-harness shell hook that sees each shell call before it runs. It is tracked in [`docs/todo/per-harness-shell-hook-for-full-run-guard.md`](../../todo/per-harness-shell-hook-for-full-run-guard.md). The decision and its alternatives are in [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
 
 ### Fast Assembly Runner and Iteration Workflow
 
-During task execution and active development, do not invoke the full `dotnet test` suite repeatedly. MSBuild project evaluation and incremental dependency checks introduce multi-second overhead per invocation. Instead, use the direct xUnit assembly runner with class filtering and the quiet reporter:
+During task execution and active development, use the direct xUnit assembly runner with class filtering. MSBuild project evaluation and incremental dependency checks add multi-second overhead to every `dotnet test` invocation:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
 ```
+
+`-class` matches the fully qualified name: a short class name runs zero tests and exits 0, so read
+the total and treat zero as nothing verified.
 
 When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
 
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
-- **Reserve the full suite for the final council**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it once per run, on the integrated head. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on) and its classes cannot be named, ask the conductor for one full run instead of starting your own; the conductor decides and dispatches at most one full run for the whole run, shared by every worker. Never run the full test suite on inner iteration loops.
+- **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it once per run, on the integrated head, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.
 - **Zero-stash RED proofs**: When proving a test fails before implementation (RED proof in TDD), never use `git stash` to toggle between dirty working tree states. `git stash` creates uncommitted stash commits that conflict with parallel task execution and risk race conditions across agents. Instead, run RED proofs against a clean base checkout, throwaway working tree copy, or isolated `git worktree`.

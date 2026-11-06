@@ -61,6 +61,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
 - Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Workflow
 

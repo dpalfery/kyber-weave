@@ -35,4 +35,7 @@ dotnet watch
 dotnet test
 ```
 
+The `dotnet test` line is the gate the review council and CI run. A dev agent never runs the full suite;
+it runs the tests covering its change (`dotnet test --filter "FullyQualifiedName~<TestClass>"`).
+
 Migrations are owned by `dal-dev`. See **<data-access-layer-coding-standard>**.

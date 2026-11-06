@@ -125,5 +125,7 @@ jobs:
             BASE="origin/HEAD"
           fi
           mkdir -p artifacts
+          # CI is the council for full-suite gates, so it passes --council.
           kyber-weave review gates . --base "$BASE" \
+            --council \
             --out artifacts/review-gates.json --format table

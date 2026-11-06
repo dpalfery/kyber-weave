@@ -18,7 +18,7 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
-        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output", "applies-when"];
+        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output", "applies-when", "full-suite"];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] TaskGateKeys =
@@ -113,7 +113,8 @@ public static class ReviewConfigLoader
                 ParseAppliesWhen(gate.Id!, gate.AppliesWhen))
             {
                 Include = include,
-                FailOnOutput = gate.FailOnOutput ?? false
+                FailOnOutput = gate.FailOnOutput ?? false,
+                FullSuite = gate.FullSuite ?? false
             });
         }
 
