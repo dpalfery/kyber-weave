@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -81,21 +82,21 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// emitted on every rendered agent that carries no overlay of either kind, per the owner's
 /// Q1-A decision, so a role outside the MCP entitlement reaches no CodeGraph, docs MCP, or web
 /// tooling beyond the built-ins. An agent declaring the canonical <c>pi-extensions</c> overlay,
-/// or receiving the derived <c>kyber-weave</c> overlay described below, instead emits the
+/// or receiving the derived <c>kw-docs</c> overlay described below, instead emits the
 /// merged list as a YAML sequence (the exact form live-verified 2026-10-24; the CSV-scalar form
 /// is unverified and is not emitted).
 /// This combines with <c>allowed_subagents</c> without conflict, because nested-subagent
 /// tools are injected directly rather than through a loaded extension.
 /// </para>
 /// <para>
-/// <b>Derived <c>kyber-weave</c> overlay (ADR 0050).</b> Every agent whose capability profile
+/// <b>Derived <c>kw-docs</c> overlay (ADR 0050).</b> Every agent whose capability profile
 /// resolves and allows <c>filesystem.read</c> receives the <c>pi-mcp-adapter</c> extension and
-/// the <c>kyber-weave</c> tool entries even when its canonical body declares no overlay: the
+/// the <c>kw-docs</c> tool entries even when its canonical body declares no overlay: the
 /// proxy entry <c>ext:pi-mcp-adapter/mcp</c> first, then one entry per tool
 /// <c>toolchain.yml</c> declares for that server. The pure-orchestrator carve-out does not
 /// apply to this server — <c>conductor</c> is entitled on the same file-read rule as every
-/// other agent — because <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and the role
-/// that assigns work is the role deciding which standards apply to whom. The declared
+/// other agent — because <c>kw-docs</c> carries <c>docs_get_coding_standard_for_technology</c>,
+/// and the role that assigns work is the role deciding which standards apply to whom. The declared
 /// <c>pi-extensions</c> and <c>pi-tools</c> remain the vehicle for everything else: the
 /// <c>context7</c> pair stays a hand-authored declaration on <c>research-agent</c>, the ADR 0019
 /// precedent for this overlay. The three lists merge rather than replace — built-ins, then
@@ -107,15 +108,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// surface does not. <c>pi-mcp-adapter</c>'s deferred/tool-search surface names a tool
 /// <c>mcp__&lt;namespace&gt;__&lt;tool&gt;</c>, where the namespace maps the server name with
 /// <c>-</c> to <c>_</c> before any other character is mapped, and the tool segment takes the
-/// same treatment. So this server's namespace is <c>kyber_weave</c> and its entries are
-/// <c>ext:pi-mcp-adapter/mcp__kyber_weave__agent_coding_standards</c> and its seven siblings,
-/// never <c>mcp__kyber-weave__*</c> — which resolves against no registered Pi tool. The
+/// same treatment. So this server's namespace is <c>kw_docs</c> and its entries are
+/// <c>ext:pi-mcp-adapter/mcp__kw_docs__docs_answer_question_from_repo_documentation</c> and its
+/// seven siblings, never <c>mcp__kw-docs__*</c> — which resolves against no registered Pi tool. The
 /// <c>mcp__context7__query_docs</c> precedent in the corpus does not reveal the mapping, because
 /// that server name has no hyphen; the tool segment is what turns <c>query-docs</c> into
 /// <c>query_docs</c>. The hyphenated spelling exists only on the adapter's <i>direct</i>-tool
-/// surface (<c>kyber-weave_docs_status</c>), and this renderer never declares onto that surface:
-/// Squad's declarations target the <c>ext:</c> surface, so the underscored namespace is the
-/// one to use.
+/// surface (<c>kw-docs_docs_get_source_repository_and_revision</c>), and this renderer never
+/// declares onto that surface: Squad's declarations target the <c>ext:</c> surface, so the
+/// underscored namespace is the one to use.
 /// </para>
 /// <para>
 /// <b>Version skew, checked.</b> The naming rule was verified against <c>pi-mcp-adapter</c>
@@ -123,10 +124,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>deferred-tool-surface.ts</c> <c>formatDeferredToolName</c> over this roster, which
 /// returned the eight underscored names above. It arrived in <b>6.0.0</b>: 5.4.0, which one
 /// machine here still runs, has no per-tool deferred registration at all and would name these
-/// tools <c>kyber-weave_agent_coding_standards</c>, so 5.x cannot be the target — the corpus's
-/// checked-in <c>mcp__context7__resolve_library_id</c> entry resolves on no version before
-/// 6.0.0 either. An operator still on 5.x keeps the <c>mcp</c> proxy entry working and loses
-/// only the enumerable per-tool names.
+/// tools <c>kw-docs_docs_answer_question_from_repo_documentation</c>, so 5.x cannot be the
+/// target — the corpus's checked-in <c>mcp__context7__resolve_library_id</c> entry resolves on no
+/// version before 6.0.0 either. An operator still on 5.x keeps the <c>mcp</c> proxy entry working
+/// and loses only the enumerable per-tool names.
 /// </para>
 /// <para>
 /// <b>Server configuration stays the operator's.</b> Squad writes no harness settings file (the
@@ -134,7 +135,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>.mcp.json</c>, a user-global <c>~/.config/mcp/mcp.json</c>, <c>~/.agents/mcp.json</c>, or
 /// Pi's own agent-directory <c>mcp.json</c>, and a project-scoped server needs a trust approval
 /// on first use. This renderer declares the extension and the tool ids and configures no
-/// server, so a deployment with no <c>kyber-weave</c> entry renders the overlay and reaches
+/// server, so a deployment with no <c>kw-docs</c> entry renders the overlay and reaches
 /// nothing through it until the operator adds one.
 /// </para>
 /// <para>
@@ -198,9 +199,9 @@ public sealed class PiRenderer : SquadHarnessRenderer
 
     /// <summary>
     /// The MCP server ADR 0050 widened to every read-entitled agent, the pure orchestrator
-    /// included, because it carries <c>agent_coding_standards</c>.
+    /// included, because it carries <c>docs_get_coding_standard_for_technology</c>.
     /// </summary>
-    private const string KyberWeaveMcpServer = "kyber-weave";
+    private const string KyberWeaveMcpServer = McpServerNames.Docs;
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Pi's built-in tool names, verified
@@ -321,9 +322,9 @@ public sealed class PiRenderer : SquadHarnessRenderer
             frontmatter["thinking"] = thinkingLevel;
         }
 
-        // Two sources, one merged surface: the entitlement derives the kyber-weave overlay for
+        // Two sources, one merged surface: the entitlement derives the kw-docs overlay for
         // any agent allowed to read the filesystem (ADR 0050), and the agent's own declaration
-        // carries everything else. A roster with no kyber-weave entry, or a profile outside the
+        // carries everything else. A roster with no kw-docs entry, or a profile outside the
         // entitlement, derives nothing — so an unmatched grant can never load an extension whose
         // only purpose is that server.
         bool carriesMcpOverlay = mcpOverlayTools.Count > 0 &&
@@ -598,7 +599,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
 
     /// <summary>
     /// The namespace the adapter gives a server: hyphens become underscores before any other
-    /// character is mapped, which is why <c>kyber-weave</c> is reached as <c>kyber_weave</c>.
+    /// character is mapped, which is why <c>kw-docs</c> is reached as <c>kw_docs</c>.
     /// </summary>
     /// <remarks>
     /// Only the hyphen is mapped, because the one server this renderer derives an overlay for is

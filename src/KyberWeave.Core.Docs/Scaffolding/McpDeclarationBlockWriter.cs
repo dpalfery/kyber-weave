@@ -28,13 +28,18 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 public static partial class McpDeclarationBlockWriter
 {
     /// <summary>
-    /// The declaration as the design renders it: <c>kyber-weave</c> declared first-party and
+    /// The declaration as the design renders it: <c>kw-docs</c> declared first-party and
     /// required, and the third-party example commented out.
     /// </summary>
     /// <remarks>
     /// One constant is the single source of the block's text. The scaffolder's fresh-file
     /// template interpolates it and <see cref="AppendBlock"/> appends it, so a newly created
     /// host configuration and an appended section cannot drift apart.
+    /// <para>
+    /// The key is the shipped one. <c>kyber-weave</c> is the key existing installs were written
+    /// under, and a fresh scaffold that emitted it would hand every new repository a name this
+    /// version no longer uses; <c>docs mcp-migrate</c> is what renames it where one already exists.
+    /// </para>
     /// </remarks>
     public const string DeclarationYaml = """
         mcp:
@@ -42,7 +47,7 @@ public static partial class McpDeclarationBlockWriter
           # into the harnesses it detects; the declaration is host-owned from the moment it exists
           # and docs init never edits it again.
           required-servers:
-            kyber-weave:
+            kw-docs:
               command: [kyber-weave-mcp, --repo-root, .]
               provenance: first-party
               level: required

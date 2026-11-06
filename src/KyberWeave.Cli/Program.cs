@@ -125,6 +125,12 @@ app.Configure(config =>
             .WithExample("docs", "mcp-unwire", ".")
             .WithExample("docs", "mcp-unwire", ".", "--target", "claude-code,opencode");
 
+        docs.AddCommand<DocsMcpMigrateCommand>("mcp-migrate")
+            .WithDescription("Rename the retired MCP server keys of an existing install in place, refusing any entry it cannot prove is Kyber-Weave's.")
+            .WithExample("docs", "mcp-migrate", ".")
+            .WithExample("docs", "mcp-migrate", ".", "--target", "claude-code,declaration")
+            .WithExample("docs", "mcp-migrate", ".", "--target", "cursor", "--dry-run");
+
         docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
             .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
             .WithExample("docs", "integrity-check", ".", "--format", "sarif")

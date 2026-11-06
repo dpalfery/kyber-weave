@@ -33,7 +33,7 @@ public class McpPackagingTests
             File.ReadAllText(KyberWeaveTestPaths.SquadMcpConfigurationPath));
         JsonElement server = document.RootElement
             .GetProperty("mcpServers")
-            .GetProperty("kyber-weave");
+            .GetProperty("kw-docs");
 
         Assert.Equal(
             ["--repo-root", "."],
@@ -71,14 +71,14 @@ public class McpPackagingTests
     /// should own an exclusion.
     /// </remarks>
     [Theory]
-    [InlineData("docs_explore")]
-    [InlineData("docs_for_symbol")]
-    [InlineData("docs_analysis_candidates")]
-    [InlineData("docs_glossary")]
-    [InlineData("docs_status")]
-    [InlineData("docs_validate")]
-    [InlineData("docs_drift")]
-    [InlineData("agent_coding_standards")]
+    [InlineData("docs_answer_question_from_repo_documentation")]
+    [InlineData("docs_find_documents_citing_code_symbol")]
+    [InlineData("docs_find_duplicates_conflicts_ambiguous_terms")]
+    [InlineData("docs_look_up_glossary_term_definition")]
+    [InlineData("docs_get_source_repository_and_revision")]
+    [InlineData("docs_validate_governed_document_schema")]
+    [InlineData("docs_detect_drift_between_documents_and_code")]
+    [InlineData("docs_get_coding_standard_for_technology")]
     public void McpToolDescriptionsScoreAsRoutingMetadata(string toolName)
     {
         DescriptionScore score = ScoreDescription(toolName);
@@ -89,14 +89,14 @@ public class McpPackagingTests
     }
 
     /// <summary>
-    /// Models pick tools by the words a request uses. <c>docs_explore</c> lost to grep while
+    /// Models pick tools by the words a request uses. <c>docs_answer_question_from_repo_documentation</c> lost to grep while
     /// it described itself in the project's own vocabulary, so the description must keep the
     /// requester's words and must say it comes before a file search.
     /// </summary>
     [Fact]
     public void DocsExploreDescriptionUsesRequesterVocabularyAndPrecedesFileSearch()
     {
-        string description = McpToolMethod("docs_explore")
+        string description = McpToolMethod("docs_answer_question_from_repo_documentation")
             .GetCustomAttribute<DescriptionAttribute>()!.Description;
 
         foreach (string jargon in new[] { "governed", "corpus", "frontmatter", "code joins" })
@@ -119,9 +119,9 @@ public class McpPackagingTests
     {
         string text = DocsServerInstructions.Text;
 
-        Assert.Contains("docs_explore", text, StringComparison.Ordinal);
+        Assert.Contains("docs_answer_question_from_repo_documentation", text, StringComparison.Ordinal);
         Assert.Contains("before grepping", text, StringComparison.Ordinal);
-        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status", "docs_validate", "docs_drift", "agent_coding_standards" })
+        foreach (string tool in new[] { "docs_find_documents_citing_code_symbol", "docs_look_up_glossary_term_definition", "docs_find_duplicates_conflicts_ambiguous_terms", "docs_get_source_repository_and_revision", "docs_validate_governed_document_schema", "docs_detect_drift_between_documents_and_code", "docs_get_coding_standard_for_technology" })
         {
             Assert.Contains(tool, text, StringComparison.Ordinal);
         }
@@ -144,7 +144,7 @@ public class McpPackagingTests
     /// Exclusions must be asymmetric: when two tools share a boundary the broader one
     /// yields and the narrower states its territory positively. If every description
     /// disclaimed the overlap, requests in the middle would match nothing — so only
-    /// <c>docs_explore</c>, the broadest of the tools, carries a negative boundary.
+    /// <c>docs_answer_question_from_repo_documentation</c>, the broadest of the tools, carries a negative boundary.
     /// </summary>
     [Fact]
     public void OnlyTheBroadestMcpToolCarriesANegativeBoundary()
@@ -152,14 +152,14 @@ public class McpPackagingTests
         static int Boundary(string toolName) =>
             ScoreDescription(toolName).Components.Single(c => c.Name == "Negative boundary").Points;
 
-        Assert.Equal(20, Boundary("docs_explore"));
-        Assert.Equal(0, Boundary("docs_for_symbol"));
-        Assert.Equal(0, Boundary("docs_analysis_candidates"));
-        Assert.Equal(0, Boundary("docs_glossary"));
-        Assert.Equal(0, Boundary("docs_status"));
-        Assert.Equal(0, Boundary("docs_validate"));
-        Assert.Equal(0, Boundary("docs_drift"));
-        Assert.Equal(0, Boundary("agent_coding_standards"));
+        Assert.Equal(20, Boundary("docs_answer_question_from_repo_documentation"));
+        Assert.Equal(0, Boundary("docs_find_documents_citing_code_symbol"));
+        Assert.Equal(0, Boundary("docs_find_duplicates_conflicts_ambiguous_terms"));
+        Assert.Equal(0, Boundary("docs_look_up_glossary_term_definition"));
+        Assert.Equal(0, Boundary("docs_get_source_repository_and_revision"));
+        Assert.Equal(0, Boundary("docs_validate_governed_document_schema"));
+        Assert.Equal(0, Boundary("docs_detect_drift_between_documents_and_code"));
+        Assert.Equal(0, Boundary("docs_get_coding_standard_for_technology"));
     }
 
     /// <summary>
@@ -168,14 +168,14 @@ public class McpPackagingTests
     /// reaches an open world.
     /// </summary>
     [Theory]
-    [InlineData("docs_explore")]
-    [InlineData("docs_for_symbol")]
-    [InlineData("docs_analysis_candidates")]
-    [InlineData("docs_glossary")]
-    [InlineData("docs_status")]
-    [InlineData("docs_validate")]
-    [InlineData("docs_drift")]
-    [InlineData("agent_coding_standards")]
+    [InlineData("docs_answer_question_from_repo_documentation")]
+    [InlineData("docs_find_documents_citing_code_symbol")]
+    [InlineData("docs_find_duplicates_conflicts_ambiguous_terms")]
+    [InlineData("docs_look_up_glossary_term_definition")]
+    [InlineData("docs_get_source_repository_and_revision")]
+    [InlineData("docs_validate_governed_document_schema")]
+    [InlineData("docs_detect_drift_between_documents_and_code")]
+    [InlineData("docs_get_coding_standard_for_technology")]
     public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string toolName)
     {
         McpServerToolAttribute attribute = McpToolMethod(toolName).GetCustomAttribute<McpServerToolAttribute>()!;
@@ -187,7 +187,7 @@ public class McpPackagingTests
     /// <summary>
     /// A client binds arguments to a tool by the names the server publishes, so a renamed
     /// parameter or a changed default breaks callers while leaving the suite green as long as
-    /// nothing pins them. <c>docs_analysis_candidates</c> and <c>docs_glossary</c> are pinned in
+    /// nothing pins them. <c>docs_find_duplicates_conflicts_ambiguous_terms</c> and <c>docs_look_up_glossary_term_definition</c> are pinned in
     /// <c>McpAnalysisToolsTests</c>; this is the same pin for the coding-standards lookup. Its
     /// declared name is already covered — the theory above resolves each tool through it, so a
     /// rename fails there — as are its annotations; the parameter contract was the gap.
@@ -200,7 +200,7 @@ public class McpPackagingTests
     [Fact]
     public void AgentCodingStandardsIsPinnedToTheParameterContractClientsBindBy()
     {
-        MethodInfo tool = McpToolMethod("agent_coding_standards");
+        MethodInfo tool = McpToolMethod("docs_get_coding_standard_for_technology");
 
         Assert.Equal(typeof(string), tool.ReturnType);
         Assert.Equal(

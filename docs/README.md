@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-05
 ---
 
 # Kyber-Weave documentation
@@ -15,8 +15,9 @@ frontmatter, every `code-refs` entry resolves against a live code index, and
 [the ontology](documentation-ontology.md) for what that means and
 [governance](docgraph/governance.md) for how it is enforced.
 
-An agent should reach this corpus through [`docs_explore`](docgraph/mcp-runbook.md) rather
-than by reading these files.
+An agent should reach this corpus through
+[`docs_answer_question_from_repo_documentation`](docgraph/mcp-runbook.md) rather than by reading
+these files. The server's configuration key is `kw-docs`.
 
 ## Start here
 

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core.Events;
@@ -56,14 +57,14 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///     </para>
 ///     <para>
 ///         <b>MCP reach is declared per agent, in <c>mcpServers</c>, and nowhere else.</b> The
-///         <c>kyber-weave</c> server is granted to every agent whose capability profile resolves and allows
+///         <c>kw-docs</c> server is granted to every agent whose capability profile resolves and allows
 ///         <c>filesystem.read</c> — <c>conductor</c> included, because the server carries
-///         <c>agent_coding_standards</c> and the role that assigns work is the role deciding which standards
-///         apply to whom (ADR 0050). The grant goes through
+///         <c>docs_get_coding_standard_for_technology</c> and the role that assigns work is the role
+///         deciding which standards apply to whom (ADR 0050). The grant goes through
 ///         <see cref="CapabilityDegradations.GrantsUniversalMcpServers" />, the one shared predicate, rather
 ///         than a renderer-local copy of the rule. The pure-orchestrator carve-out for <c>codegraph</c>
 ///         is expressed through <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers" />,
-///         emitting <c>codegraph</c> alongside <c>kyber-weave</c> for read-entitled specialists while
+///         emitting <c>codegraph</c> alongside <c>kw-docs</c> for read-entitled specialists while
 ///         withholding it from <c>conductor</c>.
 ///     </para>
 ///     <para>
@@ -71,7 +72,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         off vendor documentation, following the discipline ADR 0022 established for every Antigravity
 ///         capability: <c>mcpServers</c> is an array of objects, each entry
 ///         <c>{name, command, args}</c>, and that entry — not the single-key map spelling
-///         <c>- kyber-weave: {command, args}</c>, which listed and ran but was never called — is the one the
+///         <c>- kw-docs: {command, args}</c>, which listed and ran but was never called — is the one the
 ///         probe invoked successfully. <c>args</c> carries <c>--repo-root .</c>, workspace-relative, because
 ///         an absolute path can be overridden by a same-named global server definition and because
 ///         workspace-relative is what the rest of Squad emits.
@@ -90,7 +91,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public sealed class AntigravityRenderer : SquadHarnessRenderer
 {
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
     private const string ArbiterMatcher = "^invoke_subagent$";
     private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
     private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
@@ -267,7 +268,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         string? reasoningEffort = ResolveReasoningEffort(agent.ModelProfile);
         if (!string.IsNullOrEmpty(reasoningEffort)) frontmatter.Add("reasoning_effort", reasoningEffort);
 
-        // mcpServers: the grant vehicle this harness actually reads. Universal servers (kyber-weave)
+        // mcpServers: the grant vehicle this harness actually reads. Universal servers (kw-docs)
         // are granted to any read-entitled profile (conductor included, per ADR 0050). Every other
         // declared server is orchestrator-excluded: granted to read-entitled specialists and withheld
         // from the pure orchestrator. The declaration list is ordinal, so the emitted order is too.
@@ -660,8 +661,8 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         // is a configuration record, not a withholding claim, and it is the only signal an operator
         // gets for a renamed or dropped declaration.
         return universalToolsDeclared && mcpShape.IsObject && !mcpShape.DeclaresUniversalServer
-            ? "The toolchain roster declares the kyber-weave MCP tools, but the squad's mcp.json " +
-              "declares no 'kyber-weave' server, so no per-agent grant could be emitted. Add the " +
+            ? "The toolchain roster declares the kw-docs MCP tools, but the squad's mcp.json " +
+              "declares no 'kw-docs' server, so no per-agent grant could be emitted. Add the " +
               "server back under that exact name."
             : null;
     }
@@ -712,10 +713,10 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
 
     /// <summary>
     ///     The shape of the raw MCP declaration: whether <c>mcpServers</c> is a well-formed object, and whether it
-    ///     carries the <c>kyber-weave</c> key.
+    ///     carries the <c>kw-docs</c> key.
     /// </summary>
     /// <param name="IsObject">Whether <c>mcpServers</c> exists and is a JSON object.</param>
-    /// <param name="DeclaresUniversalServer">Whether that object carries the <c>kyber-weave</c> key.</param>
+    /// <param name="DeclaresUniversalServer">Whether that object carries the <c>kw-docs</c> key.</param>
     /// <remarks>
     ///     <see cref="ResolveMcpServer" /> answers null for a missing key, a missing <c>mcpServers</c>
     ///     object, and an unusable entry alike. Only the first is an operator-visible misconfiguration: a source

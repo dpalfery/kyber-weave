@@ -35,7 +35,7 @@ namespace KyberWeave.Tests;
 public sealed class RetrievalRegressionTests
 {
     private const string IncompletePrefix =
-        "This answer is incomplete. Call docs_explore again with the same question and cursor";
+        "This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor";
 
     private static readonly Regex ConfidenceLine = new(
         @"^confidence: (?<value>0\.\d{2}|1\.00)$",

@@ -39,6 +39,7 @@ Exit codes are deliberately not uniform, because the branches carry different ri
 | `validate`, `lint`, `sync-check`, `drift` | any error |
 | `scan` | any critical, raised by `--fail-on warning\|error` |
 | `route` | accuracy below `--min-accuracy` |
+| `docs mcp-migrate` | `1` when any named target was refused — a slug the catalog does not know, a symlink, a denied file, a malformed or foreign document, conflicting old and new entries, or an unrecordable receipt. A refused target writes zero bytes and the other named targets still proceed; a preview, a completed migration, and nothing-to-do exit `0` |
 
 Scanning gates on `Critical` alone by default so that adopting it does not immediately
 break every host build. Do not tighten that default.

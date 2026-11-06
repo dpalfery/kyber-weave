@@ -248,6 +248,23 @@ public static class McpWiringInspector
         if (detection.Wired)
             return null;
 
+        // The entry is there under the name it was written with before the rename, and it still
+        // launches the shipped binary. The gap is real, but the repair is not the wire command: that
+        // would add a second entry beside this one and leave one server under two names.
+        if (detection.LeftOver is { } leftOver)
+        {
+            return new McpWiringFinding(
+                McpWiringKind.NotWired,
+                SeverityFor(server),
+                entry.Harness,
+                server.Name,
+                namedPath,
+                NotWiredCode,
+                $"server '{server.Name}' is still wired under the retired key '{leftOver.OldKey}' ({namedPath})",
+                $"Rename the retired key: run {McpServerRenamer.MigrateCommand} --target {entry.Harness}",
+                McpWiringFixability.NotFixable);
+        }
+
         // A configuration this check refused to read is not one the repair may write either — it
         // refuses a link, a file it may not inspect, and a document whose shape is not the
         // harness's, for the same reason — so none of them can be offered as a fixable gap. An
@@ -422,7 +439,17 @@ public static class McpWiringInspector
                             // refusal instead, so the finding names the reason and offers the edit
                             // the operator can actually make.
                             if (obstacle is not null)
+                            {
                                 refusals.Add($"{file.RelativePath} was not read: {obstacle}");
+                                continue;
+                            }
+
+                            // A file still holding the server under its retired key is a different
+                            // gap from one that never had it: the launch is there, the name is not,
+                            // and the remedy is the migration rather than a wire command that would
+                            // add a second entry beside the first.
+                            if (LeftOverKey(entry, document.RootElement, server.Name) is { } leftOver)
+                                return new Detection(false, null, null, LeftOver: leftOver);
 
                             continue;
                         }
@@ -549,6 +576,30 @@ public static class McpWiringInspector
     }
 
     /// <summary>
+    /// The retired key a harness file holds in place of the declared server's name, when that entry
+    /// still launches the shipped binary.
+    /// </summary>
+    /// <remarks>
+    /// The declared name is what the lookup starts from: only a declared server whose shipped name
+    /// replaced one of the retired keys has a leftover to find. An entry under the old key that this
+    /// reader cannot prove is the shipped binary is not one — the wire command still refuses it, for
+    /// the same reason, but no rename is promised for it here.
+    /// </remarks>
+    private static McpRenameRule? LeftOverKey(HarnessMcpEntry entry, JsonElement root, string declaredName)
+    {
+        McpRenameRule? rule = McpServerRenamer.RuleForNewKey(declaredName);
+
+        if (rule is null || !TryFindEntry(root, entry.ServerKeyPath, rule.OldKey, out JsonElement oldEntry, out _))
+            return null;
+
+        EntryBody body = ReadEntryBody(oldEntry, entry.CommandShape);
+
+        return body.Reading == McpEntryReading.Readable && McpServerRenamer.IsProven(rule, body.Tokens)
+            ? rule
+            : null;
+    }
+
+    /// <summary>
     /// Reads the launch command a JSON entry body names, or reports why it names none.
     /// </summary>
     /// <remarks>
@@ -564,7 +615,7 @@ public static class McpWiringInspector
     /// parses, and a launch of it starts nothing.
     /// </para>
     /// </remarks>
-    private static EntryBody ReadEntryBody(JsonElement entry, McpEntryCommandShape shape)
+    internal static EntryBody ReadEntryBody(JsonElement entry, McpEntryCommandShape shape)
     {
         if (shape == McpEntryCommandShape.Undetermined)
             return EntryBody.Unpinned;
@@ -1255,6 +1306,11 @@ public static class McpWiringInspector
     /// <c>command</c> and not <c>args</c> — and the comparison is then against the declared
     /// executable alone rather than a difference claimed against arguments nobody read.
     /// </param>
+    /// <param name="LeftOver">
+    /// The retired key this file holds in place of the declared server's name, when that entry still
+    /// launches the shipped binary. It is a gap whose remedy is the rename rather than the wire
+    /// command, which would add a second entry beside the first.
+    /// </param>
     private readonly record struct Detection(
         bool Wired,
         IReadOnlyList<string>? LaunchCommand,
@@ -1262,10 +1318,15 @@ public static class McpWiringInspector
         McpLinkProbe Obstruction = default,
         string? Executable = null,
         bool EntryUnlaunchable = false,
-        bool LaunchCommandComplete = true);
+        bool LaunchCommandComplete = true,
+        McpRenameRule? LeftOver = null);
 
     /// <summary>What reading one entry body established about the launch it names.</summary>
-    private enum McpEntryReading
+    /// <remarks>
+    /// Internal because the renamer reads an entry body the same way: one reader is what keeps the
+    /// check and the migration from disagreeing about what a harness's entry launches.
+    /// </remarks>
+    internal enum McpEntryReading
     {
         /// <summary>The body names a command a launch could start.</summary>
         Readable,
@@ -1292,7 +1353,7 @@ public static class McpWiringInspector
     /// that cannot establish the arguments says so here, so the comparison is made against the part
     /// of the declaration the body actually answered for.
     /// </param>
-    private readonly record struct EntryBody(
+    internal readonly record struct EntryBody(
         McpEntryReading Reading,
         IReadOnlyList<string> Tokens,
         bool ArgumentsRead = true)

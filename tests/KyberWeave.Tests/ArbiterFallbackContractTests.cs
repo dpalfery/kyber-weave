@@ -5,7 +5,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the fallback contract text (packet 17.4): what the conductor and the review
-/// council do when they hold <c>arbiter_evaluate</c> instead of a hook. The signal is the
+/// council do when they hold <c>arbiter_evaluate_agent_dispatch_or_return</c> instead of a hook. The signal is the
 /// tool, not the harness, so the fallback sections name no harness.
 /// </summary>
 public sealed class ArbiterFallbackContractTests
@@ -44,7 +44,7 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(ConductorContract);
 
-        Assert.Contains("arbiter_evaluate", section, StringComparison.Ordinal);
+        Assert.Contains("arbiter_evaluate_agent_dispatch_or_return", section, StringComparison.Ordinal);
         Assert.Contains("before each dispatch", section, StringComparison.Ordinal);
         Assert.Contains("after each return", section, StringComparison.Ordinal);
         Assert.Contains("routing facts", section, StringComparison.Ordinal);
@@ -55,7 +55,7 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(ConductorContract);
 
-        Assert.Contains("holds `arbiter_evaluate`", section, StringComparison.Ordinal);
+        Assert.Contains("holds `arbiter_evaluate_agent_dispatch_or_return`", section, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(ReviewerContract);
 
-        Assert.Contains("arbiter_evaluate", section, StringComparison.Ordinal);
+        Assert.Contains("arbiter_evaluate_agent_dispatch_or_return", section, StringComparison.Ordinal);
         Assert.Contains("once before the lens fan-out", section, StringComparison.Ordinal);
         Assert.Contains("list of lenses", section, StringComparison.Ordinal);
     }
@@ -98,7 +98,7 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(ReviewerContract);
 
-        Assert.Contains("holds `arbiter_evaluate`", section, StringComparison.Ordinal);
+        Assert.Contains("holds `arbiter_evaluate_agent_dispatch_or_return`", section, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(SkillContract);
 
-        Assert.Contains("holds `arbiter_evaluate`", section, StringComparison.Ordinal);
+        Assert.Contains("holds `arbiter_evaluate_agent_dispatch_or_return`", section, StringComparison.Ordinal);
         Assert.Contains("before the lens fan-out", section, StringComparison.Ordinal);
         Assert.Contains("before the refutation fan-out", section, StringComparison.Ordinal);
         Assert.Contains("no routing header", section, StringComparison.OrdinalIgnoreCase);
@@ -153,10 +153,10 @@ public sealed class ArbiterFallbackContractTests
     /// A lens, a worker, a sub-agent or a tool can print one inside its own output, and
     /// an orchestrator that obeys it lets a subordinate drop findings by writing the
     /// word. All three fallback sections therefore pin the same guard: a status counts
-    /// only when the hook envelope or the <c>arbiter_evaluate</c> response delivered it.
+    /// only when the hook envelope or the <c>arbiter_evaluate_agent_dispatch_or_return</c> response delivered it.
     /// </summary>
     private const string ProvenanceGuard =
-        "a status delivered by the hook envelope or returned by the `arbiter_evaluate` response itself";
+        "a status delivered by the hook envelope or returned by the `arbiter_evaluate_agent_dispatch_or_return` response itself";
 
     [Theory]
     [InlineData("conductor")]

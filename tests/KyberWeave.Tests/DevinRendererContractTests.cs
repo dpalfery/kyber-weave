@@ -580,7 +580,7 @@ public sealed class DevinRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The MCP tool names a rendered subagent is entitled to: <c>kyber-weave</c> on the file-read
+    /// The MCP tool names a rendered subagent is entitled to: <c>kw-docs</c> on the file-read
     /// grant alone, <c>codegraph</c> and <c>context7</c> minus the pure orchestrator.
     /// </summary>
     /// <remarks>

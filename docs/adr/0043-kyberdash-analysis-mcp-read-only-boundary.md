@@ -4,7 +4,7 @@ title: "KyberDash Conversational Analytics over MCP: Local Read-Only Boundary wi
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-11-05
 ---
 
 # ADR 0043: KyberDash Conversational Analytics over MCP: Local Read-Only Boundary with an Attach-Only Adapter
@@ -16,6 +16,11 @@ local, read-only MCP surface (`kyberdash mcp`, eight `dash_*` tools) computed by
 shared engine behind additive `/api/kyber/analytics/*` routes, with an attach-only
 stdio adapter that never opens the store, never starts or stops the engine, and never
 performs a write.
+
+Amended 2026-11-05, in place: the eight tools carry the descriptive names below
+([ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md)), are reached through the
+`kw-dash` server key, and keep the `kyberdash mcp` launch. The boundary terms, the routes, and
+the attach-only lifecycle are unchanged.
 
 ## Context
 
@@ -35,10 +40,15 @@ cannot be read-only.
 
 ## Decision
 
-Expose eight tools — `dash_status`, `dash_catalog`, `dash_query`,
-`dash_search_sessions`, `dash_inspect`, `dash_findings`, `dash_compare`,
-`dash_outcomes` — over stdio (`kyberdash mcp`), each mapping one-to-one onto an
-additive route under `/api/kyber/analytics/` (`GET status`, `GET catalog`,
+Expose eight tools — `dash_list_available_analytics_operations`,
+`dash_list_queryable_metrics_dimensions_limits`,
+`dash_query_session_cost_tokens_and_duration`,
+`dash_search_sessions_by_text_and_scope`,
+`dash_read_captured_run_session_or_turn_context`,
+`dash_list_detected_context_and_tool_problems`,
+`dash_compare_metrics_between_two_scopes`,
+`dash_get_run_success_or_failure_outcomes` — over stdio (`kyberdash mcp`), each mapping
+one-to-one onto an additive route under `/api/kyber/analytics/` (`GET status`, `GET catalog`,
 `POST query`, `POST search-sessions`, `POST inspect`, `POST findings`,
 `POST compare`, `POST outcomes`). Computation stays in the shared engine service
 (`dash/src/analysis/query/`); the adapter (`dash/src/mcp/`) never imports the

@@ -423,7 +423,7 @@ mcp:
   # into the harnesses it detects; the declaration is host-owned from the moment it exists
   # and docs init never edits it again.
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required

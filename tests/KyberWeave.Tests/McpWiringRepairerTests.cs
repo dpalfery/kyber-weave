@@ -30,7 +30,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class McpWiringRepairerTests : IDisposable
 {
-    private const string ServerName = "kyber-weave";
+    // The key the fixture declares, which is the one this repository ships. A fixture name, not an
+    // assertion: the harness catalog's canonical documents declare `kw-docs`, and
+    // `AnAbsentFileIsCreatedHoldingTheCanonicalDocument` compares the written bytes with them.
+    private const string ServerName = "kw-docs";
 
     private const string BinaryName = "kyber-weave-mcp";
 
@@ -312,15 +315,62 @@ public sealed class McpWiringRepairerTests : IDisposable
     }
 
     /// <summary>
+    /// A file holding a proven old key beside a server the repair would add is refused with the rule id and
+    /// zero bytes, and the hint names the migrate verb. Wiring the new name beside the old one would leave
+    /// one server under two names in the same file.
+    /// </summary>
+    [Fact]
+    public void AProvenOldKeyBesideAServerItWouldAddIsRefusedWithZeroBytesAndNamesTheMigrateVerb()
+    {
+        McpConfig config = McpWiringFixture.Declare(new RequiredMcpServer(
+            "kw-docs",
+            [Path.Combine(Bin, BinaryName), "--repo-root", "."],
+            McpProvenance.FirstParty));
+        Directory.CreateDirectory(Path.Combine(Repo, ".factory"));
+        McpWiringFixture.WriteText(
+            Repo,
+            ".factory/mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    // The retired key on purpose: this case is about a leftover old name beside the
+                    // server the repair would add, so the entry in the file must be the old one.
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = Path.Combine(Bin, BinaryName),
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            }.ToJsonString());
+        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json"));
+
+        McpWiringRepairReport report = McpWiringRepairer.Repair(
+            Repo,
+            config,
+            new LaunchCommandResolver(Repo, []),
+            [Factory]);
+
+        McpWiringFileChange change = Assert.Single(report.Files);
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.Equal(RefusalCode, change.Code);
+        Assert.Contains("docs mcp-migrate", change.Hint ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
+    }
+
+    /// <summary>
     /// An entry with the same server name is refused, never merged or overwritten (5.5), and the
     /// file is left byte-identical.
     /// </summary>
     [Fact]
     public void AnExistingServerNameIsRefusedAndTheFileIsLeftByteIdentical()
     {
+        // The entry already carries the declared server's name — `ServerName` — because this case is
+        // 5.5: the repair never modifies, merges or overwrites an entry that exists.
         McpWiringFixture.WriteText(Repo,
             ".vscode/mcp.json",
-            """{"servers": {"kyber-weave": {"command": "kyber-weave-mcp"}}}""");
+            """{"servers": {"kw-docs": {"command": "kyber-weave-mcp"}}}""");
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
@@ -389,7 +439,9 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ARefusedTargetDoesNotStopAnotherTarget()
     {
-        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
+        // The entry already carries the declared server's name — `ServerName` — so 5.5 refuses the
+        // vscode file and the run still writes the target beside it.
+        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
         byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(
@@ -441,7 +493,7 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         string snippet = SingleChange(report, Codex).Snippet ?? string.Empty;
 
-        Assert.Contains("[mcp_servers.kyber-weave]", snippet, StringComparison.Ordinal);
+        Assert.Contains($"[mcp_servers.{ServerName}]", snippet, StringComparison.Ordinal);
         Assert.Contains(BinaryName, snippet, StringComparison.Ordinal);
     }
 
@@ -588,7 +640,9 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ADryRunWritesNothingAndReportsWhatTheRealRunWould()
     {
-        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
+        // The entry already carries the declared server's name — `ServerName` — so a dry run and the
+        // real run report the same refusal for it.
+        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kw-docs": {}}}""");
         byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
@@ -873,10 +927,12 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ARemedyIsNotOfferedForAGapTheRepairWouldRefuse()
     {
+        // The entry is under the declared server's name — `ServerName` — with a launch that differs
+        // from the declared one, which is the `CommandDiffers` finding 5.5 refuses to repair.
         McpWiringFixture.WriteText(
             Repo,
             ".mcp.json",
-            """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "/somewhere/else"]}}}""");
+            """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", "/somewhere/else"]}}}""");
 
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);

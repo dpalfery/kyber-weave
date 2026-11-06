@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -44,18 +45,18 @@ internal static class CapabilityDegradations
     /// <summary>
     /// The MCP server every agent needs: granted on the file-read entitlement alone, the pure
     /// orchestrator included, and never withheld on a profile's identity. It carries
-    /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
-    /// (ADR 0050).
+    /// <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it
+    /// is held to (ADR 0050).
     /// </summary>
     /// <remarks>
     /// Declared here rather than in each renderer because the server is one half of the partition
     /// the members below answer for. A target that needs the name for a question of its own keeps
     /// its own spelling — <c>AntigravityRenderer</c>'s declaration probe,
-    /// <c>OpenCodeRenderer</c>'s <c>kyber-weave_*</c> permission key — because those ask where the
+    /// <c>OpenCodeRenderer</c>'s <c>kw-docs_*</c> permission key — because those ask where the
     /// server's configuration lives or how a harness scopes it, not which entitlement class it
     /// belongs to.
     /// </remarks>
-    public const string UniversalMcpServer = "kyber-weave";
+    public const string UniversalMcpServer = McpServerNames.Docs;
 
     /// <summary>
     /// The capability profile whose holder routes work rather than researching it. Declared by id
@@ -76,8 +77,8 @@ internal static class CapabilityDegradations
     /// orchestrator included: the profile resolves and allows <see cref="FileReadCapability"/>.
     /// </summary>
     /// <remarks>
-    /// <c>kyber-weave</c> is the server this predicate exists for. It carries
-    /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to,
+    /// <c>kw-docs</c> is the server this predicate exists for. It carries
+    /// <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it is held to,
     /// and the role that assigns work is the role deciding which standards apply to whom — so
     /// withholding it from the orchestrator withheld it from the one agent whose job depends on
     /// it (ADR 0050). Every tool on that server is read-only, so the grant adds no write, no

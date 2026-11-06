@@ -400,7 +400,7 @@ public sealed class CodexRendererContractTests : IDisposable
         Write(root, "mcp.json", """
                                 {
                                   "mcpServers": {
-                                    "kyber-weave": {
+                                    "kw-docs": {
                                       "command": "kyber-weave-mcp",
                                       "args": ["--repo-root", "."]
                                     }

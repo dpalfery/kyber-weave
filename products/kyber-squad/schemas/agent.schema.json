@@ -47,7 +47,7 @@
           "read",
           "todo",
           "codegraph/*",
-          "kyber-weave/*",
+          "kw-docs/*",
           "context7/*",
           "search",
           "execute",

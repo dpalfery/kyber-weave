@@ -4,7 +4,30 @@ Kyber-Weave governs the artifacts that shape agent behaviour. **What** it does a
 lives in [`docs/`](docs/README.md) — this file is only operational rules for working in the
 code without breaking the repository.
 
+## Writing style: applies to everything you write
+
+This covers every message to the user, every doc, commit message, PR description and code
+comment, and every prompt or handoff to another agent.
+
+Assume the reader is switching between several tasks and remembers nothing about this one.
+Write for a strong developer who is reading it for the first time.
+
+- **Bottom line first.** Open with what happened, what you found, or what you need.
+- **No assumed context.** Don't rely on earlier messages, other files or past sessions.
+  Give the minimum background in one line.
+- **Plain words.** Explain every name, ID, acronym or piece of jargon the first time it
+  appears. Never use internal labels like plan IDs or task numbers as if the reader knows them.
+- **Short.** Cut anything the reader doesn't need in order to act or decide.
+- **Messages to the user** must also follow [How to respond to the user](products/kyber-squad/response-guidance.default.md).
+
 ## Commands
+
+### Code comments
+
+**Write few.** Code that follows the coding standards needs no comments; add one only where
+the code departs significantly from those standards. Public APIs are the exception: they
+always get XML doc comments (`///`). The writing style above still applies to every comment
+you do write.
 
 ### The inner loop
 
@@ -95,11 +118,13 @@ tracked diffs; afterwards undo only tracked edits init introduced. Blocked or un
 init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
-Before `docs/` greps, use Kyber-Weave MCP `docs_explore`; before contract changes,
-`docs_for_symbol`; for taxonomy, `docs_glossary` and `docs_analysis_candidates`. No CLI
-equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
-current guidance. Confirm each response's `provenance:` `root=` matches
-`git rev-parse --show-toplevel` (`docs_status`); a mismatch means the wrong repository.
+Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_documentation`;
+before contract changes, `docs_find_documents_citing_code_symbol`; for taxonomy,
+`docs_look_up_glossary_term_definition` and `docs_find_duplicates_conflicts_ambiguous_terms`.
+No CLI equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
+current guidance. The server's configuration key is `kw-docs`. Confirm each response's
+`provenance:` `root=` matches `git rev-parse --show-toplevel`
+(`docs_get_source_repository_and_revision`); a mismatch means the wrong repository.
 
 ## Non-negotiables
 

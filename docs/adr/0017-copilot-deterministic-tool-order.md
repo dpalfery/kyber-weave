@@ -4,7 +4,7 @@ title: Exact Copilot Tool Membership with One Cross-Agent Emission Order
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-12
+last-reviewed: 2026-11-05
 ---
 
 # ADR 0017: Exact Copilot Tool Membership with One Cross-Agent Emission Order
@@ -34,7 +34,7 @@ tool_search
 read
 todo
 codegraph/*
-kyber-weave/*
+kw-docs/*
 context7/*
 search
 execute

@@ -17,14 +17,14 @@ using Xunit.Sdk;
 namespace KyberWeave.Tests;
 
 /// <summary>
-///     T1 RED — <c>docs_validate</c> and <c>docs_drift</c> expose the same gates as the CLI
+///     T1 RED — <c>docs_validate_governed_document_schema</c> and <c>docs_detect_drift_between_documents_and_code</c> expose the same gates as the CLI
 ///     through read-only MCP tools rooted at the server's corpus, with provenance and a verdict
 ///     line the architect can trust before planning or merge-ready work.
 /// </summary>
 public sealed class McpDocsGateToolsTests : IDisposable
 {
-    private const string ValidateToolName = "docs_validate";
-    private const string DriftToolName = "docs_drift";
+    private const string ValidateToolName = "docs_validate_governed_document_schema";
+    private const string DriftToolName = "docs_detect_drift_between_documents_and_code";
 
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");

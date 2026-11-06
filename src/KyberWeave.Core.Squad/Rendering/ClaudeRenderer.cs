@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -34,9 +35,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Base ungoverned tools on every agent: <c>TodoWrite</c>, <c>Skill</c>. MCP server-level
-/// wildcards are granted by two rules, not one (ADR 0050). <c>mcp__kyber-weave__*</c> is
+/// wildcards are granted by two rules, not one (ADR 0050). <c>mcp__kw-docs__*</c> is
 /// granted whenever <c>filesystem.read</c> is allowed, the pure orchestrator (profile id
-/// <c>orchestrator</c>) included: that server carries <c>agent_coding_standards</c>, and the
+/// <c>orchestrator</c>) included: that server carries <c>docs_get_coding_standard_for_technology</c>, and the
 /// role that assigns work is the role deciding which standards apply to whom.
 /// <c>mcp__codegraph__*</c> and <c>mcp__context7__*</c> keep the orchestrator carve-out,
 /// because a role that only routes work has no use for code-graph or library lookups. When
@@ -118,7 +119,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     /// <summary>
     /// The MCP wildcard every read-entitled subagent carries, the pure orchestrator included.
     /// </summary>
-    private const string UniversalMcpTool = "mcp__kyber-weave__*";
+    private const string UniversalMcpTool = $"mcp__{McpServerNames.Docs}__*";
 
     /// <summary>
     /// The MCP wildcards that keep the pure-orchestrator carve-out: a role that only routes work
@@ -155,7 +156,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             "Skill",
             "Read",
             "mcp__codegraph__*",
-            "mcp__kyber-weave__*",
+            $"mcp__{McpServerNames.Docs}__*",
             "mcp__context7__*",
             "Grep",
             "Glob",
@@ -390,7 +391,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 granted.Add(agentToolEntry);
             }
 
-            // Two rules, not one (ADR 0050): kyber-weave carries agent_coding_standards, so it
+            // Two rules, not one (ADR 0050): kw-docs carries docs_get_coding_standard_for_technology, so it
             // reaches every read-entitled agent — the pure orchestrator included, because the
             // role that assigns work is the role deciding which standards apply to whom. The
             // other two servers keep the orchestrator carve-out.
@@ -508,7 +509,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 StringComparison.Ordinal) &&
             isSkillMode)
         {
-            // Name the set the subagent file actually withholds. kyber-weave follows the same
+            // Name the set the subagent file actually withholds. kw-docs follows the same
             // read entitlement as the other two, so an orchestrator whose profile denies
             // filesystem.read (or resolves to no profile) loses it as well; a note that always
             // carried the two carve-out servers would describe a grant the subagent file does not
@@ -519,7 +520,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 capabilityProfiles);
             string withheld = grantsKyberWeave
                 ? "no mcp__codegraph__*, mcp__context7__*"
-                : "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*";
+                : $"no mcp__codegraph__*, mcp__context7__*, mcp__{McpServerNames.Docs}__*";
             string reason = grantsKyberWeave
                 ? "because a role that only routes work has no use for code-graph or library lookups"
                 : "because this agent's capability profile does not allow filesystem.read";

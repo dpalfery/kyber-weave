@@ -8,14 +8,14 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const EXPECTED_TOOLS = [
-  'dash_status',
-  'dash_catalog',
-  'dash_query',
-  'dash_search_sessions',
-  'dash_inspect',
-  'dash_findings',
-  'dash_compare',
-  'dash_outcomes',
+  'dash_list_available_analytics_operations',
+  'dash_list_queryable_metrics_dimensions_limits',
+  'dash_query_session_cost_tokens_and_duration',
+  'dash_search_sessions_by_text_and_scope',
+  'dash_read_captured_run_session_or_turn_context',
+  'dash_list_detected_context_and_tool_problems',
+  'dash_compare_metrics_between_two_scopes',
+  'dash_get_run_success_or_failure_outcomes',
 ]
 const SMOKE_TIMEOUT_MS = 10_000
 const TEST_TIMEOUT_MS = 20_000

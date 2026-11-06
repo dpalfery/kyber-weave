@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "kyber-weave": {
+    "kw-docs": {
       "command": "kyber-weave-mcp",
       "args": ["--repo-root", "."]
     },
@@ -8,7 +8,7 @@
       "command": "codegraph",
       "args": ["serve", "--mcp", "--path", "."]
     },
-    "kyber-weave-arbiter": {
+    "kw-arbiter": {
       "command": "kyber-weave-arbiter",
       "args": ["serve", "--repo-root", "."]
     }
