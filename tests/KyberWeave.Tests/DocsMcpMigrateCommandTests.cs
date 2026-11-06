@@ -498,6 +498,33 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     /// <summary>
+    /// The harness-root token is equivalent in either order. Here the old entry says
+    /// <c>${workspaceFolder}</c> and the new one says <c>.</c> — the reverse of the case above — and
+    /// the old member is still a duplicate removed byte-exact, not a launch conflict.
+    /// </summary>
+    [Fact]
+    public void AHarnessRootTokenDifferenceInTheOppositeOrderAlsoCountsAsTheSameLaunch()
+    {
+        string program = System.Text.Json.JsonSerializer.Serialize(ShippedBinary);
+        string oldLine = $"    \"{OldKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \"${{workspaceFolder}}\"] }},\n";
+        string newLine = $"    \"{NewKey}\": {{ \"type\": \"stdio\", \"command\": {program}, \"args\": [\"--repo-root\", \".\"] }},\n";
+        const string otherLine = "    \"other\": { \"command\": \"other-mcp\" },\n";
+        const string header = "{\n  \"servers\": {\n";
+        const string footer = "  }\n}\n";
+
+        string original = header + otherLine + oldLine + newLine + footer;
+        string expected = header + otherLine + newLine + footer;
+        McpWiringFixture.WriteBytes(Repo, VsCodeFile, Encoding.UTF8.GetBytes(original));
+
+        CapturedConsoleExecution<int> execution = Migrate(VsCode);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(InRepo(VsCodeFile)));
+        Assert.Contains("removed duplicate", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A named harness run also renames the declared server, so the host declaration and the harness file
     /// agree afterwards. The declaration's comments stay, and the file reloads under the new name.
     /// </summary>

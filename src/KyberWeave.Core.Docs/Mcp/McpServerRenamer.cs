@@ -1042,8 +1042,12 @@ public static class McpServerRenamer
     /// </summary>
     private static bool TokenMatches(HarnessMcpEntry row, string left, string right) =>
         string.Equals(left, right, StringComparison.Ordinal)
-        || (string.Equals(left, JsonServerSplice.RepositoryRootToken, StringComparison.Ordinal)
-            && string.Equals(right, row.RepositoryRootToken, StringComparison.Ordinal));
+        || (IsRepositoryRootToken(left) && string.Equals(right, row.RepositoryRootToken, StringComparison.Ordinal))
+        || (IsRepositoryRootToken(right) && string.Equals(left, row.RepositoryRootToken, StringComparison.Ordinal));
+
+    /// <summary>Whether a launch token is the splice's spelling of the repository root.</summary>
+    private static bool IsRepositoryRootToken(string token) =>
+        string.Equals(token, JsonServerSplice.RepositoryRootToken, StringComparison.Ordinal);
 
     private static string BothLaunches(HarnessMcpEntry row, RuleState state) =>
         $"{row.Harness} holds '{state.Rule.OldKey}' and '{state.Rule.NewKey}' with different launches: "
