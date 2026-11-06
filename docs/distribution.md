@@ -44,6 +44,12 @@ pre-releases only. Both compare by SemVer precedence across every page of the Re
 not by GitHub's creation order. A positional version pins a tag without colliding with global
 `kyber-weave --version`.
 
+**A rename is not a new asset.** This release renames the three MCP servers' configuration keys
+and their nineteen tools. No executable, archive, asset name, or `--version` output changed, so
+`install.sh` and `kyber-weave update` install and replace exactly the files they always have. The
+operator-side work the rename still needs is in [Renamed MCP servers and
+tools](install.md#renamed-mcp-servers-and-tools).
+
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
 fix never requires a re-release. Keep it that way when editing it.
