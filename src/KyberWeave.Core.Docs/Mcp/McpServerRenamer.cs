@@ -324,6 +324,16 @@ public static class McpServerRenamer
     }
 
     /// <summary>The report a read-only harness gets: the key, kept, with what to paste instead.</summary>
+    /// <remarks>
+    /// Every hit is reported <em>unproven</em>, and that is a statement about the evidence rather than
+    /// about the entry. <see cref="TomlTableScanner"/> answers with the table names a document
+    /// declares and reads nothing else: it never looks at a table's <c>command</c> or <c>args</c>, so
+    /// no launch has been seen and no proof is available for any table. A table whose body is exactly
+    /// the shipped launch therefore gets the same report as one launching <c>npx</c> something else,
+    /// because both were read to the same depth — the name and no further. The notice keeps its
+    /// qualifier (<c>KW-MCP-WIRE-008</c>) for that reason: an unqualified rename would claim a proof
+    /// this command never obtained and tell an operator to rename an entry nobody read.
+    /// </remarks>
     private static IReadOnlyList<McpRenameChange> ScanToml(HarnessMcpEntry row, ConfiguredFile file)
     {
         string text = ReadText(file.AbsolutePath) ?? string.Empty;
@@ -336,7 +346,7 @@ public static class McpServerRenamer
             if (!scan.Servers.Contains(rule.OldKey, StringComparer.Ordinal))
                 continue;
 
-            changes.Add(ReportedChange(row, file.RelativePath, rule, proven: true));
+            changes.Add(ReportedChange(row, file.RelativePath, rule, proven: false));
         }
 
         return changes;
@@ -612,19 +622,56 @@ public static class McpServerRenamer
             return [Refused(row.Harness, relativePath, $"{relativePath} could not be written: {exception.Message}", null)];
         }
 
-        return [.. changes.Select(change => change with { Written = true })];
+        // The file was written, but not every row about it was: a key this run reported and left
+        // alone keeps Written false, because the flag answers "did this row's edit reach the file"
+        // and anything reading the report takes it at its word.
+        return
+        [
+            .. changes.Select(change => change with
+            {
+                Written = change.Outcome is McpRenameOutcome.Renamed or McpRenameOutcome.RemovedDuplicate
+            })
+        ];
     }
 
     /// <summary>
     /// The report a harness this tool does not write gets: the keys it holds, named, and the text to
     /// paste into its configuration by hand.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A leftover-key line is emitted only for a key that was found, and only the absence of a file is
+    /// answered with the paste-in snippet. The distinction is the difference between "the loop above
+    /// added nothing" and "there is nothing to add": a file that was read and holds no retired key is
+    /// a clean file, and a report about it would tell the operator to rename a key it does not hold —
+    /// and would say so on every run, so a migrated tree could never report itself idempotent.
+    /// </para>
+    /// <para>
+    /// A file this command could not analyse is reported as that problem, not as a key kept. "A key
+    /// was left alone" is a statement about a key that was found in a readable document; for a
+    /// document nobody read it says the opposite of what happened, and it hides the one place the
+    /// operator could learn the file needs fixing.
+    /// </para>
+    /// </remarks>
     private static IReadOnlyList<McpRenameChange> ReportOnly(string root, HarnessMcpEntry row)
     {
         List<McpRenameChange> changes = [];
+        bool inspected = false;
 
         foreach (ConfiguredFile file in ConfiguredFiles(root, row))
         {
+            inspected = true;
+
+            if (file.Probe.Obstruction != McpLinkObstruction.None)
+            {
+                changes.Add(Refused(
+                    row.Harness,
+                    file.RelativePath,
+                    $"{McpConfigurationLink.Describe(file.RelativePath, file.Probe)}, so nothing was read",
+                    "Kyber-Weave reads repository-scope files only; put a real file inside the repository and run this command again."));
+                continue;
+            }
+
             if (row.Shape == McpConfigurationShape.Toml)
             {
                 changes.AddRange(ScanToml(row, file));
@@ -633,6 +680,12 @@ public static class McpServerRenamer
 
             FileAnalysis analysis = Analyze(row, file.AbsolutePath, file.RelativePath);
 
+            if (analysis.Problem is not null)
+            {
+                changes.Add(Refused(row.Harness, file.RelativePath, analysis.Problem, FixHint(file.RelativePath, row)));
+                continue;
+            }
+
             foreach (RuleState state in analysis.States)
             {
                 if (state.OldPresent)
@@ -640,11 +693,13 @@ public static class McpServerRenamer
             }
         }
 
-        if (changes.Count > 0)
-            return changes;
+        if (inspected)
+            return changes.Count > 0 ? changes : [NothingToDo(row.Harness, row.Paths.Count > 0 ? row.Paths[0] : null)];
 
         // A harness with no file in the tree — the Copilot coding agent keeps its servers in
-        // repository settings — still has to be told what to rename, and where.
+        // repository settings — still has to be told what to rename, and where. There is no file to
+        // read, so there is no key to have found: the snippet is the whole report, and it is why the
+        // fall-through exists at all.
         return [ReportedChange(row, row.Paths.Count > 0 ? row.Paths[0] : null, Rules[0], proven: false)];
     }
 

@@ -1155,8 +1155,8 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// Runs the migrate verb against a root the case names, rather than the fixture repository — the
     /// fake home, for the cases about which tree the operator pointed the command at.
     /// </summary>
-    private static CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand().Execute(
+    private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
+        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(() => FakeHome).Execute(
             null!,
             new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 

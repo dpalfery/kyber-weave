@@ -25,6 +25,16 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// A user-scope file — under the operator's home directory — is never read or written. The report
 /// names those files so the operator can rename a key there by hand.
 /// </para>
+/// <para>
+/// The catalog holds <em>repository-relative</em> paths, so every bound in this verb is containment
+/// under the root the operator named. Point that root at a home directory and the same relative path
+/// — <c>.cursor/mcp.json</c> — is the user-scope file ADR 0052 decision 2 says is never read or
+/// written. Containment alone is therefore not the guarantee this paragraph states, and a root that
+/// <em>is</em> the operator's home directory is refused before the first read, with no byte written
+/// and no receipt. The home is resolved through an injected reader — as
+/// <c>RepositoryDoctor.Run</c> does, defaulting to the process environment — so the refusal is
+/// testable without touching the developer's own home.
+/// </para>
 /// </remarks>
 public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
 {
@@ -36,6 +46,27 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
                 .Where(row => row.Fixability == McpWiringFixability.Fixable && row.Shape == McpConfigurationShape.Json)
                 .Select(row => row.Harness)
                 .Append(McpServerRenamer.DeclarationTarget));
+
+    private readonly Func<string?> _home;
+
+    /// <summary>
+    /// Creates the command Spectre resolves: the operator's home is the process user profile.
+    /// </summary>
+    public DocsMcpMigrateCommand()
+        : this(null)
+    {
+    }
+
+    /// <summary>
+    /// Creates the command with an injectable home reader, so the home-directory refusal can be
+    /// exercised against a fixture rather than the developer's own profile.
+    /// </summary>
+    /// <param name="home">
+    /// Resolves the operator's home directory, or null for
+    /// <see cref="Environment.SpecialFolder.UserProfile"/> under the process environment.
+    /// </param>
+    public DocsMcpMigrateCommand(Func<string?>? home) =>
+        _home = home ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     /// <inheritdoc />
     public override int Execute(
@@ -49,6 +80,14 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
         if (!DocsMcpWireCommand.TryRoot(settings.Path, report, out string root))
         {
             DocsMcpWireCommand.PrintDiagnostics(report);
+            return 1;
+        }
+
+        // Before the first read: a root that is the operator's home directory would make every
+        // catalog path a user-scope file, which is the thing this verb promises never to touch.
+        if (IsOperatorHome(root, _home()))
+        {
+            CommandHelpers.WriteUnfolded(() => PrintHomeRefusal(root));
             return 1;
         }
 
@@ -107,6 +146,71 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             + "~/.config/opencode/opencode.json, ~/.factory/mcp.json, ~/.copilot/mcp-config.json, and Kilo's and ZCode's "
             + "user tiers. Rename a key there by hand.[/]");
         AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="root"/> is the operator's home directory, compared as a canonical path.
+    /// </summary>
+    /// <remarks>
+    /// The comparison is on the resolved directory, never on the spelling: a home reached through a
+    /// symbolic link, a relative path, or a <c>..</c> that lands there is the same directory, and a
+    /// refusal that let one spelling through would be a refusal an operator could walk around by
+    /// accident. A home this process cannot resolve, or does not have, cannot equal anything.
+    /// </remarks>
+    private static bool IsOperatorHome(string root, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(home))
+            return false;
+
+        string? canonicalRoot = Canonical(root);
+        string? canonicalHome = Canonical(home);
+
+        return canonicalRoot is not null
+            && canonicalHome is not null
+            && string.Equals(
+                canonicalRoot,
+                canonicalHome,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    /// <summary>The directory a path names, with its own link resolved and its trailing separator removed.</summary>
+    private static string? Canonical(string path)
+    {
+        try
+        {
+            string full = Path.GetFullPath(path);
+
+            if (Directory.Exists(full) && Directory.ResolveLinkTarget(full, returnFinalTarget: true) is { } target)
+                full = Path.GetFullPath(target.FullName);
+
+            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // A filesystem root trims to nothing, and "" is not a directory name this can compare.
+            return trimmed.Length == 0 ? full : trimmed;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or NotSupportedException
+            or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The whole report for a root that is the home directory: one refusal naming the reason, and no
+    /// table, because there is nothing this run may look at.
+    /// </summary>
+    private static void PrintHomeRefusal(string root)
+    {
+        AnsiConsole.MarkupLine(
+            $"  [red]{Markup.Escape(McpServerRenamer.RefusedCode)}[/] root "
+            + $"[grey]({Markup.Escape(TerminalText.Line(root))})[/]: the root is the operator's home directory, "
+            + "whose files this command never reads or writes, so nothing was read and nothing was written");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(
+            "    [grey]→ Name the repository that holds your MCP configuration: every path in this command's "
+            + "catalog is repository-relative, so a home directory here means user scope. Edit a user-scope "
+            + "file by hand.[/]");
     }
 
     /// <summary>Reports one change — or one refusal — as the operator reads it.</summary>
