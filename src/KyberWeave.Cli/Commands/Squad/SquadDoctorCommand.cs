@@ -18,7 +18,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
 
     private readonly IProcessExecutor? _executor;
     private readonly ISquadGlobalRootResolver? _globalRoots;

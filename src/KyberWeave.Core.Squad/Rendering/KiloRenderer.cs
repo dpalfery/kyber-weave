@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
@@ -36,12 +37,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// <b>MCP tools are gated by that same map, under a namespaced key.</b> The key is
 /// <c>{server}_{tool}</c>, with the server name sanitized only for characters outside
-/// <c>[a-zA-Z0-9_-]</c> — so the hyphen in <c>kyber-weave</c> survives, and <c>kyber-weave_*</c> is
-/// the server wildcard (a <c>kyber_weave_*</c> spelling would parse cleanly and match nothing). An
+/// <c>[a-zA-Z0-9_-]</c> — so the hyphen in <c>kw-docs</c> survives, and <c>kw-docs_*</c> is
+/// the server wildcard (a <c>kw_docs_*</c> spelling would parse cleanly and match nothing). An
 /// agent the universal MCP predicate entitles to this server emits that wildcard with
 /// <c>allow</c>, the pure orchestrator included, because the server carries
-/// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
-/// (ADR 0050). An agent the predicate does not entitle emits no entry at all: for a headless
+/// <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it
+/// is held to (ADR 0050). An agent the predicate does not entitle emits no entry at all: for a
 /// subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a server the operator
 /// may never have configured would assert more than canonical source does — the capability lattice
 /// declares no MCP capability to derive one from.
@@ -95,13 +96,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 public sealed class KiloRenderer : SquadHarnessRenderer
 {
     /// <summary>
-    /// The <c>permission</c> entry naming the whole <c>kyber-weave</c> MCP surface: Kilo gates MCP
+    /// The <c>permission</c> entry naming the whole <c>kw-docs</c> MCP surface: Kilo gates MCP
     /// tools under the same permission map as built-in ones, keyed <c>{server}_{tool}</c> with the
     /// server name sanitized only for characters outside <c>[a-zA-Z0-9_-]</c>. The hyphen is
     /// load-bearing — an underscore spelling would parse and match nothing — so the key is a
     /// constant rather than assembled at the call site, and a test pins the emitted bytes.
     /// </summary>
-    private const string KyberWeaveMcpPermission = "kyber-weave_*";
+    private const string KyberWeaveMcpPermission = $"{McpServerNames.Docs}_*";
 
     private static readonly SquadHarnessSpec HarnessSpec = new(
         SquadTarget.Kilo,
@@ -130,13 +131,14 @@ public sealed class KiloRenderer : SquadHarnessRenderer
             frontmatter["model"] = model;
         }
 
-        // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it carries
-        // agent_coding_standards, and the role that assigns work is the role telling its delegates
-        // which standards they are held to (ADR 0050). Kilo sanitizes the server name only for
-        // characters outside [a-zA-Z0-9_-], so "kyber-weave" keeps its hyphen and this is the
-        // wildcard Kilo's matcher resolves for kyber-weave_docs_status. An unentitled agent emits
-        // no entry: absence of "allow" withholds for a headless subagent (its ask fails closed),
-        // and a "deny" here would out-assert a canonical source that declares no MCP reach.
+        // kw-docs reaches every read-entitled agent, the pure orchestrator included: it
+        // carries docs_get_coding_standard_for_technology, and the role that assigns work is
+        // the role telling its delegates which standards they are held to (ADR 0050). Kilo
+        // sanitizes the server name only for characters outside [a-zA-Z0-9_-], so "kw-docs"
+        // keeps its hyphen and this is the wildcard Kilo's matcher resolves for
+        // kw-docs_docs_get_source_repository_and_revision. An unentitled agent emits no entry:
+        // absence of "allow" withholds for a headless subagent (its ask fails closed), and a
+        // "deny" here would out-assert a canonical source that declares no MCP reach.
         if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, context.CapabilityProfiles))
         {
             frontmatter["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
