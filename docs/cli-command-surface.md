@@ -333,7 +333,7 @@ changed, instead of running the repository-wide `review.gates`:
   `--paths` and `--base` scope the council gates too and are accepted without `--agent`.
 - `--council` declares the run to be the review council or CI, the only callers that may run gates marked
   `full-suite: true` (`test`, `ts-test`, `cargo-test`). Without it, when stdin is not a terminal, each
-  full-suite gate is not run: it is reported as a refused blocking failure (`KW-REVIEW-022`, severity Error)
+  full-suite gate is not run: it is reported as a refused blocking failure (`KW-REVIEW-033`, severity Error, "a gate never started")
   that names `kyber-weave review gates . --agent <name> --paths <files>` and
   `scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'`. A refusal means "not run here", not a code
   finding. The other gates still run, and `--agent` task-gate runs are unaffected. The command exits `1`.
@@ -463,7 +463,7 @@ risk. The three rules below mirror the contract in
 | `docs mcp-migrate` | `0` for a preview, a completed migration, or nothing to do; `1` when any named target was refused — a target slug the catalog does not know, a configuration that is a symbolic link, one this process may not inspect, a malformed or foreign document, an old and a new entry whose launches differ, or a receipt that could not be persisted. A refusal writes zero bytes to that file and the other named targets still proceed. `--dry-run` exits what the real run would have exited |
 | `review verdict` | `0` approve, `1` request-changes |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
-| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). A full-suite gate refused for lack of `--council` (`KW-REVIEW-022`) is a blocking failure: exit `1`, with the other gates still run. |
+| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). A full-suite gate refused for lack of `--council` (`KW-REVIEW-033`, a gate that never started) is a blocking failure: exit `1`, with the other gates still run. |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |

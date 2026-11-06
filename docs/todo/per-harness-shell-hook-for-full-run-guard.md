@@ -35,33 +35,20 @@ today. The hook should refuse them by its own rule, so each harness's shell is c
 - `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` of the tray crate, outside
   the wrapper ([fast-loop todo](fast-loop-default-tray-cargo-test.md)).
 
-Deliberate over-refusals (a directory target, `npm test --workspace`, `cargo test -p`, a scan that
-finds a test word after an unknown word) are not gaps. Keep them refused unless a named class is given.
-F4 and F5 below are false refusals that are not deliberate.
+**Parked classifier gap.**
 
-**Pass-3 classifier gaps, parked.** A read-only re-check of the classifier after pass 3 found these.
-No fix pass is scheduled. Reproduced 2026-11-06 with `scripts/proc-guard.sh classify -- <argv>` run
-directly. Under `bash -c '...'` every case reads partial, because shell strings are not parsed, so the
-direct form is the test.
+- **Unknown value-taking flag before the subcommand (Minor, bypass).** `cargo --some-flag value test`
+  and `npm --some-flag value test` classify partial, expected full, when the flag is not in the
+  classifier's known list. The unknown flag's value is read as the subcommand. Fix: a generic rule for
+  the value of unknown global flags before the subcommand, or refuse an unrecognised shape.
 
-- **F1 (Major, bypass).** `cargo -C dash/tray/src-tauri test`: actual partial, expected full. `-C <dir>`
-  is a cargo global flag missing from the value-taking list in `is_full_cargo`, so the directory is
-  read as the subcommand. Fix: add `-C` to that list.
-- **F2 (Major, false refusal).** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
-  --treenode-filter '/*/*/FastLoop*/*'`: actual full, expected partial. `is_filter_flag` knows only
-  `-treenode-filter`. Fix: add `--treenode-filter` and `--treenode-filter=`.
-- **F3 (Minor, bypass).** `cargo --artifact-dir out test`, `npm --omit dev test`, `npm --tag x test`,
-  `npm --otp 123 test`: actual partial, expected full. Unknown value-taking global flags before the
-  subcommand hide it. Fix: skip the value of known global flags before the subcommand.
-- **F4 (Minor, false refusal).** `cargo test --test smoke` (also `--bin`, `--example`, `--bench`):
-  actual full, expected partial. These select one target. Fix: treat them as narrowing.
-- **F5 (Minor, false refusal).** `dotnet test --artifacts-path out <other project>`: actual full,
-  expected partial. `--artifacts-path` is missing from `dotnet_flag_takes_value`. Fix: add it.
-- **F6 (Minor, ambiguity).** `dotnet run --project tests/KyberWeave.Tests --project src/KyberWeave.Cli`:
-  actual partial, expected full. The last `--project` wins. Fix: treat two different projects as
-  ambiguous, so full.
+**Deliberate choices, not gaps.** These classify full by design and stay refused unless the caller
+passes `--council` or runs from a terminal: a directory target, `npm test --workspace`, `cargo test -p`
+(and `--package`), any npm `--prefix` directory on a test script, and a forward scan after a launcher
+that finds a `dotnet`, `npm` or `cargo` word after an unknown word (for example `sudo echo please run
+dotnet test`). A named class (`-class`) also recovers a dotnet run.
 
-A one-line fix for F1 and F2 is cheap and optional. The real closure is still the shell hook.
+The real closure is still the shell hook.
 
 **Acceptance.** On each listed harness, a developer agent's full-suite command is refused before the
 shell runs it, and the refusal names a targeted alternative. Each listed limit has a failing row first

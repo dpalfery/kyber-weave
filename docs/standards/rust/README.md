@@ -123,10 +123,12 @@ states, and the bundle targets in `tauri.conf.json` are macOS and Windows instal
 The gates a Rust change must pass, run from the repository root:
 
 ```bash
-scripts/proc-guard.sh run -- bash -c "cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test '<name>'"
+scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
-A dev agent replaces `cargo test` with a name filter (`cargo test '<name>'`). The whole crate's
+A dev agent runs `cargo test` with a name filter, as above. The whole crate's
 run is the `cargo-test` council gate. That gate is marked `full-suite: true`, so `kyber-weave review
 gates` refuses it unless `--council` is passed, and its command is not wrapped by the watchdog
 (`scripts/proc-guard.sh`). The council and CI are the only callers that run it.

@@ -76,7 +76,7 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
 Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
-are not run: each is reported as a refused blocking failure (`KW-REVIEW-022`, exit `1`) that means "not run
+are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, exit `1`) that means "not run
 here", not a code finding. Only the `code-reviewer` council and CI pass `--council`; the other gates still run.
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The

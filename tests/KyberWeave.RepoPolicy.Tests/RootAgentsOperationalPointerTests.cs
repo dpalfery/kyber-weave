@@ -169,7 +169,7 @@ public sealed class RootAgentsOperationalPointerTests
     [InlineData("docs/standards/test/README.md", "FullyQualifiedName~")]
     [InlineData("tests/KyberWeave.RepoPolicy.Tests/AGENTS.md", "FullyQualifiedName~")]
     [InlineData("dash/AGENTS.md", "test:related")]
-    [InlineData("dash/tray/AGENTS.md", "cargo test '")]
+    [InlineData("dash/tray/AGENTS.md", "cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '")]
     public void EachAreaDocumentHoldsTheTargetedCommandTheRootFilePointsAt(string relativePath, string command)
     {
         string commands = Section(ReadAgents(), "## Commands", "## Exploration order");

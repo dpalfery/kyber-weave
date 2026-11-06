@@ -197,10 +197,14 @@ scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests
 
 A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
 `-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its
-`.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter`, or any
-`--filter`). `dotnet run --project <KyberWeave.Tests>` is full on the same terms; `dotnet run` with any other project is partial.
+`.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter` and `--treenode-filter`, in the `=` form too, or any
+`--filter`). `dotnet run` is full when any `--project`, `--project=` or `-p` names `KyberWeave.Tests`, even beside
+another project, and no narrowing flag appears; otherwise it is partial. `--artifacts-path` takes a value.
 `npm test`, `npm t`, `npm run test` and `npm run-script test` with no positional word after `--` are full under any
 `--prefix` (none, relative, absolute, or the tray UI directory), and so is `cargo test` with no positional filter.
+Value-taking npm flags before the command word (`--omit`, `--tag`, `--otp`, `--include`, `--access`, `--prefix`) are
+skipped. `cargo` skips a `+toolchain`, `-C <dir>` and `--artifact-dir` before the subcommand. `cargo test --test <x>`,
+`--bin`, `--example` or `--bench` selects one target and is partial.
 Leading launchers (`env`, `timeout`, `nice`, `time`, `command`, `exec`, `nohup`, `caffeinate`, `sudo`, `doas`, `ionice`,
 `setsid`, `stdbuf`, `arch`) are skipped before the command is classified; an unknown word after a launcher makes the
 classifier scan forward to the first `dotnet`, `npm` or `cargo` word. Naming another project (the RepoPolicy project, for example) or a path narrows a run to a partial run, which dev agents
@@ -222,8 +226,9 @@ The guard is best effort. It reads the command line and whether stdin is a termi
 - A raw `dotnet test` that skips the watchdog wrapper is not seen. Only a harness-level hook can see it.
 - A command inside a shell string (`sh -c '...'`, `bash -c '...'`) or an `env -S` string is not parsed, so it is classified as partial and runs.
 - A launcher outside the list above is not unwrapped. Its command is classified only when a `dotnet`, `npm` or `cargo` word follows it.
+- An unknown value-taking flag before the command word can hide the subcommand, so the run is classified as partial.
 - Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest` are classified as partial and run.
-- Deliberate over-refusals: a targeted run classified as full is refused. These are any directory target, `npm test --workspace <name>`, `cargo test -p <package>`, and a scan that finds a `dotnet`, `npm` or `cargo` word after an unknown word (such as `sudo echo ... dotnet test`). Recover with a named class (`-class` for dotnet, `--class` for `scripts/fast-loop.sh`), `--council`, or a terminal.
+- Deliberate over-refusals: a targeted run classified as full is refused by design. These are any directory target, `npm test --workspace <name>`, `cargo test -p <package>` (`--package` too), any npm `--prefix` directory on a test script, and a launcher followed by an unknown word and then a `dotnet`, `npm` or `cargo` word (such as `sudo echo please run dotnet test`). Recover with a named class (`-class` for dotnet, `--class` for `scripts/fast-loop.sh`), `--council`, or a terminal.
 - `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the whole tray crate for a tray Rust change, outside the watchdog.
 
 The real closure is a per-harness shell hook that sees each shell call before it runs. It is tracked in [`docs/todo/per-harness-shell-hook-for-full-run-guard.md`](../../todo/per-harness-shell-hook-for-full-run-guard.md). The decision and its alternatives are in [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md).

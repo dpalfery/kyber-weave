@@ -461,7 +461,7 @@ review:
 A gate may set `full-suite: true` (a boolean, default `false`). It marks a gate that runs the full product
 suite; the shipped `test`, `ts-test` and `cargo-test` gates set it. Such a gate runs only when the caller
 declares itself the review council or CI with `--council`, or when stdin is a terminal. Otherwise the gate is
-reported as a refused blocking failure (`KW-REVIEW-022`) and not run. The other gates still run.
+reported as a refused blocking failure (`KW-REVIEW-033`, a gate that never started) and not run. The other gates still run.
 
 ## Harness profiles
 

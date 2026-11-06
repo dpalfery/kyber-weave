@@ -121,16 +121,19 @@ usage() {
 # for anything partial. Launchers that only wrap a command (env, timeout, nice, time, command, exec, nohup,
 # caffeinate, sudo, doas, ionice, setsid, stdbuf, arch) are stripped first, skipping their own options; an
 # unknown word after one resolves to the first later dotnet, npm or cargo word. A narrowing flag anywhere
-# (-class, -method, -trait, -treenode-filter, --filter*) or a positional filter makes a run partial.
-# dotnet test is full with no target, or a KyberWeave.Tests, solution or directory target; dotnet run is
-# full only with --project KyberWeave.Tests; npm test, t, run test or run-script test is full with no path
-# after "--", under any prefix. Ambiguous input is treated as full: a wrongly refused partial run is
-# recoverable (--class, --council, a terminal), a wrongly admitted full run defeats the rule.
+# (-class, -method, -trait, -treenode-filter in either spelling, --filter*) or a positional filter makes a run
+# partial. dotnet test is full with no target, or a KyberWeave.Tests, solution or directory target; dotnet run
+# is full when any --project or -p names KyberWeave.Tests, even beside another project; npm test, t, run test or
+# run-script test is full with no path after "--", under any prefix. cargo -C and --artifact-dir take values,
+# and a single --test, --bin, --example or --bench target is partial. Value-taking flags (npm --omit and
+# friends, dotnet --artifacts-path) are skipped before reading targets. Ambiguous input is treated as full: a
+# wrongly refused partial run is recoverable (--class, --council, a terminal), a wrongly admitted full run
+# defeats the rule.
 
 # True for a dotnet flag that selects tests (-class, -method, -trait, -treenode-filter, any --filter*).
 is_filter_flag() {
   case "$1" in
-    -class|-method|-trait|-treenode-filter|-class=*|-method=*|-trait=*|-treenode-filter=*|--filter*) return 0 ;;
+    -class|-method|-trait|-treenode-filter|-class=*|-method=*|-trait=*|-treenode-filter=*|--treenode-filter|--treenode-filter=*|--filter*) return 0 ;;
   esac
   return 1
 }
@@ -138,7 +141,7 @@ is_filter_flag() {
 # True for a dotnet test flag that takes a separate value, so that value is not read as a target.
 dotnet_flag_takes_value() {
   case "$1" in
-    -c|--configuration|-f|--framework|-r|--runtime|-a|--arch|-o|--output|--os|-v|--verbosity|-l|--logger|-s|--settings|--results-directory|--diag|-e|--environment|--test-adapter-path|--coverlet-output-format|--coverlet-output|-m|--maxcpucount|--tl)
+    -c|--configuration|-f|--framework|-r|--runtime|-a|--arch|-o|--output|--os|-v|--verbosity|-l|--logger|-s|--settings|--results-directory|--artifacts-path|--diag|-e|--environment|--test-adapter-path|--coverlet-output-format|--coverlet-output|-m|--maxcpucount|--tl)
       return 0 ;;
   esac
   return 1
@@ -167,10 +170,24 @@ dotnet_target_kind() {
   esac
 }
 
-# dotnet run --project <KyberWeave.Tests> [flags] [-- app args]: full unless a narrowing flag appears anywhere
-# (including after "--"), or the project is not KyberWeave.Tests. No project is partial.
+# True when a dotnet run project word names the product project: KyberWeave.Tests, with any trailing "/"
+# or ".csproj" stripped.
+is_kw_project() {
+  local name="$1"
+  while [[ "${name}" == */ ]]; do
+    name="${name%/}"
+  done
+  name="${name##*/}"
+  name="${name%.csproj}"
+  [[ "${name}" == KyberWeave.Tests ]]
+}
+
+# dotnet run [--project X ...] [flags] [-- app args]: full when a product project (KyberWeave.Tests) is named by
+# --project, --project= or -p, and no narrowing flag appears anywhere (including after "--"). Every project named
+# is read, so a second project does not hide the product project (ambiguity resolves to full). No product project
+# is partial.
 is_full_dotnet_run() {
-  local arg skip=0 pending=0 dd=0 project="" have_project=0 name
+  local arg skip=0 pending=0 dd=0 product=0
   for arg in "$@"; do
     if is_filter_flag "${arg}"; then
       return 1
@@ -184,16 +201,18 @@ is_full_dotnet_run() {
     fi
     if ((pending == 1)); then
       pending=0
-      project="${arg}"
-      have_project=1
+      if is_kw_project "${arg}"; then
+        product=1
+      fi
       continue
     fi
     case "${arg}" in
       --) dd=1 ;;
       --project|-p) pending=1 ;;
       --project=*)
-        project="${arg#--project=}"
-        have_project=1
+        if is_kw_project "${arg#--project=}"; then
+          product=1
+        fi
         ;;
       -*)
         if dotnet_run_flag_takes_value "${arg}"; then
@@ -203,14 +222,7 @@ is_full_dotnet_run() {
       *) ;;
     esac
   done
-  ((have_project == 1)) || return 1
-  name="${project}"
-  while [[ "${name}" == */ ]]; do
-    name="${name%/}"
-  done
-  name="${name##*/}"
-  name="${name%.csproj}"
-  [[ "${name}" == KyberWeave.Tests ]] || return 1
+  ((product == 1)) || return 1
   return 0
 }
 
@@ -291,7 +303,7 @@ is_full_npm() {
     fi
     case "${arg}" in
       --) dd=1 ;;
-      --prefix|--loglevel|--workspace|-w|--registry|--userconfig|--cache) skip=1 ;;
+      --prefix|--loglevel|--workspace|-w|--registry|--userconfig|--cache|--omit|--tag|--otp|--include|--access|--auth-type|--scope|--tmp|--cafile|--ca|--proxy|--https-proxy|--before|--install-strategy) skip=1 ;;
       -*) ;;
       *)
         case "${count}" in
@@ -336,7 +348,11 @@ is_full_cargo() {
         # A toolchain selector (cargo +stable test) is allowed only before the subcommand.
         [[ -z "${sub}" ]] || return 1
         ;;
-      --manifest-path|-p|--package|--exclude|--features|-F|--target|--target-dir|--bin|--test|--example|--bench|-j|--jobs|--profile|--color|--message-format|--config|-Z)
+      --test|--bin|--example|--bench|--test=*|--bin=*|--example=*|--bench=*)
+        # One named target (test binary, bin, example or bench) is a targeted run, not the suite.
+        return 1
+        ;;
+      --manifest-path|-p|--package|--exclude|--features|-F|--target|--target-dir|--artifact-dir|-C|-j|--jobs|--profile|--color|--message-format|--config|-Z)
         skip=1
         ;;
       -*) ;;

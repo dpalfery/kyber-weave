@@ -1201,12 +1201,15 @@ Run each of these through the watchdog from the repository root
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
-scripts/proc-guard.sh run -- bash -c "cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test '<name>'"
+scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
-`cargo test '<name>'` is the targeted form a dev agent runs. The whole-crate `cargo test` belongs to the
-review council and CI. The watchdog does not parse `bash -c` strings, so it cannot refuse a bare
-`cargo test` inside one; that rule is the agent's to follow.
+`cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'` is the targeted form a dev agent runs.
+A `cargo test` with no name is the whole crate: a full run, refused by the guard, for the review council and CI
+only. Keep the three gates as separate commands. The guard does not parse `bash -c` strings, so a gate wrapped
+in one is not checked.
 
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point

@@ -128,7 +128,7 @@ written reason, never around the rule.
 5. Run `npm --prefix dash run typecheck lint check:reachable`, plus `npm --prefix dash run test:related -- <files>`
    for the files you changed (paths relative to `dash/`). The whole dash suite (`npm --prefix dash run test`)
    is the review council's and CI's; no dev agent runs it. When you touched Rust, run the tray's
-   targeted `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test '<name>'` from
+   targeted `cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check`, `cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings` and `cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'` from
    [dash/tray/AGENTS.md](../../dash/tray/AGENTS.md). Run each through `scripts/proc-guard.sh run --`
    (see [dash/AGENTS.md](../../dash/AGENTS.md#tests-that-start-processes)).
 

@@ -125,6 +125,24 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("npm run test")]
     [InlineData("npm test")]
     [InlineData("npm test --prefix /abs/path/dash")]
+    // cargo's global -C takes a directory value, so that value is not read as the subcommand.
+    [InlineData("cargo -C dash/tray/src-tauri test")]
+    // Known npm and cargo flags that take a separate value do not hide the subcommand after them.
+    [InlineData("cargo --artifact-dir out test")]
+    [InlineData("npm --omit dev test")]
+    [InlineData("npm --tag x test")]
+    [InlineData("npm --otp 123 test")]
+    [InlineData("npm --include dev test")]
+    [InlineData("npm --access public run test")]
+    // cargo test with a doc or no-run selector is not a single-target narrowing, so the run stays full.
+    [InlineData("cargo test --doc")]
+    [InlineData("cargo test --no-run")]
+    // dotnet test: the artifacts path value is skipped, and a solution is still a full target.
+    [InlineData("dotnet test --artifacts-path out KyberWeave.sln")]
+    // dotnet run naming two projects is ambiguous, and ambiguity resolves to full when either one is the product project.
+    [InlineData("dotnet run --project tests/KyberWeave.Tests --project src/KyberWeave.Cli")]
+    [InlineData("dotnet run --project src/KyberWeave.Cli --project tests/KyberWeave.Tests")]
+    [InlineData("dotnet run --project=tests/KyberWeave.Tests --project src/KyberWeave.Cli")]
     public void ClassifyReportsAnUnfilteredProductSuiteAsFull(string command)
     {
         AssertClassifiesAs(command, "full");
@@ -179,6 +197,28 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("npm --prefix dash run lint")]
     [InlineData("npm --prefix dash run test:locks")]
     [InlineData("echo hi")]
+    // --treenode-filter is a dotnet test filter: a run with it is narrowed whatever its target or position.
+    [InlineData("dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --treenode-filter /*/*/FastLoop*/*")]
+    [InlineData("dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj --treenode-filter /x")]
+    [InlineData("dotnet test --treenode-filter=/x")]
+    [InlineData("dotnet run --project tests/KyberWeave.Tests -- --treenode-filter /x")]
+    [InlineData("dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll --treenode-filter /*/*/X/*")]
+    // A known npm value flag before the subcommand does not change a narrowed run.
+    [InlineData("npm --omit dev run lint")]
+    // cargo: a single-target selector narrows the run to that one target.
+    [InlineData("cargo test --test smoke")]
+    [InlineData("cargo test --bin kyberdash")]
+    [InlineData("cargo test --example demo")]
+    [InlineData("cargo test --bench bench")]
+    // dotnet test: the artifacts path value is skipped, and the policy project is the only target, so the run is partial.
+    [InlineData("dotnet test --artifacts-path out tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj")]
+    // dotnet run aimed only at the Cli project is partial.
+    [InlineData("dotnet run --project src/KyberWeave.Cli")]
+    // The tray crate addressed by manifest path: a filter narrows it, and fmt or clippy are not test runs.
+    [InlineData("cargo test --manifest-path dash/tray/src-tauri/Cargo.toml my_filter")]
+    [InlineData("cargo -C dash/tray/src-tauri test my_filter")]
+    [InlineData("cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check")]
+    [InlineData("cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings")]
     public void ClassifyReportsAFilteredPolicyOrOtherCommandAsPartial(string command)
     {
         AssertClassifiesAs(command, "partial");
@@ -267,12 +307,17 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("dotnet run --project tests/KyberWeave.Tests")]
     [InlineData("npm test")]
     [InlineData("npm --prefix other run test")]
+    // cargo's global -C takes a directory value; the cargo test it wraps is the full tray suite.
+    [InlineData("cargo -C dash/tray/src-tauri test")]
+    // Two --project flags, one of them the product project: ambiguity resolves to full, so the refusal applies.
+    [InlineData("dotnet run --project tests/KyberWeave.Tests --project src/KyberWeave.Cli")]
     public void RunBypassShapeOfAFullRunWithoutCouncilIsRefusedWithExit89AndNeverStartsTheCommand(string command)
     {
         SkipIfBashUnavailable();
         using GuardSandbox sandbox = new();
         sandbox.Stub("dotnet", exitCode: 0);
         sandbox.Stub("npm", exitCode: 0);
+        sandbox.Stub("cargo", exitCode: 0);
 
         ProcessResult result = sandbox.Guard(["run", "--", .. command.Split(' ', StringSplitOptions.RemoveEmptyEntries)]);
 
