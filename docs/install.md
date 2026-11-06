@@ -508,7 +508,7 @@ kyberdash menubar --update
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
 arbiter and reports an absent one rather than creating it. After replacing binaries, update
-also re-renders the arbiter hooks/scripts for each registered project with `arbiter.enabled`
+also re-renders the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml` and for each registered project with `arbiter.enabled`
 (reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render.
 `--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
