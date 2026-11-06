@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-05
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -69,7 +69,7 @@ squad:
 
 mcp:
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required
@@ -492,7 +492,7 @@ offered for it either.
 
 | Key | Default | Effect |
 |---|---|---|
-| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees |
+| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees — today `kw-docs`, `kw-dash`, and `kw-arbiter` |
 | `required-servers.<name>.command` | required | Launch command as argv — the program first, then each argument. Never a shell line, for the same reason `review.gates` takes argv |
 | `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships, today `kyber-weave-mcp`) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked. `first-party` is bound to the shipped binary: it is accepted only when the command's program is `kyber-weave-mcp` |
 | `required-servers.<name>.level` | `required` | `required` reports a missing server as a warning; `recommended` reports the same line at `info` |
@@ -501,7 +501,7 @@ offered for it either.
 ```yaml
 mcp:
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required
@@ -512,7 +512,7 @@ mcp:
       install: codegraph init .
 ```
 
-`docs init` scaffolds the section with exactly one server — `kyber-weave`, launched
+`docs init` scaffolds the section with exactly one server — `kw-docs`, launched
 `kyber-weave-mcp --repo-root .`, first-party — when it creates a host configuration, and
 appends it, leaving every other byte alone, when an existing file has none. An existing
 section is never rewritten: it is host-owned from then on. The append is textual, so it

@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-05
 ---
 
 # Adopting DocGraph in an existing repository
@@ -257,10 +257,13 @@ kyber-weave-mcp --repo-root .
 ```
 
 See the [MCP runbook](mcp-runbook.md) for client configuration. Agents should reach the
-corpus through `docs_explore` rather than by reading files.
+corpus through `docs_answer_question_from_repo_documentation` rather than by reading files.
 
-The MCP surface also exposes capped read-only `docs_analysis_candidates` and
-`docs_glossary` tools; verdict and glossary writes remain CLI-only.
+The MCP surface also exposes capped read-only `docs_find_duplicates_conflicts_ambiguous_terms`
+and `docs_look_up_glossary_term_definition` tools; verdict and glossary writes remain CLI-only.
+The server's configuration key is `kw-docs`; a repository wired under the old `kyber-weave` key is
+renamed by `kyber-weave docs mcp-migrate` once the entry proves it launches this product's
+binary.
 
 ## 7. Gate it
 
