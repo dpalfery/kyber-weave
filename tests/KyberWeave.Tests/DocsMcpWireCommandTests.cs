@@ -162,6 +162,37 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A preview with no declared servers still names an unproven leftover: a Codex TOML table under
+    /// a retired key needs a hand edit, and the empty-declaration return must not hide it.
+    /// </summary>
+    [Fact]
+    public void APreviewWithNoDeclarationStillNamesAnUnprovenTomlLeftover()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ".codex/config.toml",
+            """
+            [mcp_servers.kyber-weave]
+            command = "kyber-weave-mcp"
+            """);
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        // The console wraps to its width, so the sentence is matched on collapsed whitespace.
+        string output = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpServerRenamer.LeftAloneCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("by hand", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            $"{McpServerRenamer.MigrateCommand} --target {Codex}",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A preview names a retired key it found, but it does not offer the migrate command for a
     /// conflict the migrate command would refuse: different launches for the old and new names are a
     /// decision for a person, and telling the operator to run a command that refuses sends them in a

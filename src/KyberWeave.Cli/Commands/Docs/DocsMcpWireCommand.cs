@@ -327,6 +327,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         [
             .. McpServerRenamer.Scan(root)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                    || string.Equals(change.Code, McpServerRenamer.LeftAloneCode, StringComparison.Ordinal)
                     || string.Equals(change.Code, McpServerRenamer.RefusedCode, StringComparison.Ordinal))
         ];
 
