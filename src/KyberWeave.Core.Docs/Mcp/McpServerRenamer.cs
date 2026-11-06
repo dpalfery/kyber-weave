@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Mcp;
 
@@ -817,7 +818,7 @@ public static class McpServerRenamer
 
             if (TryReplaceKeyLine(text, rule, out string edited, out string? refusal))
             {
-                if (!Verifies(edited, rule))
+                if (!Verifies(edited, loaded.Config, rule))
                 {
                     changes.Add(new McpRenameChange(
                         DeclarationTarget,
@@ -962,25 +963,50 @@ public static class McpServerRenamer
     /// <summary>
     /// Whether an edited declaration reloads as the same declaration with one server key renamed.
     /// </summary>
-    private static bool Verifies(string edited, McpRenameRule rule)
+    private static bool Verifies(string edited, KyberWeaveConfig before, McpRenameRule rule)
     {
         try
         {
-            KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(edited);
+            KyberWeaveConfig after = KyberWeaveConfigLoader.LoadFromYaml(edited);
 
-            if (!config.Mcp.RequiredServers.ContainsKey(rule.NewKey) ||
-                config.Mcp.RequiredServers.ContainsKey(rule.OldKey))
+            if (after.Mcp.RequiredServers.ContainsKey(rule.OldKey) ||
+                !after.Mcp.RequiredServers.TryGetValue(rule.NewKey, out RequiredMcpServer? renamed))
             {
                 return false;
             }
 
-            return config.Mcp.RequiredServers[rule.NewKey].Command.Count > 0;
+            if (before.Mcp.RequiredServers.Count != after.Mcp.RequiredServers.Count)
+                return false;
+
+            foreach (KeyValuePair<string, RequiredMcpServer> pair in before.Mcp.RequiredServers)
+            {
+                string expected = string.Equals(pair.Key, rule.OldKey, StringComparison.Ordinal)
+                    ? rule.NewKey
+                    : pair.Key;
+
+                if (!after.Mcp.RequiredServers.TryGetValue(expected, out RequiredMcpServer? other) ||
+                    !SameDeclaration(pair.Value, other))
+                {
+                    return false;
+                }
+            }
+
+            return renamed.Command.Count > 0;
         }
-        catch (Exception)
+        catch (Exception exception) when (exception is YamlException or InvalidOperationException or ArgumentException)
         {
             return false;
         }
     }
+
+    /// <summary>
+    /// Whether two declaration entries say the same thing: a rename may move a key, never a launch,
+    /// a provenance or a requirement level.
+    /// </summary>
+    private static bool SameDeclaration(RequiredMcpServer left, RequiredMcpServer right) =>
+        left.Command.SequenceEqual(right.Command, StringComparer.Ordinal) &&
+        left.Provenance == right.Provenance &&
+        left.Level == right.Level;
 
     private static string? WriteDeclaration(string configPath, string edited)
     {
