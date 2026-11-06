@@ -162,6 +162,37 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A preview names a retired key it found, but it does not offer the migrate command for a
+    /// conflict the migrate command would refuse: different launches for the old and new names are a
+    /// decision for a person, and telling the operator to run a command that refuses sends them in a
+    /// circle.
+    /// </summary>
+    [Fact]
+    public void APreviewDoesNotOfferMigrateForAConflictMigrateWouldRefuse()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ".mcp.json",
+            """
+            {
+              "mcpServers": {
+                "kyber-weave": { "type": "stdio", "command": "kyber-weave-mcp", "args": ["--repo-root", "."] },
+                "kw-docs": { "type": "stdio", "command": "kyber-weave-mcp", "args": ["--repo-root", "/elsewhere"] }
+              }
+            }
+            """);
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpServerRenamer.RefusedCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            $"{McpServerRenamer.MigrateCommand} --target {ClaudeCode}",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A named harness is written: the file appears holding the declared server, and the receipt
     /// records the write so the removal path has something to undo (R5.1, R5.4).
     /// </summary>

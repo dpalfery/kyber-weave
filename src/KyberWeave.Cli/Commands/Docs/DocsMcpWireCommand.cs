@@ -65,6 +65,11 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             AnsiConsole.MarkupLine(
                 "[grey]Declare them under mcp.required-servers in .kyber-weave/kyber-weave.yml, then run this "
                 + "command again.[/]");
+
+            // A retired key is a property of the harness files, not of the declaration. This early
+            // return used to hide it, which is the one case where the operator most needs the notice:
+            // nothing is declared, and a stale entry is still there.
+            ReportRenameNotices(root);
             return 0;
         }
 
@@ -338,8 +343,16 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
                 $"  [yellow]{Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)}[/] {file}: "
                 + Markup.Escape(TerminalText.Line(leftover.Message)));
 
-            AnsiConsole.MarkupLine(
-                $"    [grey]→ Run: {Markup.Escape(McpServerRenamer.MigrateCommand + " --target " + leftover.Harness)}[/]");
+            // Only a proven leftover is the migrate command's to fix. A conflict or an unreadable
+            // file is a decision for a person, and offering a command that would refuse it is a loop.
+            string? remedy = string.Equals(leftover.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                ? McpServerRenamer.MigrateCommand + " --target " + leftover.Harness
+                : leftover.Hint;
+
+            if (!string.IsNullOrWhiteSpace(remedy))
+            {
+                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(remedy))}[/]");
+            }
         }
 
         AnsiConsole.WriteLine();
