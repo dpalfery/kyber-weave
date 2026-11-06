@@ -46,7 +46,7 @@ Use the `task-gate` skill as the deterministic exit check on your own changed fi
 
 ## Discovery order
 
-Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.

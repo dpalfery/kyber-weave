@@ -29,7 +29,7 @@ Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<pl
 
 ## Discovery order
 
-Before reading or searching repository code or documentation, load the CodeGraph and kyber-weave documentation tools through the harness tool search.
+Before reading or searching repository code or documentation, load the CodeGraph and `kw-docs` documentation tools through the harness tool search.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
