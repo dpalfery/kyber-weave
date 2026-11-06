@@ -35,6 +35,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [mcp-server-and-tool-rename.md](mcp-server-and-tool-rename.md) | Ready | 2026-11-05 | | Pending closeout; see the plan's Design harvest | Rename the three MCP servers and their 19 tools by purpose so an agent can discover each tool from its name, with a migration that never touches an entry it cannot prove is ours. |
 
 ## Archived Plans
 
