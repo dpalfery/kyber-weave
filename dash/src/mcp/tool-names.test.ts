@@ -78,4 +78,10 @@ describe('MCP tool name splitting for hyphenated server keys (characterization)'
       'mcp__kw_docs__docs_answer_question_from_repo_documentation',
     )
   })
+
+  it('splits the dashboard server key on its own hyphen before the tool name', () => {
+    expect(copilot.toolDisplayName('kw-dash-dash_list_available_analytics_operations')).toBe(
+      'mcp__kw_dash__dash_list_available_analytics_operations',
+    )
+  })
 })
