@@ -13,8 +13,8 @@ describe('analytics MCP server', () => {
     try {
       const result = await client.listTools()
       expect(result.tools.map(tool => tool.name).sort()).toEqual([
-        'dash_catalog', 'dash_compare', 'dash_findings', 'dash_inspect',
-        'dash_outcomes', 'dash_query', 'dash_search_sessions', 'dash_status',
+        'dash_list_queryable_metrics_dimensions_limits', 'dash_compare_metrics_between_two_scopes', 'dash_list_detected_context_and_tool_problems', 'dash_read_captured_run_session_or_turn_context',
+        'dash_get_run_success_or_failure_outcomes', 'dash_query_session_cost_tokens_and_duration', 'dash_search_sessions_by_text_and_scope', 'dash_list_available_analytics_operations',
       ])
       for (const tool of result.tools) {
         expect(tool.inputSchema.type).toBe('object')
@@ -22,7 +22,7 @@ describe('analytics MCP server', () => {
         expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
         expect(tool.annotations).toMatchObject({ idempotentHint: true, openWorldHint: false })
       }
-      const query = result.tools.find(tool => tool.name === 'dash_query')
+      const query = result.tools.find(tool => tool.name === 'dash_query_session_cost_tokens_and_duration')
       expect(query?.inputSchema.properties).toHaveProperty('windowDays')
       expect(query?.inputSchema.properties).toHaveProperty('metrics')
       expect(query?.inputSchema.properties).toHaveProperty('groups')

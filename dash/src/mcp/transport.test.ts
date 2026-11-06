@@ -129,8 +129,8 @@ describe('analytics MCP transport and client', () => {
     try {
       const result = await client.listTools()
       expect(result.tools.map((tool) => tool.name).sort()).toEqual([
-        'dash_catalog', 'dash_compare', 'dash_findings', 'dash_inspect',
-        'dash_outcomes', 'dash_query', 'dash_search_sessions', 'dash_status',
+        'dash_list_queryable_metrics_dimensions_limits', 'dash_compare_metrics_between_two_scopes', 'dash_list_detected_context_and_tool_problems', 'dash_read_captured_run_session_or_turn_context',
+        'dash_get_run_success_or_failure_outcomes', 'dash_query_session_cost_tokens_and_duration', 'dash_search_sessions_by_text_and_scope', 'dash_list_available_analytics_operations',
       ])
       expect(analyticsTools).toHaveLength(8)
       for (const tool of result.tools) {
@@ -147,9 +147,9 @@ describe('analytics MCP transport and client', () => {
     const fixture = await startFixture()
     try {
       const client = createAnalyticsClient({ serverUrl: fixture.url })
-      const names = ['dash_status', 'dash_catalog', 'dash_query', 'dash_search_sessions', 'dash_inspect', 'dash_findings', 'dash_compare', 'dash_outcomes']
+      const names = ['dash_list_available_analytics_operations', 'dash_list_queryable_metrics_dimensions_limits', 'dash_query_session_cost_tokens_and_duration', 'dash_search_sessions_by_text_and_scope', 'dash_read_captured_run_session_or_turn_context', 'dash_list_detected_context_and_tool_problems', 'dash_compare_metrics_between_two_scopes', 'dash_get_run_success_or_failure_outcomes']
       for (const name of names) {
-        const args = name === 'dash_search_sessions' ? { query: 'session-a' } : name === 'dash_inspect' ? { kind: 'session', id: 'session-a' } : {}
+        const args = name === 'dash_search_sessions_by_text_and_scope' ? { query: 'session-a' } : name === 'dash_read_captured_run_session_or_turn_context' ? { kind: 'session', id: 'session-a' } : {}
         const result = await client.callTool(name, args)
         expect(result.structuredContent.contractVersion, name).toBe(1)
         expect(result.content, name).toHaveLength(1)
@@ -169,7 +169,7 @@ describe('analytics MCP transport and client', () => {
     const fixture = await startFixture()
     try {
       const client = createAnalyticsClient({ serverUrl: fixture.url })
-      const result = await client.callTool('dash_search_sessions', { text: 'session-a' })
+      const result = await client.callTool('dash_search_sessions_by_text_and_scope', { text: 'session-a' })
       const sent = fixture.requests.at(-1)?.body as Record<string, unknown>
       expect(sent, `MCP search body ${JSON.stringify(sent)} must carry the engine query field`).toHaveProperty('query', 'session-a')
       expect(result.structuredContent.error, JSON.stringify(result.structuredContent.error)).toBeNull()
@@ -182,7 +182,7 @@ describe('analytics MCP transport and client', () => {
     const fixture = await startFixture()
     try {
       const client = createAnalyticsClient({ serverUrl: fixture.url })
-      const result = await client.callTool('dash_inspect', { sessionId: 'session-a' })
+      const result = await client.callTool('dash_read_captured_run_session_or_turn_context', { sessionId: 'session-a' })
       const sent = fixture.requests.at(-1)?.body as Record<string, unknown>
       expect(sent, `MCP inspect body ${JSON.stringify(sent)} must carry the engine kind/id target`).toMatchObject({ kind: 'session', id: 'session-a' })
       expect(result.structuredContent.error, JSON.stringify(result.structuredContent.error)).toBeNull()
@@ -195,7 +195,7 @@ describe('analytics MCP transport and client', () => {
     const fixture = await startFixture()
     try {
       const client = createAnalyticsClient({ serverUrl: fixture.url })
-      const result = await client.callTool('dash_inspect', { sessionId: 'session-a', turnIndex: 2, blockId: 'block-2', includeContent: true })
+      const result = await client.callTool('dash_read_captured_run_session_or_turn_context', { sessionId: 'session-a', turnIndex: 2, blockId: 'block-2', includeContent: true })
       const sent = fixture.requests.at(-1)?.body as Record<string, unknown>
       expect(sent, `MCP content body ${JSON.stringify(sent)} must carry the engine turn target`).toMatchObject({ kind: 'turn', sessionId: 'session-a', turnIndex: 2, blockId: 'block-2', includeContent: true })
       expect(result.structuredContent.error, JSON.stringify(result.structuredContent.error)).toBeNull()
@@ -212,7 +212,7 @@ describe('analytics MCP transport and client', () => {
     await mkdir(stateDir)
     await mkdir(configDir)
     const client = createAnalyticsClient({ stateDir, configDir })
-    await expect(client.callTool('dash_status', {})).rejects.toThrow('engine_unavailable')
+    await expect(client.callTool('dash_list_available_analytics_operations', {})).rejects.toThrow('engine_unavailable')
   })
 
   it('ignores a stale receipt that points at a non-loopback URL', async () => {
@@ -227,7 +227,7 @@ describe('analytics MCP transport and client', () => {
     try {
       await writeFile(join(configDir, 'server.json'), JSON.stringify({ url: fixture.url }))
       const client = createAnalyticsClient({ stateDir, configDir })
-      const result = await client.callTool('dash_status', {})
+      const result = await client.callTool('dash_list_available_analytics_operations', {})
       expect(result.structuredContent.error).toBeNull()
       expect(fixture.requests.map((request) => request.pathname).join(','), 'stale receipt must not divert the request').toContain('/api/kyber/analytics/status')
     } finally {
@@ -244,7 +244,7 @@ describe('analytics MCP transport and client', () => {
     try {
       const address = server.address() as AddressInfo
       const client = createAnalyticsClient({ serverUrl: `http://127.0.0.1:${address.port}` })
-      await expect(client.callTool('dash_status', {})).rejects.toThrow('incompatible_engine')
+      await expect(client.callTool('dash_list_available_analytics_operations', {})).rejects.toThrow('incompatible_engine')
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -264,7 +264,7 @@ describe('analytics MCP transport and client', () => {
     try {
       const address = server.address() as AddressInfo
       const client = createAnalyticsClient({ serverUrl: `http://127.0.0.1:${address.port}` })
-      const error = await client.callTool('dash_status', {}).then(
+      const error = await client.callTool('dash_list_available_analytics_operations', {}).then(
         () => { throw new Error('expected the redirect to be refused') },
         (cause: unknown) => cause as Error,
       )

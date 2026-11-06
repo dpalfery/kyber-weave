@@ -22,7 +22,7 @@ describe('analytics MCP engine client', () => {
       return Response.json({ contractVersion: 1, scope: {}, data: {}, measurement: {}, coverage: {}, freshness: {}, evidence: [], pagination: {}, error: null })
     }
     const client = createAnalyticsClient({ serverUrl: 'http://127.0.0.1:4747', fetchImpl })
-    for (const name of ['dash_status', 'dash_catalog', 'dash_query', 'dash_search_sessions', 'dash_inspect', 'dash_findings', 'dash_compare', 'dash_outcomes']) {
+    for (const name of ['dash_list_available_analytics_operations', 'dash_list_queryable_metrics_dimensions_limits', 'dash_query_session_cost_tokens_and_duration', 'dash_search_sessions_by_text_and_scope', 'dash_read_captured_run_session_or_turn_context', 'dash_list_detected_context_and_tool_problems', 'dash_compare_metrics_between_two_scopes', 'dash_get_run_success_or_failure_outcomes']) {
       await client.callTool(name, {})
     }
     expect(requests.map(({ url, method }) => [new URL(url).pathname, method])).toEqual([
@@ -31,7 +31,7 @@ describe('analytics MCP engine client', () => {
       ['/api/kyber/analytics/inspect', 'POST'], ['/api/kyber/analytics/findings', 'POST'],
       ['/api/kyber/analytics/compare', 'POST'], ['/api/kyber/analytics/outcomes', 'POST'],
     ])
-    const result = await client.callTool('dash_query', { windowDays: 7, limit: 25 })
+    const result = await client.callTool('dash_query_session_cost_tokens_and_duration', { windowDays: 7, limit: 25 })
     expect(result.structuredContent).toMatchObject({
       contractVersion: 1,
       scope: expect.any(Object),
@@ -73,7 +73,7 @@ describe('analytics MCP engine client', () => {
       },
     })
     const controller = new AbortController()
-    const result = await client.callTool('dash_query', {}, { signal: controller.signal })
+    const result = await client.callTool('dash_query_session_cost_tokens_and_duration', {}, { signal: controller.signal })
     expect(result.isError).toBe(true)
     expect(result.structuredContent).toMatchObject({ error: { code: 'not_measurable' } })
     expect(observedSignal?.aborted).toBe(false)
@@ -92,10 +92,10 @@ describe('analytics MCP engine client', () => {
       fetchImpl,
       now: () => new Date('2026-10-25T12:00:00.000Z'),
     })
-    await client.callTool('dash_search_sessions', { text: 'session-a', windowDays: 30 })
-    await client.callTool('dash_findings', { windowDays: 30 })
-    await client.callTool('dash_outcomes', { windowDays: 30 })
-    await client.callTool('dash_query', { windowDays: 30, limit: 25 })
+    await client.callTool('dash_search_sessions_by_text_and_scope', { text: 'session-a', windowDays: 30 })
+    await client.callTool('dash_list_detected_context_and_tool_problems', { windowDays: 30 })
+    await client.callTool('dash_get_run_success_or_failure_outcomes', { windowDays: 30 })
+    await client.callTool('dash_query_session_cost_tokens_and_duration', { windowDays: 30, limit: 25 })
 
     expect(bodies).toHaveLength(4)
     for (const body of bodies) {
@@ -117,7 +117,7 @@ describe('analytics MCP engine client', () => {
       fetchImpl,
       now: () => new Date('2026-10-25T12:00:00.000Z'),
     })
-    await client.callTool('dash_findings', {
+    await client.callTool('dash_list_detected_context_and_tool_problems', {
       windowDays: 30,
       scope: { from: '2026-10-01T00:00:00.000Z', to: '2026-10-02T00:00:00.000Z' },
     })
@@ -143,7 +143,7 @@ describe('analytics MCP engine client', () => {
       now: () => new Date('2026-10-25T12:00:00.000Z'),
     })
     for (const windowDays of ['30', 0, 1000, Number.NaN, 1.5]) {
-      await expect(client.callTool('dash_findings', { windowDays }), `windowDays=${String(windowDays)}`).rejects.toThrow(/invalid_request.*1.*365/)
+      await expect(client.callTool('dash_list_detected_context_and_tool_problems', { windowDays }), `windowDays=${String(windowDays)}`).rejects.toThrow(/invalid_request.*1.*365/)
     }
     expect(calls).toBe(0)
   })
@@ -158,7 +158,7 @@ describe('analytics MCP engine client', () => {
     const fetchImpl: typeof fetch = async () => new Response(body)
     const client = createAnalyticsClient({ serverUrl: 'http://127.0.0.1:4747', fetchImpl })
 
-    const result = await client.callTool('dash_status', {})
+    const result = await client.callTool('dash_list_available_analytics_operations', {})
 
     expect(result.isError).toBe(true)
     expect(result.structuredContent.error).toMatchObject({ code: 'incompatible_engine' })

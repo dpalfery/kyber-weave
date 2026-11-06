@@ -48,7 +48,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-describe('dash_inspect MCP complete-context contract', () => {
+describe('dash_read_captured_run_session_or_turn_context MCP complete-context contract', () => {
   it('publishes the new manifest/content request on the existing tool and rejects injected fields', async () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     const server = createAnalyticsMcpServer()
@@ -57,7 +57,7 @@ describe('dash_inspect MCP complete-context contract', () => {
     await client.connect(clientTransport)
     try {
       const listed = await client.listTools()
-      const inspect = listed.tools.find((tool) => tool.name === 'dash_inspect')
+      const inspect = listed.tools.find((tool) => tool.name === 'dash_read_captured_run_session_or_turn_context')
       expect(inspect).toBeDefined()
       expect(listed.tools.filter((tool) => tool.name.startsWith('dash_'))).toHaveLength(8)
       expect(inspect?.inputSchema.properties).toMatchObject({
@@ -96,7 +96,7 @@ describe('dash_inspect MCP complete-context contract', () => {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
     try {
-      const result = await client.callTool({ name: 'dash_inspect', arguments: contentRequest })
+      const result = await client.callTool({ name: 'dash_read_captured_run_session_or_turn_context', arguments: contentRequest })
       expect(result.isError).not.toBe(true)
       expect(requests).toEqual([contentRequest])
       const content = asRecord(result.structuredContent)
@@ -106,7 +106,7 @@ describe('dash_inspect MCP complete-context contract', () => {
       expect(asRecord(content['pagination'])).toMatchObject({ nextCursor: null, hasMore: false })
 
       const manifestRequest = { mode: 'manifest', target: { kind: 'turn', sessionId: 'session-a', turnIndex: 2 } }
-      const manifest = await client.callTool({ name: 'dash_inspect', arguments: manifestRequest })
+      const manifest = await client.callTool({ name: 'dash_read_captured_run_session_or_turn_context', arguments: manifestRequest })
       expect(manifest.isError).not.toBe(true)
       expect(requests).toEqual([contentRequest, manifestRequest])
       expect(asRecord(manifest.structuredContent)).toMatchObject({ data: { items: [{ partId: 'part-opaque', role: 'user' }] } })
@@ -125,7 +125,7 @@ describe('dash_inspect MCP complete-context contract', () => {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
     try {
-      const result = await client.callTool({ name: 'dash_inspect', arguments: { sessionId: 'session-a' } })
+      const result = await client.callTool({ name: 'dash_read_captured_run_session_or_turn_context', arguments: { sessionId: 'session-a' } })
       expect(fetchImpl).toHaveBeenCalledTimes(1)
       expect(asRecord(result.structuredContent)).toMatchObject({ data: { id: 'session-a', label: 'legacy session' } })
     } finally {
@@ -147,12 +147,12 @@ describe('dash_inspect MCP complete-context contract', () => {
     await server.connect(serverTransport)
     await client.connect(clientTransport)
     try {
-      const missingTarget = await client.callTool({ name: 'dash_inspect', arguments: { mode: 'content' } })
+      const missingTarget = await client.callTool({ name: 'dash_read_captured_run_session_or_turn_context', arguments: { mode: 'content' } })
       expect(missingTarget.isError).toBe(true)
       expect(JSON.stringify(missingTarget.content)).toContain('mode and target must be supplied together.')
 
       const assembledRun = await client.callTool({
-        name: 'dash_inspect',
+        name: 'dash_read_captured_run_session_or_turn_context',
         arguments: { mode: 'content', target: { kind: 'run', runId: 'run-a' }, representation: 'assembled_turn' },
       })
       expect(assembledRun.isError).toBe(true)
