@@ -13,6 +13,7 @@ namespace KyberWeave.Tests;
 /// fallback-only, and the install must write an explicit Arbiter MCP entry into the target's own
 /// <c>.warp/.mcp.json</c> without clobbering any foreign JSON the user already kept there.
 /// </summary>
+[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
@@ -98,18 +99,8 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
 
     private static CommandExecution Capture(Func<int> execute)
     {
-        using StringWriter writer = new();
-        TextWriter saved = Console.Out;
-        Console.SetOut(writer);
-        try
-        {
-            int result = execute();
-            return new CommandExecution(result, writer.ToString());
-        }
-        finally
-        {
-            Console.SetOut(saved);
-        }
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);

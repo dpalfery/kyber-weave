@@ -63,18 +63,8 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 
     private static CommandExecution Capture(Func<int> execute)
     {
-        using StringWriter writer = new();
-        TextWriter saved = Console.Out;
-        Console.SetOut(writer);
-        try
-        {
-            int result = execute();
-            return new CommandExecution(result, writer.ToString());
-        }
-        finally
-        {
-            Console.SetOut(saved);
-        }
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);
