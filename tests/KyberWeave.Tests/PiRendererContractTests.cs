@@ -95,7 +95,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// to <c>_</c> before any other character is replaced, so <c>mcp__kw_docs__*</c> and
     /// never <c>mcp__kw-docs__*</c>.
     /// </summary>
-    private const string KyberWeaveNamespace = "kyber_weave";
+    private const string KyberWeaveNamespace = "kw_docs";
 
     private static IReadOnlyList<string> ComputeExpectedTools(SquadCapabilityProfile profile)
     {
@@ -483,7 +483,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// the derived <c>kw-docs</c> overlay, whichever agent declares it — ADR 0050's decision,
     /// and the reason <c>conductor</c>'s position in the roster changes nothing about its
     /// entitlement. The hyphenated namespace spelling fails here deliberately: the adapter's
-    /// deferred surface maps <c>kw-docs</c> to <c>kyber_weave</c>, so an entry spelled
+    /// deferred surface maps <c>kw-docs</c> to <c>kw_docs</c>, so an entry spelled
     /// <c>mcp__kw-docs__*</c> resolves against no registered Pi tool.
     /// </summary>
     [Fact]

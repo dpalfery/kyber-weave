@@ -1163,7 +1163,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         return
         [
             .. SquadMcpDeclaration.ServerNames(source)
-                .Where(name => !string.Equals(name, "kyber-weave-arbiter", StringComparison.Ordinal))
+                .Where(name => !string.Equals(name, "kw-arbiter", StringComparison.Ordinal))
         ];
     }
 
