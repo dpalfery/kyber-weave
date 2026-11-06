@@ -4,7 +4,29 @@ Kyber-Weave governs the artifacts that shape agent behaviour. **What** it does a
 lives in [`docs/`](docs/README.md) — this file is only operational rules for working in the
 code without breaking the repository.
 
+## Writing style: applies to everything you write
+
+This covers every message to the user, every doc, commit message, PR description and code
+comment, and every prompt or handoff to another agent.
+
+Assume the reader is switching between several tasks and remembers nothing about this one.
+Write for a strong developer who is reading it for the first time.
+
+- **Bottom line first.** Open with what happened, what you found, or what you need.
+- **No assumed context.** Don't rely on earlier messages, other files or past sessions.
+  Give the minimum background in one line.
+- **Plain words.** Explain every name, ID, acronym or piece of jargon the first time it
+  appears. Never use internal labels like plan IDs or task numbers as if the reader knows them.
+- **Short.** Cut anything the reader doesn't need in order to act or decide.
+- **Messages to the user** must also follow "How to respond to the user".
+
 ## Commands
+
+### Code comments
+**Code comments are the exception.** Code that follows the coding standards needs no
+comments. Add one only where the code departs significantly from those standards.
+Public APIs are the exception: they always get XML doc comments (`///`).
+
 
 ### The inner loop
 
