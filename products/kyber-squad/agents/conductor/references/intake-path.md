@@ -69,4 +69,4 @@ Assign `docs-dev` an explicit promotion task to perform these todo and index wri
 
 ## Planner dispatches
 
-Unless you hold `arbiter_evaluate` (see Arbiter fallback), the intake assessment dispatch to `architect` carries `KYBER-ARBITER: true` and the `INTAKE:` marker with the todo path or open request, and never `TASK:`.
+Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), the intake assessment dispatch to `architect` carries `KYBER-ARBITER: true` and the `INTAKE:` marker with the todo path or open request, and never `TASK:`.

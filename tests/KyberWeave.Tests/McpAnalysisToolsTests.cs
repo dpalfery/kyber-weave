@@ -200,12 +200,12 @@ public sealed class McpAnalysisToolsTests : IDisposable
             candidates.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal(20, candidates.GetParameters()[2].DefaultValue);
         Assert.Equal(12_000, candidates.GetParameters()[3].DefaultValue);
-        Assert.Equal("docs_analysis_candidates", McpToolName(candidates));
+        Assert.Equal("docs_find_duplicates_conflicts_ambiguous_terms", McpToolName(candidates));
 
         Assert.NotNull(glossary);
         Assert.Equal(typeof(string), glossary.ReturnType);
         Assert.Equal(["term"], glossary.GetParameters().Select(parameter => parameter.Name));
-        Assert.Equal("docs_glossary", McpToolName(glossary));
+        Assert.Equal("docs_look_up_glossary_term_definition", McpToolName(glossary));
         Assert.DoesNotContain(
             typeof(DocsTools).GetMethods(
                 BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public),

@@ -67,12 +67,21 @@ public static class McpWiringFixes
         string root = Path.GetFullPath(repositoryRoot);
         List<string> harnesses = [];
         Dictionary<string, HarnessPlan> plans = new(StringComparer.Ordinal);
+        HashSet<string> retired = Leftovers(root);
 
         foreach (McpWiringFinding finding in report.Findings)
         {
             // Path.Combine(root, "") is the root itself, so an absent, empty or whitespace path is
             // excluded here rather than resolved into a question about the repository directory.
             if (finding.Fixable != McpWiringFixability.Fixable || string.IsNullOrWhiteSpace(finding.Path))
+                continue;
+
+            // A file that still holds a proven retired key is one the repair refuses, for the same
+            // reason it refuses the file in the first place: wiring the shipped name beside the old
+            // one leaves one server under two names. The rename is the remedy, so offering the wire
+            // here would ask the operator to consent to a write guaranteed to come back as
+            // KW-MCP-WIRE-005.
+            if (retired.Contains(finding.Harness))
                 continue;
 
             if (McpRepositoryPath.Contained(root, finding.Path) is not { } absolutePath)
@@ -96,6 +105,28 @@ public static class McpWiringFixes
                 [.. plans[harness].Servers],
                 Create: !File.Exists(plans[harness].AbsolutePath)))
         ];
+    }
+
+    /// <summary>
+    /// The harnesses whose repository-scope file still holds a proven retired server key.
+    /// </summary>
+    /// <remarks>
+    /// The scan is the migration's, so this list and <c>docs mcp-migrate</c> cannot disagree about
+    /// which files hold a leftover: one proof table decides both.
+    /// </remarks>
+    private static HashSet<string> Leftovers(string root)
+    {
+        HashSet<string> harnesses = new(StringComparer.Ordinal);
+
+        foreach (McpRenameChange change in McpServerRenamer.Scan(root))
+        {
+            if (string.IsNullOrEmpty(change.OldKey) || change.Code == McpServerRenamer.LeftAloneCode)
+                continue;
+
+            harnesses.Add(change.Harness);
+        }
+
+        return harnesses;
     }
 
     /// <summary>

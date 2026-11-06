@@ -127,7 +127,7 @@ Only a successful closeout completes the objective.
 
 ## Arbiter routing headers
 
-Unless you hold `arbiter_evaluate` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
+Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
 
 ## Worker packets
 

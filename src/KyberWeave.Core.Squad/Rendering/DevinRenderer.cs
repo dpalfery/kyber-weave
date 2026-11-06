@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Serialization;
@@ -93,8 +94,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <b>MCP is granted by concrete tool name, on two entitlements.</b> Devin names an MCP tool
 /// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> in its permission rules, so the tools declared in
 /// <c>toolchain.yml</c>'s <c>required-mcp-tools</c> are appended to <c>allowed-tools</c> in that
-/// form. <c>kyber-weave</c> is granted on the file-read grant alone, the pure orchestrator
-/// included, because it carries <c>agent_coding_standards</c> (ADR 0050); <c>codegraph</c> and
+/// form. <c>kw-docs</c> is granted on the file-read grant alone, the pure orchestrator
+/// included, because it carries <c>docs_get_coding_standard_for_technology</c> (ADR 0050); <c>codegraph</c> and
 /// <c>context7</c> keep the carve-out a role that only routes work has no use for. The
 /// orchestrator never exercises the widened half of that rule on Devin: <c>conductor</c> is a
 /// primary agent, Devin lowers a primary agent to a <em>skill</em>, and a Devin skill carries no
@@ -171,7 +172,7 @@ public sealed class DevinRenderer : SquadHarnessRenderer
     /// documented, so the matcher is the bare name exactly.</summary>
     private const string ArbiterMatcher = "^run_subagent$";
 
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Devin's core tool names, every tool that

@@ -34,4 +34,4 @@ Revision feedback reopens only the affected phase and all downstream phases. Pre
 
 ## Planner dispatches
 
-Unless you hold `arbiter_evaluate` (see Arbiter fallback), planner dispatches to `product-owner` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Each spec phase carries `FEATURE:` with `PHASE:` (requirements, design, tasks, phase-approval, or finalization) as the first two non-blank lines in either order.
+Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), planner dispatches to `product-owner` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Each spec phase carries `FEATURE:` with `PHASE:` (requirements, design, tasks, phase-approval, or finalization) as the first two non-blank lines in either order.

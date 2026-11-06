@@ -11,14 +11,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const EXPECTED_TOOLS = [
-  'dash_status',
-  'dash_catalog',
-  'dash_query',
-  'dash_search_sessions',
-  'dash_inspect',
-  'dash_findings',
-  'dash_compare',
-  'dash_outcomes',
+  'dash_list_available_analytics_operations',
+  'dash_list_queryable_metrics_dimensions_limits',
+  'dash_query_session_cost_tokens_and_duration',
+  'dash_search_sessions_by_text_and_scope',
+  'dash_read_captured_run_session_or_turn_context',
+  'dash_list_detected_context_and_tool_problems',
+  'dash_compare_metrics_between_two_scopes',
+  'dash_get_run_success_or_failure_outcomes',
 ]
 const TIMEOUT_MS = 10_000
 
@@ -158,14 +158,14 @@ async function main() {
     if (!Array.isArray(names) || names.length !== EXPECTED_TOOLS.length || new Set(names).size !== EXPECTED_TOOLS.length || EXPECTED_TOOLS.some((name) => !names.includes(name))) {
       fail(`tools/list did not return exactly the expected tools (${EXPECTED_TOOLS.join(', ')})`)
     }
-    const result = await request('tools/call', { name: 'dash_status', arguments: {} })
+    const result = await request('tools/call', { name: 'dash_list_available_analytics_operations', arguments: {} })
     const text = result?.content?.find((item) => item?.type === 'text')?.text
     let analytics
-    try { analytics = JSON.parse(text) } catch { fail('dash_status did not return JSON analytics data') }
+    try { analytics = JSON.parse(text) } catch { fail('dash_list_available_analytics_operations did not return JSON analytics data') }
     if (analytics?.contractVersion !== 1 || analytics.data === null || analytics.data === undefined) {
-      fail('dash_status did not return contractVersion 1 analytics data')
+      fail('dash_list_available_analytics_operations did not return contractVersion 1 analytics data')
     }
-    console.log('sea-mcp-smoke: initialize, eight tools, and dash_status contractVersion 1 succeeded')
+    console.log('sea-mcp-smoke: initialize, eight tools, and dash_list_available_analytics_operations contractVersion 1 succeeded')
   } finally {
     clearTimeout(timer)
     if (child) {

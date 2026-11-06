@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -38,14 +39,14 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         excludes every server, an absent key keeps the parent's availability, and a scalar is
 ///         rejected. This renderer therefore never omits the key and never emits a scalar. Its value
 ///         is the whitelist the droid is entitled to — the servers the squad's own <c>mcp.json</c>
-///         declares (excluding the <c>kyber-weave-arbiter</c> hook server), in ordinal order — for a
+///         declares (excluding the <c>kw-arbiter</c> hook server), in ordinal order — for a
 ///         droid whose capability profile resolves and allows <c>filesystem.read</c>, and <c>[]</c>
 ///         for every other droid. The declaration is partitioned by the same entitlement classes every
-///         renderer uses: universal servers (<c>kyber-weave</c>) are granted to the pure orchestrator
+///         renderer uses: universal servers (<c>kw-docs</c>) are granted to the pure orchestrator
 ///         (profile id <c>orchestrator</c>) as well, while orchestrator-excluded servers (today
 ///         <c>codegraph</c>) are granted to the same read-entitled specialists but withheld from the
 ///         orchestrator. The orchestrator keeps the universal grant because that server carries
-///         <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to,
+///         <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it is held to,
 ///         and the role that assigns work is the role deciding which standards apply to whom
 ///         (ADR 0050); it loses only the research surface its profile is not written for.
 ///         Squad does not invent Factory MCP server names: a name that reaches a droid came from the
@@ -95,7 +96,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public sealed class FactoryRenderer : SquadHarnessRenderer
 {
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
     private const string ArbiterMatcher = "Task";
 
     /// <summary>
@@ -242,14 +243,14 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
 
     /// <summary>
     ///     The MCP servers a droid is entitled to declare, filtered from the squad's declared servers
-    ///     according to the agent's capability profile: universal servers (<c>kyber-weave</c>) require
+    ///     according to the agent's capability profile: universal servers (<c>kw-docs</c>) require
     ///     <see cref="CapabilityDegradations.GrantsUniversalMcpServers" />, while orchestrator-excluded
     ///     servers (<c>codegraph</c>) require
     ///     <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers" />.
     /// </summary>
     /// <remarks>
     ///     Preserves ADR 0050: the conductor routes work rather than researching it, so orchestrator-excluded
-    ///     servers like <c>codegraph</c> are withheld from it while allowing <c>kyber-weave</c> for coding
+    ///     servers like <c>codegraph</c> are withheld from it while allowing <c>kw-docs</c> for coding
     ///     standards. Non-orchestrator specialists that allow <c>filesystem.read</c> receive both servers.
     /// </remarks>
     private static IReadOnlyList<string> ResolveMcpServers(
@@ -305,7 +306,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
 
     /// <summary>
     ///     The YAML spelling of a rendered whitelist, so the entry-point caveat names the value the
-    ///     droid beside it actually carries — <c>mcpServers: [kyber-weave]</c> or, for a droid
+    ///     droid beside it actually carries — <c>mcpServers: [kw-docs]</c> or, for a droid
     ///     entitled to none, the <c>mcpServers: []</c> the caveat has always named.
     /// </summary>
     private static string DescribeMcpServers(IReadOnlyList<string> mcpServers)

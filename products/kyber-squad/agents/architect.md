@@ -7,7 +7,7 @@ model-profile: architect
 capability-profile: architect
 copilot-capability-profile: architect-copilot
 devin-capability-profile: architect-devin
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
 aliases: []
@@ -23,16 +23,16 @@ You are the headless technical planner for the conductor. You investigate, chall
 - For a diagnosed Ready-task assessment, inspect the diagnosis and approved contract read-only; determine whether bounded rework fits or the artifact needs revision and renewed approval.
 - For plan work, create or edit only the selected plan under the directory named by **<plan-index>** and that plan's index row. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in the **Active Plans** section of **<plan-index>**. A pull request that does will not be approved.
 - Write only files under the directories named by **<plan-index>**, **<specification-index>**, and **<todo-index>**. Your write tools can reach the whole tree, so this boundary is yours to keep: never write application code, tests, configuration, infrastructure, pipelines, or any other documentation.
-- The only checks you run after plan writes are the read-only MCP tools `docs_validate` and `docs_drift` on the kyber-weave documentation server. Leave `mergeReady` false while the plan is in the active plans folder. Compare each tool's provenance `root=` to this checkout before trusting a pass or fail. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
+- The only checks you run after plan writes are the read-only MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the kw-docs server. Leave `mergeReady` false while the plan is in the active plans folder. Compare each tool's provenance `root=` to this checkout before trusting a pass or fail. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
 
 Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<plan-index>**, **<specification-index>**, **<todo-index>**, **<component-catalog>**, **<adr-index>**, **<rules-index>**, and applicable standards. Never substitute a hard-coded documentation root.
 
 ## Discovery order
 
-Before reading or searching repository code or documentation, load the CodeGraph and kyber-weave documentation tools through the harness tool search.
+Before reading or searching repository code or documentation, load the CodeGraph and `kw-docs` documentation tools through the harness tool search.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
-- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. When a tool or index is unavailable, report the failure and use only the narrow fallback permitted by the host.
 - Include `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code, in the final digest. For plan work, also record it in the plan's investigation findings; intake returns it in its read-only routing or recommendation digest.
 

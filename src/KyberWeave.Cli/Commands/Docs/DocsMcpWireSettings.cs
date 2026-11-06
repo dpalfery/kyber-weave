@@ -41,3 +41,25 @@ public sealed class DocsMcpUnwireSettings : CommandSettings
     [Description("Harness slugs to unwind, comma-separated. Omit to list the files the receipt records.")]
     public string Target { get; set; } = string.Empty;
 }
+
+/// <summary>Settings for <c>kyber-weave docs mcp-migrate</c>.</summary>
+/// <remarks>
+/// The same three options as the wire verb, and for the same reason: selection is the consent. A
+/// migration renames bytes in a file the whole team shares, so the harnesses are named rather than
+/// inferred, <c>declaration</c> names the host declaration without a harness, and
+/// <see cref="DryRun"/> is how the same computation is inspected before any of it happens.
+/// </remarks>
+public sealed class DocsMcpMigrateSettings : CommandSettings
+{
+    [CommandArgument(0, "[path]")]
+    [Description("Repository root to migrate. Defaults to the current directory.")]
+    public string Path { get; set; } = ".";
+
+    [CommandOption("-t|--target <TARGETS>")]
+    [Description("Targets to migrate, comma-separated: factory, claude-code, cursor, vscode, opencode, declaration. Omit to preview; nothing is written without a named target.")]
+    public string Target { get; set; } = string.Empty;
+
+    [CommandOption("--dry-run")]
+    [Description("Report what each target would change and write nothing, not even the receipt. Exits what the real run would.")]
+    public bool DryRun { get; set; }
+}

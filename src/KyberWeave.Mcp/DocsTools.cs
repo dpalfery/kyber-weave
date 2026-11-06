@@ -75,7 +75,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         _analysisReader = analysisReader ?? throw new ArgumentNullException(nameof(analysisReader));
     }
 
-    [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_answer_question_from_repo_documentation", ReadOnly = true, OpenWorld = false)]
     [Description("""
         DOCS FIRST — call before grepping or reading repository documentation under docs/ or other markdown.
         Searches this repository's guides, runbooks, decision records, and design
@@ -125,7 +125,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     }
 
     private const string ExploreReadingRule =
-        "Stop reading when confidence is 0.60 or higher and the answer is not marked incomplete; otherwise call docs_explore again with the cursor when one is present, or ask a narrower question.";
+        "Stop reading when confidence is 0.60 or higher and the answer is not marked incomplete; otherwise call docs_answer_question_from_repo_documentation again with the cursor when one is present, or ask a narrower question.";
 
     private static string FormatExploreAnswer(ExploreAnswer answer)
     {
@@ -137,7 +137,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
         if (answer.Incomplete && answer.CursorToken is not null)
         {
-            sb.Append("This answer is incomplete. Call docs_explore again with the same question and cursor \"")
+            sb.Append("This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor \"")
               .Append(answer.CursorToken)
               .AppendLine("\".");
             sb.AppendLine();
@@ -159,7 +159,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return sb.ToString();
     }
 
-    [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_find_documents_citing_code_symbol", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Use when about to rename, move, delete, or change the signature of a class, method,
         property, or endpoint: call BEFORE the change. Returns every document that claims the symbol in its
@@ -198,14 +198,14 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return Lead(provenance, sb.ToString());
     }
 
-    [McpServerTool(Name = "docs_analysis_candidates", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_find_duplicates_conflicts_ambiguous_terms", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Documentation quality audit. Returns a paged list of duplicate claims, conflicting
         statements, and ambiguous terms across the docs, each with line-addressable evidence.
 
         Use when docs may contradict themselves, when consolidating or deduplicating pages,
         when choosing which of two statements is canonical, or before a release or large
-        docs edit. To answer a question, call docs_explore instead.
+        docs edit. To answer a question, call docs_answer_question_from_repo_documentation instead.
 
         Candidates are review evidence only; nothing is applied. Empty: nothing pending.
         """)]
@@ -309,7 +309,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
-    [McpServerTool(Name = "docs_glossary", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_look_up_glossary_term_definition", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Looks up ONE term in the managed glossary: its approved, proposed, and rejected
         senses with definitions, scopes, and aliases.
@@ -391,7 +391,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
-    [McpServerTool(Name = "docs_validate", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_validate_governed_document_schema", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Use when you need the same schema conformance gate as kyber-weave docs validate after
         editing governed documentation — especially after writing or revising a plan under
@@ -441,16 +441,16 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Severity.Error,
                 exception.Message,
                 "docs validate",
-                Hint: "Fix the repository configuration or corpus access, then call docs_validate again."));
+                Hint: "Fix the repository configuration or corpus access, then call docs_validate_governed_document_schema again."));
         }
 
         return FormatGateResponse(provenance, report, charBudget);
     }
 
-    [McpServerTool(Name = "docs_drift", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_detect_drift_between_documents_and_code", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Use when you need the same entity-drift gate as kyber-weave docs drift after
-        documentation edits that cite code symbols or API routes, alongside docs_validate
+        documentation edits that cite code symbols or API routes, alongside docs_validate_governed_document_schema
         before PLAN_READY or PLAN_FINALIZED. There is no repository-path argument: compare
         the provenance root to your checkout. A missing CodeGraph index fails rather than
         passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
@@ -482,7 +482,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Severity.Error,
                 exception.Message,
                 "docs drift",
-                Hint: "Fix the repository configuration or corpus access, then call docs_drift again."));
+                Hint: "Fix the repository configuration or corpus access, then call docs_detect_drift_between_documents_and_code again."));
         }
 
         return FormatGateResponse(provenance, report, charBudget);
@@ -492,7 +492,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     /// Reports the provenance of the corpus this server answers from, with no query. This is
     /// the cheap session-start check an agent calls before trusting any other docs tool.
     /// </summary>
-    [McpServerTool(Name = "docs_status", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_get_source_repository_and_revision", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Which repository is this server answering from? Returns one line: absolute repo
         root, short HEAD revision (with dirty marker), and document count. No arguments.
@@ -527,7 +527,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     /// caller's budget is an index nobody can rely on.
     /// </para>
     /// </remarks>
-    [McpServerTool(Name = "agent_coding_standards", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_get_coding_standard_for_technology", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Use when you are about to write or review code in one of this repository's stacks and
         need the local answer rather than the one you shipped with: how C# is written here, how

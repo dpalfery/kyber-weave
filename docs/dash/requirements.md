@@ -4,7 +4,7 @@ title: KyberDash requirements and invariants contract
 doc-type: requirements
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-11-05
 status: current
 decided-by:
   - adr/0008-kyberdash-single-canonical-store
@@ -77,8 +77,10 @@ dropping the requirement would reproduce it.
 
 ## How the requirements govern the analysis MCP surface
 
-`kyberdash mcp` introduces no new measurement semantics: it is the same engine behind
-eight additive routes, so the requirements above govern it without a new `KD-*` row.
+`kyberdash mcp` — the server a client registers under the key `kw-dash`, with the
+executable and argv unchanged — introduces no new measurement semantics: it is the same
+engine behind eight additive routes, so the requirements above govern it without a new
+`KD-*` row.
 The durable local read-only analytics boundary is decided in
 [ADR 0043](../adr/0043-kyberdash-analysis-mcp-read-only-boundary.md) (attach-only
 adapter; direct-SQL analytics and engine auto-start rejected):
@@ -91,7 +93,8 @@ adapter; direct-SQL analytics and engine auto-start rejected):
   or rendered, relocation precedes any removal suggestion, and every finding carries at
   least two evidence rows, an outcome-risk caveat, and waste-ranked ordering with the
   comparison kept descriptive, never causal.
-- **KD-010** is the content contract. Search is metadata-only; `dash_inspect` and
+- **KD-010** is the content contract. Search is metadata-only;
+  `dash_read_captured_run_session_or_turn_context` and
   `POST /api/kyber/analytics/inspect` share one body — `mode: 'manifest' | 'content'`
   plus an explicit `target` (`run` / `session` / `turn`) — and content needs no
   additional flag or approval. `mode: 'manifest'` discovers without returning text

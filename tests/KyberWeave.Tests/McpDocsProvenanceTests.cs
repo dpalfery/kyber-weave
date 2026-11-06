@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// T1/T2 RED — every docs tool response discloses the corpus it answered from, and
-/// <c>docs_status</c> exposes the same provenance block on demand.
+/// <c>docs_get_source_repository_and_revision</c> exposes the same provenance block on demand.
 /// </summary>
 /// <remarks>
 /// Regression for issue #162: the four docs tools led with hit counts only. A same-named
@@ -117,13 +117,13 @@ public sealed class McpDocsProvenanceTests : IDisposable
     [Fact]
     public void DocsStatusIsAPublicReadOnlyClosedWorldToolWithNoParameters()
     {
-        MethodInfo status = FindMcpTool("docs_status");
+        MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
         McpServerToolAttribute attribute = status.GetCustomAttribute<McpServerToolAttribute>()!;
 
         Assert.Equal(typeof(string), status.ReturnType);
         Assert.Empty(status.GetParameters());
-        Assert.True(attribute.ReadOnly, "docs_status must declare ReadOnly so clients see readOnlyHint.");
-        Assert.False(attribute.OpenWorld, "docs_status reads a local corpus and must not claim an open world.");
+        Assert.True(attribute.ReadOnly, "docs_get_source_repository_and_revision must declare ReadOnly so clients see readOnlyHint.");
+        Assert.False(attribute.OpenWorld, "docs_get_source_repository_and_revision reads a local corpus and must not claim an open world.");
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
     {
         (string rootA, _) = CreateTwoCorpora();
         DocsTools tools = CreateTools(rootA);
-        MethodInfo status = FindMcpTool("docs_status");
+        MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
 
         string expected = ParseProvenance(tools.Explore("documentation")).Raw;
         string actual = (string)status.Invoke(tools, null)!;
@@ -170,7 +170,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
         yield return tools.Glossary("documentation");
         yield return tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
         // Direct, like the four calls above. Reflection exists in this file for the tests whose
-        // subject is a tool's declared metadata — docs_status's shape — and this one's subject
+        // subject is a tool's declared metadata — docs_get_source_repository_and_revision's shape — and this one's subject
         // is the response, which a call returns without asking the metadata a question.
         yield return AgentCodingStandardsMiss(tools);
     }

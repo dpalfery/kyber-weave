@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
@@ -419,6 +420,42 @@ public sealed class McpWiringHardeningTests : IDisposable
             Assert.False(change.Written);
             Assert.Equal(RefusalCode, change.Code);
             Assert.Contains("could not be inspected", DiagnosticText(change), StringComparison.Ordinal);
+        }
+        finally
+        {
+            AllowTraversal(directory);
+        }
+
+        Assert.Equal(before, File.ReadAllBytes(target));
+    }
+
+    /// <summary>
+    /// A migrate over a configuration this process may not inspect is a refusal, not a silent skip: it exits 1
+    /// with KW-MCP-WIRE-009 and, once traversal is restored, the file is byte-identical. The file holds a proven
+    /// old key, so the only reason the rename does not happen is the denial.
+    /// </summary>
+    [Fact]
+    public void AMigrateRefusesAConfigurationItMayNotInspectAndLeavesItByteIdentical()
+    {
+        string directory = Path.Combine(Repo, ".vscode");
+        string target = Path.Combine(directory, "mcp.json");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            target,
+            """{"servers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "."]}}}""");
+        byte[] before = File.ReadAllBytes(target);
+
+        try
+        {
+            DenyTraversal(directory, target);
+
+            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+                new DocsMcpMigrateCommand().Execute(
+                    null!,
+                    new DocsMcpMigrateSettings { Path = Repo, Target = VsCode }));
+
+            Assert.Equal(1, execution.Result);
+            Assert.Contains("KW-MCP-WIRE-009", execution.Output, StringComparison.Ordinal);
         }
         finally
         {

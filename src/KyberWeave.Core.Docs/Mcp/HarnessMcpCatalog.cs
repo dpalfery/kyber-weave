@@ -230,7 +230,7 @@ public static class HarnessMcpCatalog
                 """
                 {
                   "mcpServers": {
-                    "kyber-weave": {
+                    "kw-docs": {
                       "command": "kyber-weave-mcp",
                       "args": ["--repo-root", "."]
                     }
@@ -260,7 +260,7 @@ public static class HarnessMcpCatalog
                 """
                 {
                   "mcpServers": {
-                    "kyber-weave": {
+                    "kw-docs": {
                       "type": "stdio",
                       "command": "kyber-weave-mcp",
                       "args": ["--repo-root", "."]
@@ -291,7 +291,7 @@ public static class HarnessMcpCatalog
                 """
                 {
                   "mcpServers": {
-                    "kyber-weave": {
+                    "kw-docs": {
                       "command": "kyber-weave-mcp",
                       "args": ["--repo-root", "."]
                     }
@@ -321,7 +321,7 @@ public static class HarnessMcpCatalog
                 """
                 {
                   "servers": {
-                    "kyber-weave": {
+                    "kw-docs": {
                       "type": "stdio",
                       "command": "kyber-weave-mcp",
                       "args": ["--repo-root", "${workspaceFolder}"],
@@ -384,7 +384,7 @@ public static class HarnessMcpCatalog
                 {
                   "$schema": "https://opencode.ai/config.json",
                   "mcp": {
-                    "kyber-weave": {
+                    "kw-docs": {
                       "type": "local",
                       "command": ["kyber-weave-mcp", "--repo-root", "."],
                       "enabled": true,

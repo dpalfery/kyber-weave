@@ -113,6 +113,32 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
+    public void Render_Opencode_EmitsDefaultExportObjectWithSetup()
+    {
+        // OpenCode v2.2.5's loader reads only the default export and accepts
+        // { id, setup }; a named-only export fails with SchemaError and the
+        // plugin silently never loads (fail-open).
+        string content = ArbiterPluginShim.Render("opencode");
+
+        Assert.Contains("export default", content, StringComparison.Ordinal);
+        Assert.Contains("id: \"kyber-arbiter\"", content, StringComparison.Ordinal);
+        Assert.Contains("setup: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("server: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.Contains("export const KyberArbiter", content, StringComparison.Ordinal);
+
+        // Contains alone passes with two defaults (SyntaxError in the host) or
+        // a default ahead of the named export it references (TDZ
+        // ReferenceError at import). Pin exactly one default, after it.
+        int defaultExport = content.IndexOf("export default", StringComparison.Ordinal);
+        Assert.True(defaultExport >= 0, "shim must default-export the plugin for the OpenCode v2 loader");
+        Assert.Equal(-1, content.IndexOf("export default", defaultExport + 1, StringComparison.Ordinal));
+        int namedExport = content.IndexOf("export const KyberArbiter", StringComparison.Ordinal);
+        Assert.True(
+            namedExport >= 0 && defaultExport > namedExport,
+            "default export must follow the named export it references");
+    }
+
+    [Fact]
     public async Task RenderAsync_Shim_AssignsArgsAndAppendsOutputOnBlock()
     {
         string content = await ShimContentAsync();

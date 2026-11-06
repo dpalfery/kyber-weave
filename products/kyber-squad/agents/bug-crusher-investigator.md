@@ -5,7 +5,7 @@ description: "Diagnoses a reported defect: reproduces the failure, finds root ca
 invocation: subagent
 model-profile: deep-planning
 capability-profile: investigator
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -20,10 +20,10 @@ Your verdict is the routing decision for everything downstream, so the honest an
 
 ## Discovery order
 
-Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
-- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 

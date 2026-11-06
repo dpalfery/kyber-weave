@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-05
 status: current
 ---
 
@@ -205,9 +205,14 @@ set, Devin cost is reported as unpriced rather than as a measured zero. See the
 ## Ask KyberDash from an MCP client
 
 The same engine answers conversational analytics over MCP. `kyberdash mcp` exposes eight
-read-only tools — `dash_status`, `dash_catalog`, `dash_query`, `dash_search_sessions`,
-`dash_inspect`, `dash_findings`, `dash_compare`, `dash_outcomes` — over stdio, computed
-by the shared engine behind `/api/kyber/analytics/*`. See
+read-only tools — `dash_list_available_analytics_operations`,
+`dash_list_queryable_metrics_dimensions_limits`,
+`dash_query_session_cost_tokens_and_duration`, `dash_search_sessions_by_text_and_scope`,
+`dash_read_captured_run_session_or_turn_context`,
+`dash_list_detected_context_and_tool_problems`, `dash_compare_metrics_between_two_scopes`,
+`dash_get_run_success_or_failure_outcomes` — over stdio, computed by the shared engine
+behind `/api/kyber/analytics/*`. The client registers the server under the configuration
+key `kw-dash`; the executable and its argv are unchanged. See
 [the architecture](architecture.md#conversational-analytics-over-mcp-kyberdash-mcp) for
 the tool contract, the limits, and the content/outcome caveats.
 
@@ -232,15 +237,15 @@ releases the keep-alive, signal handlers, and stdout guard instead of leaking th
 
 ### 2. Register the client yourself
 
-KyberDash never writes a client's configuration: no `mcp` subcommand edits user-level
-client config, and setup means pasting one entry into the client's own config by hand.
-The shape below is an example — consult the client's documentation for where it keeps
-MCP servers:
+No KyberDash tool reads or writes a client's MCP configuration, and no `mcp` subcommand
+edits a user-level client config either. Setup means adding one entry to the client's own
+configuration by hand, under the server key `kw-dash`. The shape below is an example —
+consult the client's documentation for where it keeps MCP servers:
 
 ```json
 {
   "mcpServers": {
-    "kyberdash": {
+    "kw-dash": {
       "command": "kyberdash",
       "args": ["mcp"]
     }
@@ -249,19 +254,41 @@ MCP servers:
 ```
 
 With an engine on a non-default port, use `"args": ["mcp", "--server-url",
-"http://127.0.0.1:<port>"]` instead. When the client lists tools, it must see exactly
-the eight `dash_*` names above; `dash_status` with no engine attached answers
-`engine_unavailable` and tells you to run `kyberdash web --no-open`.
+"http://127.0.0.1:<port>"]` instead. `kw-dash` is not part of the Kyber-Weave Squad
+roster, so no `squad install` or `squad update` writes this entry and no grant for it
+ships — the entry is always yours to add. When the client lists tools, it must see exactly
+the eight `dash_*` names above; `dash_list_available_analytics_operations` with no engine
+attached answers `engine_unavailable` and tells you to run `kyberdash web --no-open`.
+
+Where a client spells a tool grant from the server key, the grant follows it: Claude Code
+`mcp__kw-dash__<tool>`, OpenCode and Kilo `kw-dash_<tool>`, Copilot `kw-dash/<tool>`.
+
+#### Renaming an entry from `kyberdash` to `kw-dash`
+
+An entry added before the rename still carries the old key. No KyberDash tool reads or
+writes a client's MCP configuration — the tools never read or write user-scope files at
+all — so the user-scope entry is renamed by hand. In Claude Code:
+
+```bash
+claude mcp get kyberdash
+claude mcp remove kyberdash --scope user
+claude mcp add --scope user kw-dash -- kyberdash mcp
+```
+
+Only the key changes. The executable and its argv do not: the entry is still
+`kyberdash mcp`, and the server still reports `kyberdash-analytics` as its `serverInfo`
+name.
 
 ### 3. What is (and is not) validated
 
 The stdio shape is verified on every release path: `dash/scripts/sea-mcp-smoke.mjs`
-initializes over the SDK client, lists exactly the eight tools, calls `dash_status`
-against an isolated fixture engine, then observes a clean exit — run from both the npm
-build and the staged single-executable binary with no checkout and no access to your
-state (`scripts/release-local.sh` and `.github/workflows/release.yml` wire it alongside
-the web smoke). What that proves is the protocol, the tool list, and the attach-only
-boundary — not that every host client renders them.
+initializes over the SDK client, lists exactly the eight tools, calls
+`dash_list_available_analytics_operations` against an isolated fixture engine, then
+observes a clean exit — run from both the npm build and the staged single-executable
+binary with no checkout and no access to your state (`scripts/release-local.sh` and
+`.github/workflows/release.yml` wire it alongside the web smoke). What that proves is the
+protocol, the tool list, and the attach-only boundary — not that every host client renders
+them.
 
 > **[NOT LIVE-VERIFIED]** No host-client integration (Claude Code/Desktop, Cursor,
 > Copilot, or any other MCP host) has been observed against this surface. The SDK smoke

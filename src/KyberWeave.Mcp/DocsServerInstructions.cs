@@ -15,17 +15,17 @@ public static class DocsServerInstructions
 
         For a question about how something in this repository works, how to run or configure
         it, what a command, flag, or rule means, or whether something is documented, call
-        docs_explore first, before grepping or reading files under docs/ or other markdown. It
+        docs_answer_question_from_repo_documentation first, before grepping or reading files under docs/ or other markdown. It
         returns one answer with a confidence score and a single source line. If it
         reports a miss, the subject is likely undocumented and searching files directly is
         appropriate.
 
-        Also available: docs_for_symbol (which documents describe a code symbol, before changing
-        it), agent_coding_standards (how this repository writes code in a named technology, and
+        Also available: docs_find_documents_citing_code_symbol (which documents describe a code symbol, before changing
+        it), docs_get_coding_standard_for_technology (how this repository writes code in a named technology, and
         the rule ids that standard states, before writing or reviewing code in it),
-        docs_glossary (what a term means here), docs_analysis_candidates (duplicated or
-        contradictory documentation), docs_validate and docs_drift (the same schema and drift
-        gates as kyber-weave docs validate and docs drift, without a shell), and docs_status
+        docs_look_up_glossary_term_definition (what a term means here), docs_find_duplicates_conflicts_ambiguous_terms (duplicated or
+        contradictory documentation), docs_validate_governed_document_schema and docs_detect_drift_between_documents_and_code (the same schema and drift
+        gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision
         (which repository and revision the documentation comes from).
         """;
 

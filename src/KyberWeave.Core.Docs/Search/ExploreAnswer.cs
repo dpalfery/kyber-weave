@@ -11,7 +11,7 @@ using Markdig.Syntax.Inlines;
 
 namespace KyberWeave.Core.Docs.Search;
 
-/// <summary>One <c>docs_explore</c> answer: a whole leaf, confidence, and optional continuation.</summary>
+/// <summary>One <c>docs_answer_question_from_repo_documentation</c> answer: a whole leaf, confidence, and optional continuation.</summary>
 public sealed record ExploreAnswer(
     bool IsMiss,
     bool IsInvalidCursor,

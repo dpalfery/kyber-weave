@@ -40,13 +40,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <b>MCP is granted by fully qualified tool name, on the file-read entitlement.</b> Command Code
 /// gives a subagent no MCP tool it does not name in its own <c>tools</c> list, so an unnamed
 /// server is a server the agent cannot call. This renderer therefore names the
-/// <c>kyber-weave</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
+/// <c>kw-docs</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
 /// whose capability profile resolves and allows <c>filesystem.read</c> — the pure orchestrator
-/// included, because that server carries <c>agent_coding_standards</c> (ADR 0050). It names that
-/// one server and no other: <c>codegraph</c> and <c>context7</c> keep the orchestrator carve-out,
-/// and this target never named them before the widening either, so it is not the surface on
-/// which that carve-out is expressed. Where the grant is empty — a profile that denies the read,
-/// or an unresolvable one — the agent names no MCP tool and its
+/// included, because that server carries <c>docs_get_coding_standard_for_technology</c>
+/// (ADR 0050). It names that one server and no other: <c>codegraph</c> and <c>context7</c> keep
+/// the orchestrator carve-out, and this target never named them before the widening either, so
+/// it is not the surface on which that carve-out is expressed. Where the grant is empty — a
+/// profile that denies the read, or an unresolvable one — the agent names no MCP tool and its
 /// <c>permission-not-expressible</c> record states that reason rather than claiming in general
 /// terms that Squad names nothing.
 /// </para>

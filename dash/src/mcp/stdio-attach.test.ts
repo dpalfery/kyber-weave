@@ -95,8 +95,8 @@ describe('kyberdash mcp stdio attach and framing', () => {
         throw new Error(`tools/list failed (exit=${child.exitCode}, signal=${child.signalCode}): ${stderr()}`, { cause: error })
       })
       expect(result.tools.map((tool) => tool.name).sort()).toEqual([
-        'dash_catalog', 'dash_compare', 'dash_findings', 'dash_inspect',
-        'dash_outcomes', 'dash_query', 'dash_search_sessions', 'dash_status',
+        'dash_compare_metrics_between_two_scopes', 'dash_get_run_success_or_failure_outcomes', 'dash_list_available_analytics_operations', 'dash_list_detected_context_and_tool_problems',
+        'dash_list_queryable_metrics_dimensions_limits', 'dash_query_session_cost_tokens_and_duration', 'dash_read_captured_run_session_or_turn_context', 'dash_search_sessions_by_text_and_scope',
       ])
       const closed = waitForClose(child)
       await client.close()
@@ -119,7 +119,7 @@ describe('kyberdash mcp stdio attach and framing', () => {
       await writeFile(join(stateDir, 'server.json'), JSON.stringify({ url: fixture.url }))
       const { client, child, stderr } = await connectedServer({ stateDir, name: 'attach-receipt' })
       try {
-        const result = await client.callTool({ name: 'dash_status', arguments: {} })
+        const result = await client.callTool({ name: 'dash_list_available_analytics_operations', arguments: {} })
         expect(fixture.seen.join(','), 'state-dir receipt must attach the loopback engine').toContain('/api/kyber/analytics/status')
         expect(JSON.stringify(result.structuredContent)).toContain('"contractVersion":1')
       } finally {
@@ -143,7 +143,7 @@ describe('kyberdash mcp stdio attach and framing', () => {
       await writeFile(join(stateDir, 'server.json'), JSON.stringify({ url: stale.url }))
       const { client, child, stderr } = await connectedServer({ serverUrl: preferred.url, stateDir, name: 'attach-override' })
       try {
-        await client.callTool({ name: 'dash_status', arguments: {} })
+        await client.callTool({ name: 'dash_list_available_analytics_operations', arguments: {} })
         expect(preferred.seen.join(','), 'explicit URL must win over the receipt').toContain('/api/kyber/analytics/status')
         expect(stale.seen.join(','), `stale receipt ${stale.url} must stay unused`).not.toContain('/api/kyber/analytics/status')
       } finally {
@@ -160,7 +160,7 @@ describe('kyberdash mcp stdio attach and framing', () => {
   it('surfaces a dead engine behind stdio as a stable error instead of a raw transport failure', async () => {
     const { client, child, stderr } = await connectedServer({ serverUrl: 'http://127.0.0.1:1', name: 'attach-dead' })
     try {
-      const result = await client.callTool({ name: 'dash_status', arguments: {} })
+      const result = await client.callTool({ name: 'dash_list_available_analytics_operations', arguments: {} })
       const text = (result.content as Array<{ type: string; text: string }>)[0]?.text ?? ''
       const structured = result.structuredContent as { error: { code: string } | null } | undefined
       const code = structured?.error?.code ?? text.split(':')[0] ?? ''

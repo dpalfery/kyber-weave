@@ -4,7 +4,7 @@ title: A Primary Agent Sharing a Canonical Skill Identity Reuses the Skill as It
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-11-05
 ---
 
 # ADR 0036: A Primary Agent Sharing a Canonical Skill Identity Reuses the Skill as Its Entry Point
@@ -102,7 +102,7 @@ fail-closed throw and the `role-` prefix does not exist for this shape.
 - **Adding a primary root wrapper is now a two-file change** — the agent body and a `shared-identities`
   entry — not a renderer change.
 - **OpenCode's MCP grant keys on the suppressed set.** A primary shared identity is not a suppressed
-  identity, so it keeps the kyber-weave MCP tools it needs to edit files and run commands; only a
+  identity, so it keeps the `kw-docs` MCP tools it needs to edit files and run commands; only a
   suppressed subagent identity withholds them.
 - **A canonical skill occupying a primary identity remains a fail-closed render error** unless the
   identity is declared shared first; adding one means revisiting this ADR.
