@@ -1,3 +1,5 @@
+using KyberWeave.Core.Configuration;
+
 namespace KyberWeave.Core.Squad.Model;
 
 /// <summary>Known GitHub Copilot custom-agent tools and their deterministic emission order.</summary>
@@ -26,7 +28,7 @@ internal static class CopilotToolCatalog
         "read/getTaskOutput",
         "todo",
         "codegraph/*",
-        "kw-docs/*",
+        $"{McpServerNames.Docs}/*",
         "context7/resolve-library-id",
         "context7/query-docs",
         "search",
@@ -62,7 +64,7 @@ internal static class CopilotToolCatalog
             ["read"] = "filesystem.read",
             ["todo"] = null,
             ["codegraph/*"] = "filesystem.read",
-            ["kw-docs/*"] = "filesystem.read",
+            [$"{McpServerNames.Docs}/*"] = "filesystem.read",
             ["context7/*"] = "filesystem.read",
             ["context7/resolve-library-id"] = "filesystem.read",
             ["context7/query-docs"] = "filesystem.read",
