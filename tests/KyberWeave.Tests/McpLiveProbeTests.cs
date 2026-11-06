@@ -142,6 +142,83 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// The real corpus provenance line includes metadata after the root path, and the root still has to match exactly.
+    /// Paths with spaces are legal and must not be truncated before comparison.
+    /// </summary>
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    public void McpLiveProbe_ProvenanceRootWithMetadata_PassesWhenRootMatches(string dirty)
+    {
+        string root = Path.Combine(_root.Path, "repo with spaces");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                ProvenanceCall(root, dirty))),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.True(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
+    /// When the server reports a different repository in the same metadata format, the doctor still fails the root check.
+    /// </summary>
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    public void McpLiveProbe_ProvenanceRootWithMetadata_MismatchFails(string dirty)
+    {
+        string root = Path.Combine(_root.Path, "repo with spaces");
+        string wrongRoot = Path.Combine(_root.Path, "other repo with spaces");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                ProvenanceCall(wrongRoot, dirty))),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
+    /// Older servers that emit only the bare root remain accepted for backward compatibility.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_BareProvenanceRoot_IsStillAccepted()
+    {
+        string root = Path.Combine(_root.Path, "bare repo");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                call)),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.True(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
     /// A server that answers <c>initialize</c> and then closes its input fails a check with exit 1 instead of throwing
     /// out of the probe. The child's input is closed before it writes the reply, so the next write reaches a broken
     /// pipe rather than racing the child.
@@ -322,4 +399,7 @@ public sealed class McpLiveProbeTests : IDisposable
             int.TryParse(suggested, out int seconds) && seconds > 0,
             $"The remedy suggested '{suggested}', which is not a timeout --mcp-timeout accepts.");
     }
+
+    private static string ProvenanceCall(string root, string dirty, string rev = "abc123", int documents = 7) =>
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + " rev=" + rev + " dirty=" + dirty + " documents=" + documents + "\"}]}}";
 }

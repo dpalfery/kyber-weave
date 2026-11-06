@@ -186,6 +186,13 @@ public static class McpLiveProbe
                 "kyber-weave update");
 
         string served = FirstLine(text[(index + ProvenancePrefix.Length)..]).Trim();
+
+        // The provenance line carries metadata after the root, e.g. `root=<path> rev=<rev> dirty=<...> documents=<n>`.
+        // Strip the metadata while preserving spaces inside the real path, then compare the bare root to the resolved repo.
+        int metadataIndex = served.IndexOf(" rev=", StringComparison.Ordinal);
+        if (metadataIndex >= 0)
+            served = served[..metadataIndex].Trim();
+
         bool matches = served.Length > 0 && SamePath(served, root);
         return matches
             ? new DoctorCheck("mcp.root", true, "server answers for this repository", null)
