@@ -53,8 +53,8 @@ describe('kyberdash mcp stdio process', () => {
       throw new Error(`tools/list failed (exit=${child.exitCode}, signal=${child.signalCode}): ${stderr()}`, { cause: error })
     })
     expect(result.tools.map(tool => tool.name).sort()).toEqual([
-      'dash_catalog', 'dash_compare', 'dash_findings', 'dash_inspect',
-      'dash_outcomes', 'dash_query', 'dash_search_sessions', 'dash_status',
+      'dash_compare_metrics_between_two_scopes', 'dash_get_run_success_or_failure_outcomes', 'dash_list_available_analytics_operations', 'dash_list_detected_context_and_tool_problems',
+      'dash_list_queryable_metrics_dimensions_limits', 'dash_query_session_cost_tokens_and_duration', 'dash_read_captured_run_session_or_turn_context', 'dash_search_sessions_by_text_and_scope',
     ])
     await client.close()
     expect(await closed, stderr()).toBe(0)

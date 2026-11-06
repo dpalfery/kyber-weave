@@ -252,4 +252,17 @@ public sealed class ArbiterHookHostTests
         Assert.Matches(@"^kyber-weave-arbiter \d+\.\d+\.\d+\r?\n$", stdout.ToString());
         Assert.Equal(string.Empty, stderr.ToString());
     }
+
+    /// <summary>
+    /// The arbiter answers <c>--version</c> with exit 0 and <c>--help</c> with a usage
+    /// error, which is why the CI smoke may drop <c>|| true</c> for it.
+    /// </summary>
+    [Fact]
+    public async Task ArbiterBinaryAnswersVersionAndRejectsHelp()
+    {
+        Assert.Equal(0, await Composition.DispatchAsync(
+            ["--version"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+        Assert.Equal(2, await Composition.DispatchAsync(
+            ["--help"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+    }
 }

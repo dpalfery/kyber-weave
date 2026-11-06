@@ -10,9 +10,9 @@ namespace KyberWeave.Core.Doctor;
 /// <remarks>
 ///     <para>
 ///         Process liveness is not enough. The probe runs <c>initialize</c>, then <c>notifications/initialized</c>,
-///         then <c>tools/call docs_explore</c>. A non-error result must carry <c>provenance: root=</c> equal to the
-///         repository root, which catches a server answering from another checkout. <c>docs_status</c> alone would
-///         pass a server whose index never loaded, which is why <c>docs_explore</c> was chosen.
+///         then <c>tools/call docs_answer_question_from_repo_documentation</c>. A non-error result must carry <c>provenance: root=</c> equal to the
+///         repository root, which catches a server answering from another checkout. <c>docs_get_source_repository_and_revision</c> alone would
+///         pass a server whose index never loaded, which is why <c>docs_answer_question_from_repo_documentation</c> was chosen.
 ///     </para>
 ///     <para>
 ///         Each step's failure is reported with its check id and a fix line. The child's stderr is shown only as its
@@ -139,12 +139,12 @@ public static class McpLiveProbe
             || !TrySend(
                 session,
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
-                "{\"name\":\"docs_explore\",\"arguments\":{\"query\":\"README\"}}}"))
+                "{\"name\":\"docs_answer_question_from_repo_documentation\",\"arguments\":{\"query\":\"README\"}}}"))
         {
             checks.Add(new DoctorCheck(
                 "mcp.docs_explore",
                 false,
-                "the server closed its input before docs_explore was requested",
+                "the server closed its input before docs_answer_question_from_repo_documentation was requested",
                 "stop the kyber-weave-mcp server and re-run: kyber-weave doctor --check"));
             return;
         }
@@ -157,7 +157,7 @@ public static class McpLiveProbe
 
         if (!TryResult(callReply!, out JsonElement result) || !TryText(result, out string text))
         {
-            checks.Add(new DoctorCheck("mcp.docs_explore", false, "docs_explore reply was not a tool result", "kyber-weave update"));
+            checks.Add(new DoctorCheck("mcp.docs_explore", false, "docs_answer_question_from_repo_documentation reply was not a tool result", "kyber-weave update"));
             return;
         }
 
@@ -166,12 +166,12 @@ public static class McpLiveProbe
             checks.Add(new DoctorCheck(
                 "mcp.docs_explore",
                 false,
-                $"docs_explore returned an error: {Truncate(FirstLine(text))}",
+                $"docs_answer_question_from_repo_documentation returned an error: {Truncate(FirstLine(text))}",
                 "kyber-weave update"));
             return;
         }
 
-        checks.Add(new DoctorCheck("mcp.docs_explore", true, "docs_explore answered", null));
+        checks.Add(new DoctorCheck("mcp.docs_explore", true, "docs_answer_question_from_repo_documentation answered", null));
         checks.Add(CheckRoot(text, root));
     }
 
@@ -182,7 +182,7 @@ public static class McpLiveProbe
             return new DoctorCheck(
                 "mcp.root",
                 false,
-                "docs_explore did not report its provenance root",
+                "docs_answer_question_from_repo_documentation did not report its provenance root",
                 "kyber-weave update");
 
         string served = FirstLine(text[(index + ProvenancePrefix.Length)..]).Trim();

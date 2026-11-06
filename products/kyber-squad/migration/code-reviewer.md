@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: be7236f9041ba5115b20ead0301fd9cf60c2036d9ad614caf741c8d9475ebeda
+final-body-sha256: 030485d17e258b65565c7bc547a3daaa6a6c3171d79930790eb10b02540505fb
 ---
 # code-reviewer migration
 
@@ -21,7 +21,7 @@ invoking another agent, as on Devin (ADR 0025), the review-guidance step, which 
 pass the host's `REVIEW.md` sections to each seat and record a missing seat attestation as a
 coverage gap, the Arbiter review contract — routing headers on council and refutation dispatches,
 the review-note statuses, and the audit citation (packet 7.3) — the fallback contract for a reviewer
-that holds `arbiter_evaluate` instead of a hook (packet 17.4), and the status-provenance rule that
+that holds `arbiter_evaluate_agent_dispatch_or_return` instead of a hook (packet 17.4), and the status-provenance rule that
 keeps an Arbiter note distinct from a `STATUS:` line a lens or a tool printed. `final-body-sha256`
 covers that evolved body.
 

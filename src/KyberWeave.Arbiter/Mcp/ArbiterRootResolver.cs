@@ -4,7 +4,7 @@ namespace KyberWeave.Arbiter.Mcp;
 /// <remarks>
 /// Order: <c>--repo-root</c>, then <c>KYBER_WEAVE_REPO_ROOT</c>, then the working
 /// directory. Unlike the docs server, the root need not hold host configuration:
-/// <c>arbiter_status</c> reports a missing configuration rather than refusing to start,
+/// <c>arbiter_check_configuration_and_key_readiness</c> reports a missing configuration rather than refusing to start,
 /// so a client can see why it cannot evaluate. The root must exist, because a missing
 /// directory would make every ledger and log path resolve somewhere unintended.
 /// </remarks>

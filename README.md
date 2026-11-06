@@ -107,12 +107,14 @@ corpus degrades gracefully rather than serving unreviewed metadata as current gu
 
 `kyber-weave-mcp` is where the feature is actually consumed. Point any MCP client at it:
 
+Its configuration key is `kw-docs`; the executable is unchanged.
+
 | Tool | What it does |
 |---|---|
-| `docs_explore(query, cursor?)` | One leaf answer (preamble or `###` section) with confidence, a single source line, and an optional continuation cursor past 24,000 characters |
-| `docs_for_symbol(symbol)` | Reverse lookup: documents whose `code-refs` **formally claim** a symbol — not those that merely mention it |
-| `docs_analysis_candidates(kind, cursor, limit, charBudget)` | Capped, stable, read-only duplicate/conflict/terminology evidence with local cost metrics |
-| `docs_glossary(term)` | Capped, read-only lookup of managed term senses, scopes, and aliases |
+| `docs_answer_question_from_repo_documentation(query, cursor?)` | One leaf answer (preamble or `###` section) with confidence, a single source line, and an optional continuation cursor past 24,000 characters |
+| `docs_find_documents_citing_code_symbol(symbol)` | Reverse lookup: documents whose `code-refs` **formally claim** a symbol — not those that merely mention it |
+| `docs_find_duplicates_conflicts_ambiguous_terms(kind, cursor, limit, charBudget)` | Capped, stable, read-only duplicate/conflict/terminology evidence with local cost metrics |
+| `docs_look_up_glossary_term_definition(term)` | Capped, read-only lookup of managed term senses, scopes, and aliases |
 
 It is a separate binary from the CLI on purpose: JSON-RPC owns stdout and Spectre.Console
 also writes there, so separate entry points make stream corruption structurally
@@ -256,9 +258,15 @@ kyberdash web --no-open     # start or attach to the engine for MCP
 kyberdash mcp               # configure the MCP client to launch this stdio server
 ```
 
-The MCP tools are `dash_status`, `dash_catalog`, `dash_query`,
-`dash_search_sessions`, `dash_inspect`, `dash_findings`, `dash_compare`, and
-`dash_outcomes`. Register `kyberdash mcp` in the client’s own MCP configuration; KyberDash
+The MCP tools are `dash_list_available_analytics_operations`,
+`dash_list_queryable_metrics_dimensions_limits`,
+`dash_query_session_cost_tokens_and_duration`,
+`dash_search_sessions_by_text_and_scope`,
+`dash_read_captured_run_session_or_turn_context`,
+`dash_list_detected_context_and_tool_problems`,
+`dash_compare_metrics_between_two_scopes`, and
+`dash_get_run_success_or_failure_outcomes`. The server's configuration key is `kw-dash`. Register
+`kyberdash mcp` in the client’s own MCP configuration; KyberDash
 does not edit client configuration. Host-client integration remains
 **[not live-verified](docs/dash/onboarding.md#3-what-is-and-is-not-validated)**. See the
 [client setup guide](docs/dash/onboarding.md#ask-kyberdash-from-an-mcp-client) and
@@ -285,13 +293,13 @@ surface of both binaries — plus every canonical install, update, and configure
 ```
 src/
   KyberWeave.Core/        shared engine
-    Docs/                   Feature 1 — parsing, search, validation, export
     Skills/ Agents/         Feature 2 — governance per artifact class
     Security/               Feature 2 — shared instruction-surface scanner
-    Squad/                  Feature 3 — multi-harness deployment engine & transaction store
     Diagnostics/            Feature 4 — rule ids, severities, reports
     CodeGraph/              read-only port over the CodeGraph index
     Configuration/ Text/ Parsing/
+  KyberWeave.Core.Docs/   Feature 1 — parsing, search, validation, export
+  KyberWeave.Core.Squad/  Feature 3 — multi-harness deployment engine & transaction store
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/

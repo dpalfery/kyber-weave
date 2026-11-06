@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-06
 ---
 
 # Installing Kyber-Weave
@@ -563,6 +563,72 @@ deployed target tree, and about a deployment receipt that still claims its
 files, in both cases printing the delete-then-`squad update` steps and pointing
 at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
 
+### Renamed MCP servers and tools
+
+**This is a breaking change.** The three MCP servers are configured under new keys, and their
+nineteen tools are renamed to say what they do. Nothing about a launch changed, so an old wiring
+still starts a server — it starts one the repository no longer declares. The recommended release
+is a **minor** tag: the automatic version bump is patch-only, and a patch tag would understate
+what an operator has to do.
+
+| Old server key | New server key | Executable (unchanged) |
+|---|---|---|
+| `kyber-weave` | `kw-docs` | `kyber-weave-mcp` |
+| `kyberdash` | `kw-dash` | `kyberdash mcp` |
+| `kyber-weave-arbiter` | `kw-arbiter` | `kyber-weave-arbiter serve` |
+
+The executables, the CLI commands, KyberDash's operation strings and its `/api/kyber/analytics/*`
+routes, every `KW-*` rule id, and every `doctor` check id are unchanged. MCP `serverInfo` still
+reports `kyber-weave-mcp`, `kyber-weave-arbiter` and `kyberdash-analytics`.
+
+**kw-docs** — eight tools:
+
+| Old tool name | New tool name |
+|---|---|
+| `docs_explore` | `docs_answer_question_from_repo_documentation` |
+| `docs_for_symbol` | `docs_find_documents_citing_code_symbol` |
+| `docs_glossary` | `docs_look_up_glossary_term_definition` |
+| `docs_analysis_candidates` | `docs_find_duplicates_conflicts_ambiguous_terms` |
+| `docs_validate` | `docs_validate_governed_document_schema` |
+| `docs_drift` | `docs_detect_drift_between_documents_and_code` |
+| `docs_status` | `docs_get_source_repository_and_revision` |
+| `agent_coding_standards` | `docs_get_coding_standard_for_technology` |
+
+**kw-arbiter** — three tools:
+
+| Old tool name | New tool name |
+|---|---|
+| `arbiter_evaluate` | `arbiter_evaluate_agent_dispatch_or_return` |
+| `arbiter_rules` | `arbiter_list_effective_rules_by_trigger` |
+| `arbiter_status` | `arbiter_check_configuration_and_key_readiness` |
+
+**kw-dash** — eight tools:
+
+| Old tool name | New tool name |
+|---|---|
+| `dash_status` | `dash_list_available_analytics_operations` |
+| `dash_catalog` | `dash_list_queryable_metrics_dimensions_limits` |
+| `dash_query` | `dash_query_session_cost_tokens_and_duration` |
+| `dash_search_sessions` | `dash_search_sessions_by_text_and_scope` |
+| `dash_inspect` | `dash_read_captured_run_session_or_turn_context` |
+| `dash_findings` | `dash_list_detected_context_and_tool_problems` |
+| `dash_compare` | `dash_compare_metrics_between_two_scopes` |
+| `dash_outcomes` | `dash_get_run_success_or_failure_outcomes` |
+
+#### Upgrade steps
+
+1. `kyber-weave update`. Binaries now serve the new names. Arbiter-enabled projects re-render and warn.
+2. In each repository: `kyber-weave docs mcp-migrate .` to preview, then `kyber-weave docs mcp-migrate . --target <harnesses>`. Commit the diff; it is key-only.
+3. `kyber-weave squad update` (add `--global` if you deployed globally).
+4. By hand, for files no tool reads: user-scope files (`~/.claude.json` through `claude mcp`, `~/.cursor/mcp.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json`, `~/.factory/mcp.json`, `~/.copilot/mcp-config.json`, Kilo's and ZCode's), `kilo.json`, Copilot repository settings, and any harness permission allow-list naming an old tool.
+5. Restart the harness. Claude Code will likely ask to approve the renamed `.mcp.json` server (`claude mcp reset-project-choices` resets; the docs do not say approval is keyed by name, so this is an inference). Cursor's per-server toggles are worth a look; Factory and OpenCode document no per-server state.
+
+`docs mcp-migrate` renames an old key only where the entry also proves the launch — the
+shipped binary's file name as `argv[0]`, plus `serve` for the arbiter and `mcp` for the dash. An
+entry it cannot prove is reported with the edit to make by hand and left exactly as it stands.
+The proof rules, the states table, and `KW-MCP-WIRE-007` to `-009` are in the [MCP
+runbook](docgraph/mcp-runbook.md#docs-mcp-migrate).
+
 ## Then initialize your repository
 
 For an Arbiter-enforced repository, one command does everything the old multi-step
@@ -611,7 +677,7 @@ What an installing repository gets, and which step writes it:
   never alters what runs for an unchanged configuration. `kyber-weave review catalogue`
   prints the catalogue for newer releases, to copy in by hand.
 - **`docs init` declares and checks the MCP servers your instructions rely on.** It
-  scaffolds one server into the host config's `mcp:` section, then reports harness by
+  scaffolds one server, `kw-docs`, into the host config's `mcp:` section, then reports harness by
   harness whether each declared server is wired in that harness's repository-scope
   configuration, with a copy-ready `docs mcp-wire --target <harness>` command per fixable gap
   — an entry whose launch command differs, a configuration that is a symbolic link, or one

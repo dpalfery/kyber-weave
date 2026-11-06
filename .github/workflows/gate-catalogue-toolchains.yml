@@ -16,7 +16,7 @@ name: gate-catalogue-toolchains
     paths:
       - products/kyber-squad/standards/*/gates.yml
       - src/KyberWeave.Core/Review/**
-      - src/KyberWeave.Core/Docs/Scaffolding/**
+      - src/KyberWeave.Core.Docs/Scaffolding/**
       - tests/fixtures/gate-catalogue/**
       - tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs
       - .github/workflows/gate-catalogue-toolchains.yml

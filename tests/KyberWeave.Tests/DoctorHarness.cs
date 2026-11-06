@@ -10,8 +10,17 @@ namespace KyberWeave.Tests;
 /// or a trivial shell stub written into a temp directory. No test spawns a real <c>codegraph</c> or the real
 /// <c>kyber-weave-mcp</c>.
 /// </summary>
+/// <remarks>
+/// The MCP stubs assert the tool name the probe requests. Each stub answers <c>tools/call</c> with its scripted
+/// reply only when the request names <see cref="ProbedTool"/>; any other name gets a reply the probe must not
+/// accept. A probe still asking for the retired name therefore fails its check instead of passing against a stub
+/// that ignored the name.
+/// </remarks>
 internal static class DoctorHarness
 {
+    /// <summary>The docs tool the live probe must request. The stubs answer only this name.</summary>
+    public const string ProbedTool = "docs_answer_question_from_repo_documentation";
+
     /// <summary>The reply a healthy server gives <c>initialize</c>.</summary>
     public const string InitializeReply = """{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}""";
 
@@ -62,68 +71,66 @@ internal static class DoctorHarness
         return path;
     }
 
-    /// <summary>A healthy server: answers <c>initialize</c> and <c>tools/call</c> for <paramref name="root"/>.</summary>
+    /// <summary>A healthy server: answers <c>initialize</c> and the probed tool for <paramref name="root"/>.</summary>
     public static string HealthyStub(string directory, string root) =>
-        WriteStub(directory, """
-            read _initialize
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
-            read _initialized
-            read _call
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=ROOT"}]}}'
-            cat > /dev/null
-            """.Replace("ROOT", root, StringComparison.Ordinal));
+        WriteStub(directory, Preamble() + "read _call\n" + CallBranch(Reply(false, Provenance(root)), UnknownTool()));
 
     /// <summary>Behaves like a healthy server and records the argv it was started with, one argument per line.</summary>
     public static string RecordingStub(string directory, string root, string argvPath) =>
-        WriteStub(directory, """
-            printf '%s\n' "$@" > "ARGV"
-            read _initialize
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
-            read _initialized
-            read _call
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=ROOT"}]}}'
-            cat > /dev/null
-            """.Replace("ARGV", argvPath, StringComparison.Ordinal).Replace("ROOT", root, StringComparison.Ordinal));
+        WriteStub(
+            directory,
+            $"printf '%s\\n' \"$@\" > \"{argvPath}\"\n"
+            + Preamble()
+            + "read _call\n"
+            + CallBranch(Reply(false, Provenance(root)), UnknownTool()));
 
-    /// <summary>Answers the handshake, then reports <c>docs_explore</c> as an error result.</summary>
+    /// <summary>
+    /// Behaves like a healthy server and records the <c>tools/call</c> request line it received, so a test can read
+    /// the tool name the probe asked for.
+    /// </summary>
+    public static string CallRecordingStub(string directory, string root, string callPath) =>
+        WriteStub(
+            directory,
+            Preamble()
+            + "read _call\n"
+            + $"printf '%s\\n' \"$_call\" > \"{callPath}\"\n"
+            + CallBranch(Reply(false, Provenance(root)), UnknownTool()));
+
+    /// <summary>
+    /// Answers the handshake, then reports the probed docs tool as an error result. Any other tool name gets a
+    /// healthy provenance reply, so a probe that still asks for the retired name would pass and the test would fail.
+    /// </summary>
     public static string ErroringDocsExploreStub(string directory, string root) =>
-        WriteStub(directory, """
-            read _initialize
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
-            read _initialized
-            read _call
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"isError":true,"content":[{"type":"text","text":"index not loaded for ROOT"}]}}'
-            cat > /dev/null
-            """.Replace("ROOT", root, StringComparison.Ordinal));
+        WriteStub(
+            directory,
+            Preamble()
+            + "read _call\n"
+            + CallBranch(Reply(true, "index not loaded for " + root), Reply(false, Provenance(root))));
 
     /// <summary>Answers everything, but from a different checkout than the root.</summary>
     public static string WrongRootStub(string directory) =>
-        WriteStub(directory, """
-            read _initialize
-            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
-            read _initialized
-            read _call
-            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/elsewhere/checkout"}]}}'
-            cat > /dev/null
-            """);
+        WriteStub(
+            directory,
+            Preamble()
+            + "read _call\n"
+            + CallBranch(Reply(false, "provenance: root=/elsewhere/checkout"), UnknownTool()));
 
     /// <summary>Starts, then never answers: the handshake waits until its budget expires.</summary>
     public static string SilentStub(string directory) =>
         WriteStub(directory, "sleep 30");
 
     /// <summary>
-    /// Answers <c>initialize</c> with <paramref name="initializeReply"/> and <c>tools/call</c> with
+    /// Answers <c>initialize</c> with <paramref name="initializeReply"/> and the probed tool with
     /// <paramref name="callReply"/>, so a test can put arbitrary JSON in front of the probe's parser.
     /// </summary>
     public static string ReplyingStub(string directory, string initializeReply, string callReply) =>
-        WriteStub(directory, $$"""
-            read _initialize
-            printf '%s\n' '{{initializeReply}}'
-            read _initialized
-            read _call
-            printf '%s\n' '{{callReply}}'
-            cat > /dev/null
-            """);
+        WriteStub(
+            directory,
+            "read _initialize\n"
+            + $"printf '%s\\n' '{initializeReply}'\n"
+            + "read _initialized\n"
+            + "read _call\n"
+            + CallBranch(callReply, UnknownTool()));
 
     /// <summary>
     /// Answers <c>initialize</c>, then closes its own standard input. The close happens before the reply is
@@ -143,4 +150,30 @@ internal static class DoctorHarness
         Assert.DoesNotContain(
             executor.CallsTo("codegraph"),
             call => call.ArgumentList.Contains(verb, StringComparer.Ordinal));
+
+    /// <summary>The shell lines that answer <c>initialize</c> and consume <c>notifications/initialized</c>.</summary>
+    private static string Preamble() =>
+        "read _initialize\n"
+        + $"printf '%s\\n' '{InitializeReply}'\n"
+        + "read _initialized\n";
+
+    /// <summary>
+    /// The <c>tools/call</c> branch. The request line has already been read into <c>_call</c>. The probed tool gets
+    /// <paramref name="probedReply"/>; a request naming any other tool gets <paramref name="otherReply"/>.
+    /// </summary>
+    private static string CallBranch(string probedReply, string otherReply) =>
+        "case \"$_call\" in\n"
+        + $"  *'\"name\":\"{ProbedTool}\"'*) printf '%s\\n' '{probedReply}' ;;\n"
+        + $"  *) printf '%s\\n' '{otherReply}' ;;\n"
+        + "esac\n"
+        + "cat > /dev/null\n";
+
+    /// <summary>A JSON-RPC tool result carrying one text item.</summary>
+    private static string Reply(bool isError, string text) =>
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":" + (isError ? "true" : "false")
+        + ",\"content\":[{\"type\":\"text\",\"text\":\"" + text + "\"}]}}";
+
+    private static string Provenance(string root) => "provenance: root=" + root;
+
+    private static string UnknownTool() => Reply(true, "unknown tool");
 }

@@ -264,7 +264,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     public void Packer_SourceContainsNoAmbientHomeOrEnvironmentReads()
     {
         string packagingDir = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Squad", "Packaging");
+            KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core.Squad", "Packaging");
         Assert.True(Directory.Exists(packagingDir), $"Expected packaging source at '{packagingDir}'.");
 
         string[] sources = Directory.GetFiles(packagingDir, "*.cs", SearchOption.AllDirectories);

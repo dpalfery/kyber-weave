@@ -5,7 +5,7 @@ doc-type: adr
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-05
 decided-by: []
 supersedes: []
 ---
@@ -19,6 +19,13 @@ Accepted, 2026-10-31, with the MCP configuration wiring specification. The docs-
 Squad-owned hook blocks or the Arbiter install; those are a different artifact and are governed by
 [ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md) and the Arbiter install flow.
 
+Amended 2026-11-05, in place: the closed list of writers gains a fourth member, `docs mcp-migrate`,
+and **this amendment is the new decision** that the Consequences below say weakening a bound
+requires. [ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md) retires the MCP server keys
+and tool names, so a repository-scope configuration holds entries a rename has to reach;
+`docs mcp-migrate` renames the property-name token in place and nothing else. Decision 2 is
+untouched by this amendment: user-scope configuration is still never written and never read.
+
 ## Context
 
 Two standing decisions keep deployment tools out of harness configuration files.
@@ -29,7 +36,7 @@ holds it without exception ("Squad does not own settings files", D-no-settings,
 [Kyber-Squad architecture](../kyber-squad/architecture.md) §3).
 
 Neither decision covers the case that produced this record. A host's agent instructions
-declare the MCP servers they rely on — in this repository, the kyber-weave documentation
+declare the MCP servers they rely on — in this repository, the `kw-docs` documentation
 server — and each harness reads its own file to learn about them. Nothing writes those files:
 the [DocGraph MCP runbook](../docgraph/mcp-runbook.md) documents each client's recipe by
 hand, one file and one key path at a time, and detects nothing. When the entry is missing, an
@@ -60,8 +67,10 @@ user-scope configuration.**
 1. **The writers are closed, and so is the file set.** `docs mcp-wire --target <harness>`
    writes the entry for the named harnesses; `docs init`'s confirmed prompt calls that same
    write path after the check finds a fixable gap; `docs mcp-unwire` restores only what a
-   receipt records. No other command writes these files, and no harness outside the catalog is
-   ever written.
+   receipt records; and `docs mcp-migrate` renames the server property-name token of an entry
+   already in one of those files, because [ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md)
+   retires the keys and tool names those files hold. Those four are the whole list. No other
+   command writes these files, and no harness outside the catalog is ever written.
 
    | Harness | Command | File written (repository scope) | Server key |
    |---|---|---|---|
@@ -74,6 +83,24 @@ user-scope configuration.**
    Every path is relative to the repository root the command was pointed at. `docs mcp-unwire`
    writes only the file a receipt records, and only while that file's digest still matches what
    the wire command left.
+
+   `docs mcp-migrate` is bounded to the property name. It rewrites the token that names the
+   server, and removes one duplicate member where the rename would otherwise leave two entries
+   with the same name; it never adds an entry, never changes a command, an argument, or any other
+   value in the file, and never reads or writes a user-scope file. An entry that cannot be proven
+   to be the server it is looking for is left exactly as it is, and reported as left.
+
+   **The proof rule: a key alone is never proof.** An entry is renamed only when two independent
+   things hold together — the property name equals the retired key exactly, *and* the entry's
+   launch proves the same server. The launch proves it when `argv[0]`'s file name equals the
+   shipped binary's — `kyber-weave-mcp` for `kw-docs`, `kyberdash` for `kw-dash`,
+   `kyber-weave-arbiter` for `kw-arbiter` — in any directory, compared case-insensitively, with an
+   optional `.exe` suffix, *and* the argument that launch passes next is the one this server's
+   entry requires: `mcp` for the dashboard and `serve` for the arbiter. The documentation server
+   requires no next argument — the file name `kyber-weave-mcp` is the whole proof, and whatever
+   the entry passes afterwards, `--repo-root` included, is not compared. A matching key with a
+   launch that does not prove it is some other server that happens to share a name, and it is not
+   this repository's to rename.
 
 2. **User-scope configuration is never written and never read.** These commands never write and
    never read a user-scope configuration file: `~/.factory/mcp.json`, `~/.cursor/mcp.json`,
@@ -179,13 +206,18 @@ user-scope configuration.**
   configured in repository settings, where no command can reach.
 - **The bounds are the contract.** Weakening one — writing without a receipt, merging an
   existing entry, re-serializing a document, writing on a dry run, writing at user scope — is a
-  new decision, not an implementation detail.
+  new decision, not an implementation detail. Adding a writer to the closed list is a weakening of
+  the same kind, and the 2026-11-05 amendment that added `docs mcp-migrate` **is** that decision,
+  taken for one command bounded to a property-name token and proven by its launch (decision 1).
+
 - **The ownership map now has three statements, not two**, and the split is readable: Kyber
   Utilities owns per-user staged utilities, Squad owns agent and skill files, and the docs branch
   owns repository-scope harness MCP wiring under this record's bounds.
 
 ## Related
 
+- [ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md) — the naming decision
+  `docs mcp-migrate` exists to carry into an existing repository-scope configuration
 - [ADR 0026](0026-kyber-utilities-owned-files-not-settings.md) — the Kyber Utilities boundary
   this record cross-references and leaves intact
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — droid-level visibility versus

@@ -901,7 +901,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     Every agent the source entitles to <c>kyber-weave</c> renders it in its own frontmatter, in
+    ///     Every agent the source entitles to <c>kw-docs</c> renders it in its own frontmatter, in
     ///     the one entry shape live-probed against <c>agy</c> 1.4.12, and every agent the source does
     ///     not entitle renders no <c>mcpServers</c> key at all.
     /// </summary>
@@ -910,11 +910,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     ///     <see cref="SquadMcpGrantProjection" />, never from the renderer, so a renderer that re-added
     ///     the pure-orchestrator carve-out fails here rather than agreeing with its own copy of the
     ///     rule. <c>conductor</c>'s presence is asserted explicitly as well, because that one agent is
-    ///     the whole point of ADR 0050: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
+    ///     the whole point of ADR 0050: <c>kw-docs</c> carries <c>docs_get_coding_standard_for_technology</c>, and
     ///     the role that assigns work is the role that needs it.
     ///     The shape is asserted structurally rather than by string match because it is the contract.
     ///     The probe called <c>{name, command, args}</c> entries successfully; the alternative
-    ///     single-key map spelling (<c>- kyber-weave: {command, args}</c>) listed and ran but was never
+    ///     single-key map spelling (<c>- kw-docs: {command, args}</c>) listed and ran but was never
     ///     called, so it is not the shape this suite accepts.
     /// </remarks>
     [Fact]
@@ -945,7 +945,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 Assert.False(
                     frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
                     $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') renders an "
-                    + "'mcpServers' key, but the source withholds kyber-weave from it.");
+                    + "'mcpServers' key, but the source withholds kw-docs from it.");
                 continue;
             }
 
@@ -977,7 +977,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode entry = Assert.IsType<YamlMappingNode>(
                 Assert.Single(entries.Children, node =>
-                    node is YamlMappingNode map && RequireScalar(map, "name") == "kyber-weave"));
+                    node is YamlMappingNode map && RequireScalar(map, "name") == "kw-docs"));
 
             // The verified entry shape, and only that shape: an entry that also carried the server
             // name as its own key would be the spelling the probe never called.
@@ -987,7 +987,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     .Select(key => (key as YamlScalarNode)?.Value ?? string.Empty)
             ];
             Assert.Equal(["name", "command", "args"], keys);
-            Assert.Equal("kyber-weave", RequireScalar(entry, "name"));
+            Assert.Equal("kw-docs", RequireScalar(entry, "name"));
             Assert.Equal(declaration.Command, RequireScalar(entry, "command"));
             Assert.Equal(declaration.Args, RequireSequenceValues(entry, "args"));
         }
@@ -1034,7 +1034,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
                       string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
         Assert.NotNull(withholding.Details);
-        Assert.Contains("kyber-weave", withholding.Details, StringComparison.Ordinal);
+        Assert.Contains("kw-docs", withholding.Details, StringComparison.Ordinal);
         Assert.Contains("withheld", withholding.Details, StringComparison.Ordinal);
         Assert.Contains("filesystem.read", withholding.Details, StringComparison.Ordinal);
 
@@ -1045,11 +1045,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
             + "this test proves nothing.");
         foreach (SquadDegradationRecord record in result.Degradations.Where(record =>
                      string.Equals(record.CanonicalIdentity, granted.Name, StringComparison.Ordinal)))
-            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("kw-docs", record.Details ?? string.Empty, StringComparison.Ordinal);
     }
 
     /// <summary>
-    ///     A squad that declares MCP servers but not <c>kyber-weave</c> grants no universal server:
+    ///     A squad that declares MCP servers but not <c>kw-docs</c> grants no universal server:
     ///     the orchestrator and read-denied agents render no <c>mcpServers</c> key, while read-entitled
     ///     specialists receive only the orchestrator-excluded servers the declaration names. No record
     ///     claims a server was withheld.
@@ -1108,7 +1108,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 Assert.False(
                     frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
                     $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
-                    + "'kyber-weave' server and the agent is not entitled to an orchestrator-excluded "
+                    + "'kw-docs' server and the agent is not entitled to an orchestrator-excluded "
                     + "server. An omitted key is the only fail-closed answer: on Antigravity an explicit "
                     + "empty list excludes every server rather than inheriting nothing.");
             }
@@ -1139,7 +1139,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             SquadDegradationRecord record = Assert.Single(
                 mine,
                 record => record.Details is not null &&
-                          record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal) &&
+                          record.Details.Contains("declares no 'kw-docs' server", StringComparison.Ordinal) &&
                           record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
             Assert.NotNull(record.Details);
         }
@@ -1184,7 +1184,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 StringComparison.Ordinal)).ToList());
         Assert.Equal("permission-not-expressible", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
-        Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.Contains("declares no 'kw-docs' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
         Assert.Contains("even with the server declared", record.Details, StringComparison.Ordinal);
     }
@@ -1245,7 +1245,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.Equal("capability-not-isolable", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
-        Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.Contains("declares no 'kw-docs' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
         Assert.Contains("even with the server declared", record.Details, StringComparison.Ordinal);
     }
@@ -1289,7 +1289,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.Equal("permission-not-expressible", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
-        Assert.DoesNotContain("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("declares no 'kw-docs' server", record.Details, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1342,7 +1342,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.NotNull(record.Details);
         Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
-        Assert.DoesNotContain("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("declares no 'kw-docs' server", record.Details, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1358,7 +1358,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     ///     boolean, an object, or an array.
     ///     The hand-built source is necessary rather than lazy. <see cref="SquadSourceLoader" /> rejects
     ///     every one of these states at load time (<c>ParseMcp</c> and <c>ValidateMcpServer</c> demand an
-    ///     object <c>mcpServers</c>, an object <c>kyber-weave</c> entry, a non-empty string
+    ///     object <c>mcpServers</c>, an object <c>kw-docs</c> entry, a non-empty string
     ///     <c>command</c>, and a string-array <c>args</c>), so no on-disk corpus can reach them. They
     ///     exist to keep a hand-built or future-loaded source from rendering a server the operator never
     ///     declared, and until this theory they were asserted only in prose.
@@ -1380,42 +1380,42 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Theory]
     [InlineData(
         "well-formed declaration",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "."]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", "."]}}}""",
         true)]
     [InlineData("no mcpServers key", "{}", false)]
     [InlineData("non-object mcpServers", """{"mcpServers": []}""", false)]
-    [InlineData("non-object entry", """{"mcpServers": {"kyber-weave": "kyber-weave-mcp"}}""", false)]
-    [InlineData("missing command", """{"mcpServers": {"kyber-weave": {"args": []}}}""", false)]
-    [InlineData("non-string command", """{"mcpServers": {"kyber-weave": {"command": 7, "args": []}}}""", false)]
-    [InlineData("blank command", """{"mcpServers": {"kyber-weave": {"command": "   ", "args": []}}}""", false)]
-    [InlineData("missing args", """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp"}}}""", false)]
+    [InlineData("non-object entry", """{"mcpServers": {"kw-docs": "kyber-weave-mcp"}}""", false)]
+    [InlineData("missing command", """{"mcpServers": {"kw-docs": {"args": []}}}""", false)]
+    [InlineData("non-string command", """{"mcpServers": {"kw-docs": {"command": 7, "args": []}}}""", false)]
+    [InlineData("blank command", """{"mcpServers": {"kw-docs": {"command": "   ", "args": []}}}""", false)]
+    [InlineData("missing args", """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp"}}}""", false)]
     [InlineData(
         "non-array args",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": "--repo-root"}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": "--repo-root"}}}""",
         false)]
     [InlineData(
         "null args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", null]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", null]}}}""",
         false)]
     [InlineData(
         "numeric args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", 7]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", 7]}}}""",
         false)]
     [InlineData(
         "true args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", true]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", true]}}}""",
         false)]
     [InlineData(
         "false args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", false]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", false]}}}""",
         false)]
     [InlineData(
         "object args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", {}]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", {}]}}}""",
         false)]
     [InlineData(
         "array args element",
-        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", []]}}}""",
+        """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", []]}}}""",
         false)]
     public async Task ADeclarationThatCannotBeResolvedGrantsNoMcpServerAndRecordsNoWithholding(
         string caseName,
@@ -1466,12 +1466,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         foreach (SquadDegradationRecord record in result.Degradations)
         {
             Assert.DoesNotContain("withheld", record.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("kw-docs", record.Details ?? string.Empty, StringComparison.Ordinal);
         }
     }
 
     /// <summary>
-    ///     The launch definition the squad's own <c>mcp.json</c> declares for <c>kyber-weave</c>, read
+    ///     The launch definition the squad's own <c>mcp.json</c> declares for <c>kw-docs</c>, read
     ///     from the loaded source so the rendered entry is compared against the declaration rather
     ///     than against a literal the renderer could have drifted from.
     /// </summary>
@@ -1482,13 +1482,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
             "The canonical squad declares no 'mcpServers', so there is no server to grant.");
         Assert.True(
             servers.TryGetProperty(SquadMcpGrantProjection.KyberWeaveServer, out JsonElement server),
-            "The canonical squad declares no 'kyber-weave' server, so there is no grant to assert.");
+            "The canonical squad declares no 'kw-docs' server, so there is no grant to assert.");
         Assert.True(
             server.TryGetProperty("command", out JsonElement command),
-            "The declared 'kyber-weave' server carries no 'command'.");
+            "The declared 'kw-docs' server carries no 'command'.");
         Assert.True(
             server.TryGetProperty("args", out JsonElement args),
-            "The declared 'kyber-weave' server carries no 'args'.");
+            "The declared 'kw-docs' server carries no 'args'.");
 
         return (
             command.GetString() ?? string.Empty,

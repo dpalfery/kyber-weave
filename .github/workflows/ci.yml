@@ -166,6 +166,17 @@ jobs:
           --report-trx-filename kyber-weave.trx
           --results-directory TestResults
 
+      # The repository-policy tests: scripts, workflows, gate configuration, docs and
+      # source scans. Their own project, so the product suite above measures product code.
+      - name: Test (repository policy)
+        run: >
+          dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --report-trx
+          --report-trx-filename repo-policy.trx
+          --results-directory TestResults
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

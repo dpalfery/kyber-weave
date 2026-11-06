@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 
@@ -52,6 +53,12 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
             if (!loaded.Success || loaded.Config?.Arbiter.Enabled != true)
                 continue;
+
+            // The refresh already reaches every enabled project, so it is the one place an update
+            // can name a project's leftover MCP server key without a second walk of the tree. The
+            // line is per project because that is what the operator has to act on, and nothing is
+            // written: the rename belongs to `docs mcp-migrate`.
+            ReportRetiredMcpKeys(root);
 
             try
             {
@@ -233,5 +240,31 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
         string afterHarness = harnessAndRemainder[targetToken.Length..];
         return afterHarness.TrimStart().StartsWith("--scope global", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Names the project's leftover MCP server keys once, in the same log the refresh already writes
+    /// to. Read only.
+    /// </summary>
+    /// <remarks>
+    /// A note for the whole run would not say which project holds the leftover, and the operator
+    /// would have to search every tree for it. It is a warning because the configuration still works;
+    /// it is the name that is stale, not the install.
+    /// </remarks>
+    private void ReportRetiredMcpKeys(string root)
+    {
+        IReadOnlyList<McpRenameChange> leftovers =
+        [
+            .. McpServerRenamer.Scan(root)
+                .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
+        ];
+
+        foreach (McpRenameChange leftover in leftovers)
+        {
+            _log?.Invoke(
+                $"warning: '{root}' still holds the retired MCP server key '{leftover.OldKey}' "
+                + $"({leftover.Path}): {McpServerRenamer.RenameCode}; run {McpServerRenamer.MigrateCommand} "
+                + $"--target {leftover.Harness} to rename it to '{leftover.NewKey}'.");
+        }
     }
 }

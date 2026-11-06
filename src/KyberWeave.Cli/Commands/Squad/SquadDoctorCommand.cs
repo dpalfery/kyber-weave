@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -18,7 +20,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
 
     private readonly IProcessExecutor? _executor;
     private readonly ISquadGlobalRootResolver? _globalRoots;
@@ -135,6 +137,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
+        // 3c. Retired MCP server keys. Read only, and it deliberately does not move the exit code: a
+        // leftover is a rename this install has not been asked to make, not a broken prerequisite.
+        ReportRetiredMcpKeys(workingDirectory);
+
         // 4. Canonical Source (Maintainer check - only when inside repository root)
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
@@ -212,6 +218,52 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     public int Execute(CommandContext context, SquadDoctorSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reports every harness in this project whose configuration still holds a retired MCP server key,
+    /// or could not be checked for one, and the remedy for each: the migrate command for a proven
+    /// leftover, the hand edit for an unproven one.
+    /// </summary>
+    /// <remarks>
+    /// Doctor is where an operator looks when something is off, so a leftover has to be named here.
+    /// It is a warning about configuration rather than a failed prerequisite, and the exit code does
+    /// not move on it: a healthy install that has not yet been asked to rename its keys is still
+    /// healthy. Nothing is written; the rename belongs to <c>docs mcp-migrate</c>.
+    /// </remarks>
+    private static void ReportRetiredMcpKeys(string workingDirectory)
+    {
+        IReadOnlyList<McpRenameChange> leftovers =
+        [
+            .. McpServerRenamer.Scan(workingDirectory)
+                .Where(change => change.Code is McpServerRenamer.RenameCode
+                    or McpServerRenamer.LeftAloneCode
+                    or McpServerRenamer.RefusedCode)
+        ];
+
+        if (leftovers.Count == 0)
+            return;
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            foreach (McpRenameChange leftover in leftovers)
+            {
+                string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
+
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] {Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)} {file}: "
+                    + Markup.Escape(TerminalText.Line(leftover.Message)));
+
+                string? remedy = string.Equals(leftover.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                    ? "Run: " + McpServerRenamer.MigrateCommand + " --target " + leftover.Harness
+                    : leftover.Hint;
+
+                if (!string.IsNullOrWhiteSpace(remedy))
+                {
+                    AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(remedy))}[/]");
+                }
+            }
+        });
     }
 
     /// <summary>

@@ -65,6 +65,11 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             AnsiConsole.MarkupLine(
                 "[grey]Declare them under mcp.required-servers in .kyber-weave/kyber-weave.yml, then run this "
                 + "command again.[/]");
+
+            // A retired key is a property of the harness files, not of the declaration. This early
+            // return used to hide it, which is the one case where the operator most needs the notice:
+            // nothing is declared, and a stale entry is still there.
+            ReportRenameNotices(root);
             return 0;
         }
 
@@ -296,11 +301,62 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
                 AnsiConsole.WriteLine();
             }
 
+            ReportRenameNotices(root);
+
             AnsiConsole.MarkupLine(
                 $"[grey]Nothing was written. Wire a harness with: {Markup.Escape(WireCommand + " " + TargetPlaceholder)}. Add --dry-run to preview the write.[/]");
         });
 
         return 0;
+    }
+
+    /// <summary>
+    /// Prints the leftover-key notices a preview found, and nothing at all when there are none.
+    /// </summary>
+    /// <remarks>
+    /// The wiring check answers "is the declared server wired"; it returns nothing at all when
+    /// nothing is declared, and it says nothing about a server wired under the name the declaration
+    /// itself still uses. A preview is where an operator looks before writing, so the leftover is
+    /// named here whether or not anything is declared.
+    /// </remarks>
+    internal static void ReportRenameNotices(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        IReadOnlyList<McpRenameChange> leftovers =
+        [
+            .. McpServerRenamer.Scan(root)
+                .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                    || string.Equals(change.Code, McpServerRenamer.LeftAloneCode, StringComparison.Ordinal)
+                    || string.Equals(change.Code, McpServerRenamer.RefusedCode, StringComparison.Ordinal))
+        ];
+
+        if (leftovers.Count == 0)
+            return;
+
+        AnsiConsole.MarkupLine("[bold]Retired MCP server keys found:[/]");
+
+        foreach (McpRenameChange leftover in leftovers)
+        {
+            string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
+
+            AnsiConsole.MarkupLine(
+                $"  [yellow]{Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)}[/] {file}: "
+                + Markup.Escape(TerminalText.Line(leftover.Message)));
+
+            // Only a proven leftover is the migrate command's to fix. A conflict or an unreadable
+            // file is a decision for a person, and offering a command that would refuse it is a loop.
+            string? remedy = string.Equals(leftover.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                ? McpServerRenamer.MigrateCommand + " --target " + leftover.Harness
+                : leftover.Hint;
+
+            if (!string.IsNullOrWhiteSpace(remedy))
+            {
+                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(remedy))}[/]");
+            }
+        }
+
+        AnsiConsole.WriteLine();
     }
 
     /// <summary>
@@ -373,6 +429,16 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         // the answer there (R5.4, D19), never "nothing to do".
         if (!row.Paths.Any(candidate => File.Exists(FullPath(root, candidate))))
             return false;
+
+        // A file still holding a proven retired key is not satisfied: the entry the repair would add
+        // is the same server under the name this version uses, and adding it beside the old one
+        // leaves one server under two names. The repair refuses it for that reason, so leaving it to
+        // the repair is what puts the migration in front of the operator.
+        if (McpServerRenamer.Scan(root, harness)
+            .Any(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)))
+        {
+            return false;
+        }
 
         foreach (McpWiringFinding finding in inspection.Findings)
         {

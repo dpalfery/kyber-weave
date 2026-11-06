@@ -51,6 +51,34 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// The probe asks the server for the renamed docs tool, <c>docs_answer_question_from_repo_documentation</c>, and
+    /// still reports the stable check id <c>mcp.docs_explore</c>. The recorded request is the proof: it names the new
+    /// tool and never the retired one, so there is no fallback to the old name.
+    /// </summary>
+    /// <remarks>
+    /// The check id is a contract that other tooling matches on, so the rename moves the request and not the id.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_RequestsTheRenamedDocsTool_AndKeepsItsCheckId()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string callPath = Path.Combine(_stubs.Path, "call.json");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.CallRecordingStub(_stubs.Path, Root, callPath)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.True(DoctorHarness.CheckNamed(report, "mcp.docs_explore").Passed);
+        Assert.Equal(0, report.ExitCode);
+        string request = File.ReadAllText(callPath);
+        Assert.Contains("\"name\":\"docs_answer_question_from_repo_documentation\"", request, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"name\":\"docs_explore\"", request, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The probe starts the server for the repository it resolved, by passing <c>--repo-root</c>. Without the flag the
     /// child inherits the doctor's working directory, so a healthy target can fail <c>mcp.root</c> or pass against the
     /// wrong checkout — the exact confusion the probe exists to prevent.
@@ -101,8 +129,8 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
-    /// A server whose <c>docs_explore</c> returns an error result fails <c>mcp.docs_explore</c> with exit 1. Process
-    /// liveness is not enough: <c>docs_status</c> alone would pass here, which is why D8 chose <c>docs_explore</c>.
+    /// A server whose <c>docs_answer_question_from_repo_documentation</c> returns an error result fails <c>mcp.docs_explore</c> with exit 1. Process
+    /// liveness is not enough: <c>docs_get_source_repository_and_revision</c> alone would pass here, which is why D8 chose <c>docs_answer_question_from_repo_documentation</c>.
     /// </summary>
     [Fact]
     public void McpLiveProbe_DocsExploreError_Exits1()
@@ -121,7 +149,7 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
-    /// A server answering from another checkout fails <c>mcp.root</c> with exit 1, even though <c>docs_explore</c>
+    /// A server answering from another checkout fails <c>mcp.root</c> with exit 1, even though <c>docs_answer_question_from_repo_documentation</c>
     /// succeeded. The root check is what catches a server pointed at the wrong repository.
     /// </summary>
     /// <remarks>D8: the <c>provenance: root=</c> value must equal <c>git rev-parse --show-toplevel</c>.</remarks>

@@ -39,7 +39,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class DocsMcpWireCommandTests : IDisposable
 {
-    private const string ServerName = "kyber-weave";
+    private const string ServerName = "kw-docs";
 
     /// <summary>
     /// The file name the stand-in for the shipped server carries. A first-party declaration is a claim
@@ -159,6 +159,68 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains("mcp-wire", execution.Output, StringComparison.Ordinal);
         Assert.False(File.Exists(InRepo(".mcp.json")));
         Assert.False(File.Exists(InRepo("opencode.json")));
+    }
+
+    /// <summary>
+    /// A preview with no declared servers still names an unproven leftover: a Codex TOML table under
+    /// a retired key needs a hand edit, and the empty-declaration return must not hide it.
+    /// </summary>
+    [Fact]
+    public void APreviewWithNoDeclarationStillNamesAnUnprovenTomlLeftover()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ".codex/config.toml",
+            """
+            [mcp_servers.kyber-weave]
+            command = "kyber-weave-mcp"
+            """);
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        // The console wraps to its width, so the sentence is matched on collapsed whitespace.
+        string output = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpServerRenamer.LeftAloneCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("by hand", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            $"{McpServerRenamer.MigrateCommand} --target {Codex}",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A preview names a retired key it found, but it does not offer the migrate command for a
+    /// conflict the migrate command would refuse: different launches for the old and new names are a
+    /// decision for a person, and telling the operator to run a command that refuses sends them in a
+    /// circle.
+    /// </summary>
+    [Fact]
+    public void APreviewDoesNotOfferMigrateForAConflictMigrateWouldRefuse()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ".mcp.json",
+            """
+            {
+              "mcpServers": {
+                "kyber-weave": { "type": "stdio", "command": "kyber-weave-mcp", "args": ["--repo-root", "."] },
+                "kw-docs": { "type": "stdio", "command": "kyber-weave-mcp", "args": ["--repo-root", "/elsewhere"] }
+              }
+            }
+            """);
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpServerRenamer.RefusedCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            $"{McpServerRenamer.MigrateCommand} --target {ClaudeCode}",
+            execution.Output,
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -838,6 +900,73 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         // value is on the one line whose subject it is — not on a line of its own.
         Assert.Contains("forged.json", execution.Output, StringComparison.Ordinal);
         Assert.Contains("forged: wired", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>docs mcp-wire</c> refuses a target that holds a proven old key for a server it would add, with
+    /// zero bytes, and its hint names <c>docs mcp-migrate</c>. The wire would otherwise add the new name
+    /// beside the old entry the same launch already holds.
+    /// </summary>
+    [Fact]
+    public void WireRefusesBesideAProvenOldKeyAndNamesTheMigrateVerb()
+    {
+        WriteDeclaration();
+        WriteJson(
+            ".factory/mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = BinaryPath,
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            });
+        byte[] before = File.ReadAllBytes(InRepo(".factory/mcp.json"));
+
+        CapturedConsoleExecution<int> execution = Wire(Factory);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(".factory/mcp.json")));
+        Assert.Null(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+    }
+
+    /// <summary>
+    /// The no-target preview reads a proven old key and prints the rename notice with the migrate verb,
+    /// and it writes no byte to the file and no receipt.
+    /// </summary>
+    [Fact]
+    public void ANoTargetPreviewHoldingAProvenOldKeyPrintsTheNoticeAndWritesNothing()
+    {
+        WriteDeclaration();
+        WriteJson(
+            ".mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = BinaryPath,
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            });
+        byte[] before = File.ReadAllBytes(InRepo(".mcp.json"));
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains("KW-MCP-WIRE-007", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(InRepo(".mcp.json")));
+        Assert.False(File.Exists(ReceiptPath), "a preview must not write the receipt");
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>

@@ -4,9 +4,9 @@ title: Adopting DocGraph in an existing repository
 doc-type: onboarding
 status: current
 component: DocGraph
-source-root: src/KyberWeave.Core/Docs
+source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-05
 ---
 
 # Adopting DocGraph in an existing repository
@@ -86,13 +86,13 @@ operator-owned file.
 
 `docs init` also declares and checks the MCP servers your agent instructions rely on. The
 declaration is the `mcp:` section of `.kyber-weave/kyber-weave.yml`, scaffolded with one
-server — `kyber-weave`, launched `kyber-weave-mcp --repo-root .`, first-party — and yours
+server — `kw-docs`, launched `kyber-weave-mcp --repo-root .`, first-party — and yours
 from the moment it exists:
 
 ```yaml
 mcp:
   required-servers:
-    kyber-weave:
+    kw-docs:
       command: [kyber-weave-mcp, --repo-root, .]
       provenance: first-party
       level: required
@@ -134,8 +134,11 @@ included — is reviewed alongside the code changes it accompanies. That is deli
 incidental: the declaration decides which servers your instructions depend on, and the
 scaffolded default is part of what a reviewer sees and approves.
 
-The per-harness recipes, the two repair verbs, their flags and exit codes, and the harnesses
-the repair will not write are in the [MCP runbook](mcp-runbook.md#checking-and-wiring). The
+A repository wired under a retired key — `kyber-weave`, `kyberdash`, or `kyber-weave-arbiter` —
+is renamed by [`docs mcp-migrate`](mcp-runbook.md#docs-mcp-migrate), which proves the launch
+before it touches a key. The per-harness recipes, the two repair verbs, their flags and exit
+codes, and the harnesses the repair will not write are in the
+[MCP runbook](mcp-runbook.md#checking-and-wiring). The
 schema and its keys are in [configuration](../configuration.md#mcp-servers).
 
 ### APM is an expected dependency
@@ -257,10 +260,13 @@ kyber-weave-mcp --repo-root .
 ```
 
 See the [MCP runbook](mcp-runbook.md) for client configuration. Agents should reach the
-corpus through `docs_explore` rather than by reading files.
+corpus through `docs_answer_question_from_repo_documentation` rather than by reading files.
 
-The MCP surface also exposes capped read-only `docs_analysis_candidates` and
-`docs_glossary` tools; verdict and glossary writes remain CLI-only.
+The MCP surface also exposes capped read-only `docs_find_duplicates_conflicts_ambiguous_terms`
+and `docs_look_up_glossary_term_definition` tools; verdict and glossary writes remain CLI-only.
+The server's configuration key is `kw-docs`; a repository wired under the old `kyber-weave` key is
+renamed by `kyber-weave docs mcp-migrate` once the entry proves it launches this product's
+binary.
 
 ## 7. Gate it
 

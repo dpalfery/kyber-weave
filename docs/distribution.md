@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-01
+last-reviewed: 2026-11-05
 ---
 
 # Distribution and release flow
@@ -43,6 +43,12 @@ pre-release, so it picks `v1.0.0` over `v1.0.0-rc.1`. The script's `--prerelease
 pre-releases only. Both compare by SemVer precedence across every page of the Releases list,
 not by GitHub's creation order. A positional version pins a tag without colliding with global
 `kyber-weave --version`.
+
+**A rename is not a new asset.** This release renames the three MCP servers' configuration keys
+and their nineteen tools. No executable, archive, asset name, or `--version` output changed, so
+`install.sh` and `kyber-weave update` install and replace exactly the files they always have. The
+operator-side work the rename still needs is in [Renamed MCP servers and
+tools](install.md#renamed-mcp-servers-and-tools).
 
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
@@ -556,7 +562,8 @@ smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the b
 `kyberdash web` serves the SPA rather than the "not built" page. The same loop and the
 release job also run `dash/scripts/sea-mcp-smoke.mjs` against the staged binary: it
 initializes over stdio with an isolated loopback fixture, lists exactly the eight
-`dash_*` tools, calls `dash_status`, then closes the child and asserts a clean exit —
+`dash_*` tools, calls `dash_list_available_analytics_operations`, then closes the child and
+asserts a clean exit —
 proving the bundled MCP SDK works from the single executable with no checkout and no
 access to the operator's state. The job is the authority.
 `ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and
@@ -601,11 +608,20 @@ sibling product repos — without Azure or container scans, which do not apply h
 | Job | What it covers |
 |---|---|
 | Build and test | Restore, `dotnet format` (whitespace + curated style), NuGet audit, build, test, pack |
-| CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries |
+| CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries, minus one rule excluded by id |
 | Trivy filesystem | Dependency, misconfig, secret, and license findings at HIGH/CRITICAL |
 | Semgrep Community | Additional SAST (`p/default`, ERROR) |
 | gitleaks | Secret scan of the full history fetch |
 | Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-docs-authoring`, `.apm/skills/kyber-docs-integrity-review`, `.apm/skills/kyber-docs-onboarding-and-assessment`, `.apm/skills/kyber-weave-cli`, and `.apm/skills/kyber-weave-model-profile`, plus `docs validate` |
+
+CodeQL excludes exactly one rule, `js/http-to-file-access`, by id and never by path: no file
+or directory is excluded. Its only open-alert sink as of 2026-11-04 (alert 288) is the live gate's evidence writer
+(`dash/scripts/opencode-live-gate/run.mjs`), which records kyberDash and OpenCode responses
+into evidence files — the thing the gate exists to prove — and the query has no default
+sanitizer, so no code guard can clear it. The owner and a review date live in
+`.github/codeql/codeql-config.yml`, and `CodeQlConfigTests` keeps the exclusion rule-scoped
+rather than letting it drift into the path-wide exclusion [ADR 0020](adr/0020-kyberdash-one-time-fork.md)
+retired.
 
 Formatting is gated by [`.editorconfig`](../.editorconfig): whitespace plus a small style
 pack (file-scoped namespaces, usings, predefined types, `var` when apparent). The

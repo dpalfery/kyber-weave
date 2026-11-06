@@ -38,7 +38,7 @@ Record all decisions in a structured table:
 
 ## Documentation gates after plan writes
 
-After every plan save, obtain the two checks by calling `docs_validate` and `docs_drift` on the kyber-weave documentation server. Leave `mergeReady` false while the plan is in the active plans folder. Compare the provenance `root=` on each response to this checkout. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
+After every plan save, obtain the two checks by calling `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the kw-docs server. Leave `mergeReady` false while the plan is in the active plans folder. Compare the provenance `root=` on each response to this checkout. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
 
 Persist each question with a stable id (for example, D1, D2 or Q1, Q2), the question or architectural choice, the selected answer or decision, mitigating and supporting context (alternatives considered, trade-offs, constraints), and status/approval provenance.
 

@@ -325,7 +325,7 @@ public sealed class SquadArbiterCliTests : IDisposable
     [Fact]
     public void Doctor_OnZcodeRepoWithArbiterDisabled_DoesNotRequireTheArbiterServer()
     {
-        // A repo with .zcode/ whose source toolchain declares kyber-weave-arbiter: with the
+        // A repo with .zcode/ whose source toolchain declares kw-arbiter: with the
         // Arbiter disabled the render grants no arbiter tools, so doctor must not require
         // the server (review 20.1, Major 3).
         string workingDir = NewDir("arbiter-doctor-zcode-off");
@@ -465,10 +465,10 @@ public sealed class SquadArbiterCliTests : IDisposable
             "required-features:\n" +
             "  - agent-ir/v1\n" +
             "required-mcp-tools:\n" +
-            "  kyber-weave-arbiter:\n" +
-            "    - arbiter_evaluate\n" +
-            "    - arbiter_rules\n" +
-            "    - arbiter_status\n" +
+            "  kw-arbiter:\n" +
+            "    - arbiter_evaluate_agent_dispatch_or_return\n" +
+            "    - arbiter_list_effective_rules_by_trigger\n" +
+            "    - arbiter_check_configuration_and_key_readiness\n" +
             "validated-release: null\n",
             Encoding.UTF8);
         File.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), string.Empty, Encoding.UTF8);

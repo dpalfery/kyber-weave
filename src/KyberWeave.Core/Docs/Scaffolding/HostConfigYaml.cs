@@ -1077,7 +1077,7 @@ public static partial class HostConfigYaml
     /// the first ending the file shows, because that is the one its first line already uses.
     /// </para>
     /// <para>
-    /// <see cref="McpDeclarationBlockWriter"/> appends its section to the same file and answers
+    /// <c>McpDeclarationBlockWriter</c> appends its section to the same file and answers
     /// the same question through this method rather than a copy, so a configuration cannot end
     /// up carrying two appended sections written in two different styles.
     /// </para>
@@ -1152,7 +1152,7 @@ public static partial class HostConfigYaml
     /// A byte-order mark is a character, not a line break: a configuration saved with one and
     /// opening on <c>ontology:</c> would otherwise read as having no <c>ontology:</c> block at
     /// all, and the append that follows writes a second key — a file YAML refuses to load.
-    /// <see cref="McpDeclarationBlockWriter"/> tolerates the same character for the same reason,
+    /// <c>McpDeclarationBlockWriter</c> tolerates the same character for the same reason,
     /// and the two writers edit the same file.
     /// </remarks>
     [GeneratedRegex(@"^\uFEFF?ontology[ \t]*:[ \t]*(#.*)?$")]
