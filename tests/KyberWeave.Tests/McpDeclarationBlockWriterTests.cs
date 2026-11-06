@@ -151,7 +151,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         byte[] appended = Encoding.UTF8.GetBytes("\n" + DeclarationBlock + "\n");
         Assert.Equal(originalBytes.Concat(appended), File.ReadAllBytes(ConfigFile));
         Assert.Equal(
-            "kyber-weave",
+            "kw-docs",
             Assert.Single(KyberWeaveConfigLoader.Load(_temp.Path).Mcp.RequiredServers).Key);
     }
 

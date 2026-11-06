@@ -25,7 +25,33 @@ public enum JsonSpliceOutcome
     /// server container along the key path, is not an object. Writing into it would replace a
     /// diagnosable refusal with a harness that silently starts with no tools (5.7).
     /// </summary>
-    ForeignDocument
+    ForeignDocument,
+
+    /// <summary>An entry's property name is rewritten, and <see cref="JsonSplicePlan.Document"/> is the result.</summary>
+    Renamed,
+
+    /// <summary>An entry is removed, and <see cref="JsonSplicePlan.Document"/> is the result.</summary>
+    Removed,
+
+    /// <summary>
+    /// No entry carries the name the change was about, so there is nothing to rename or remove.
+    /// The plan carries no change and the input document.
+    /// </summary>
+    ServerAbsent,
+
+    /// <summary>
+    /// The name is written with a JSON escape, so the bytes that spell it are not the bytes of the
+    /// name. Rewriting them would be a guess at how the author wanted the new name spelled, and the
+    /// change refuses rather than silently re-escaping somebody else's document.
+    /// </summary>
+    EscapedName,
+
+    /// <summary>
+    /// The spliced document did not re-parse to the input's model minus the change, so the plan
+    /// refuses and hands back the input. A change this code cannot prove is a change it does not
+    /// make.
+    /// </summary>
+    UnsafeSplice
 }
 
 /// <summary>Where a planned insertion lands.</summary>
@@ -193,6 +219,450 @@ public static class JsonServerSplice
             offset,
             insertedBytes,
             spliced);
+    }
+
+    /// <summary>Plans the rename of one entry's property name, leaving every other byte alone.</summary>
+    /// <param name="document">The document's bytes, as read from disk.</param>
+    /// <param name="serverKeyPath">The key path from the root to the map of servers.</param>
+    /// <param name="oldName">The entry name as it is written today.</param>
+    /// <param name="newName">The entry name to write in its place.</param>
+    /// <returns>
+    /// The renamed bytes and the document they produce, or the refusal and the input unchanged.
+    /// </returns>
+    /// <remarks>
+    /// Only the property-name token changes. A document's comments, key order, trailing commas and
+    /// byte-order mark are the operator's, and re-serialising would rewrite all of them; the plan
+    /// therefore replaces one measured byte range and proves the result by re-parsing it.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// The key path is empty, or a name is blank.
+    /// </exception>
+    public static JsonSplicePlan PlanRename(
+        byte[] document,
+        IReadOnlyList<string> serverKeyPath,
+        string oldName,
+        string newName)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(serverKeyPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(oldName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newName);
+
+        if (serverKeyPath.Count == 0)
+        {
+            throw new ArgumentException(
+                "a server container is reached by at least one key, so the key path cannot be empty.",
+                nameof(serverKeyPath));
+        }
+
+        int bomLength = ByteOrderMarkLength(document);
+        ContainerScan scan = LocateContainer(document.AsSpan(bomLength), serverKeyPath);
+
+        if (scan.Kind != ContainerKind.Found)
+            return Refuse(scan.Kind switch
+            {
+                ContainerKind.Malformed => JsonSpliceOutcome.MalformedDocument,
+                ContainerKind.Foreign => JsonSpliceOutcome.ForeignDocument,
+                _ => JsonSpliceOutcome.ServerAbsent
+            }, document, scan.Message);
+
+        MemberSpan? member = scan.Find(oldName);
+
+        if (member is null)
+        {
+            return Refuse(
+                JsonSpliceOutcome.ServerAbsent,
+                document,
+                $"the document holds no entry named '{oldName}' under '{string.Join('.', serverKeyPath)}'");
+        }
+
+        if (member.Value.Escaped)
+        {
+            return Refuse(
+                JsonSpliceOutcome.EscapedName,
+                document,
+                $"the entry named '{oldName}' is written with a JSON escape, so its bytes are not the bytes of "
+                    + "its name and this change will not guess at them");
+        }
+
+        int start = bomLength + member.Value.Start;
+        byte[] name = Encoding.UTF8.GetBytes(Quote(newName));
+        int end = start + member.Value.RawLength;
+
+        byte[] renamed = [.. document.AsSpan(0, start), .. name, .. document.AsSpan(end)];
+
+        if (!VerifyRename(document, renamed, serverKeyPath, oldName, newName))
+        {
+            return Refuse(
+                JsonSpliceOutcome.UnsafeSplice,
+                document,
+                $"renaming '{oldName}' to '{newName}' did not re-parse to the same document with one name changed, "
+                    + "so nothing was changed");
+        }
+
+        return new JsonSplicePlan(
+            JsonSpliceOutcome.Renamed,
+            JsonInsertionPoint.NonEmptyContainer,
+            start,
+            name,
+            renamed);
+    }
+
+    /// <summary>Plans the removal of one entry, taking its separator with it.</summary>
+    /// <param name="document">The document's bytes, as read from disk.</param>
+    /// <param name="serverKeyPath">The key path from the root to the map of servers.</param>
+    /// <param name="name">The entry name to remove.</param>
+    /// <returns>
+    /// The document without the entry, or the refusal and the input unchanged.
+    /// </returns>
+    /// <remarks>
+    /// The removed range is the member, the comma that separates it from its neighbour, and the
+    /// whitespace back to the previous line, so taking a duplicate out leaves no blank row and no
+    /// dangling comma in its place. Everything outside that range is the operator's text and is
+    /// copied through untouched.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The key path is empty, or the name is blank.</exception>
+    public static JsonSplicePlan PlanRemoval(
+        byte[] document,
+        IReadOnlyList<string> serverKeyPath,
+        string name)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(serverKeyPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        if (serverKeyPath.Count == 0)
+        {
+            throw new ArgumentException(
+                "a server container is reached by at least one key, so the key path cannot be empty.",
+                nameof(serverKeyPath));
+        }
+
+        int bomLength = ByteOrderMarkLength(document);
+        ReadOnlySpan<byte> body = document.AsSpan(bomLength);
+        ContainerScan scan = LocateContainer(body, serverKeyPath);
+
+        if (scan.Kind != ContainerKind.Found)
+            return Refuse(scan.Kind switch
+            {
+                ContainerKind.Malformed => JsonSpliceOutcome.MalformedDocument,
+                ContainerKind.Foreign => JsonSpliceOutcome.ForeignDocument,
+                _ => JsonSpliceOutcome.ServerAbsent
+            }, document, scan.Message);
+
+        MemberSpan? member = scan.Find(name);
+
+        if (member is null)
+        {
+            return Refuse(
+                JsonSpliceOutcome.ServerAbsent,
+                document,
+                $"the document holds no entry named '{name}' under '{string.Join('.', serverKeyPath)}'");
+        }
+
+        (int Start, int End) range = RemovalRange(body, member.Value);
+        int start = bomLength + range.Start;
+        int end = bomLength + range.End;
+
+        byte[] removed = [.. document.AsSpan(0, start), .. document.AsSpan(end)];
+
+        if (!VerifyRemoval(document, removed, serverKeyPath, name))
+        {
+            return Refuse(
+                JsonSpliceOutcome.UnsafeSplice,
+                document,
+                $"removing '{name}' did not re-parse to the same document without that entry, so nothing was removed");
+        }
+
+        return new JsonSplicePlan(
+            JsonSpliceOutcome.Removed,
+            JsonInsertionPoint.NonEmptyContainer,
+            start,
+            [],
+            removed);
+    }
+
+    /// <summary>
+    /// The bytes one member occupies: its own whitespace and separator included, so a removal leaves
+    /// neither a blank row nor a doubled or dangling comma.
+    /// </summary>
+    private static (int Start, int End) RemovalRange(ReadOnlySpan<byte> body, MemberSpan member)
+    {
+        int start = member.Start;
+
+        while (start > 0 && body[start - 1] is (byte)' ' or (byte)'\t')
+            start--;
+
+        int afterValue = member.ValueEnd;
+        int probe = afterValue;
+
+        while (probe < body.Length && body[probe] is (byte)' ' or (byte)'\t')
+            probe++;
+
+        if (probe < body.Length && body[probe] == (byte)',')
+        {
+            int end = probe + 1;
+
+            if (end < body.Length && body[end] == (byte)'\r')
+                end++;
+
+            if (end < body.Length && body[end] == (byte)'\n')
+                end++;
+
+            return (start, end);
+        }
+
+        // The member is the last one and has no comma of its own, so the comma that separates it
+        // from its neighbour is the one before it.
+        int comma = start;
+
+        while (comma > 0 && body[comma - 1] is (byte)' ' or (byte)'\t')
+            comma--;
+
+        return comma > 0 && body[comma - 1] == (byte)','
+            ? (comma - 1, afterValue)
+            : (start, afterValue);
+    }
+
+    /// <summary>
+    /// Whose member list at the container, read from the document itself, is the model a splice is
+    /// checked against.
+    /// </summary>
+    private static bool VerifyRename(
+        byte[] before,
+        byte[] after,
+        IReadOnlyList<string> keyPath,
+        string oldName,
+        string newName)
+    {
+        if (!TryModel(before, keyPath, out IReadOnlyList<MemberModel> input) ||
+            !TryModel(after, keyPath, out IReadOnlyList<MemberModel> result))
+        {
+            return false;
+        }
+
+        int renamed = 0;
+        List<MemberModel> expected = new(input.Count);
+
+        foreach (MemberModel member in input)
+        {
+            if (string.Equals(member.Name, oldName, StringComparison.Ordinal))
+            {
+                renamed++;
+                expected.Add(member with { Name = newName });
+                continue;
+            }
+
+            expected.Add(member);
+        }
+
+        return renamed == 1 && SameModel(expected, result);
+    }
+
+    private static bool VerifyRemoval(
+        byte[] before,
+        byte[] after,
+        IReadOnlyList<string> keyPath,
+        string name)
+    {
+        if (!TryModel(before, keyPath, out IReadOnlyList<MemberModel> input) ||
+            !TryModel(after, keyPath, out IReadOnlyList<MemberModel> result))
+        {
+            return false;
+        }
+
+        int at = -1;
+
+        for (int index = 0; index < input.Count; index++)
+        {
+            if (!string.Equals(input[index].Name, name, StringComparison.Ordinal))
+                continue;
+
+            at = index;
+            break;
+        }
+
+        if (at < 0)
+            return false;
+
+        List<MemberModel> expected = [.. input];
+        expected.RemoveAt(at);
+
+        return SameModel(expected, result);
+    }
+
+    private static bool SameModel(IReadOnlyList<MemberModel> expected, IReadOnlyList<MemberModel> actual)
+    {
+        if (expected.Count != actual.Count)
+            return false;
+
+        for (int index = 0; index < expected.Count; index++)
+        {
+            if (!string.Equals(expected[index].Name, actual[index].Name, StringComparison.Ordinal) ||
+                !string.Equals(expected[index].Raw, actual[index].Raw, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The ordered member list at a key path, as a name and the value's own text.
+    /// </summary>
+    /// <remarks>
+    /// The value's raw text is what makes this a model of the document rather than of its names: a
+    /// splice that corrupted a byte inside an entry would leave the name list intact and be caught
+    /// here, and one that only moved a name would not be reported as a corruption.
+    /// </remarks>
+    private static bool TryModel(byte[] document, IReadOnlyList<string> keyPath, out IReadOnlyList<MemberModel> model)
+    {
+        model = [];
+
+        try
+        {
+            using JsonDocument parsed = JsonDocument.Parse(
+                document.AsMemory(ByteOrderMarkLength(document)),
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+
+            JsonElement current = parsed.RootElement;
+
+            if (current.ValueKind != JsonValueKind.Object)
+                return false;
+
+            foreach (string key in keyPath)
+            {
+                if (!current.TryGetProperty(key, out JsonElement next) || next.ValueKind != JsonValueKind.Object)
+                    return false;
+
+                current = next;
+            }
+
+            List<MemberModel> members = [];
+            foreach (JsonProperty property in current.EnumerateObject())
+                members.Add(new MemberModel(property.Name, property.Value.GetRawText()));
+
+            model = members;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Walks the document to the server container and lists its members' byte ranges, or reports why
+    /// it cannot.
+    /// </summary>
+    private static ContainerScan LocateContainer(ReadOnlySpan<byte> body, IReadOnlyList<string> keyPath)
+    {
+        try
+        {
+            Utf8JsonReader reader = new(
+                body,
+                new JsonReaderOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+
+            if (!reader.Read())
+                return ContainerScan.Malformed("the document is empty");
+
+            if (reader.TokenType != JsonTokenType.StartObject)
+                return ContainerScan.Foreign("its root is not a JSON object");
+
+            int level = 0;
+
+            while (true)
+            {
+                bool descended = false;
+
+                while (reader.Read())
+                {
+                    if (reader.TokenType == JsonTokenType.EndObject)
+                        break;
+
+                    if (reader.TokenType != JsonTokenType.PropertyName)
+                        return ContainerScan.Malformed($"expected a property name in a JSON object, found {reader.TokenType}");
+
+                    if (!string.Equals(reader.GetString(), keyPath[level], StringComparison.Ordinal))
+                    {
+                        reader.Skip();
+                        continue;
+                    }
+
+                    if (!reader.Read())
+                        return ContainerScan.Malformed($"the document ended after the property name '{keyPath[level]}'");
+
+                    if (reader.TokenType != JsonTokenType.StartObject)
+                        return ContainerScan.Foreign($"'{keyPath[level]}' is not a JSON object");
+
+                    descended = true;
+                    break;
+                }
+
+                if (!descended)
+                    return ContainerScan.Missing($"the document has no '{string.Join('.', keyPath)}'");
+
+                level++;
+
+                if (level < keyPath.Count)
+                    continue;
+
+                List<MemberSpan> members = [];
+                ContainerScan refusal = ReadMembers(ref reader, members);
+
+                return refusal.Kind == ContainerKind.Found
+                    ? ContainerScan.Found(members)
+                    : refusal;
+            }
+        }
+        catch (JsonException exception)
+        {
+            return ContainerScan.Malformed(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Reads one object's members into <paramref name="members"/>, and then the rest of the document,
+    /// so trailing garbage is a malformed document rather than a splice target with a tail nobody
+    /// looked at.
+    /// </summary>
+    private static ContainerScan ReadMembers(ref Utf8JsonReader reader, List<MemberSpan> members)
+    {
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+            {
+                Drain(ref reader);
+                return ContainerScan.Found(members);
+            }
+
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                return ContainerScan.Malformed($"expected a property name in a JSON object, found {reader.TokenType}");
+
+            string name = reader.GetString() ?? string.Empty;
+            int start = checked((int)reader.TokenStartIndex);
+            int rawLength = reader.ValueSpan.Length + 2;
+            bool escaped = reader.ValueIsEscaped;
+
+            if (!reader.Read())
+                return ContainerScan.Malformed($"the document ended after the property name '{name}'");
+
+            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                reader.Skip();
+
+            members.Add(new MemberSpan(name, start, rawLength, checked((int)reader.BytesConsumed), escaped));
+        }
+
+        return ContainerScan.Malformed("the document ended before its JSON object closed");
     }
 
     /// <summary>
@@ -509,4 +979,77 @@ public static class JsonServerSplice
     /// <param name="TokenType">The token the property's value starts with, when found.</param>
     /// <param name="Start">The value's body-relative start offset, when found.</param>
     private readonly record struct PropertyScan(bool Found, bool Empty, JsonTokenType TokenType, int Start);
+
+    /// <summary>What walking to a server container established.</summary>
+    private enum ContainerKind
+    {
+        /// <summary>The container was reached and its members read.</summary>
+        Found,
+
+        /// <summary>The document is not valid JSON.</summary>
+        Malformed,
+
+        /// <summary>The document is JSON but the key path does not reach an object.</summary>
+        Foreign,
+
+        /// <summary>The document is the harness's shape but declares no container at that path.</summary>
+        Missing
+    }
+
+    /// <summary>
+    /// The container walk's answer: its members, or why there are none.
+    /// </summary>
+    /// <param name="Kind">What the walk established.</param>
+    /// <param name="Members">The container's members, in document order, when found.</param>
+    /// <param name="Message">Why the walk could not answer, when it could not.</param>
+    private readonly record struct ContainerScan(
+        ContainerKind Kind,
+        IReadOnlyList<MemberSpan> Members,
+        string? Message)
+    {
+        public static ContainerScan Found(IReadOnlyList<MemberSpan> members) =>
+            new(ContainerKind.Found, members, null);
+
+        public static ContainerScan Malformed(string message) =>
+            new(ContainerKind.Malformed, [], $"it is not valid JSON: {message}");
+
+        public static ContainerScan Foreign(string message) =>
+            new(
+                ContainerKind.Foreign,
+                [],
+                $"it is not a document this harness could load: {message}");
+
+        public static ContainerScan Missing(string message) =>
+            new(ContainerKind.Missing, [], message);
+
+        /// <summary>The first member carrying a name, or null when none does.</summary>
+        public MemberSpan? Find(string name)
+        {
+            foreach (MemberSpan member in Members)
+            {
+                if (string.Equals(member.Name, name, StringComparison.Ordinal))
+                    return member;
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>One member of a server container, as the byte range its name occupies.</summary>
+    /// <param name="Name">The decoded property name.</param>
+    /// <param name="Start">The body-relative index of the name's opening quote.</param>
+    /// <param name="RawLength">The quoted token's length in bytes, quotes included.</param>
+    /// <param name="ValueEnd">The body-relative index just past the member's value.</param>
+    /// <param name="Escaped">Whether the name is written with a JSON escape.</param>
+    private readonly record struct MemberSpan(
+        string Name,
+        int Start,
+        int RawLength,
+        int ValueEnd,
+        bool Escaped);
+
+    /// <summary>One member of a server container, as the model a splice is checked against.</summary>
+    /// <param name="Name">The property name.</param>
+    /// <param name="Raw">The value's own JSON text.</param>
+    private readonly record struct MemberModel(string Name, string Raw);
 }

@@ -36,7 +36,7 @@ namespace KyberWeave.Tests;
 [Collection(DocsInitMcpCheckEnvironmentCollection.Name)]
 public sealed class DocsInitMcpCheckTests : IDisposable
 {
-    private const string KyberWeaveServer = "kyber-weave";
+    private const string KyberWeaveServer = "kw-docs";
 
     private const string McpBinary = "kyber-weave-mcp";
 
@@ -422,7 +422,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "."]
                 }
@@ -524,7 +524,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "."]
                 }
@@ -635,7 +635,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "/somewhere/else"]
                 }

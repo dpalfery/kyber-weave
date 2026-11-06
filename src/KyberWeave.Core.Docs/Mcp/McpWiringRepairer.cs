@@ -525,6 +525,24 @@ public static class McpWiringRepairer
                         + "the repair never rewrites a document it could not read.");
             }
 
+            // An entry written under a retired key is the same server under the name this version
+            // no longer uses. Wiring the shipped name beside it would leave one server under two
+            // names in one file, and the rename is what settles which name the file keeps. This is
+            // the more specific refusal, so it is made before the ordinary name collision: an
+            // operator whose file holds the retired key needs the migration, not "delete it".
+            if (HoldsRetiredServer(original, row, declared) is { } retired)
+            {
+                return Refused(
+                    harness,
+                    path,
+                    [retired.NewKey],
+                    RefusalCode,
+                    $"{path} still holds the retired key '{retired.OldKey}' for '{retired.NewKey}', which the repair never "
+                        + "adds beside: one server under two names is one file no harness can read unambiguously",
+                    $"Run {McpServerRenamer.MigrateCommand} --target {harness} to rename '{retired.OldKey}' to "
+                        + $"'{retired.NewKey}', then run the wire command again. Nothing was written.");
+            }
+
             foreach (RequiredMcpServer server in declared)
             {
                 if (!HoldsServer(original, row.ServerKeyPath, server.Name))
@@ -740,6 +758,65 @@ public static class McpWiringRepairer
         return TryFindContainer(parsed.RootElement, serverKeyPath, out JsonElement container, out _)
             && container.ValueKind == JsonValueKind.Object
             && container.TryGetProperty(name, out _);
+    }
+
+    /// <summary>
+    /// The retired key a file holds for a server the repair would add, when that entry's launch
+    /// proves the two names are one server.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two keys are the same server here when the rule's shipped name is what the repair would add,
+    /// or when the retired key itself is what the declaration still names. The second case is the
+    /// awkward one — a host that has not migrated its declaration yet — and it is the case the wire
+    /// would otherwise satisfy by adding nothing, because the entry it was asked for is already
+    /// there under the name it was asked under.
+    /// </para>
+    /// <para>
+    /// A key alone is never the reason for a refusal. The entry's body has to launch the shipped
+    /// binary, with the argument that server's entry requires, exactly as the migration proves it:
+    /// a file that merely has an entry called <c>kyber-weave</c> is somebody else's server, and the
+    /// repair is right to treat it as an ordinary name collision.
+    /// </para>
+    /// </remarks>
+    private static McpRenameRule? HoldsRetiredServer(
+        byte[] document,
+        HarnessMcpEntry row,
+        IReadOnlyList<RequiredMcpServer> declared)
+    {
+        using JsonDocument? parsed = ReadJson(document, out _);
+
+        if (parsed is null ||
+            !TryFindContainer(parsed.RootElement, row.ServerKeyPath, out JsonElement container, out _) ||
+            container.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (RequiredMcpServer server in declared)
+        {
+            foreach (McpRenameRule rule in McpServerRenamer.Rules)
+            {
+                if (!string.Equals(rule.NewKey, server.Name, StringComparison.Ordinal) &&
+                    !string.Equals(rule.OldKey, server.Name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!container.TryGetProperty(rule.OldKey, out JsonElement entry))
+                    continue;
+
+                McpWiringInspector.EntryBody body = McpWiringInspector.ReadEntryBody(entry, row.CommandShape);
+
+                if (body.Reading == McpWiringInspector.McpEntryReading.Readable &&
+                    McpServerRenamer.IsProven(rule, body.Tokens))
+                {
+                    return rule;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

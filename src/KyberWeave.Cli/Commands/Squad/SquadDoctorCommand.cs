@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -135,6 +137,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
+        // 3c. Retired MCP server keys. Read only, and it deliberately does not move the exit code: a
+        // leftover is a rename this install has not been asked to make, not a broken prerequisite.
+        ReportRetiredMcpKeys(workingDirectory);
+
         // 4. Canonical Source (Maintainer check - only when inside repository root)
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
@@ -212,6 +218,43 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     public int Execute(CommandContext context, SquadDoctorSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reports every harness in this project still wired under a retired MCP server key, and the
+    /// command that renames it.
+    /// </summary>
+    /// <remarks>
+    /// Doctor is where an operator looks when something is off, so a leftover has to be named here.
+    /// It is a warning about configuration rather than a failed prerequisite, and the exit code does
+    /// not move on it: a healthy install that has not yet been asked to rename its keys is still
+    /// healthy. Nothing is written; the rename belongs to <c>docs mcp-migrate</c>.
+    /// </remarks>
+    private static void ReportRetiredMcpKeys(string workingDirectory)
+    {
+        IReadOnlyList<McpRenameChange> leftovers =
+        [
+            .. McpServerRenamer.Scan(workingDirectory)
+                .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
+        ];
+
+        if (leftovers.Count == 0)
+            return;
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            foreach (McpRenameChange leftover in leftovers)
+            {
+                string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
+
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] {Markup.Escape(McpServerRenamer.RenameCode)} {file}: "
+                    + Markup.Escape(TerminalText.Line(leftover.Message)));
+
+                AnsiConsole.MarkupLine(
+                    $"         Run: [grey]{Markup.Escape(McpServerRenamer.MigrateCommand + " --target " + leftover.Harness)}[/]");
+            }
+        });
     }
 
     /// <summary>

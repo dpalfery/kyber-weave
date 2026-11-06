@@ -39,7 +39,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class DocsMcpWireCommandTests : IDisposable
 {
-    private const string ServerName = "kyber-weave";
+    private const string ServerName = "kw-docs";
 
     /// <summary>
     /// The file name the stand-in for the shipped server carries. A first-party declaration is a claim
