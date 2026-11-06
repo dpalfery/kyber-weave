@@ -95,11 +95,13 @@ tracked diffs; afterwards undo only tracked edits init introduced. Blocked or un
 init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
-Before `docs/` greps, use Kyber-Weave MCP `docs_explore`; before contract changes,
-`docs_for_symbol`; for taxonomy, `docs_glossary` and `docs_analysis_candidates`. No CLI
-equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
-current guidance. Confirm each response's `provenance:` `root=` matches
-`git rev-parse --show-toplevel` (`docs_status`); a mismatch means the wrong repository.
+Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_documentation`;
+before contract changes, `docs_find_documents_citing_code_symbol`; for taxonomy,
+`docs_look_up_glossary_term_definition` and `docs_find_duplicates_conflicts_ambiguous_terms`.
+No CLI equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
+current guidance. The server's configuration key is `kw-docs`. Confirm each response's
+`provenance:` `root=` matches `git rev-parse --show-toplevel`
+(`docs_get_source_repository_and_revision`); a mismatch means the wrong repository.
 
 ## Non-negotiables
 
