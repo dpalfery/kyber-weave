@@ -82,6 +82,39 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
     }
 
     [Fact]
+    public void Render_Kilo_EmitsDefaultExportObjectWithServer()
+    {
+        // Kilo is an OpenCode fork whose loader reads the default export as
+        // { id, server }, not OpenCode's { id, setup }.
+        string content = ArbiterPluginShim.Render("kilo");
+
+        Assert.Contains("export default", content, StringComparison.Ordinal);
+        Assert.Contains("id: \"kyber-arbiter\"", content, StringComparison.Ordinal);
+        Assert.Contains("server: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("setup: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.Contains("export const KyberArbiter", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_Pi_EmitsBareFunctionDefaultExport()
+    {
+        // Pi's extension loader rejects a non-function default export
+        // (typeof factory !== "function" returns undefined), so the pi token
+        // must default-export the plugin function itself.
+        string content = ArbiterPluginShim.Render("pi");
+
+        Assert.Contains("export default KyberArbiter;", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("setup: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("server: KyberArbiter", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_UnknownHarnessToken_ThrowsInsteadOfGuessingALoaderShape()
+    {
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render("warp"));
+    }
+
+    [Fact]
     public async Task RenderAsync_Shim_AssignsArgsAndAppendsOutputOnBlock()
     {
         string content = await ShimContentAsync();

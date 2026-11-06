@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-05
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -30,6 +30,7 @@ code-refs:
   - PluginHookAdapter
   - FactoryHooksShadowing
   - ArbiterTools
+  - ArbiterPluginShim
 ---
 
 # Kyber Arbiter architecture
@@ -245,6 +246,11 @@ Per-harness notes:
   writes a `kyber-arbiter.plugin-event/v1` envelope, blocks by throwing, and strips the
   routing headers by assigning `output.args`. The target comes from `args.subagent_type`
   and the prompt from `args.prompt`; returns pair by `callID`. No trust gate is documented.
+  Both harnesses' loaders read only the renderer's default export: OpenCode v2 accepts
+  `{ id, setup }` while Kilo's fork accepts `{ id, server }`, so the shared generator
+  parameterizes the default export by harness token (`ArbiterPluginShim.Render`) and
+  keeps the named `KyberArbiter` export alongside it. A named-only render fails OpenCode
+  v2's loader with `SchemaError` and the plugin silently never loads.
 - **Antigravity** can dispatch several subagents in one call (`toolCall.args.Subagents`,
   each element with its own target and prompt); the call is denied when any element
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are

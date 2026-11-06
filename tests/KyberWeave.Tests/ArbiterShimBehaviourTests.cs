@@ -104,6 +104,64 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         Assert.StartsWith(expected, output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OpenCodeShim_DefaultExportLoadsThroughSetupAndBlocksOnBlock()
+    {
+        // The OpenCode v2 loader reads only the default export { id, setup }.
+        // Loading through the named export (as the fail-closed table above does)
+        // cannot see the SchemaError the real loader raises for that shape, so
+        // this test imports the default export exactly as the loader does.
+        string bun = RequireBun();
+        WriteFakeBinary("{\"decision\":\"block\",\"reason\":\"nope\"}", "0");
+        PlantRepositoryMarker();
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), ArbiterPluginShim.Render("opencode"));
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import plugin from "./shim.ts";
+            const hooks: any = await plugin.setup({ directory: process.cwd() } as any);
+            try {
+              await hooks["tool.execute.before"](
+                { tool: "task", callID: "c1", sessionID: "s1", args: { subagent_type: "x", prompt: "p" } },
+                { args: {} });
+              console.log("ALLOWED");
+            } catch (e) {
+              console.log("BLOCKED:" + String(e));
+            }
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.StartsWith(Blocked, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task KiloShim_DefaultExportLoadsThroughServerAndBlocksOnBlock()
+    {
+        // The Kilo loader reads the default export { id, server }. Loading
+        // through the named export cannot see a missing or wrong-shape default
+        // export, so this test mirrors the loader contract like the OpenCode
+        // case above.
+        string bun = RequireBun();
+        WriteFakeBinary("{\"decision\":\"block\",\"reason\":\"nope\"}", "0");
+        PlantRepositoryMarker();
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), ArbiterPluginShim.Render("kilo"));
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import plugin from "./shim.ts";
+            const hooks: any = await plugin.server({ directory: process.cwd() } as any);
+            try {
+              await hooks["tool.execute.before"](
+                { tool: "task", callID: "c1", sessionID: "s1", args: { subagent_type: "x", prompt: "p" } },
+                { args: {} });
+              console.log("ALLOWED");
+            } catch (e) {
+              console.log("BLOCKED:" + String(e));
+            }
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.StartsWith(Blocked, output, StringComparison.Ordinal);
+    }
+
     [Theory]
     [MemberData(nameof(Cases))]
     public async Task PiExtension_FailsClosedUnlessTheHostAllowsOnPurpose(string stdout, string exit, string expected)

@@ -10,11 +10,19 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <remarks>
 /// <para>
 /// The generator is parameterized by harness token because Kilo takes the same shim
-/// (task 16.2): only the <c>--harness</c> argv element and the envelope's
-/// <c>harness</c> field vary. The spawned argv, the
+/// (task 16.2): the <c>--harness</c> argv element, the envelope's <c>harness</c>
+/// field, and the default-export shape vary. The spawned argv, the
 /// <c>kyber-arbiter.plugin-event/v1</c> envelope shape
 /// (<c>{schema, harness, phase, tool, call-id, session, cwd, args, result}</c>),
 /// and the <c>{decision, reason, args}</c> reply contract stay identical.
+/// </para>
+/// <para>
+/// The default export is the shape each harness's loader reads: OpenCode v2
+/// reads only the default export and accepts <c>{ id, setup }</c>; Kilo's fork
+/// reads <c>{ id, server }</c>; Pi's extension loader requires the default
+/// export to be a bare function. Emitting only the named
+/// <c>KyberArbiter</c> export left the plugin unloaded under OpenCode v2
+/// (fail-open) because its loader never saw a default export.
 /// </para>
 /// <para>
 /// The shim spawns by argv with <c>Bun.spawn</c> and no shell, writes the envelope
@@ -61,9 +69,25 @@ public static class ArbiterPluginShim
                 nameof(harnessToken));
         }
 
+        // The default export is the only thing each harness loader reads, and the
+        // three loaders disagree on its shape: OpenCode v2 wants { id, setup },
+        // Kilo's fork wants { id, server }, and Pi's loader requires a bare
+        // function. An unknown harness has no known loader contract, so it is
+        // rejected rather than guessed at with another harness's shape.
+        string defaultExport = harnessToken switch
+        {
+            "opencode" => "export default {\n  id: \"kyber-arbiter\",\n  setup: KyberArbiter,\n};",
+            "kilo" => "export default {\n  id: \"kyber-arbiter\",\n  server: KyberArbiter,\n};",
+            "pi" => "export default KyberArbiter;",
+            _ => throw new ArgumentException(
+                $"Arbiter plugin harness token '{harnessToken}' has no known loader " +
+                $"default-export shape: expected one of opencode, kilo, pi.",
+                nameof(harnessToken)),
+        };
+
         // JSON string encoding, so the token lands inside the TypeScript literal as data.
         string literal = JsonSerializer.Serialize(harnessToken);
-        return $$"""
+        string template = $$"""
             import type { Plugin } from "@opencode-ai/plugin";
             import { existsSync } from "node:fs";
             import { dirname, join, resolve } from "node:path";
@@ -257,5 +281,7 @@ public static class ArbiterPluginShim
               },
             });
             """;
+
+        return template + "\n" + defaultExport;
     }
 }

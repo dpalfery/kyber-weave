@@ -113,6 +113,21 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
+    public void Render_Opencode_EmitsDefaultExportObjectWithSetup()
+    {
+        // OpenCode v2.2.5's loader reads only the default export and accepts
+        // { id, setup }; a named-only export fails with SchemaError and the
+        // plugin silently never loads (fail-open).
+        string content = ArbiterPluginShim.Render("opencode");
+
+        Assert.Contains("export default", content, StringComparison.Ordinal);
+        Assert.Contains("id: \"kyber-arbiter\"", content, StringComparison.Ordinal);
+        Assert.Contains("setup: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("server: KyberArbiter", content, StringComparison.Ordinal);
+        Assert.Contains("export const KyberArbiter", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RenderAsync_Shim_AssignsArgsAndAppendsOutputOnBlock()
     {
         string content = await ShimContentAsync();
