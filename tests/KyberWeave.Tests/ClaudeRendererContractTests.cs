@@ -65,7 +65,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         "WebSearch",
         "Agent",
         "mcp__codegraph__*",
-        "mcp__kyber-weave__*",
+        "mcp__kw-docs__*",
         "mcp__context7__*"
     ];
 
@@ -209,14 +209,14 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 Assert.DoesNotContain(tools, tool => tool.StartsWith("Agent", StringComparison.Ordinal));
             }
 
-            // MCP is two rules. kyber-weave follows the file-read entitlement alone, the pure
+            // MCP is two rules. kw-docs follows the file-read entitlement alone, the pure
             // orchestrator included; codegraph and context7 keep the orchestrator carve-out.
             bool grantsKyberWeave =
                 SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude);
             Assert.True(
-                grantsKyberWeave == tools.Contains("mcp__kyber-weave__*", StringComparer.Ordinal),
+                grantsKyberWeave == tools.Contains("mcp__kw-docs__*", StringComparer.Ordinal),
                 $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') should "
-                + $"{(grantsKyberWeave ? "carry" : "withhold")} 'mcp__kyber-weave__*'.");
+                + $"{(grantsKyberWeave ? "carry" : "withhold")} 'mcp__kw-docs__*'.");
 
             bool grantsOrchestratorExcluded =
                 SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, SquadTarget.Claude);
@@ -244,16 +244,16 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
-        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]);
+        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
-        AssertTools(result, "bug-crusher-investigator", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch"]);
+        AssertTools(result, "bug-crusher-investigator", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch"]);
 
         // Degradations: 'ask' capabilities produce safety-narrowed; allowed network.publish
         // and delegate-allow rosters produce permission-not-expressible. An agent may carry
@@ -803,7 +803,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
     /// <summary>
     /// An orchestrator whose own capability profile denies <c>filesystem.read</c> renders a note
-    /// that names <c>mcp__kyber-weave__*</c> among the withheld wildcards and gives the read denial
+    /// that names <c>mcp__kw-docs__*</c> among the withheld wildcards and gives the read denial
     /// as the reason.
     /// </summary>
     /// <remarks>
@@ -845,7 +845,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         // The note states what the subagent file withholds, so the file has to withhold all three:
         // a receipt naming a server the tools list still carries is the same falsehood reversed.
         IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
-        Assert.DoesNotContain("mcp__kyber-weave__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__kw-docs__*", conductorTools, StringComparer.Ordinal);
         Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
         Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
 
@@ -855,10 +855,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
                  string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
         Assert.NotNull(record.Details);
 
-        // The withholding list names kyber-weave beside the two carve-out servers: the grant branch
+        // The withholding list names kw-docs beside the two carve-out servers: the grant branch
         // omits the third wildcard, so its absence would recreate the defect this pins.
         Assert.Contains(
-            "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*",
+            "no mcp__codegraph__*, mcp__context7__*, mcp__kw-docs__*",
             record.Details,
             StringComparison.Ordinal);
 
@@ -875,11 +875,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The pure orchestrator is granted <c>kyber-weave</c> and keeps its withholding on
+    /// The pure orchestrator is granted <c>kw-docs</c> and keeps its withholding on
     /// <c>codegraph</c> and <c>context7</c>.
     /// </summary>
     /// <remarks>
-    /// <c>kyber-weave</c> carries <c>agent_coding_standards</c> — the tool that hands an agent the
+    /// <c>kw-docs</c> carries <c>docs_get_coding_standard_for_technology</c> — the tool that hands an agent the
     /// standards it must follow — so withholding it from the role that assigns work withheld it
     /// from the one role that decides which standards apply to whom. The other two servers keep
     /// the carve-out: a role that only routes work has no use for code-graph or library lookups.
@@ -900,7 +900,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
-        Assert.Contains("mcp__kyber-weave__*", conductorTools, StringComparer.Ordinal);
+        Assert.Contains("mcp__kw-docs__*", conductorTools, StringComparer.Ordinal);
         Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
         Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
 
@@ -911,8 +911,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
             IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
             Assert.True(
                 SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude)
-                    == tools.Contains("mcp__kyber-weave__*", StringComparer.Ordinal),
-                $"Agent '{agent.Name}' kyber-weave wildcard does not follow the source-computed "
+                    == tools.Contains("mcp__kw-docs__*", StringComparer.Ordinal),
+                $"Agent '{agent.Name}' kw-docs wildcard does not follow the source-computed "
                 + "entitlement.");
             foreach (string wildcard in new[] { "mcp__codegraph__*", "mcp__context7__*" })
             {
@@ -936,7 +936,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.NotNull(record.Details);
         Assert.Contains("mcp__codegraph__", record.Details, StringComparison.Ordinal);
         Assert.Contains("mcp__context7__", record.Details, StringComparison.Ordinal);
-        Assert.DoesNotContain("mcp__kyber-weave__", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcp__kw-docs__", record.Details, StringComparison.Ordinal);
     }
 
     private static bool IsDocumentedClaudeTool(string tool) =>

@@ -2,11 +2,11 @@
  * The published analytics catalog: authoritative grains, permitted
  * dimensions, metric ids with their operators, and the bounded query
  * limits. The source-to-metric mapping lives here so every transport
- * rediscovers the same contract from `dash_catalog`.
+ * rediscovers the same contract from `dash_list_queryable_metrics_dimensions_limits`.
  *
  * <remarks>
  * Model, tool, MCP server and skill detail stay out of the dimensions on
- * purpose: per-model/tool drill-down reads through `dash_inspect`, never
+ * purpose: per-model/tool drill-down reads through `dash_read_captured_run_session_or_turn_context`, never
  * through a grouped aggregate.
  * </remarks>
  */
@@ -36,7 +36,7 @@ export function isMetricId(value: unknown): value is AnalyticsMetricId {
   return typeof value === 'string' && (METRICS as readonly string[]).includes(value)
 }
 
-/** Operators each metric supports, as published by `dash_catalog`. */
+/** Operators each metric supports, as published by `dash_list_queryable_metrics_dimensions_limits`. */
 export function metricOperators(id: AnalyticsMetricId): readonly string[] {
   if (id === 'session_count') return ['count']
   if (id === 'cache_read_ratio') return ['ratio']

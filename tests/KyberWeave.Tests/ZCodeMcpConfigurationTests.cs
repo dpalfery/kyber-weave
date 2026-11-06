@@ -17,7 +17,7 @@ public sealed class ZCodeMcpConfigurationTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
 
-    private static readonly string[] Required = ["codegraph", "context7", "kyber-weave"];
+    private static readonly string[] Required = ["codegraph", "context7", "kw-docs"];
 
     private static string ServersConfig(params string[] serverNames)
     {
@@ -84,7 +84,7 @@ public sealed class ZCodeMcpConfigurationTests : IDisposable
             working,
             Files(new(StringComparer.Ordinal)
             {
-                [Path.Combine(root, "cli", "config.json")] = ServersConfig("codegraph", "kyber-weave"),
+                [Path.Combine(root, "cli", "config.json")] = ServersConfig("codegraph", "kw-docs"),
             }));
 
         Assert.Equal(["context7"], report.MissingServers);
@@ -114,7 +114,7 @@ public sealed class ZCodeMcpConfigurationTests : IDisposable
             Files(new(StringComparer.Ordinal)
             {
                 [Path.Combine(root, "cli", "config.json")] = ServersConfig("codegraph"),
-                [projectConfig] = ServersConfig("context7", "kyber-weave"),
+                [projectConfig] = ServersConfig("context7", "kw-docs"),
             }));
 
         Assert.Empty(report.MissingServers);
@@ -217,7 +217,7 @@ public sealed class ZCodeMcpConfigurationTests : IDisposable
                 "servers": {
                   "codegraph": { "command": "codegraph" },
                   "context7": { "url": "https://mcp.context7.com/mcp" },
-                  "kyber-weave": { "command": "kyber-weave-mcp" },
+                  "kw-docs": { "command": "kyber-weave-mcp" },
                 },
               },
             }

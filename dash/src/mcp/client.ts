@@ -64,7 +64,7 @@ function applyWindowDays(out: Record<string, unknown>, now: () => Date): void {
 
 function toEngineBody(name: string, args: unknown, now: () => Date): Record<string, unknown> {
   const raw = isRecord(args) ?? {}
-  if (name === 'dash_search_sessions') {
+  if (name === 'dash_search_sessions_by_text_and_scope') {
     if (typeof raw['query'] === 'string') {
       const out: Record<string, unknown> = { ...raw }
       applyWindowDays(out, now)
@@ -75,7 +75,7 @@ function toEngineBody(name: string, args: unknown, now: () => Date): Record<stri
     applyWindowDays(out, now)
     return out
   }
-  if (name === 'dash_inspect') {
+  if (name === 'dash_read_captured_run_session_or_turn_context') {
     // Complete-context requests already are the engine contract. In particular,
     // do not reinterpret their target or cursor: both are opaque evidence handles.
     if (typeof raw['mode'] === 'string' || 'target' in raw) return { ...raw }
@@ -87,7 +87,7 @@ function toEngineBody(name: string, args: unknown, now: () => Date): Record<stri
     if (typeof sessionId === 'string') return { ...rest, kind: 'session', id: sessionId }
     return { ...raw }
   }
-  if (name === 'dash_query') {
+  if (name === 'dash_query_session_cost_tokens_and_duration') {
     const out: Record<string, unknown> = { ...raw }
     if (Array.isArray(out['metrics']) && (out['metrics'] as unknown[]).every((metric) => typeof metric === 'string')) {
       out['metrics'] = (out['metrics'] as string[]).map((id) => ({ id }))
@@ -100,7 +100,7 @@ function toEngineBody(name: string, args: unknown, now: () => Date): Record<stri
     if (out['catalogVersion'] === undefined) out['catalogVersion'] = 1
     return out
   }
-  if (name === 'dash_findings' || name === 'dash_outcomes') {
+  if (name === 'dash_list_detected_context_and_tool_problems' || name === 'dash_get_run_success_or_failure_outcomes') {
     const out: Record<string, unknown> = { ...raw }
     applyWindowDays(out, now)
     return out

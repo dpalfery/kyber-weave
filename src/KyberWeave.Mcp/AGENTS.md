@@ -62,7 +62,7 @@ Write descriptions in the requester's words ("runbook", "how to run"), not the p
 consistent.
 Every tool response must also lead with the shared provenance header — the absolute root,
 short HEAD revision with dirty marker, and live document count — so a caller can tell which
-corpus answered. `CorpusProvenance` formats it, `docs_status` returns it alone, and the
+corpus answered. `CorpusProvenance` formats it, `docs_get_source_repository_and_revision` returns it alone, and the
 header is emitted whole while any budget is taken from the body.
 
 ## Staleness is handled for you

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
@@ -102,7 +103,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <b>MCP is granted by concrete tool name, and fails closed when a server is missing.</b>
 /// <c>registerMcpTools</c> admits a tool only on an exact set membership test against
 /// <c>toolAllowlist</c>, with no wildcard expansion, so <see cref="ClaudeRenderer"/>'s
-/// <c>mcp__kyber-weave__*</c> server-selector form registers nothing here — and worse, it is
+/// <c>mcp__kw-docs__*</c> server-selector form registers nothing here — and worse, it is
 /// still collected into <c>requiredServerNames</c>, so it imposes a connected-server
 /// requirement while granting no tool. This renderer therefore emits the fully qualified
 /// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> names declared by <c>toolchain.yml</c>'s
@@ -123,9 +124,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// and naming a server there adds a second, redundant failure mode.
 /// </para>
 /// <para>
-/// <b>Two MCP entitlements, not one.</b> <c>kyber-weave</c> is granted on the file-read grant
+/// <b>Two MCP entitlements, not one.</b> <c>kw-docs</c> is granted on the file-read grant
 /// alone — every profile that resolves and allows <c>filesystem.read</c>, the pure orchestrator
-/// included. That server carries <c>agent_coding_standards</c>, the tool that hands an agent the
+/// included. That server carries <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the
 /// standards it is held to, and the role that assigns work is the role deciding which standards
 /// apply to whom; withholding it withheld it from the one agent whose job depends on it
 /// (ADR 0050). <c>codegraph</c> and <c>context7</c> keep the carve-out the other targets apply:
@@ -140,7 +141,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// <b>The widened grant is a hard connected-server requirement.</b>
 /// <c>validateSubagentMcpRequirements</c> treats every enumerated name as a requirement, so
-/// <c>kyber-weave</c> becomes one for every ZCode principal, the orchestrator included:
+/// <c>kw-docs</c> becomes one for every ZCode principal, the orchestrator included:
 /// <c>squad doctor</c> fails an install without that server connected instead of it degrading to
 /// a missing tool. That is intended — the grant is only useful if the server is there — and it is
 /// recorded in ADR 0050 and the requirements row that names it. Every tool on the server is
@@ -193,10 +194,10 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
     /// <summary>
     /// The Arbiter's MCP server. It is excluded from the standard MCP grant and granted only
     /// through <see cref="GrantsArbiter"/>, so a capability profile that allows
-    /// <c>decision.query</c> reaches <c>arbiter_evaluate</c> without also gaining the
+    /// <c>decision.query</c> reaches <c>arbiter_evaluate_agent_dispatch_or_return</c> without also gaining the
     /// documentation and code-graph servers.
     /// </summary>
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = McpServerNames.Arbiter;
 
     private const string ArbiterDecisionCapability = "decision.query";
 
@@ -837,7 +838,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
     /// Whether a principal is entitled to the Arbiter's tools. Two gates: the render
     /// must carry an enabled, project-scope wiring (<see cref="ArbiterEnforced"/>,
     /// decided upstream by the empty tool list), and the agent must be the conductor or
-    /// the code-reviewer — the two whose contracts call <c>arbiter_evaluate</c>. Holding
+    /// the code-reviewer — the two whose contracts call <c>arbiter_evaluate_agent_dispatch_or_return</c>. Holding
     /// <c>decision.query</c> alone does not grant the server.
     /// </summary>
     private static bool GrantsArbiter(

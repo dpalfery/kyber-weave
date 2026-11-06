@@ -14,7 +14,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <c>docs_explore</c> returns the whole winning leaf up to a 24,000-character ceiling,
+/// <c>docs_answer_question_from_repo_documentation</c> returns the whole winning leaf up to a 24,000-character ceiling,
 /// with <c>tanh</c> topic confidence and optional cursor continuation on the same leaf.
 /// </summary>
 public sealed class ExploreAnswerTests : IDisposable
@@ -22,7 +22,7 @@ public sealed class ExploreAnswerTests : IDisposable
     private const int SectionAnswerCeiling = 24000;
 
     private const string IncompletePrefix =
-        "This answer is incomplete. Call docs_explore again with the same question and cursor";
+        "This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor";
 
     private static readonly Regex ConfidenceLine = new(
         @"^confidence: (?<value>0\.\d{2}|1\.00)$",
@@ -373,8 +373,8 @@ public sealed class ExploreAnswerTests : IDisposable
             MethodInfo? method = typeof(DocsTools)
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .SingleOrDefault(candidate =>
-                    candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name == "docs_explore");
-            Assert.True(method is not null, "DocsTools must expose docs_explore.");
+                    candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name == "docs_answer_question_from_repo_documentation");
+            Assert.True(method is not null, "DocsTools must expose docs_answer_question_from_repo_documentation.");
             return method!;
         }
     }

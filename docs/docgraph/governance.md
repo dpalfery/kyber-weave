@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-05
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
@@ -35,9 +35,12 @@ anything.
 
 ### Agents and the MCP gate surface
 
-An agent with the kyber-weave documentation MCP server bound to its checkout obtains the
-same two gates through the read-only tools [`docs_validate`](mcp-runbook.md#docs_validatemergeready--false-base--originhead-charbudget--12000) and
-[`docs_drift`](mcp-runbook.md#docs_driftcharbudget--12000). Each tool runs the same Core
+An agent with the `kw-docs` documentation MCP server bound to its checkout obtains the same
+two gates through the read-only tools
+[`docs_validate_governed_document_schema`](mcp-runbook.md#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000)
+and
+[`docs_detect_drift_between_documents_and_code`](mcp-runbook.md#docs_detect_drift_between_documents_and_codecharbudget--12000).
+Each tool runs the same Core
 logic as the matching CLI command against the server's resolved repository root and returns
 the findings in the response — it is not a separate rule set and introduces no new `KW-*`
 id.
@@ -45,6 +48,10 @@ id.
 The CLI remains the path for humans, pull-request CI, and closeout commands that must exit
 non-zero on failure. Calling the MCP tools does not grant `process.execute`; read-only gate
 results are not a shell substitute.
+
+A server key that is not migrated is a wiring finding rather than a gate finding:
+`kyber-weave docs mcp-migrate` renames a proven old key and reports the rest — see the
+[MCP runbook](mcp-runbook.md#docs-mcp-migrate).
 
 A missing CodeGraph index is still one **critical** `KW-DOC-DRIFT-001` ("Drift cannot be
 verified") through either surface, not a silent pass. See [Entity drift — `docs

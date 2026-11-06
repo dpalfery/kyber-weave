@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-05
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 lead: frontmatter
@@ -59,8 +59,8 @@ code-refs:
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
 | `keywords` | Domain synonyms, acronyms, or search aliases that route natural-language and specialized queries to this document. Optional. `aliases` is accepted as an internal synonym for the same list; retrieval reads the unified `Keywords` view. Empty items fail `KW-DOC-SPEC-002`. |
-| `lead` | Optional section slug naming the leaf `docs_explore` returns when the query is an exact document `id`. Defaults to the preamble (`#`). Slugs match GitHub heading fragments for each `##` heading. |
-| `sections` | Optional map from section slug to per-section `keywords` and `code-refs`. Use `"#":` for the preamble (text before the first `##`). Those lists roll up to the document for ranking and `docs_for_symbol`; empty items in a section list fail `KW-DOC-SPEC-002`, and section `code-refs` are checked by `KW-DOC-DRIFT-001` like document-level entries. |
+| `lead` | Optional section slug naming the leaf `docs_answer_question_from_repo_documentation` returns when the query is an exact document `id`. Defaults to the preamble (`#`). Slugs match GitHub heading fragments for each `##` heading. |
+| `sections` | Optional map from section slug to per-section `keywords` and `code-refs`. Use `"#":` for the preamble (text before the first `##`). Those lists roll up to the document for ranking and `docs_find_documents_citing_code_symbol`; empty items in a section list fail `KW-DOC-SPEC-002`, and section `code-refs` are checked by `KW-DOC-DRIFT-001` like document-level entries. |
 | `code-refs` | Symbols this document formally claims to describe. Resolved against the code graph. |
 | `api-endpoints` | Exact route strings, e.g. `GET /api/me/usage`. Resolved against the code graph. |
 | `decided-by` | Ids of the ADRs that decided this document's content. |
@@ -141,7 +141,8 @@ renamed file breaks nothing and a retired id breaks loudly.
 **`code-refs` is a claim of ownership, not a mention.** A document that discusses
 `DocumentIndex` in prose has not claimed it. A document listing it in `code-refs` has,
 and is answerable for it when the symbol is renamed. That distinction is what makes
-[`docs_for_symbol`](docgraph/mcp-runbook.md) a reverse lookup rather than a grep.
+[`docs_find_documents_citing_code_symbol`](docgraph/mcp-runbook.md) a reverse lookup rather
+than a grep.
 
 ## Sections
 
@@ -159,15 +160,16 @@ ranking and drift checks stay unified.
 | Rule | Fires when |
 |---|---|
 | `KW-DOC-SPEC-008` | `lead` or a `sections` key names a slug that does not exist in the document (hint: nearest slug) |
-| `KW-DOC-SPEC-009` | The body of the declared `lead` leaf exceeds the 24,000-character `docs_explore` answer ceiling |
+| `KW-DOC-SPEC-009` | The body of the declared `lead` leaf exceeds the 24,000-character `docs_answer_question_from_repo_documentation` answer ceiling |
 | `KW-DOC-SPEC-010` | A section `keywords` entry shares no words with that section's headings or text (warning) |
 | `KW-DOC-LINK-001` | A Markdown link `#fragment` does not match any heading slug in the target (hint: nearest slug) |
 
 `KW-DOC-SPEC-002` also applies to empty or whitespace-only entries in section keyword and
 code-ref lists. `KW-DOC-DRIFT-001` also applies to symbols listed under `sections`.
 
-See [ADR 0046](adr/0046-docs-explore-section-answer.md) for how `docs_explore` selects one
-leaf, reports confidence, and caps returned prose.
+See [ADR 0046](adr/0046-docs-explore-section-answer.md) for how
+`docs_answer_question_from_repo_documentation` selects one leaf, reports confidence, and caps
+returned prose.
 
 ## Configuring the ontology
 

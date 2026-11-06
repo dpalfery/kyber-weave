@@ -1,10 +1,10 @@
 ---
 id: adr/0046-docs-explore-section-answer
-title: docs_explore Returns One Section Answer, Not a Document List
+title: docs_answer_question_from_repo_documentation Returns One Section Answer, Not a Document List
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-05
 component: DocGraph
 code-refs:
   - DocumentIndex
@@ -12,19 +12,24 @@ decided-by: []
 supersedes: []
 ---
 
-# ADR 0046: docs_explore Returns One Section Answer, Not a Document List
+# ADR 0046: docs_answer_question_from_repo_documentation Returns One Section Answer, Not a Document List
 
 ## Status
 
 Accepted, 2026-10-30.
 
+Amended 2026-11-05, in place: the tool this record governs is
+`docs_answer_question_from_repo_documentation`
+([ADR 0058](0058-mcp-servers-and-tools-are-named-by-purpose.md)); the answer contract below is
+unchanged.
+
 ## Context
 
-`docs_explore` originally returned ranked **documents** with section excerpts chosen under a
-shared `charBudget`. Agents still had to stitch partial sections together, and a plan that
-repeated a query term could outrank the ontology that actually governed frontmatter. The MCP
-runbook exposed `maxDocs` and `charBudget` on `docs_explore`, which encouraged callers to
-tune truncation instead of asking a sharper question.
+`docs_answer_question_from_repo_documentation` originally returned ranked **documents** with
+section excerpts chosen under a shared `charBudget`. Agents still had to stitch partial sections
+together, and a plan that repeated a query term could outrank the ontology that actually governed
+frontmatter. The MCP runbook exposed `maxDocs` and `charBudget` on that tool, which encouraged
+callers to tune truncation instead of asking a sharper question.
 
 Operators need one authoritative answer per question: the best matching **leaf**, with honest
 confidence when another topic nearly tied. A leaf is the preamble, the prose before a `##`
@@ -34,11 +39,11 @@ under one `##` are not rivals.
 
 ## Decision
 
-1. **`docs_explore` returns one answer blob, not a document list.** After documents clear the
-   relevance floor, leaves inside them score with claim coverage, BM25 body text, and an exact
-   document-id lead bonus on the declared lead leaf. The winning leaf's prose is returned whole
-   (subject to the ceiling below). `maxDocs` and `charBudget` are removed from `docs_explore`;
-   other MCP tools keep their existing budgets.
+1. **`docs_answer_question_from_repo_documentation` returns one answer blob, not a document
+   list.** After documents clear the relevance floor, leaves inside them score with claim
+   coverage, BM25 body text, and an exact document-id lead bonus on the declared lead leaf. The
+   winning leaf's prose is returned whole (subject to the ceiling below). `maxDocs` and
+   `charBudget` are removed from that tool; other MCP tools keep their existing budgets.
 
 2. **Section identity is `{doc-id}#{github-slug}`.** The slug is the GitHub auto-identifier for
    that leaf's heading: the `##` lead-in or the `###` subsection. The preamble uses slug `#`
@@ -49,7 +54,8 @@ under one `##` are not rivals.
 3. **Optional `lead` and `sections` frontmatter declare section identity.** `lead` names the
    slug returned for an exact document `id` query; default is `#`. `sections` maps each slug
    (including `"#":` for the preamble) to optional `keywords` and `code-refs` that roll up to
-   the document for ranking and `docs_for_symbol`. Validation uses `KW-DOC-SPEC-008` through
+   the document for ranking and `docs_find_documents_citing_code_symbol`. Validation uses
+   `KW-DOC-SPEC-008` through
    `KW-DOC-SPEC-010` and link fragments use `KW-DOC-LINK-001`; list and drift rules extend
    `KW-DOC-SPEC-002` and `KW-DOC-DRIFT-001` to section lists without renumbering existing ids.
 

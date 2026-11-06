@@ -160,7 +160,7 @@ public sealed class CommandCodeRendererContractTests
     }
 
     /// <summary>
-    /// Every agent is granted the <c>kyber-weave</c> roster by qualified name, so a subagent
+    /// Every agent is granted the <c>kw-docs</c> roster by qualified name, so a subagent
     /// reaches the coding-standards tool it must follow.
     /// </summary>
     /// <remarks>

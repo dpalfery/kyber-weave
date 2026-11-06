@@ -417,6 +417,12 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         // whether the section is empty, absent, or missing from the configuration object the loader
         // returned — and R3.4 keeps every one of them at exit zero, never at the one dereference
         // this command would otherwise throw after the corpus was already scaffolded.
+        //
+        // The retired-key notice is printed before that return on purpose: a harness still wired
+        // under the name this version no longer uses is exactly the state a repository that has not
+        // declared the new server yet is in, and the notice does not depend on the wiring check.
+        PrintRenameNotices(root);
+
         if (loaded.Config is not { Mcp.RequiredServers.Count: > 0 } config)
             return 0;
 
@@ -432,6 +438,46 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             OfferRepair(root, mcp, fixes);
 
         return 0;
+    }
+
+    /// <summary>
+    /// Names every harness still wired under a retired MCP server key, and the command that renames
+    /// it. Read only: the rename belongs to <c>docs mcp-migrate</c>, which the operator runs.
+    /// </summary>
+    /// <remarks>
+    /// This is not a wiring finding and does not move the exit code. It is the one thing the wiring
+    /// check cannot say — a file whose entry launches the shipped binary under a name the
+    /// declaration has moved past looks, to a check by name, like a harness that never had the entry
+    /// at all — and it is worth saying at adoption, which is when a repository's declaration and its
+    /// harnesses most often disagree.
+    /// </remarks>
+    private static void PrintRenameNotices(string root)
+    {
+        IReadOnlyList<McpRenameChange> leftovers =
+        [
+            .. McpServerRenamer.Scan(root)
+                .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
+        ];
+
+        if (leftovers.Count == 0)
+            return;
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            foreach (McpRenameChange leftover in leftovers)
+            {
+                string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
+
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] {Markup.Escape(McpServerRenamer.RenameCode)} {file}: "
+                    + Markup.Escape(TerminalText.Line(leftover.Message)));
+
+                AnsiConsole.MarkupLine(
+                    $"        [grey]Run: {Markup.Escape(McpServerRenamer.MigrateCommand + " --target " + leftover.Harness)}[/]");
+            }
+
+            AnsiConsole.WriteLine();
+        });
     }
 
     /// <summary>

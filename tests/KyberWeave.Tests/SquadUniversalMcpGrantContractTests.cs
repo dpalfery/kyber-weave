@@ -11,7 +11,7 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Guards that the universal <c>kyber-weave</c> grant has one meaning across every target, so the
+/// Guards that the universal <c>kw-docs</c> grant has one meaning across every target, so the
 /// per-renderer copies of the entitlement rule cannot drift apart.
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace KyberWeave.Tests;
 /// restatement. This suite compares every renderer to one source-computed projection
 /// (<see cref="SquadMcpGrantProjection"/>) and to each other.
 ///
-/// Two entitlements are asserted separately because they are different rules: <c>kyber-weave</c>
+/// Two entitlements are asserted separately because they are different rules: <c>kw-docs</c>
 /// reaches every agent whose profile resolves and allows <c>filesystem.read</c>, while
 /// <c>codegraph</c> and <c>context7</c> keep the pure-orchestrator carve-out.
 /// </remarks>
@@ -61,7 +61,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     /// </summary>
     /// <remarks>
     /// Factory whitelists only the servers the squad's own <c>mcp.json</c> declares, OpenCode,
-    /// Kilo and Pi pin a single <c>kyber-weave</c> key or overlay, Antigravity writes the one
+    /// Kilo and Pi pin a single <c>kw-docs</c> key or overlay, Antigravity writes the one
     /// declared server, and Command Code names the one server the squad declares. None of them
     /// could grant the other two before this change either, so their silence is not a carve-out
     /// to compare — it is the absence of the mechanism.
@@ -87,7 +87,7 @@ public sealed class SquadUniversalMcpGrantContractTests
         };
 
     /// <summary>
-    /// Every target grants <c>kyber-weave</c> to exactly the agents the source entitles, and the
+    /// Every target grants <c>kw-docs</c> to exactly the agents the source entitles, and the
     /// granted set is the same on every target that has somewhere to express it.
     /// </summary>
     /// <remarks>
@@ -148,7 +148,7 @@ public sealed class SquadUniversalMcpGrantContractTests
                     $"Target '{SquadTargetCatalog.GetToken(target)}' renders agent "
                     + $"'{agent.Name}' (capability profile "
                     + $"'{SquadMcpGrantProjection.EffectiveProfileName(agent, target)}') with "
-                    + $"kyber-weave {(grant.Value ? "granted" : "withheld")}, but the source "
+                    + $"kw-docs {(grant.Value ? "granted" : "withheld")}, but the source "
                     + $"entitlement requires it {(expected ? "granted" : "withheld")}.");
             }
 
@@ -288,10 +288,10 @@ public sealed class SquadUniversalMcpGrantContractTests
     /// </summary>
     /// <remarks>
     /// This is the test a typo has to get past. Kilo sanitizes a server name only for characters
-    /// outside <c>[a-zA-Z0-9_-]</c>, so the hyphen survives and <c>kyber-weave_*</c> is the
-    /// wildcard its matcher resolves — <c>kyber_weave_*</c> is accepted without complaint and
+    /// outside <c>[a-zA-Z0-9_-]</c>, so the hyphen survives and <c>kw-docs_*</c> is the
+    /// wildcard its matcher resolves — <c>kw_docs_*</c> is accepted without complaint and
     /// matches nothing. Pi's MCP adapter inverts that: its deferred surface maps the hyphen to an
-    /// underscore, so <c>mcp__kyber_weave__</c> resolves there and the hyphenated form does not.
+    /// underscore, so <c>mcp__kw_docs__</c> resolves there and the hyphenated form does not.
     /// The two spellings are the same server name, and a single test that assumed one form would
     /// pass on one target while asserting nothing on the other.
     ///
@@ -374,7 +374,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             source,
             SquadMcpGrantProjection.KyberWeaveServer)
             ?? throw new InvalidOperationException(
-                "The canonical source declares no usable kyber-weave launch definition, so the "
+                "The canonical source declares no usable kw-docs launch definition, so the "
                 + "Antigravity entry cannot be checked against it.");
 
         SquadRenderResult antigravity = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
@@ -405,7 +405,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     }
 
     /// <summary>
-    /// A corpus whose profile denies <c>filesystem.read</c> grants no <c>kyber-weave</c> on any
+    /// A corpus whose profile denies <c>filesystem.read</c> grants no <c>kw-docs</c> on any
     /// target and keeps the withholding record it already had, so the widening cannot become a
     /// fail-open.
     /// </summary>
@@ -438,7 +438,7 @@ public sealed class SquadUniversalMcpGrantContractTests
                 + $"'{denied.Name}', so nothing about the fail-closed grant was exercised.");
             Assert.False(
                 grant.Value,
-                $"Target '{SquadTargetCatalog.GetToken(target)}' granted kyber-weave to the "
+                $"Target '{SquadTargetCatalog.GetToken(target)}' granted kw-docs to the "
                 + "read-denied agent.");
 
             // Where the target states a withholding, it still states it: a fail-closed target has
@@ -482,19 +482,19 @@ public sealed class SquadUniversalMcpGrantContractTests
     public async Task WhenCodegraphDeclared_AntigravityEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
     {
         using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kyber-weave", "codegraph");
+            McpDeclarationCorpusFixture.WithServers("kw-docs", "codegraph");
 
         SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 1. Conductor (orchestrator): must receive kyber-weave, but NOT codegraph
+        // 1. Conductor (orchestrator): must receive kw-docs, but NOT codegraph
         SquadDeploymentFile conductorFile = Assert.Single(
             result.Files,
             file => file.RelativePath == ".agents/agents/conductor/agent.md");
         YamlMappingNode conductorFrontmatter = Frontmatter(conductorFile);
         IReadOnlyList<string> conductorServers = McpServerEntryNames(conductorFrontmatter);
 
-        Assert.Contains("kyber-weave", conductorServers, StringComparer.Ordinal);
+        Assert.Contains("kw-docs", conductorServers, StringComparer.Ordinal);
         Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
 
         // 2. Read-entitled specialists: csharp-dev, test-dev, architect
@@ -508,7 +508,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             IReadOnlyList<string> servers = McpServerEntryNames(frontmatter);
 
             Assert.Contains(
-                "kyber-weave",
+                "kw-docs",
                 servers,
                 StringComparer.Ordinal);
             Assert.Contains(
@@ -527,7 +527,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     public async Task WhenContext7Declared_AntigravityGrantsItToSpecialistsAndWithholdsFromConductor()
     {
         using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kyber-weave", "context7");
+            McpDeclarationCorpusFixture.WithServers("kw-docs", "context7");
 
         SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -536,7 +536,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             result.Files,
             file => file.RelativePath == ".agents/agents/conductor/agent.md");
         IReadOnlyList<string> conductorServers = McpServerEntryNames(Frontmatter(conductorFile));
-        Assert.Equal(["kyber-weave"], conductorServers);
+        Assert.Equal(["kw-docs"], conductorServers);
 
         foreach (string specialist in new[] { "csharp-dev", "test-dev", "architect" })
         {
@@ -544,7 +544,7 @@ public sealed class SquadUniversalMcpGrantContractTests
                 result.Files,
                 file => file.RelativePath == $".agents/agents/{specialist}/agent.md");
             IReadOnlyList<string> servers = McpServerEntryNames(Frontmatter(specialistFile));
-            Assert.Equal(["context7", "kyber-weave"], servers);
+            Assert.Equal(["context7", "kw-docs"], servers);
         }
     }
 
@@ -557,12 +557,12 @@ public sealed class SquadUniversalMcpGrantContractTests
     public async Task WhenCodegraphDeclared_FactoryEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
     {
         using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kyber-weave", "codegraph");
+            McpDeclarationCorpusFixture.WithServers("kw-docs", "codegraph");
 
         SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Factory);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 1. Conductor (orchestrator): must receive kyber-weave, but NOT codegraph
+        // 1. Conductor (orchestrator): must receive kw-docs, but NOT codegraph
         SquadDeploymentFile conductorFile = Assert.Single(
             result.Files,
             file => file.RelativePath == ".factory/droids/conductor.md");
@@ -570,7 +570,7 @@ public sealed class SquadUniversalMcpGrantContractTests
         IReadOnlyList<string>? conductorServers = Sequence(conductorFrontmatter, "mcpServers");
         Assert.NotNull(conductorServers);
 
-        Assert.Contains("kyber-weave", conductorServers, StringComparer.Ordinal);
+        Assert.Contains("kw-docs", conductorServers, StringComparer.Ordinal);
         Assert.DoesNotContain("codegraph", conductorServers, StringComparer.Ordinal);
 
         // 2. Read-entitled specialists: csharp-dev, test-dev, architect
@@ -585,7 +585,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             Assert.NotNull(servers);
 
             Assert.Contains(
-                "kyber-weave",
+                "kw-docs",
                 servers,
                 StringComparer.Ordinal);
             Assert.Contains(
@@ -596,7 +596,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     }
 
     /// <summary>
-    /// Whether one target positively grants <c>kyber-weave</c> to one agent, or
+    /// Whether one target positively grants <c>kw-docs</c> to one agent, or
     /// <see langword="null"/> when the target renders no surface that could carry the grant.
     /// </summary>
     /// <remarks>

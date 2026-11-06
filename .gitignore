@@ -10,8 +10,10 @@ nupkg/
 # Playwright (and similar) output at any depth. Distinct from /TestResults/
 # above, which is the .NET VSTest directory at the repo root.
 test-results/
-# Agent working notes, lint dumps, and screenshots. Never product.
+# Agent working notes, lint dumps, and screenshots. Never product. Both
+# spellings occur: the harnesses have used the singular and the plural.
 .agent_scratchpad/
+.agents-scratchpad/
 *.sarif
 .DS_Store
 /artifacts/

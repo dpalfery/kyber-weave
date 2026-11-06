@@ -97,4 +97,4 @@ expected to stay true:
 - Every rule id — [`docs/ci-pipelines/rule-reference.md`](../../docs/ci-pipelines/rule-reference.md)
 
 Changing a weight, a threshold, or a severity means updating those documents in the same
-change. `docs_for_symbol` finds which ones claim the symbol you are editing.
+change. `docs_find_documents_citing_code_symbol` finds which ones claim the symbol you are editing.

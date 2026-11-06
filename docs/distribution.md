@@ -44,6 +44,12 @@ pre-releases only. Both compare by SemVer precedence across every page of the Re
 not by GitHub's creation order. A positional version pins a tag without colliding with global
 `kyber-weave --version`.
 
+**A rename is not a new asset.** This release renames the three MCP servers' configuration keys
+and their nineteen tools. No executable, archive, asset name, or `--version` output changed, so
+`install.sh` and `kyber-weave update` install and replace exactly the files they always have. The
+operator-side work the rename still needs is in [Renamed MCP servers and
+tools](install.md#renamed-mcp-servers-and-tools).
+
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
 fix never requires a re-release. Keep it that way when editing it.
@@ -556,7 +562,8 @@ smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the b
 `kyberdash web` serves the SPA rather than the "not built" page. The same loop and the
 release job also run `dash/scripts/sea-mcp-smoke.mjs` against the staged binary: it
 initializes over stdio with an isolated loopback fixture, lists exactly the eight
-`dash_*` tools, calls `dash_status`, then closes the child and asserts a clean exit —
+`dash_*` tools, calls `dash_list_available_analytics_operations`, then closes the child and
+asserts a clean exit —
 proving the bundled MCP SDK works from the single executable with no checkout and no
 access to the operator's state. The job is the authority.
 `ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and

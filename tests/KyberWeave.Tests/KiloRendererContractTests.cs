@@ -271,15 +271,15 @@ public sealed class KiloRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     Every agent the source entitles to <c>kyber-weave</c> — the pure orchestrator included —
+    ///     Every agent the source entitles to <c>kw-docs</c> — the pure orchestrator included —
     ///     carries the server's wildcard entry in an emitted <c>permission</c> map, spelled with the
     ///     hyphen Kilo preserves.
     /// </summary>
     /// <remarks>
     ///     Kilo gates MCP tools through the same <c>permission</c> map as its built-in tools, under
     ///     the namespaced key <c>{server}_{tool}</c>, with the server name sanitized only for
-    ///     characters outside <c>[a-zA-Z0-9_-]</c>. The hyphen in <c>kyber-weave</c> therefore
-    ///     survives, and a <c>kyber_weave_*</c> spelling would parse cleanly and match no tool at
+    ///     characters outside <c>[a-zA-Z0-9_-]</c>. The hyphen in <c>kw-docs</c> therefore
+    ///     survives, and a <c>kw_docs_*</c> spelling would parse cleanly and match no tool at
     ///     all — which is why the emitted bytes are pinned, not only the parsed key.
     ///     <para>
     ///     The expectation is computed from the loaded source through
@@ -292,8 +292,8 @@ public sealed class KiloRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Kilo_GrantsKyberWeaveToEveryReadEntitledAgent()
     {
-        const string KyberWeaveWildcard = "kyber-weave_*";
-        const string UnderscoreSpelling = "kyber_weave_*";
+        const string KyberWeaveWildcard = "kw-docs_*";
+        const string UnderscoreSpelling = "kw_docs_*";
         const string conductor = "conductor";
 
         SquadSource source = TestSquadCorpus.CanonicalSource;

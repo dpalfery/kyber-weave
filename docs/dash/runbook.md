@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-06
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
@@ -933,7 +933,8 @@ node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 ### 2j. Conversational analytics over MCP (`kyberdash mcp`)
 
 `kyberdash mcp` serves the eight read-only analytics tools over stdio for an MCP
-client. `runMcpCommand` (`dash/src/cli/mcp.ts`) builds the adapter
+client registered under the configuration key `kw-dash`. `runMcpCommand`
+(`dash/src/cli/mcp.ts`) builds the adapter
 (`createAnalyticsMcpServer`) on a client that only fetches the eight
 `/api/kyber/analytics/*` routes — the adapter never imports the canonical store and
 never owns the server lifecycle:
@@ -987,7 +988,8 @@ single decoded summary over 256 KiB or cumulative decoded input over 16 MiB, and
 return no partial total on budget failure. A 5 s cooperative computation deadline is
 checked between bounded batches. The refused request names the narrowing step
 (`stale_cursor` says restart from the first page; `unsupported_query` says what to
-narrow, including the unsupported-dimension hint toward `dash_inspect`). Over HTTP, the
+narrow, including the unsupported-dimension hint toward
+`dash_read_captured_run_session_or_turn_context`). Over HTTP, the
 status follows the envelope error code — 400 for `invalid_request`/`unsupported_query`,
 404 for `not_found`, 409 for `stale_cursor`, 413 for `budget_exceeded`, 503 for
 `engine_unavailable`/`incompatible_engine`/`cancelled`, and 500 for `internal_error` or
@@ -995,7 +997,8 @@ any code the route does not know — so a 500 means the engine returned a code t
 does not know.
 
 **Content and outcome caveats are operational facts.** Search is metadata-only;
-`dash_inspect` and `POST /api/kyber/analytics/inspect` share one body —
+`dash_read_captured_run_session_or_turn_context` and
+`POST /api/kyber/analytics/inspect` share one body —
 `mode: 'manifest' | 'content'` plus an explicit `target` (`run` / `session` /
 `turn`) — and content needs no additional flag or approval. `mode: 'manifest'`
 discovers without returning text bodies (run executions with parent/child/session
@@ -1021,6 +1024,19 @@ reported, never smoothed over, and comparisons are descriptive, never causal. To
 annotations (read-only/idempotent/non-destructive/closed-world hints) do not replace
 the route allowlist.
 
+**The rename boundary (`kw-dash`).** The server key a client registers is `kw-dash`; the
+executable and its argv are unchanged, so `kyberdash mcp` still starts it. The eight tools
+were renamed once, when that key changed, to purpose-shaped names that say what each
+operation does; this runbook uses only the current names, and
+[the adoption guide](onboarding.md#ask-kyberdash-from-an-mcp-client) carries the old-to-new
+mapping beside the full list. The records are not part of the rename. Past sessions keep
+the tool names they were recorded with — the old names, for anything captured before the
+rename — and per-tool statistics split at the rename boundary: a window that spans it
+reports the old name and the new name as two rows, never one merged row. Stored records are
+evidence and are never rewritten, so there is no alias map — nothing translates an old name
+to a new one on read, and a tool-name filter written before the rename does not match
+records made after it. Read a spanning window as two populations, not as a drop in use.
+
 **Verifying it.** Focused suites plus the release smoke:
 
 ```bash
@@ -1032,10 +1048,10 @@ scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run scripts/sea-mc
 
 `dash/scripts/sea-mcp-smoke.mjs` stages the real single-executable binary outside any
 checkout (`HOME`, config, and state all point at a temp dir), initializes over stdio,
-lists exactly the eight tools, calls `dash_status` against an isolated loopback
-fixture, then closes the child and asserts a clean exit. It runs beside the web smoke
-in `scripts/release-local.sh` and `.github/workflows/release.yml`. It proves protocol,
-tool list, and the attach-only boundary — not host-client compatibility (see the
+lists exactly the eight tools, calls `dash_list_available_analytics_operations` against an
+isolated loopback fixture, then closes the child and asserts a clean exit. It runs beside
+the web smoke in `scripts/release-local.sh` and `.github/workflows/release.yml`. It proves
+protocol, tool list, and the attach-only boundary — not host-client compatibility (see the
 [adoption guide](onboarding.md#3-what-is-and-is-not-validated)).
 
 ### 3. Raw Content Backfill and Re-normalization

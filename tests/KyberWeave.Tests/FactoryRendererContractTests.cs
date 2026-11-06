@@ -359,12 +359,12 @@ public sealed class FactoryRendererContractTests : IDisposable
         }
 
         // The shipped claims: the read-entitled specialists carry the documentation server, and
-        // so does the orchestrator — kyber-weave hands an agent the coding standards it is held
+        // so does the orchestrator — kw-docs hands an agent the coding standards it is held
         // to, which a role that delegates work needs as much as the roles it delegates to.
-        Assert.Equal(["codegraph", "kyber-weave"], RenderedMcpServers(result, "architect"));
-        Assert.Equal(["codegraph", "kyber-weave"], RenderedMcpServers(result, "code-reviewer"));
-        Assert.Equal(["codegraph", "kyber-weave"], RenderedMcpServers(result, "review-lens"));
-        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "conductor"));
+        Assert.Equal(["codegraph", "kw-docs"], RenderedMcpServers(result, "architect"));
+        Assert.Equal(["codegraph", "kw-docs"], RenderedMcpServers(result, "code-reviewer"));
+        Assert.Equal(["codegraph", "kw-docs"], RenderedMcpServers(result, "review-lens"));
+        Assert.Equal(["kw-docs"], RenderedMcpServers(result, "conductor"));
 
         // The orchestrator's grant is the rule, not the exception: assert it against the
         // source-computed entitlement so a re-added carve-out fails here as well as above.
@@ -372,7 +372,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         Assert.True(
             SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Factory),
             "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
-            + "cannot state the conductor is entitled to kyber-weave.");
+            + "cannot state the conductor is entitled to kw-docs.");
     }
 
     /// <summary>
@@ -1117,8 +1117,8 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// <remarks>
     ///     The entitlement is read from <see cref="SquadMcpGrantProjection" /> rather than from the
     ///     renderer, so the test states the contract instead of echoing the implementation. The
-    ///     orchestrator is not carved out of it: <c>kyber-weave</c> carries
-    ///     <c>agent_coding_standards</c>, and the conductor has to hand its delegates the standards
+    ///     orchestrator is not carved out of it: <c>kw-docs</c> carries
+    ///     <c>docs_get_coding_standard_for_technology</c>, and the conductor has to hand its delegates the standards
     ///     they are held to.
     /// </remarks>
     private static IReadOnlyList<string> ExpectedFactoryMcpServers(
@@ -1163,7 +1163,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         return
         [
             .. SquadMcpDeclaration.ServerNames(source)
-                .Where(name => !string.Equals(name, "kyber-weave-arbiter", StringComparison.Ordinal))
+                .Where(name => !string.Equals(name, "kw-arbiter", StringComparison.Ordinal))
         ];
     }
 

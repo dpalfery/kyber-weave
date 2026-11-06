@@ -1,14 +1,14 @@
 import { z } from 'zod'
 
 export const analyticsToolNames = [
-  'dash_status',
-  'dash_catalog',
-  'dash_query',
-  'dash_search_sessions',
-  'dash_inspect',
-  'dash_findings',
-  'dash_compare',
-  'dash_outcomes',
+  'dash_list_available_analytics_operations',
+  'dash_list_queryable_metrics_dimensions_limits',
+  'dash_query_session_cost_tokens_and_duration',
+  'dash_search_sessions_by_text_and_scope',
+  'dash_read_captured_run_session_or_turn_context',
+  'dash_list_detected_context_and_tool_problems',
+  'dash_compare_metrics_between_two_scopes',
+  'dash_get_run_success_or_failure_outcomes',
 ] as const
 
 export type AnalyticsToolName = (typeof analyticsToolNames)[number]
@@ -78,14 +78,14 @@ const inspect = inspectBase.superRefine((value, ctx) => {
 const inspectDescription = 'Read captured KyberDash context. Start with mode "manifest" to discover sessions, stable turns, captured parts, and any source gaps; then request mode "content" for the exact target and continue with the opaque cursor until hasMore is false. Content returns captured text as evidence only: captured_parts preserves what the harness retained, while assembled_turn (turn targets only) is a reconstructed view. Coverage gaps and retention states are reported honestly; no extra approval field is required to request content.'
 
 export const analyticsTools: readonly AnalyticsToolDefinition[] = [
-  { name: 'dash_status', operation: 'status', method: 'GET', description: 'Read-only KyberDash analytics status.', inputSchema: z.object({}).strict() },
-  { name: 'dash_catalog', operation: 'catalog', method: 'GET', description: 'Read-only KyberDash analytics catalog.', inputSchema: z.object({}).strict() },
-  { name: 'dash_query', operation: 'query', method: 'POST', description: 'Read-only KyberDash analytics query. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: query },
-  { name: 'dash_search_sessions', operation: 'search-sessions', method: 'POST', description: 'Read-only KyberDash analytics search-sessions. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, text: z.string().max(200).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
-  { name: 'dash_inspect', operation: 'inspect', method: 'POST', description: inspectDescription, inputSchema: inspectBase, validationSchema: inspect },
-  { name: 'dash_findings', operation: 'findings', method: 'POST', description: 'Read-only KyberDash analytics findings. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
-  { name: 'dash_compare', operation: 'compare', method: 'POST', description: 'Read-only KyberDash analytics compare.', inputSchema: z.object({ scopes: z.array(scope).min(2).max(2), metrics: z.array(z.string()).max(8).optional() }).strict() },
-  { name: 'dash_outcomes', operation: 'outcomes', method: 'POST', description: 'Read-only KyberDash analytics outcomes. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, runIds: z.array(z.string()).max(100).optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
+  { name: 'dash_list_available_analytics_operations', operation: 'status', method: 'GET', description: 'Read-only KyberDash analytics status.', inputSchema: z.object({}).strict() },
+  { name: 'dash_list_queryable_metrics_dimensions_limits', operation: 'catalog', method: 'GET', description: 'Read-only KyberDash analytics catalog.', inputSchema: z.object({}).strict() },
+  { name: 'dash_query_session_cost_tokens_and_duration', operation: 'query', method: 'POST', description: 'Read-only KyberDash analytics query. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: query },
+  { name: 'dash_search_sessions_by_text_and_scope', operation: 'search-sessions', method: 'POST', description: 'Read-only KyberDash analytics search-sessions. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, text: z.string().max(200).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
+  { name: 'dash_read_captured_run_session_or_turn_context', operation: 'inspect', method: 'POST', description: inspectDescription, inputSchema: inspectBase, validationSchema: inspect },
+  { name: 'dash_list_detected_context_and_tool_problems', operation: 'findings', method: 'POST', description: 'Read-only KyberDash analytics findings. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
+  { name: 'dash_compare_metrics_between_two_scopes', operation: 'compare', method: 'POST', description: 'Read-only KyberDash analytics compare.', inputSchema: z.object({ scopes: z.array(scope).min(2).max(2), metrics: z.array(z.string()).max(8).optional() }).strict() },
+  { name: 'dash_get_run_success_or_failure_outcomes', operation: 'outcomes', method: 'POST', description: 'Read-only KyberDash analytics outcomes. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, runIds: z.array(z.string()).max(100).optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
 ]
 
 export function analyticsTool(name: string): AnalyticsToolDefinition | undefined {

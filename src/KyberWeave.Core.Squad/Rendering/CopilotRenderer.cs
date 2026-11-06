@@ -25,7 +25,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Copilot's <c>tools</c> frontmatter key is a closed allow-list drawn from a documented
 /// built-in vocabulary (<c>vscode</c>, <c>execute</c>, <c>read</c>, <c>edit</c>, <c>search</c>,
 /// <c>agent</c>, <c>web</c>, <c>todo</c>) and single-quoted MCP server wildcards
-/// (<c>'codegraph/*'</c>, <c>'kyber-weave/*'</c>, <c>'context7/*'</c>).
+/// (<c>'codegraph/*'</c>, <c>'kw-docs/*'</c>, <c>'context7/*'</c>).
 /// Tools are rendered as an inline YAML flow sequence (<c>tools: [vscode, ...]</c>).
 /// Naming any tool withholds every tool not named, MCP server tools included,
 /// which is what makes a <c>deny</c> in the capability profile enforced rather than merely
