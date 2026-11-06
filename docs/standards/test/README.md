@@ -198,9 +198,12 @@ scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests
 A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
 `-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its
 `.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter`, or any
-`--filter`). `npm --prefix dash run test` with no path after `--` is full, and so is `cargo test` with no positional
-filter. Leading `env`, `timeout`, `nice`, `time`, `command` and `exec` are skipped before the command is classified.
-Naming another project (the RepoPolicy project, for example) or a path narrows a run to a partial run, which dev agents
+`--filter`). `dotnet run --project <KyberWeave.Tests>` is full on the same terms; `dotnet run` with any other project is partial.
+`npm test`, `npm t`, `npm run test` and `npm run-script test` with no positional word after `--` are full under any
+`--prefix` (none, relative, absolute, or the tray UI directory), and so is `cargo test` with no positional filter.
+Leading launchers (`env`, `timeout`, `nice`, `time`, `command`, `exec`, `nohup`, `caffeinate`, `sudo`, `doas`, `ionice`,
+`setsid`, `stdbuf`, `arch`) are skipped before the command is classified; an unknown word after a launcher makes the
+classifier scan forward to the first `dotnet`, `npm` or `cargo` word. Naming another project (the RepoPolicy project, for example) or a path narrows a run to a partial run, which dev agents
 may use. `npm run test:related` and `dotnet build` are never full runs. When a shape is ambiguous the classifier calls
 it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. `scripts/proc-guard.sh run` refuses a full run with exit 89 unless the caller
 passes `--council` or stdin is a terminal; the refusal names the targeted alternatives and starts nothing. Only the
@@ -217,8 +220,10 @@ The guard is best effort. It reads the command line and whether stdin is a termi
 - A shell with a pseudo-terminal looks like a person at a terminal and passes the terminal test. The Claude Code Bash tool has no terminal (checked 2026-11-06); other harnesses have not been checked.
 - An agent that types `--council` passes. The flag is the caller's claim, not proof of who is calling.
 - A raw `dotnet test` that skips the watchdog wrapper is not seen. Only a harness-level hook can see it.
-- A command inside a shell string (`sh -c '...'`), an `env -S` string, or behind a launcher such as `nohup`, `caffeinate` or `sudo` is not unwrapped, so it is classified as partial and runs.
-- `dotnet run --project <test project>` and `npm --prefix <absolute path to dash> run test` are not classified as full, so they run.
+- A command inside a shell string (`sh -c '...'`, `bash -c '...'`) or an `env -S` string is not parsed, so it is classified as partial and runs.
+- A launcher outside the list above is not unwrapped. Its command is classified only when a `dotnet`, `npm` or `cargo` word follows it.
+- Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest` are classified as partial and run.
+- Deliberate over-refusals: a targeted run classified as full is refused. These are any directory target, `npm test --workspace <name>`, `cargo test -p <package>`, and a scan that finds a `dotnet`, `npm` or `cargo` word after an unknown word (such as `sudo echo ... dotnet test`). Recover with a named class (`-class` for dotnet, `--class` for `scripts/fast-loop.sh`), `--council`, or a terminal.
 - `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the whole tray crate for a tray Rust change, outside the watchdog.
 
 The real closure is a per-harness shell hook that sees each shell call before it runs. It is tracked in [`docs/todo/per-harness-shell-hook-for-full-run-guard.md`](../../todo/per-harness-shell-hook-for-full-run-guard.md). The decision and its alternatives are in [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md).

@@ -23,7 +23,7 @@ impact-components: [ReviewCouncil, CI Pipelines, KyberDash]
 
 **Problem.** The rule is settled in prose: only the review council and CI run the full .NET suite
 (and the full dash and tray suites). No dev agent runs them, cross-cutting changes included; dev
-agents run a targeted set. The uncommitted edits already say so in `AGENTS.md` ("Iterating locally"),
+agents run a targeted set. The uncommitted edits already say so in `AGENTS.md` ("The inner loop"),
 the Squad agents and skills, and `docs/standards/test/README.md`, and tests pin that wording. Nothing
 mechanical stops an agent from starting a full run. Today a dev agent that runs
 `scripts/fast-loop.sh --full` or `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj`
@@ -95,7 +95,7 @@ Three layers, one definition (D3).
 | Full-run definition, refusal exit 89, `classify` subcommand, `--council` flag | Distribution | reference | `docs/cli-command-surface.md` (exit codes, `review gates --council`) |
 | Refusal behaviour, terminal test, targeted alternatives | ReviewCouncil | standard | `docs/standards/test/README.md#commands` |
 | `full-suite: true` gate key and `--council` | ReviewCouncil | reference | `docs/configuration.md#review` |
-| Iterating-locally rule and the refusal message | ReviewCouncil | operations (agent guidance) | `AGENTS.md` ("Iterating locally", "Before opening a PR") |
+| Inner-loop rule and the refusal message | ReviewCouncil | operations (agent guidance) | `AGENTS.md` ("The inner loop", "Before opening a PR") |
 | Watchdog refusal and the KyberDash runbook section | KyberDash | runbook | `docs/dash/runbook.md#running-tests-safely` |
 | CI and template callers pass `--council` | CI Pipelines | runbook | `docs/ci-pipelines/workflows-runbook.md` |
 | Boundary decision: full runs reserved for council and CI; residuals D6 | ReviewCouncil | ADR | `docs/adr/0056-*.md` (new, at closeout) |
@@ -154,7 +154,7 @@ Each task names its files, delegate, acceptance, and targeted command. Delegate 
 
 ### T5. Documentation (docs-dev)
 
-- **Files:** `AGENTS.md` ("Iterating locally" and "Before opening a PR"; the Config Reg block is generated and is not edited), `docs/standards/test/README.md#commands`, `docs/dash/runbook.md#running-tests-safely`, `docs/cli-command-surface.md` (exit 89, `review gates --council`), `docs/configuration.md#review` (`full-suite`), `docs/ci-pipelines/workflows-runbook.md` (CI and template `--council`), and `docs/plans/README.md` only for the index row's status at closeout.
+- **Files:** `AGENTS.md` ("The inner loop" and "Before opening a PR"; the Config Reg block is generated and is not edited), `docs/standards/test/README.md#commands`, `docs/dash/runbook.md#running-tests-safely`, `docs/cli-command-surface.md` (exit 89, `review gates --council`), `docs/configuration.md#review` (`full-suite`), `docs/ci-pipelines/workflows-runbook.md` (CI and template `--council`), and `docs/plans/README.md` only for the index row's status at closeout.
 - **Delegate:** `docs-dev`. Reason: every file is governed `.md`.
 - **Acceptance:** the docs describe the rule, the refusal text, `--council`, the terminal test, and the residuals D6. `docs_validate` (mergeReady false) and `docs_drift` report zero findings, with provenance `root=` equal to this checkout.
 - **Dependencies:** T2, T3, T4.
@@ -222,12 +222,22 @@ Standard `code-reviewer` council at the end of the run, over the whole change. T
 
 ### Known limits at archive
 
-- **N1** `dotnet run --project <test project>` is not classified as full. Disclosed in the [test standard, Limits of the guard](../../standards/test/README.md#limits-of-the-guard).
-- **N2** Launchers (`nohup`, `caffeinate`, `sudo`) and absolute-path wrappers are not unwrapped. Disclosed in the same section.
-- **N3** `npm --prefix <absolute path to dash> run test` is not classified as full. Disclosed in the same section.
 - **N4** `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the tray crate, outside the watchdog. Disclosed in the same section.
 - **N5** The installed kyber-weave 0.1.8-rc.19 does not know `--council` or the `full-suite` key. It warns and fails safe. The CLI, the classifier, the gate keys and the CI template must ship together. Disclosed in the [CI pipelines workflows runbook](../../ci-pipelines/workflows-runbook.md).
 - **Minor items** (recorded here only): `env -S` strings; `vstest`, `exec` and `npx vitest` shapes; over-refusal of directory targets and of a bare word after an unknown flag; the `cargo-test` gate argv is not wrapped by the watchdog; `fast-loop.sh` refusal checks only `$1`; a refused gate is missing from the `failed` metric; the `proc-guard.sh` header comment overstates what is not forwarded.
+
+### Pass 3
+
+After the remediation circuit-breaker cap, David authorised one more bounded pass. It fixed N1
+(`dotnet run --project` on the test project is full), N2 (the launchers `nohup`, `caffeinate`, `sudo`
+and the other listed wrappers are unwrapped, and an unknown word after a launcher scans forward to the
+first `dotnet`, `npm` or `cargo` word), N3 (`npm --prefix <absolute path> run test`, and any other
+`--prefix` spelling, is full), and the tray UI line in the runbook (`npm --prefix dash/tray/ui run test`
+with no path is now refused, so the runbook gives the targeted form). N1 to N3 are removed from the list
+above. N4 and N5 remain open. The rules now live in the test standard, ADR 0059 and the per-harness hook
+todo, and D17 is extended in the closeout mapping. The pass-3 re-check (a single in-process reader, with
+no lens seats) returned REQUEST_CHANGES with six further gaps, F1 to F6; they are parked, not fixed, and
+are recorded in the per-harness hook todo.
 
 ## Closeout mapping
 
@@ -236,7 +246,7 @@ Every decision D1 to D17 and every Design harvest item H1 to H7 maps to a destin
 | ID | Destination | Durable fact | Impact components |
 |---|---|---|---|
 | D1 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) (boundary and alternatives); [CLI command surface, repository scripts](../../cli-command-surface.md#repository-scripts) | Three layers share one definition of a full run; the Arbiter is not the enforcement point | ReviewCouncil |
-| D2 | [AGENTS.md, Iterating locally](../../../AGENTS.md#iterating-locally); [test standard, Commands](../../standards/test/README.md#commands); [CLI command surface, repository scripts](../../cli-command-surface.md#repository-scripts) ("no environment variable lifts the refusal") | Council identity by the `--council` flag and the terminal test; environment variables rejected | ReviewCouncil |
+| D2 | [AGENTS.md, The inner loop](../../../AGENTS.md#the-inner-loop); [test standard, Commands](../../standards/test/README.md#commands); [CLI command surface, repository scripts](../../cli-command-surface.md#repository-scripts) ("no environment variable lifts the refusal") | Council identity by the `--council` flag and the terminal test; environment variables rejected | ReviewCouncil |
 | D3 | [test standard, Commands](../../standards/test/README.md#commands); the classifier comments in `scripts/proc-guard.sh` | Full-run definition | ReviewCouncil |
 | D4 | [CLI command surface, repository scripts](../../cli-command-surface.md#repository-scripts) (89); [CLI command surface, `review`](../../cli-command-surface.md#review--the-deterministic-review-half) (exit 1) | Refusal exits 89; a refused full-suite gate is a blocking failure and the command exits 1 | ReviewCouncil |
 | D5 | [configuration, review](../../configuration.md#review); [code-review architecture](../../code-review/architecture.md) (gate keys table); pinned by `ReviewGateFullSuiteConfigTests` | `full-suite: true` gate key on `test`, `ts-test`, `cargo-test` | ReviewCouncil |
@@ -251,11 +261,11 @@ Every decision D1 to D17 and every Design harvest item H1 to H7 maps to a destin
 | D14 | Documentation waiver: a confirm-first check; no behaviour changed, so no document moves. The existing routing text in [code-review architecture](../../code-review/architecture.md) stays accurate. | Council routing between `review gates` and `--agent` task gates is unchanged | ReviewCouncil |
 | D15 | [CI pipelines workflows runbook](../../ci-pipelines/workflows-runbook.md) (template paragraph). ADR waiver: no ADR — ADR waiver: a one-flag call change inside an existing template, with no boundary. The missing github-actions standard is an open gap for the owner. | Template exception with no github-actions standard | CI Pipelines |
 | D16 | [code-review SKILL.md](../../../products/kyber-squad/skills/code-review/SKILL.md), step 2; [CLI command surface, `review`](../../cli-command-surface.md#review--the-deterministic-review-half) (`--council` bullet); [configuration, review](../../configuration.md#review) | The pre-push self-review never passes `--council`; a refusal means "not run here"; `KW-REVIEW-022` is reused | ReviewCouncil |
-| D17 | [test standard, Commands](../../standards/test/README.md#commands); the classifier in `scripts/proc-guard.sh`; [dash runbook, running tests safely](../../dash/runbook.md#running-tests-safely) (full-run clause) | Amended full-run definition (wrappers, `dotnet test` targets, `--prefix` spellings, `+toolchain`, ambiguous means full, `sh -c` not parsed) | ReviewCouncil, KyberDash |
+| D17 | [test standard, Commands](../../standards/test/README.md#commands); the classifier in `scripts/proc-guard.sh`; [dash runbook, running tests safely](../../dash/runbook.md#running-tests-safely) (full-run clause) | Amended full-run definition (wrappers, `dotnet test` targets, `--prefix` spellings, `+toolchain`, ambiguous means full, `sh -c` not parsed); extended in pass 3: launcher list, dotnet run, npm any prefix | ReviewCouncil, KyberDash |
 | Full-run definition, refusal exit 89, `classify` subcommand, `--council` flag | [CLI command surface, repository scripts](../../cli-command-surface.md#repository-scripts). Open: the `classify` subcommand is not named there yet; it is documented in the test standard. | Design harvest H1 | ReviewCouncil |
 | Refusal behaviour, terminal test, targeted alternatives | [test standard, Commands](../../standards/test/README.md#commands) | Design harvest H2 | ReviewCouncil |
 | `full-suite: true` gate key and `--council` | [configuration, review](../../configuration.md#review) | Design harvest H3 | ReviewCouncil |
-| Iterating-locally rule and the refusal message | [test standard, Commands](../../standards/test/README.md#commands) (the rule also stands in the `AGENTS.md` "Iterating locally" section) | Design harvest H4 | ReviewCouncil |
+| Inner-loop rule and the refusal message | [test standard, Commands](../../standards/test/README.md#commands) (the rule also stands in the `AGENTS.md` "The inner loop" section) | Design harvest H4 | ReviewCouncil |
 | Watchdog refusal and the KyberDash runbook section | [dash runbook, running tests safely](../../dash/runbook.md#running-tests-safely) | Design harvest H5 | KyberDash |
 | CI and template callers pass `--council` | [CI pipelines workflows runbook](../../ci-pipelines/workflows-runbook.md) | Design harvest H6 | CI Pipelines |
 | Boundary decision: full runs reserved for council and CI; residuals D6 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md); residual tracking: [per-harness shell hook todo](../../todo/per-harness-shell-hook-for-full-run-guard.md) | Design harvest H7 | ReviewCouncil |

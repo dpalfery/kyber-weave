@@ -91,6 +91,40 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("npm test --prefix=dash -- --coverage")]
     // A toolchain word such as +stable is skipped; with no positional filter the run is the full tray suite.
     [InlineData("cargo +stable test --manifest-path dash/tray/src-tauri/Cargo.toml")]
+    // dotnet run is full when its project is the product project and no filter appears anywhere.
+    [InlineData("dotnet run --project tests/KyberWeave.Tests")]
+    [InlineData("dotnet run --project tests/KyberWeave.Tests/")]
+    [InlineData("dotnet run -c Release --project tests/KyberWeave.Tests/KyberWeave.Tests.csproj --no-build")]
+    [InlineData("dotnet run --project=tests/KyberWeave.Tests -- -reporter quiet")]
+    // Launchers (nohup, caffeinate, sudo, doas, ionice, setsid, stdbuf, arch) are stripped with their own options.
+    [InlineData("nohup dotnet test")]
+    [InlineData("nohup dotnet test KyberWeave.sln")]
+    [InlineData("caffeinate -i dotnet test")]
+    [InlineData("caffeinate -t 3600 -i dotnet test")]
+    [InlineData("caffeinate -w 4242 -i dotnet test")]
+    [InlineData("sudo dotnet test")]
+    [InlineData("sudo -u dave dotnet test")]
+    [InlineData("sudo -g staff dotnet test")]
+    [InlineData("doas -u dave dotnet test")]
+    [InlineData("sudo -E env FOO=1 dotnet test")]
+    [InlineData("ionice -c 3 nice -n 10 dotnet test")]
+    [InlineData("setsid dotnet test")]
+    [InlineData("stdbuf -oL dotnet test")]
+    [InlineData("stdbuf -o L dotnet test")]
+    [InlineData("nohup timeout 900 dotnet test")]
+    [InlineData("/usr/bin/nohup /usr/local/share/dotnet/dotnet test KyberWeave.sln")]
+    [InlineData("/opt/homebrew/bin/caffeinate -dimsu npm --prefix dash run test")]
+    [InlineData("caffeinate -i cargo test")]
+    // A test script with no positional after -- is full whatever the prefix: none, relative, absolute, tray UI, or another dir.
+    [InlineData("npm --prefix /Users/dave/git/personal/claude/kyber-weave/dash run test")]
+    [InlineData("npm --prefix=/abs/path/dash run test")]
+    [InlineData("npm --prefix /abs/path/dash/ test")]
+    [InlineData("npm --prefix dash/tray/ui run test")]
+    [InlineData("npm --prefix /abs/path/dash/tray/ui test")]
+    [InlineData("npm --prefix other run test")]
+    [InlineData("npm run test")]
+    [InlineData("npm test")]
+    [InlineData("npm test --prefix /abs/path/dash")]
     public void ClassifyReportsAnUnfilteredProductSuiteAsFull(string command)
     {
         AssertClassifiesAs(command, "full");
@@ -125,9 +159,25 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("dotnet test --filter FullyQualifiedName~X")]
     [InlineData("dotnet test --project tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj")]
     [InlineData("npm test --prefix dash -- tests/foo.test.ts")]
-    [InlineData("npm --prefix other run test")]
-    [InlineData("npm run test")]
     [InlineData("cargo +stable test --manifest-path dash/tray/src-tauri/Cargo.toml my_filter")]
+    // dotnet run is partial unless it targets the product project with no filter; no project is partial.
+    [InlineData("dotnet run --project tests/KyberWeave.Tests -- -class \"KyberWeave.Tests.ConfigRegResolutionTests\"")]
+    [InlineData("dotnet run --project tests/KyberWeave.Tests -- --filter-class \"KyberWeave.Tests.X\"")]
+    [InlineData("dotnet run --project src/KyberWeave.Cli -- review gates .")]
+    [InlineData("dotnet run --project tests/KyberWeave.RepoPolicy.Tests")]
+    [InlineData("dotnet run")]
+    // Launchers with nothing after them, or with a non-test tool after them, are partial.
+    [InlineData("nohup dotnet build")]
+    [InlineData("sudo dotnet test --filter \"FullyQualifiedName~Foo\"")]
+    [InlineData("caffeinate -i npm --prefix dash run lint")]
+    [InlineData("nohup echo hello")]
+    [InlineData("sudo")]
+    // npm test scripts with a suffix, a path after --, or a non-test script are partial.
+    [InlineData("npm --prefix /abs/path/dash run test:related -- src/a.test.ts")]
+    [InlineData("npm --prefix /abs/path/dash run test -- src/foo.test.ts")]
+    [InlineData("npm --prefix dash/tray/ui run test -- src/foo.test.tsx")]
+    [InlineData("npm --prefix dash run lint")]
+    [InlineData("npm --prefix dash run test:locks")]
     [InlineData("echo hi")]
     public void ClassifyReportsAFilteredPolicyOrOtherCommandAsPartial(string command)
     {
@@ -214,6 +264,9 @@ public sealed class ProcGuardFullRunGuardTests
     [InlineData("timeout 60 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj")]
     [InlineData("env CI=1 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release")]
     [InlineData("npm --prefix=dash run test")]
+    [InlineData("dotnet run --project tests/KyberWeave.Tests")]
+    [InlineData("npm test")]
+    [InlineData("npm --prefix other run test")]
     public void RunBypassShapeOfAFullRunWithoutCouncilIsRefusedWithExit89AndNeverStartsTheCommand(string command)
     {
         SkipIfBashUnavailable();

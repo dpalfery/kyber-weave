@@ -481,7 +481,7 @@ command is a full test-suite run and the caller is not the council or CI: `scrip
 (stdin not a terminal). Both exit `89` before any build or process starts, and print the targeted
 alternatives. `proc-guard.sh run` takes `--council` on its command line only; no environment variable lifts
 the refusal. `scripts/proc-guard.sh classify -- <argv>` prints `full` or `partial` for a command and starts
-nothing, so you can check a command before running it; shell strings such as `bash -c` are not parsed and count as `partial`. `scripts/fast-loop.sh --class` and `--method` are unchanged.
+nothing, so you can check a command before running it; shell strings such as `bash -c` are not parsed and count as `partial`. The launcher list, the per-tool full-run rules and the remaining limits are in the [test standard, limits of the guard](standards/test/README.md#limits-of-the-guard). `scripts/fast-loop.sh --class` and `--method` are unchanged.
 
 ### `kyberdash`
 

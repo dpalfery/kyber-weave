@@ -1200,7 +1200,7 @@ Run each of these through the watchdog from the repository root
 
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
 scripts/proc-guard.sh run -- bash -c "cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test '<name>'"
 ```
 
@@ -1569,7 +1569,7 @@ scripts/proc-guard.sh run -- npm --prefix dash run test:locks
 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"
 ```
 
-The whole `npm --prefix dash run test`, a bare `dotnet test`, and `dotnet test KyberWeave.sln` are full runs; only CI and the review council start them. The guard refuses a full run with exit 89 when it is
+The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. The guard refuses a full run with exit 89 when it is
 started from a shell with no terminal (a dev agent's shell) and not passed `--council`. The refusal names
 the targeted alternatives and starts nothing. Only the review council (`code-reviewer`) and CI pass
 `--council`. Dev agents run a filtered set, for example `scripts/proc-guard.sh run -- dotnet test

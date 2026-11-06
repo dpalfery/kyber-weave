@@ -15,10 +15,11 @@
 #
 # Full-run guard: a "full" run is an unfiltered product suite: dotnet test (or the KyberWeave.Tests.dll
 # runner) with no narrowing flag and no target other than KyberWeave.Tests (a solution, a directory or no
-# target counts as full), npm --prefix dash run test with no path after "--", cargo test with no positional
-# filter. Leading env, timeout, nice, time, command and exec wrappers are stripped first. Shell strings
-# (sh -c, bash -c) are not parsed. Ambiguous input counts as full. Only the review council and CI run
-# those. `classify -- <cmd...>` prints exactly "full" or "partial" on stdout, exits 0
+# target counts as full), dotnet run --project KyberWeave.Tests with no narrowing flag, npm test (or t, run
+# test) with no path after "--" under any prefix, cargo test with no positional filter. Launchers (env,
+# timeout, nice, time, nohup, caffeinate, sudo, doas, ionice, setsid, stdbuf, arch and others) are stripped
+# first. Shell strings (sh -c, bash -c) are not parsed. Ambiguous input counts as full. Only the review council
+# and CI run those. `classify -- <cmd...>` prints exactly "full" or "partial" on stdout, exits 0
 # and starts nothing. `run` refuses a full run with exit 89 unless --council is given or stdin is an
 # interactive terminal; --council is a command-line flag only (never an environment variable) and is
 # consumed here, not forwarded to the command. The refusal starts no process and happens before the slot wait.
@@ -117,9 +118,14 @@ usage() {
 }
 
 # Full-run classification. Each is_full_* returns 0 for a full run (an unfiltered product suite) and 1
-# for anything partial. A filter flag or a positional filter makes a run partial. Ambiguous input is
-# treated as full: a wrongly refused partial run is recoverable (--class, --council, a terminal), a
-# wrongly admitted full run defeats the rule.
+# for anything partial. Launchers that only wrap a command (env, timeout, nice, time, command, exec, nohup,
+# caffeinate, sudo, doas, ionice, setsid, stdbuf, arch) are stripped first, skipping their own options; an
+# unknown word after one resolves to the first later dotnet, npm or cargo word. A narrowing flag anywhere
+# (-class, -method, -trait, -treenode-filter, --filter*) or a positional filter makes a run partial.
+# dotnet test is full with no target, or a KyberWeave.Tests, solution or directory target; dotnet run is
+# full only with --project KyberWeave.Tests; npm test, t, run test or run-script test is full with no path
+# after "--", under any prefix. Ambiguous input is treated as full: a wrongly refused partial run is
+# recoverable (--class, --council, a terminal), a wrongly admitted full run defeats the rule.
 
 # True for a dotnet flag that selects tests (-class, -method, -trait, -treenode-filter, any --filter*).
 is_filter_flag() {
@@ -133,6 +139,15 @@ is_filter_flag() {
 dotnet_flag_takes_value() {
   case "$1" in
     -c|--configuration|-f|--framework|-r|--runtime|-a|--arch|-o|--output|--os|-v|--verbosity|-l|--logger|-s|--settings|--results-directory|--diag|-e|--environment|--test-adapter-path|--coverlet-output-format|--coverlet-output|-m|--maxcpucount|--tl)
+      return 0 ;;
+  esac
+  return 1
+}
+
+# True for a dotnet run flag that takes a separate value (-p is the project, read separately).
+dotnet_run_flag_takes_value() {
+  case "$1" in
+    -c|--configuration|-f|--framework|-r|--runtime|-a|--arch|-o|--output|--os|-v|--verbosity|--launch-profile|-lp)
       return 0 ;;
   esac
   return 1
@@ -152,10 +167,63 @@ dotnet_target_kind() {
   esac
 }
 
-# dotnet test [flags] [targets], or the direct runner dotnet <path>.dll [args]. Full unless a filter flag is
-# present, or every named target is another project (no solution, directory or KyberWeave.Tests target).
+# dotnet run --project <KyberWeave.Tests> [flags] [-- app args]: full unless a narrowing flag appears anywhere
+# (including after "--"), or the project is not KyberWeave.Tests. No project is partial.
+is_full_dotnet_run() {
+  local arg skip=0 pending=0 dd=0 project="" have_project=0 name
+  for arg in "$@"; do
+    if is_filter_flag "${arg}"; then
+      return 1
+    fi
+    if ((dd == 1)); then
+      continue
+    fi
+    if ((skip == 1)); then
+      skip=0
+      continue
+    fi
+    if ((pending == 1)); then
+      pending=0
+      project="${arg}"
+      have_project=1
+      continue
+    fi
+    case "${arg}" in
+      --) dd=1 ;;
+      --project|-p) pending=1 ;;
+      --project=*)
+        project="${arg#--project=}"
+        have_project=1
+        ;;
+      -*)
+        if dotnet_run_flag_takes_value "${arg}"; then
+          skip=1
+        fi
+        ;;
+      *) ;;
+    esac
+  done
+  ((have_project == 1)) || return 1
+  name="${project}"
+  while [[ "${name}" == */ ]]; do
+    name="${name%/}"
+  done
+  name="${name##*/}"
+  name="${name%.csproj}"
+  [[ "${name}" == KyberWeave.Tests ]] || return 1
+  return 0
+}
+
+# dotnet test [flags] [targets], or the direct runner dotnet <path>.dll [args], or dotnet run (see above).
+# Full unless a filter flag is present, or every named target is another project (no solution, directory or
+# KyberWeave.Tests target).
 is_full_dotnet() {
   local arg kind="" skip=0 pending=0 seen_other=0 seen_full=0
+  if [[ "${1:-}" == run ]]; then
+    shift
+    is_full_dotnet_run "$@"
+    return
+  fi
   if [[ "${1:-}" == test ]]; then
     shift
   else
@@ -206,28 +274,13 @@ is_full_dotnet() {
   return 0
 }
 
-# True when an npm --prefix value names the dash directory: dash, dash/, ./dash, ./dash/.
-npm_prefix_is_dash() {
-  local value="$1"
-  while [[ "${value}" == ./* ]]; do
-    value="${value#./}"
-  done
-  while [[ "${value}" == */ ]]; do
-    value="${value%/}"
-  done
-  [[ "${value}" == dash ]]
-}
-
-# npm [--prefix dash] run test | run-script test | test | t, with no positional after "--" and no other prefix.
+# npm test | t | run test | run-script test, with no positional word after "--" (flags after it are fine).
+# The --prefix value is skipped, whatever it is: none, relative, absolute or a tray UI directory.
 is_full_npm() {
-  local arg skip="" dd=0 count=0 w1="" w2="" prefix_seen=0 prefix_bad=0
+  local arg skip=0 dd=0 count=0 w1="" w2=""
   for arg in "$@"; do
-    if [[ -n "${skip}" ]]; then
-      if [[ "${skip}" == prefix ]]; then
-        prefix_seen=1
-        npm_prefix_is_dash "${arg}" || prefix_bad=1
-      fi
-      skip=""
+    if ((skip == 1)); then
+      skip=0
       continue
     fi
     if ((dd == 1)); then
@@ -238,12 +291,7 @@ is_full_npm() {
     fi
     case "${arg}" in
       --) dd=1 ;;
-      --prefix) skip=prefix ;;
-      --prefix=*)
-        prefix_seen=1
-        npm_prefix_is_dash "${arg#--prefix=}" || prefix_bad=1
-        ;;
-      --loglevel|--workspace|-w|--registry|--userconfig|--cache) skip=other ;;
+      --prefix|--loglevel|--workspace|-w|--registry|--userconfig|--cache) skip=1 ;;
       -*) ;;
       *)
         case "${count}" in
@@ -255,9 +303,6 @@ is_full_npm() {
         ;;
     esac
   done
-  if ((prefix_seen == 0 || prefix_bad == 1)); then
-    return 1
-  fi
   case "${count}" in
     1)
       [[ "${w1}" == test || "${w1}" == t ]] || return 1
@@ -309,13 +354,15 @@ is_full_cargo() {
   return 0
 }
 
-# Entry point: "$@" is a command line. Leading wrappers (env, timeout, nice, time, command, exec) are
-# stripped first, so the real command is classified. Returns 0 for a full run, 1 for partial.
-# Shell strings (sh -c, bash -c) are not parsed: an accepted residual.
+# Entry point: "$@" is a command line. Launchers are stripped first, skipping their own options, so the real
+# command is classified. Returns 0 for a full run, 1 for partial. Shell strings (sh -c, bash -c) are not
+# parsed: an accepted residual.
 is_full_run() {
+  local stripped=0 tool
   while (($# > 0)); do
     case "${1##*/}" in
       env)
+        stripped=1
         shift
         while (($# > 0)); do
           case "$1" in
@@ -329,6 +376,7 @@ is_full_run() {
         done
         ;;
       timeout)
+        stripped=1
         shift
         while (($# > 0)) && [[ "$1" == -* ]]; do
           case "$1" in
@@ -343,6 +391,7 @@ is_full_run() {
         (($# > 0)) && shift
         ;;
       nice)
+        stripped=1
         shift
         while (($# > 0)) && [[ "$1" == -* ]]; do
           case "$1" in
@@ -355,9 +404,75 @@ is_full_run() {
         done
         ;;
       time|command|exec)
+        stripped=1
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -f|-o|-a)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        ;;
+      nohup|setsid|arch)
+        stripped=1
         shift
         while (($# > 0)) && [[ "$1" == -* ]]; do
           shift
+        done
+        ;;
+      caffeinate)
+        stripped=1
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -t|-w)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        ;;
+      sudo|doas)
+        stripped=1
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -u|-g|-C|-D|-h|-p|-r|-T|-U|-t|--user|--group)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        ;;
+      ionice)
+        stripped=1
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -c|-n|-p|--class|--classdata|--pid)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
+        done
+        ;;
+      stdbuf)
+        stripped=1
+        shift
+        while (($# > 0)) && [[ "$1" == -* ]]; do
+          case "$1" in
+            -i|-o|-e)
+              shift
+              (($# > 0)) && shift
+              ;;
+            *) shift ;;
+          esac
         done
         ;;
       *) break ;;
@@ -366,7 +481,19 @@ is_full_run() {
   if (($# == 0)); then
     return 1
   fi
-  local tool="${1##*/}"
+  case "${1##*/}" in
+    dotnet|npm|cargo) ;;
+    *)
+      # A launcher was stripped and the word after it is not a tool: use the first later dotnet, npm or
+      # cargo word (ambiguity resolves toward full). With no launcher, or no such word, the run is partial.
+      ((stripped == 1)) || return 1
+      while (($# > 0)) && [[ "${1##*/}" != dotnet && "${1##*/}" != npm && "${1##*/}" != cargo ]]; do
+        shift
+      done
+      (($# > 0)) || return 1
+      ;;
+  esac
+  tool="${1##*/}"
   shift
   case "${tool}" in
     dotnet) is_full_dotnet "$@" ;;

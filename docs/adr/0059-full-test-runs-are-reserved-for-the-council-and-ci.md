@@ -19,7 +19,7 @@ Accepted, 2026-11-06.
 
 ## Context
 
-A full test run is the whole .NET suite, the whole `dash/` npm suite, or a bare `cargo test`.
+A full test run is the whole .NET suite, the whole `dash/` npm suite, the whole tray UI suite, or a bare `cargo test`.
 It takes minutes of CPU and memory. Overlapping full runs on one machine slow each other and
 make the load-sensitive test classes flaky ([ADR 0047](0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)).
 A developer agent needs the tests that cover its change, not the whole suite. A prose rule
@@ -43,13 +43,22 @@ cannot stop a run, so the rule is enforced in code.
      `src/KyberWeave.Cli/Commands/Review/ReviewGatesCommand.cs`.
    - **C. `scripts/fast-loop.sh`.** `--full`, `--scoped` and `--regenerate` exit 89 before any
      build when stdin is not a terminal. This script has no `--council` flag.
-3. **The full-run definition.** The classifier first strips leading `env`, `timeout`, `nice`,
-   `time`, `command` and `exec` prefixes. Then:
-   - `dotnet test`, and the direct test runner dll, is full unless a class, method, trait or
-     filter option narrows it, or it is aimed at another project. The full targets are no
-     target, a solution file, a directory, and the `KyberWeave.Tests` project or dll.
-   - The `dash` npm test script is full when no path follows `--`.
-   - A bare `cargo test`, with no positional filter, is full.
+3. **The full-run definition.** The classifier first strips launchers, skipping each one's own
+   options, in any order: `env`, `timeout`, `nice`, `time`, `command`, `exec`, `nohup`,
+   `caffeinate`, `sudo`, `doas`, `ionice`, `setsid`, `stdbuf` and `arch`. An unknown word after a
+   launcher makes the classifier scan forward to the first `dotnet`, `npm` or `cargo` word. A
+   narrowing flag anywhere (`-class`, `-method`, `-trait`, `-treenode-filter`, `--filter*`) makes
+   a run partial. Then:
+   - `dotnet test`, and the direct test runner dll, is full with no target, a solution file, a
+     directory, or the `KyberWeave.Tests` project or dll. It is partial when every named target is
+     another project.
+   - `dotnet run --project <path>` is full only when the project is `KyberWeave.Tests` (a trailing
+     `/` and `.csproj` are ignored) and no narrowing flag appears, including after `--`. Any other
+     project is partial.
+   - `npm test`, `npm t`, `npm run test` and `npm run-script test` are full with no positional word
+     after `--`, under any prefix: none, relative, absolute, `--prefix=`, or the tray UI directory.
+   - `cargo test` is full with no positional filter. A `+toolchain` selector is allowed before the
+     subcommand.
    - Ambiguous input counts as full. A wrongly refused partial run is recoverable; a wrongly
      admitted full run is not.
 4. **Caller identity is a flag or a terminal.** A caller is the review council when it passes
@@ -78,14 +87,18 @@ cannot stop a run, so the rule is enforced in code.
 - A shell with a pseudo-terminal passes the terminal test.
 - Typing `--council` passes the guard.
 - A raw `dotnet test` run that bypasses `proc-guard.sh` is not seen.
-- `sh -c` and `env -S` command strings are not parsed.
-- Other launchers (`nohup`, `caffeinate`, `sudo`, absolute-path wrappers) are not unwrapped.
-- `dotnet run --project <test project>` and `npm --prefix <absolute path> run test` classify as
-  partial.
-- A directory target is treated as full, so some partial runs are refused.
+- `sh -c`, `bash -c` and `env -S` command strings are not parsed.
+- A launcher outside the list in the definition is not unwrapped. Its command is classified only
+  when a `dotnet`, `npm` or `cargo` word follows it.
+- Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest` are
+  classified as partial and run.
 - The default path of `scripts/fast-loop.sh` runs an unfiltered `cargo test` of the tray crate
   for a tray Rust change. It does not go through `proc-guard.sh`, so no refusal applies. Tracked in
   [the fast-loop tray cargo test todo](../todo/fast-loop-default-tray-cargo-test.md).
+- Deliberate over-refusals: a targeted run classified as full is refused. These are any directory
+  target, `npm test --workspace <name>`, `cargo test -p <package>`, and a scan that finds a
+  `dotnet`, `npm` or `cargo` word after an unknown word, such as `sudo echo ... dotnet test`. Recover
+  with a named class (`-class` for dotnet), `--council`, or a terminal.
 
 ## Release Ordering
 
