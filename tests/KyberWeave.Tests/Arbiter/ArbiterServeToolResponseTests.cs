@@ -11,7 +11,7 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// What the served <c>arbiter_evaluate</c> tool answers. The client controls every
+/// What the served <c>arbiter_evaluate_agent_dispatch_or_return</c> tool answers. The client controls every
 /// fact it passes, so the tool is responsible for keeping a client's text out of the
 /// structured parts of its own response: the synthesized routing header block is the
 /// hook's decision surface, and a client string that joins it forges routing.

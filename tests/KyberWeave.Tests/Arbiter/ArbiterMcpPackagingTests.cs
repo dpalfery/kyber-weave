@@ -18,7 +18,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// Contract for task 17.1: <c>kyber-weave-arbiter serve</c> is a stdio MCP server for the
 /// D4 fallback. It declares three tools with routing descriptions, leads every response
 /// with the provenance line, resolves its root as flag, then environment, then working
-/// directory, answers <c>arbiter_evaluate</c> with the hook's own outcome for the same
+/// directory, answers <c>arbiter_evaluate_agent_dispatch_or_return</c> with the hook's own outcome for the same
 /// event, and never reports the key. Stdout belongs to the transport.
 /// RED: <c>ArbiterTools</c> and the serve surface do not exist yet.
 /// </summary>
@@ -141,9 +141,9 @@ public sealed class ArbiterMcpPackagingTests
     private static string FullPath(string path) => Path.GetFullPath(path);
 
     [Theory]
-    [InlineData("arbiter_evaluate", false)]
-    [InlineData("arbiter_rules", true)]
-    [InlineData("arbiter_status", true)]
+    [InlineData("arbiter_evaluate_agent_dispatch_or_return", false)]
+    [InlineData("arbiter_list_effective_rules_by_trigger", true)]
+    [InlineData("arbiter_check_configuration_and_key_readiness", true)]
     public void ThreeToolsDeclareTheirAnnotations(string toolName, bool readOnly)
     {
         McpServerToolAttribute attribute = ToolMethod(toolName).GetCustomAttribute<McpServerToolAttribute>()!;
@@ -163,13 +163,13 @@ public sealed class ArbiterMcpPackagingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(["arbiter_evaluate", "arbiter_rules", "arbiter_status"], names);
+        Assert.Equal(["arbiter_evaluate_agent_dispatch_or_return", "arbiter_list_effective_rules_by_trigger", "arbiter_check_configuration_and_key_readiness"], names);
     }
 
     [Theory]
-    [InlineData("arbiter_evaluate")]
-    [InlineData("arbiter_rules")]
-    [InlineData("arbiter_status")]
+    [InlineData("arbiter_evaluate_agent_dispatch_or_return")]
+    [InlineData("arbiter_list_effective_rules_by_trigger")]
+    [InlineData("arbiter_check_configuration_and_key_readiness")]
     public void ToolDescriptionsScoreAsRoutingMetadata(string toolName)
     {
         DescriptionScore score = ScoreDescription(toolName);
@@ -182,7 +182,7 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void ExactlyOneArbiterToolCarriesANegativeBoundary()
     {
-        string[] tools = ["arbiter_evaluate", "arbiter_rules", "arbiter_status"];
+        string[] tools = ["arbiter_evaluate_agent_dispatch_or_return", "arbiter_list_effective_rules_by_trigger", "arbiter_check_configuration_and_key_readiness"];
         string[] bounded = tools
             .Where(name => ScoreDescription(name).Components
                 .Single(c => c.Name == "Negative boundary").Points > 0)

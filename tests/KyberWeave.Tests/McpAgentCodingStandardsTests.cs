@@ -12,14 +12,14 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// T3 RED — the <c>agent_coding_standards</c> tool answers a portable agent's question about
+/// T3 RED — the <c>docs_get_coding_standard_for_technology</c> tool answers a portable agent's question about
 /// one stack: it resolves the technology to this repository's standard, names the document,
 /// and puts the rule ids in front of the prose so a budget can never cut them away.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Every call resolves the method through its <c>[McpServerTool]</c> name rather than calling it
-/// directly — the idiom <c>McpDocsProvenanceTests</c> uses for <c>docs_status</c>. The declared
+/// directly — the idiom <c>McpDocsProvenanceTests</c> uses for <c>docs_get_source_repository_and_revision</c>. The declared
 /// name is what a client routes on, so keeping the calls on it means a rename fails here instead
 /// of leaving the suite green while the tool agents call has gone.
 /// </para>
@@ -32,7 +32,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class McpAgentCodingStandardsTests : IDisposable
 {
-    private const string ToolName = "agent_coding_standards";
+    private const string ToolName = "docs_get_coding_standard_for_technology";
     private const string CsharpStandardPath = "6-Docs/standards/csharp/README.md";
     private const string TestStandardPath = "6-Docs/standards/test/README.md";
     private const string RustStandardPath = "6-Docs/standards/rust/README.md";
