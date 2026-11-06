@@ -337,16 +337,20 @@ public static class McpServerRenamer
     /// </remarks>
     private static IReadOnlyList<McpRenameChange> ScanToml(HarnessMcpEntry row, ConfiguredFile file)
     {
-        string? text = ReadText(file.AbsolutePath);
+        string text;
 
-        if (text is null)
+        try
+        {
+            text = File.ReadAllText(file.AbsolutePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return
             [
                 Refused(
                     row.Harness,
                     file.RelativePath,
-                    $"{file.RelativePath} could not be read, so nothing was read or written",
+                    $"{file.RelativePath} could not be read: {exception.Message}, so nothing was written",
                     $"Fix {file.RelativePath} so it can be read, then run this command again. Nothing was written.")
             ];
         }
@@ -1001,12 +1005,13 @@ public static class McpServerRenamer
 
     /// <summary>
     /// Whether two declaration entries say the same thing: a rename may move a key, never a launch,
-    /// a provenance or a requirement level.
+    /// a provenance, a requirement level or an install command.
     /// </summary>
     private static bool SameDeclaration(RequiredMcpServer left, RequiredMcpServer right) =>
         left.Command.SequenceEqual(right.Command, StringComparer.Ordinal) &&
         left.Provenance == right.Provenance &&
-        left.Level == right.Level;
+        left.Level == right.Level &&
+        string.Equals(left.Install, right.Install, StringComparison.Ordinal);
 
     private static string? WriteDeclaration(string configPath, string edited)
     {

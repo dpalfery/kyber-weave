@@ -1241,6 +1241,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
             Assert.Equal(1, execution.Result);
             Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+            Assert.Contains("could not be read:", execution.Output, StringComparison.Ordinal);
             Assert.DoesNotContain("nothing to do", execution.Output, StringComparison.OrdinalIgnoreCase);
         }
         finally
