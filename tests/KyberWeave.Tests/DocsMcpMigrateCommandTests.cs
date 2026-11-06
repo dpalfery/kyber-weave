@@ -1170,6 +1170,98 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
                 + $"command never reads or writes. Output:{Environment.NewLine}{execution.Output}");
     }
 
+    /// <summary>
+    /// A declaration that is a symbolic link is refused before it is read: reading it would read a
+    /// file the repository does not contain, and writing it would write there.
+    /// </summary>
+    [Fact]
+    public void ASymlinkedDeclarationIsRefusedAndLeavesItsTargetByteIdentical()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Creating symbolic links requires elevation on Windows, so the case cannot be simulated.");
+            return;
+        }
+
+        string outside = Path.Combine(_root.Path, "outside-declaration.yml");
+        File.WriteAllText(
+            outside,
+            $$"""
+            mcp:
+              required-servers:
+                {{OldKey}}:
+                  command: ['{{ShippedBinary}}', --repo-root, .]
+                  provenance: first-party
+                  level: required
+            """);
+        Directory.CreateDirectory(Path.GetDirectoryName(InRepo(DeclarationFile))!);
+        File.CreateSymbolicLink(InRepo(DeclarationFile), outside);
+        byte[] before = File.ReadAllBytes(outside);
+
+        CapturedConsoleExecution<int> execution = Migrate(ClaudeCode);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(outside));
+        Assert.Contains("symbolic link", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A TOML target this process cannot read is refused with the error code rather than reported as
+    /// a clean file with nothing to do. The command has to say it did not read the file it was
+    /// pointed at, exactly as the JSON path does.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableTomlTargetIsRefusedRatherThanReportedClean()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes are not enforced on Windows, so a denied read cannot be simulated.");
+            return;
+        }
+
+        WriteFile(
+            CodexFile,
+            $$"""
+            [mcp_servers.{{OldKey}}]
+            command = "kyber-weave-mcp"
+            """);
+        string fullPath = InRepo(CodexFile);
+
+        File.SetUnixFileMode(fullPath, UnixFileMode.None);
+        try
+        {
+            if (!ReadIsDenied(fullPath))
+            {
+                Assert.Skip("The process can read a mode-000 file (running as root?), so a denied read cannot be simulated.");
+                return;
+            }
+
+            CapturedConsoleExecution<int> execution = Migrate(Codex);
+
+            Assert.Equal(1, execution.Result);
+            Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("nothing to do", execution.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    private static bool ReadIsDenied(string path)
+    {
+        try
+        {
+            _ = File.ReadAllText(path);
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     // ----------------------------------------------------------------------------------------
     // Fixtures
     // ----------------------------------------------------------------------------------------

@@ -336,7 +336,20 @@ public static class McpServerRenamer
     /// </remarks>
     private static IReadOnlyList<McpRenameChange> ScanToml(HarnessMcpEntry row, ConfiguredFile file)
     {
-        string text = ReadText(file.AbsolutePath) ?? string.Empty;
+        string? text = ReadText(file.AbsolutePath);
+
+        if (text is null)
+        {
+            return
+            [
+                Refused(
+                    row.Harness,
+                    file.RelativePath,
+                    $"{file.RelativePath} could not be read, so nothing was read or written",
+                    $"Fix {file.RelativePath} so it can be read, then run this command again. Nothing was written.")
+            ];
+        }
+
         TomlScanReport scan = TomlTableScanner.Scan(text);
 
         List<McpRenameChange> changes = [];
@@ -714,6 +727,35 @@ public static class McpServerRenamer
             ? Path.Combine(KyberWeaveYamlParser.DefaultDirectoryName, KyberWeaveYamlParser.DefaultFileName).Replace('\\', '/')
             : Path.GetRelativePath(root, configPath).Replace('\\', '/');
 
+        if (configPath is not null)
+        {
+            if (McpRepositoryPath.Contained(root, relativePath) is not { } guarded)
+            {
+                return
+                [
+                    Refused(
+                        DeclarationTarget,
+                        relativePath,
+                        $"{relativePath} does not resolve inside the repository, so nothing was read or written",
+                        "Report this: a repository-scope file has to name a path in the tree this command was given.")
+                ];
+            }
+
+            McpLinkProbe probe = McpConfigurationLink.Probe(root, guarded);
+
+            if (probe.Obstruction != McpLinkObstruction.None)
+            {
+                return
+                [
+                    Refused(
+                        DeclarationTarget,
+                        relativePath,
+                        $"{McpConfigurationLink.Describe(relativePath, probe)}, so nothing was read or written",
+                        "Kyber-Weave reads and writes repository-scope files only; put a real file inside the repository and run this command again.")
+                ];
+            }
+        }
+
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
 
         if (!loaded.Success || loaded.Config is null)
@@ -728,7 +770,30 @@ public static class McpServerRenamer
         }
 
         List<McpRenameChange> changes = [];
-        string text = configPath is null ? string.Empty : File.ReadAllText(configPath);
+        string text;
+
+        if (configPath is null)
+        {
+            text = string.Empty;
+        }
+        else
+        {
+            try
+            {
+                text = File.ReadAllText(configPath);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return
+                [
+                    Refused(
+                        DeclarationTarget,
+                        relativePath,
+                        $"{relativePath} could not be read: {exception.Message}, so nothing was written",
+                        $"Fix {relativePath} so it can be read, then run this command again. Nothing was written.")
+                ];
+            }
+        }
 
         foreach (McpRenameRule rule in Rules)
         {
@@ -919,12 +984,12 @@ public static class McpServerRenamer
 
     private static string? WriteDeclaration(string configPath, string edited)
     {
-        byte[] original = File.ReadAllBytes(configPath);
-        bool bom = JsonServerSplice.ByteOrderMarkLength(original) > 0;
-        byte[] content = Encoding.UTF8.GetBytes(edited);
-
         try
         {
+            byte[] original = File.ReadAllBytes(configPath);
+            bool bom = JsonServerSplice.ByteOrderMarkLength(original) > 0;
+            byte[] content = Encoding.UTF8.GetBytes(edited);
+
             AtomicFile.WriteAllBytes(configPath, bom ? [0xEF, 0xBB, 0xBF, .. content] : content);
             return null;
         }
