@@ -1026,16 +1026,12 @@ the route allowlist.
 
 **The rename boundary (`kw-dash`).** The server key a client registers is `kw-dash`; the
 executable and its argv are unchanged, so `kyberdash mcp` still starts it. The eight tools
-were renamed once, when that key changed: `dash_status` is now
-`dash_list_available_analytics_operations`, `dash_catalog` is
-`dash_list_queryable_metrics_dimensions_limits`, `dash_query` is
-`dash_query_session_cost_tokens_and_duration`, `dash_search_sessions` is
-`dash_search_sessions_by_text_and_scope`, `dash_inspect` is
-`dash_read_captured_run_session_or_turn_context`, `dash_findings` is
-`dash_list_detected_context_and_tool_problems`, `dash_compare` is
-`dash_compare_metrics_between_two_scopes`, and `dash_outcomes` is
-`dash_get_run_success_or_failure_outcomes`. Past sessions keep the tool names they were
-recorded with, and per-tool statistics split at the rename boundary: a window that spans it
+were renamed once, when that key changed, to purpose-shaped names that say what each
+operation does; this runbook uses only the current names, and
+[the adoption guide](onboarding.md#ask-kyberdash-from-an-mcp-client) carries the old-to-new
+mapping beside the full list. The records are not part of the rename. Past sessions keep
+the tool names they were recorded with — the old names, for anything captured before the
+rename — and per-tool statistics split at the rename boundary: a window that spans it
 reports the old name and the new name as two rows, never one merged row. Stored records are
 evidence and are never rewritten, so there is no alias map — nothing translates an old name
 to a new one on read, and a tool-name filter written before the rename does not match
