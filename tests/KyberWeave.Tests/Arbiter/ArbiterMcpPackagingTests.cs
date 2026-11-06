@@ -163,7 +163,7 @@ public sealed class ArbiterMcpPackagingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(["arbiter_evaluate_agent_dispatch_or_return", "arbiter_list_effective_rules_by_trigger", "arbiter_check_configuration_and_key_readiness"], names);
+        Assert.Equal(["arbiter_check_configuration_and_key_readiness", "arbiter_evaluate_agent_dispatch_or_return", "arbiter_list_effective_rules_by_trigger"], names);
     }
 
     [Theory]
