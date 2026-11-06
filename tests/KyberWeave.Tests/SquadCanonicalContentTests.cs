@@ -1757,13 +1757,13 @@ public sealed class SquadCanonicalContentTests
         int nextHeading = body.IndexOf("\n#", heading + 1, StringComparison.Ordinal);
         string discovery = nextHeading < 0 ? body[heading..] : body[heading..nextHeading];
         int code = discovery.IndexOf("codegraph_explore", StringComparison.Ordinal);
-        int docs = discovery.IndexOf("docs_explore", StringComparison.Ordinal);
+        int docs = discovery.IndexOf("docs_answer_question_from_repo_documentation", StringComparison.Ordinal);
         int directRead = discovery.IndexOf("Read or search a file directly", StringComparison.Ordinal);
 
         Assert.True(code >= 0 && docs >= 0 && directRead > code && directRead > docs,
             $"{agentName}: index discovery must precede direct-read authorization.");
-        Assert.Contains("docs_for_symbol", discovery, StringComparison.Ordinal);
-        Assert.Contains("docs_glossary", discovery, StringComparison.Ordinal);
+        Assert.Contains("docs_find_documents_citing_code_symbol", discovery, StringComparison.Ordinal);
+        Assert.Contains("docs_look_up_glossary_term_definition", discovery, StringComparison.Ordinal);
         if (agentName is "review-lens" or "review-triage")
         {
             Assert.Contains("Discovery reporting is exempt", discovery, StringComparison.Ordinal);

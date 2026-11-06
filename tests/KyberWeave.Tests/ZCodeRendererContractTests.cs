@@ -109,7 +109,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     private const int MaxDescriptionLength = 1024;
 
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = "kw-arbiter";
 
     /// <summary>
     /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
@@ -123,7 +123,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The MCP tool names one principal is entitled to: <c>kyber-weave</c> on the file-read
+    /// The MCP tool names one principal is entitled to: <c>kw-docs</c> on the file-read
     /// entitlement alone, <c>codegraph</c> and <c>context7</c> minus the pure orchestrator.
     /// The Arbiter server is granted separately, only to the conductor and code-reviewer.
     /// </summary>
@@ -910,7 +910,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// connected-server requirement while granting nothing. This suite therefore asserts the
     /// qualified form is present and the selector form is absent.
     ///
-    /// Two entitlements, not one: <c>kyber-weave</c> follows the file-read grant alone and
+    /// Two entitlements, not one: <c>kw-docs</c> follows the file-read grant alone and
     /// reaches the pure orchestrator, while <c>codegraph</c> and <c>context7</c> keep the
     /// carve-out. Each principal's expectation is computed from
     /// <see cref="SquadMcpGrantProjection"/>, so a re-added exclusion cannot agree with itself.
@@ -988,7 +988,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     /// <remarks>
     /// The orchestrator still loses <c>codegraph</c> and <c>context7</c>, so its receipt has to
-    /// say so. It no longer loses <c>kyber-weave</c>: naming that server as withheld would be the
+    /// say so. It no longer loses <c>kw-docs</c>: naming that server as withheld would be the
     /// one place a review or a <c>squad doctor</c> run reads a claim that contradicts the render.
     /// </remarks>
     [Fact]

@@ -9,9 +9,9 @@ namespace KyberWeave.Tests.Fakes;
 /// <see cref="SquadSource"/> instead of read back from any renderer.
 /// </summary>
 /// <remarks>
-/// Two rules, not one. <c>kyber-weave</c> is granted to every agent whose effective capability
+/// Two rules, not one. <c>kw-docs</c> is granted to every agent whose effective capability
 /// profile allows <c>filesystem.read</c>, the pure orchestrator included: that server carries
-/// <c>agent_coding_standards</c>, and a role that delegates work still has to hand its delegates
+/// <c>docs_get_coding_standard_for_technology</c>, and a role that delegates work still has to hand its delegates
 /// the standards they are held to. <c>codegraph</c> and <c>context7</c> keep the pure-orchestrator
 /// carve-out, because a role that only routes work has no use for code-graph or library lookups.
 ///
@@ -25,36 +25,36 @@ namespace KyberWeave.Tests.Fakes;
 /// The per-target vocabulary lives here too, and for the same reason. Each harness spells the
 /// grant its own way, and several of those spellings are one character away from a value that
 /// parses cleanly and matches nothing: Kilo's permission key keeps the hyphen in
-/// <c>kyber-weave_*</c> because it sanitizes only characters outside <c>[a-zA-Z0-9_-]</c>, while
+/// <c>kw-docs_*</c> because it sanitizes only characters outside <c>[a-zA-Z0-9_-]</c>, while
 /// Pi's adapter namespace replaces that same hyphen with an underscore in
-/// <c>mcp__kyber_weave__</c>. Stating both spellings here, as constants a test names, is what
+/// <c>mcp__kw_docs__</c>. Stating both spellings here, as constants a test names, is what
 /// lets a suite assert the wrong one is absent rather than merely that the right one appeared.
 /// </remarks>
 internal static class SquadMcpGrantProjection
 {
     /// <summary>The server the owner widened to every read-entitled agent.</summary>
-    internal const string KyberWeaveServer = "kyber-weave";
+    internal const string KyberWeaveServer = "kw-docs";
 
     /// <summary>
     /// The Arbiter server. It is never part of the standard MCP grant: a target that
     /// enforces the Arbiter uses hooks, and the fallback-only targets grant its tools
     /// separately only to the conductor and code-reviewer.
     /// </summary>
-    internal const string ArbiterServer = "kyber-weave-arbiter";
+    internal const string ArbiterServer = "kw-arbiter";
 
     /// <summary>
     /// The permission key Kilo gates the whole server on. Kilo sanitizes a server name only for
     /// characters outside <c>[a-zA-Z0-9_-]</c>, so the hyphen survives and this key matches
-    /// <c>kyber-weave_docs_status</c>.
+    /// <c>kw-docs_docs_get_source_repository_and_revision</c>.
     /// </summary>
-    internal const string KiloMcpPermissionKey = "kyber-weave_*";
+    internal const string KiloMcpPermissionKey = "kw-docs_*";
 
     /// <summary>
     /// The misspelling Kilo would accept without complaint and match nothing with: <c>_</c> in
     /// place of the server name's <c>-</c>. Asserted absent, because a test that only checked for
     /// <see cref="KiloMcpPermissionKey"/> would still pass if this one were emitted beside it.
     /// </summary>
-    internal const string KiloMcpPermissionKeyMisspelled = "kyber_weave_*";
+    internal const string KiloMcpPermissionKeyMisspelled = "kw_docs_*";
 
     /// <summary>
     /// The extension Pi loads to reach an MCP server, and the namespace its deferred surface
@@ -75,7 +75,7 @@ internal static class SquadMcpGrantProjection
     /// </summary>
     internal const string PureOrchestratorProfile = "orchestrator";
 
-    /// <summary>The capability the kyber-weave entitlement rests on.</summary>
+    /// <summary>The capability the kw-docs entitlement rests on.</summary>
     internal const string FileReadCapability = "filesystem.read";
 
 
@@ -116,7 +116,7 @@ internal static class SquadMcpGrantProjection
     }
 
     /// <summary>
-    /// Whether the agent is entitled to <c>kyber-weave</c>: the profile resolves and allows
+    /// Whether the agent is entitled to <c>kw-docs</c>: the profile resolves and allows
     /// <c>filesystem.read</c>, with no reference to the profile's identity.
     /// </summary>
     internal static bool GrantsKyberWeave(SquadSource source, SquadAgent agent, SquadTarget target)
@@ -140,7 +140,7 @@ internal static class SquadMcpGrantProjection
                    StringComparison.Ordinal);
     }
 
-    /// <summary>The agents the rule grants <c>kyber-weave</c>, by source identity.</summary>
+    /// <summary>The agents the rule grants <c>kw-docs</c>, by source identity.</summary>
     internal static IReadOnlySet<string> KyberWeaveEntitledAgents(SquadSource source, SquadTarget target)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -182,7 +182,7 @@ internal static class SquadMcpGrantProjection
         ];
     }
 
-    /// <summary>The <c>kyber-weave</c> roster's fully qualified tool names.</summary>
+    /// <summary>The <c>kw-docs</c> roster's fully qualified tool names.</summary>
     internal static IReadOnlyList<string> KyberWeaveToolNames(SquadSource source)
     {
         return QualifiedToolNames(source, server => string.Equals(server, KyberWeaveServer, StringComparison.Ordinal));
@@ -201,7 +201,7 @@ internal static class SquadMcpGrantProjection
     /// <summary>
     /// The MCP tool names one agent is entitled to on a target that enumerates the whole roster
     /// it grants (Claude, ZCode, Devin): the orchestrator-excluded servers first, then
-    /// <c>kyber-weave</c>, in the server-then-tool order the roster declares.
+    /// <c>kw-docs</c>, in the server-then-tool order the roster declares.
     /// </summary>
     internal static IReadOnlyList<string> EntitledRosterToolNames(
         SquadSource source,
@@ -219,7 +219,7 @@ internal static class SquadMcpGrantProjection
     }
 
     /// <summary>
-    /// The <c>kyber-weave</c> tool names one agent is entitled to on a target that named no MCP
+    /// The <c>kw-docs</c> tool names one agent is entitled to on a target that named no MCP
     /// tool at all before this change (Command Code), where the widening adds the one server the
     /// squad's own <c>mcp.json</c> declares and no other.
     /// </summary>
@@ -257,8 +257,8 @@ internal static class SquadMcpGrantProjection
 
     /// <summary>
     /// The namespace Pi's MCP adapter registers a server under: hyphens become underscores before
-    /// any other character is mapped, which is why <c>kyber-weave</c> is reached as
-    /// <c>kyber_weave</c> there and nowhere else.
+    /// any other character is mapped, which is why <c>kw-docs</c> is reached as
+    /// <c>kw_docs</c> there and nowhere else.
     /// </summary>
     /// <remarks>
     /// Stated as the inverse of <see cref="KiloMcpPermissionKey"/> on purpose. The same server
@@ -283,7 +283,7 @@ internal static class SquadMcpGrantProjection
     }
 
     /// <summary>
-    /// The prefix every <c>kyber-weave</c> overlay tool entry on Pi carries, so a suite can assert
+    /// The prefix every <c>kw-docs</c> overlay tool entry on Pi carries, so a suite can assert
     /// the underscored namespace appeared and the hyphenated one did not.
     /// </summary>
     internal static string PiMcpToolEntryPrefix { get; } =
@@ -296,7 +296,7 @@ internal static class SquadMcpGrantProjection
     /// <remarks>
     /// Derived from the source-declared roster, so a tool added to <c>toolchain.yml</c> moves this
     /// expectation without a renderer or a test edit, and a renderer that dropped one entry fails.
-    /// A roster with no <c>kyber-weave</c> entry yields nothing, which is what keeps an unmatched
+    /// A roster with no <c>kw-docs</c> entry yields nothing, which is what keeps an unmatched
     /// grant from loading an extension for a server nobody declared.
     /// </remarks>
     internal static IReadOnlyList<string> PiMcpOverlayToolEntries(SquadSource source)
