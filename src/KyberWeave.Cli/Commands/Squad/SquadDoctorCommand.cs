@@ -221,8 +221,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    /// Reports every harness in this project still wired under a retired MCP server key, and the
-    /// command that renames it.
+    /// Reports every harness in this project whose configuration still holds a retired MCP server key,
+    /// or could not be checked for one, and the remedy for each: the migrate command for a proven
+    /// leftover, the hand edit for an unproven one.
     /// </summary>
     /// <remarks>
     /// Doctor is where an operator looks when something is off, so a leftover has to be named here.
@@ -235,7 +236,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IReadOnlyList<McpRenameChange> leftovers =
         [
             .. McpServerRenamer.Scan(workingDirectory)
-                .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
+                .Where(change => change.Code is McpServerRenamer.RenameCode
+                    or McpServerRenamer.LeftAloneCode
+                    or McpServerRenamer.RefusedCode)
         ];
 
         if (leftovers.Count == 0)
@@ -248,11 +251,17 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
 
                 AnsiConsole.MarkupLine(
-                    $"  [yellow]warn[/] {Markup.Escape(McpServerRenamer.RenameCode)} {file}: "
+                    $"  [yellow]warn[/] {Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)} {file}: "
                     + Markup.Escape(TerminalText.Line(leftover.Message)));
 
-                AnsiConsole.MarkupLine(
-                    $"         Run: [grey]{Markup.Escape(McpServerRenamer.MigrateCommand + " --target " + leftover.Harness)}[/]");
+                string? remedy = string.Equals(leftover.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
+                    ? "Run: " + McpServerRenamer.MigrateCommand + " --target " + leftover.Harness
+                    : leftover.Hint;
+
+                if (!string.IsNullOrWhiteSpace(remedy))
+                {
+                    AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(remedy))}[/]");
+                }
             }
         });
     }

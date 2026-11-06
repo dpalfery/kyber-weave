@@ -20,6 +20,8 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
 {
     private const string WarningCode = "KW-MCP-WIRE-007";
 
+    private const string InfoCode = "KW-MCP-WIRE-008";
+
     private const string MigrateVerb = "docs mcp-migrate";
 
     private readonly TempDirectory _temp = new();
@@ -84,6 +86,40 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
         CommandExecution control = RunProjectDoctor(controlDir);
 
         Assert.Contains(WarningCode, control.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An old key that is present but not provably ours is still a leftover doctor reports, with the
+    /// hand edit as its remedy rather than a command that would refuse it.
+    /// </summary>
+    [Fact]
+    public void Doctor_ProjectWithUnprovenOldKey_ReportsItAsLeftAloneWithAHandEdit()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-unproven");
+        Directory.CreateDirectory(workingDir);
+        McpWiringFixture.WriteText(
+            workingDir,
+            ".mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["kyber-weave"] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = "npx",
+                        ["args"] = new JsonArray("kyber-weave-mcp")
+                    }
+                }
+            }.ToJsonString());
+
+        CommandExecution execution = RunProjectDoctor(workingDir);
+
+        Assert.Contains("warn", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(".mcp.json", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(MigrateVerb, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("by hand", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
