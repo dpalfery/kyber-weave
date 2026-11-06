@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: ContextHygiene
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-11-05
 code-refs:
   - InstructionSurfaceScanner
 ---
@@ -55,6 +55,20 @@ assignments. A secret in a skill is a secret in every context that skill is load
 
 Missing author, version, or license. Not vulnerabilities; they are the metadata that makes
 an artifact auditable at all, and their absence is worth a finding.
+
+The scanner reads provenance from the **nested `metadata:` map only**, never from top-level
+keys. Declaring `author:` and `version:` at the top level satisfies nothing and instead earns
+a `KW-SKILL-SPEC-009` unknown-key warning, so the fields belong under `metadata:`:
+
+```yaml
+metadata:
+  author: dpalfery
+  version: 0.1.0
+```
+
+Every `.apm/skills/*/SKILL.md` ships `metadata.author`, `metadata.version`, and a `license`.
+`SkillProvenanceTests` parses each of them with the real parser and scanner, so the top-level
+hoist above fails the suite instead of passing silently.
 
 ## Necessary, not sufficient
 

@@ -439,6 +439,75 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
+    public void StartSqliteLockWhenContendedFailsFastWithBailAndReportsError()
+    {
+        RequireSqlite();
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        using Process primaryLock = StartSqliteLock(persistence.DatabasePath);
+        try
+        {
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => StartSqliteLock(persistence.DatabasePath, sqliteTimeoutMilliseconds: 50));
+
+            Assert.True(
+                exception.Message.Contains("lock", StringComparison.OrdinalIgnoreCase)
+                || exception.Message.Contains("busy", StringComparison.OrdinalIgnoreCase),
+                $"Expected a lock/busy diagnostic, but got: {exception.Message}");
+        }
+        finally
+        {
+            if (!primaryLock.HasExited)
+            {
+                try
+                {
+                    primaryLock.StandardInput.WriteLine("ROLLBACK;");
+                    primaryLock.StandardInput.Close();
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
+                {
+                    // Child process terminated before or during rollback write.
+                }
+            }
+
+            if (!primaryLock.HasExited)
+            {
+                Assert.True(primaryLock.WaitForExit(5_000), "sqlite primary lock fixture did not exit.");
+            }
+        }
+    }
+
+    [Fact]
+    public void StartSqliteLockWhenOutputIsNotAcquiredKillsChildAndFailsFastWithoutHanging()
+    {
+        RequireSqlite();
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            () => StartSqliteLock(persistence.DatabasePath, acquireAckQuery: "SELECT 'UNEXPECTED';"));
+
+        Assert.Contains("Output: 'UNEXPECTED'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartSqliteLockWhenRollbackCleanupFailsPreservesCleanupDiagnosticInAggregateException()
+    {
+        RequireSqlite();
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+
+        AggregateException exception = Assert.Throws<AggregateException>(
+            () => StartSqliteLock(
+                persistence.DatabasePath,
+                probeTimeoutSeconds: 0,
+                beforeProbe: process => process.StandardInput.Dispose()));
+
+        Assert.IsType<TimeoutException>(exception.InnerExceptions[0]);
+        Assert.Contains(exception.InnerExceptions.Skip(1), inner => inner is IOException or InvalidOperationException);
+    }
+
+    [Fact]
     public void PublicPersistenceContractDoesNotAcceptCredentialsOrRequestHeaders()
     {
         string[] publicNames = typeof(SqliteAnalysisPersistence)
@@ -556,34 +625,139 @@ public sealed class AnalysisPersistenceTests
         if (result.ExitCode != 0) throw new InvalidOperationException(result.StandardError);
     }
 
-    private static Process StartSqliteLock(string databasePath)
+    private static Process StartSqliteLock(
+        string databasePath,
+        int acquireTimeoutSeconds = 60,
+        int probeTimeoutSeconds = 60,
+        int sqliteTimeoutMilliseconds = 60000,
+        string acquireAckQuery = "SELECT 'ACQUIRED';",
+        Action<Process>? beforeProbe = null)
     {
         ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("-batch");
+        startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite lock fixture.");
-        process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
-        process.StandardInput.Flush();
 
-        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 1\nBEGIN IMMEDIATE;");
-            if (result.ExitCode != 0
-                && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
-                    || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
+            process.StandardInput.WriteLine(
+                $".timeout {sqliteTimeoutMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
+            process.StandardInput.WriteLine(acquireAckQuery);
+            process.StandardInput.Flush();
+
+            using CancellationTokenSource cts = new(TimeSpan.FromSeconds(acquireTimeoutSeconds));
+            string? line;
+            try
             {
-                return process;
+                line = process.StandardOutput.ReadLineAsync(cts.Token).AsTask().GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException exception)
+            {
+                throw new TimeoutException("sqlite lock fixture did not acquire an immediate transaction within deadline.", exception);
             }
 
-            Thread.Sleep(20);
-        }
+            if (!string.Equals(line?.Trim(), "ACQUIRED", StringComparison.Ordinal))
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        process.WaitForExit(5_000);
+                    }
+                }
+                catch (Exception ex) when (ex is Win32Exception or NotSupportedException or InvalidOperationException)
+                {
+                    // Best effort termination before draining stderr.
+                }
 
-        process.StandardInput.WriteLine("ROLLBACK;");
-        process.StandardInput.Close();
-        process.WaitForExit();
-        throw new TimeoutException("sqlite lock fixture did not acquire an immediate transaction.");
+                string stderr;
+                using (CancellationTokenSource stderrCts = new(TimeSpan.FromSeconds(5)))
+                {
+                    try
+                    {
+                        stderr = process.StandardError.ReadToEndAsync(stderrCts.Token).GetAwaiter().GetResult();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        stderr = string.Empty;
+                    }
+                }
+
+                throw new InvalidOperationException(
+                    $"sqlite lock fixture did not acquire an immediate transaction. Output: '{line}', Error: '{stderr}'.");
+            }
+
+            beforeProbe?.Invoke(process);
+
+            DateTime deadline = DateTime.UtcNow.AddSeconds(probeTimeoutSeconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 50\nBEGIN IMMEDIATE;");
+                if (result.ExitCode != 0
+                    && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                        || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return process;
+                }
+
+                Thread.Sleep(20);
+            }
+
+            throw new TimeoutException("sqlite lock fixture verified acquire, but concurrent transaction probe did not detect lock.");
+        }
+        catch (Exception primaryException)
+        {
+            List<Exception> cleanupFailures = [];
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.StandardInput.WriteLine("ROLLBACK;");
+                    process.StandardInput.Close();
+                    process.WaitForExit(5_000);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException)
+            {
+                cleanupFailures.Add(ex);
+            }
+
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(5_000);
+                }
+            }
+            catch (Exception ex) when (ex is Win32Exception or NotSupportedException or InvalidOperationException)
+            {
+                if (!process.HasExited)
+                {
+                    cleanupFailures.Add(ex);
+                }
+            }
+
+            if (!process.HasExited)
+            {
+                cleanupFailures.Add(new InvalidOperationException("sqlite lock fixture could not terminate child process."));
+            }
+
+            process.Dispose();
+
+            if (cleanupFailures.Count > 0)
+            {
+                throw new AggregateException(
+                    "sqlite lock fixture encountered a failure, and cleanup also failed.",
+                    [primaryException, .. cleanupFailures]);
+            }
+
+            throw;
+        }
     }
 
     private static string QuerySqlite(string databasePath, string input)

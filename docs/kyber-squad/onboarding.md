@@ -3,7 +3,7 @@ id: squad/onboarding
 title: Kyber-Squad adoption and usage guide
 doc-type: onboarding
 component: KyberSquad
-source-root: src/KyberWeave.Core/Squad
+source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
 last-reviewed: 2026-11-04
 status: current
@@ -237,13 +237,13 @@ those `ext:` tool names appended to its capability-derived `tools` CSV. That age
 the `pi-mcp-adapter` extension in the deployment harness. `network.publish` still has no
 built-in Pi tool and still records `permission-not-expressible`.
 
-**`kyber-weave` needs no such declaration.** The renderer derives that half of the overlay for
-every agent entitled to `kyber-weave`, so the emitted file carries `extensions: [pi-mcp-adapter]`,
+**`kw-docs` needs no such declaration.** The renderer derives that half of the overlay for
+every agent entitled to `kw-docs`, so the emitted file carries `extensions: [pi-mcp-adapter]`,
 the proxy entry `ext:pi-mcp-adapter/mcp`, and one
-`ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool, merged with whatever the
+`ext:pi-mcp-adapter/mcp__kw_docs__<tool>` entry per roster tool, merged with whatever the
 agent declares. The namespace maps the server's hyphen to an underscore — that is
-`pi-mcp-adapter`'s rule, and it is why the entries are `mcp__kyber_weave__…` and not
-`mcp__kyber-weave__…`. It arrived in adapter 6.0.0 and 7.0.0 is the supported target; on 5.x the
+`pi-mcp-adapter`'s rule, and it is why the entries are `mcp__kw_docs__…` and not
+`mcp__kw-docs__…`. It arrived in adapter 6.0.0 and 7.0.0 is the supported target; on 5.x the
 proxy entry still reaches the server and only the per-tool names resolve to nothing. A primary
 agent lowered to a skill carries neither key, so `conductor` reaches the server through its
 session rather than through the file.
@@ -280,7 +280,7 @@ allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to 
 **MCP servers:** a Task-dispatched droid sees MCP servers only through the `mcpServers`
 whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
 names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
-`kyber-weave`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
+`kw-docs`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
 capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md));
 `mcpServers: []` remains the fail-closed value for a droid whose profile grants no read
 entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
@@ -426,15 +426,16 @@ report that the council ran in-process; `architect` does its own sweeps and hand
 question back for the conductor to put to `azure-reader`; `product-owner` does its own external
 research. The receipt records a `permission-not-expressible` degradation for each.
 
-**MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and Kyber-Weave MCP
-tools individually, and the review council's `allowed-tools` adds the three
-`kyber-weave-arbiter` tools (`arbiter_evaluate`, `arbiter_rules`, `arbiter_status`) — the
-council holds the `decision.query` capability, which only the conductor and `code-reviewer`
+**MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and `kw-docs` MCP
+tools individually, and the review council's `allowed-tools` adds the three `kw-arbiter`
+tools (`arbiter_evaluate_agent_dispatch_or_return`,
+`arbiter_list_effective_rules_by_trigger`, `arbiter_check_configuration_and_key_readiness`) —
+the council holds the `decision.query` capability, which only the conductor and `code-reviewer`
 profiles allow. Configure those servers in Devin's `mcp_config.json` (project `.devin/` or
-the user configuration directory) — for the Arbiter, `kyber-weave-arbiter serve --repo-root
-<root>` — noting that Squad itself writes no MCP configuration for Devin, so the fallback
-stays advisory until the server is registered; Devin also imports servers from `.mcp.json`,
-`.cursor/mcp.json`, and `opencode.json`. `squad doctor`
+the user configuration directory) — for the Arbiter, server key `kw-arbiter`, launched
+`kyber-weave-arbiter serve --repo-root <root>` — noting that Squad itself writes no MCP
+configuration for Devin, so the fallback stays advisory until the server is registered; Devin
+also imports servers from `.mcp.json`, `.cursor/mcp.json`, and `opencode.json`. `squad doctor`
 does not check them for Devin.
 
 **Plugins**: Devin can install the Agent Plugins archive `squad pack` produces, which exposes
@@ -447,12 +448,21 @@ frontmatter, and `devin skills list` lists discovered skills. Confirm names ther
 ## MCP access across harnesses
 
 Squad renders a per-agent MCP grant on every target whose harness accepts one, from a single rule:
-**the `kyber-weave` server is granted to every agent whose capability profile resolves and allows
+**the `kw-docs` server is granted to every agent whose capability profile resolves and allows
 `filesystem.read`, the pure orchestrator `conductor` included**
 ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The `codegraph` and `context7`
 servers keep the original non-orchestrator rule. The predicate itself lives once, on
 `CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
 agreeing with the others.
+
+**Where the key comes from.** Every server name in this section is one value from
+`McpServerNames` in `src/KyberWeave.Core/Configuration/`, which holds the three keys
+`Docs` (`kw-docs`), `Dash` (`kw-dash`), and `Arbiter` (`kw-arbiter`) and nothing else — no
+executable and no tool name. The renderers and the Arbiter's `ArbiterServer` constant read it,
+so a key cannot drift between a grant and the toolchain roster. **The Squad roster is
+`kw-docs` and `kw-arbiter`: `kw-dash` is not in `toolchain.yml`, in `products/kyber-squad/mcp.json`,
+or in any agent grant**, because the KyberDash MCP surface belongs to KyberDash and Squad
+neither deploys nor checks it.
 
 **Two targets cannot express it for the `conductor` at all.** On Devin and Pi the conductor is a
 lowered skill, and a skill on either harness carries no grant vehicle — Devin's skills take no
@@ -461,8 +471,9 @@ whatever its session already has, and that is a structural boundary rather than 
 The parity guard pins both targets by name, so a change to either shows up as a failing assertion
 instead of a quiet discrepancy.
 
-**Why the orchestrator is included.** One `kyber-weave` tool is `agent_coding_standards`, which
-hands an agent the coding standard it must follow. The conductor writes no code but dispatches,
+**Why the orchestrator is included.** One `kw-docs` tool is
+`docs_get_coding_standard_for_technology`, which hands an agent the coding standard it must
+follow. The conductor writes no code but dispatches,
 reviews digests, and answers owner questions about what a specialist was required to do, and the
 standard settles those questions. The earlier carve-out excluded the orchestrator from every
 server on the reasoning that a routing role has no use for lookups; that reasoning still holds for
@@ -476,17 +487,17 @@ other profile decision are untouched. Do not "fix" it back: change the ADR first
 
 | Harness | How the grant is expressed | `conductor` |
 |---|---|---|
-| Claude | Tool-level wildcards in the agent's `tools` allow-list | `mcp__kyber-weave__*`, and neither `mcp__codegraph__*` nor `mcp__context7__*` |
-| ZCode | Enumerated `mcp__<server>__<tool>` names; no wildcard is expanded | The eight `kyber-weave` names, and neither of the other two servers |
-| Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kyber-weave` only through the session it runs in |
-| OpenCode | The server-scoped permission key `kyber-weave_*` | Granted |
-| Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kyber-weave` names |
-| Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kyber-weave]` |
-| Copilot | The agent's own `copilot-tools` frontmatter entry `kyber-weave/*` — canonical source, not renderer output | That one entry |
-| Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
-| Kilo | The agent frontmatter `permission` map entry `kyber-weave_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kyber-weave_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |
-| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with `command`/`args` read from the squad's own `mcp.json`; no entry when the squad declares none | Granted: `mcpServers: [{name: kyber-weave, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
-| Cursor, Codex, Warp | No per-agent key: MCP reach is inherited from the session | Reaches `kyber-weave` as soon as you wire the server |
+| Claude | Tool-level wildcards in the agent's `tools` allow-list | `mcp__kw-docs__*`, and neither `mcp__codegraph__*` nor `mcp__context7__*` |
+| ZCode | Enumerated `mcp__<server>__<tool>` names; no wildcard is expanded | The eight `kw-docs` names, and neither of the other two servers |
+| Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kw-docs` only through the session it runs in |
+| OpenCode | The server-scoped permission key `kw-docs_*` | Granted |
+| Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kw-docs` names |
+| Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kw-docs]` |
+| Copilot | The agent's own `copilot-tools` frontmatter entry `kw-docs/*` — canonical source, not renderer output | That one entry |
+| Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
+| Kilo | The agent frontmatter `permission` map entry `kw-docs_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kw-docs_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |
+| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with `command`/`args` read from the squad's own `mcp.json`; no entry when the squad declares none | Granted: `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
+| Cursor, Codex, Warp | No per-agent key: MCP reach is inherited from the session | Reaches `kw-docs` as soon as you wire the server |
 
 **Wiring, not granting, is your half.** Every row above decides whether an agent is *allowed* to
 call a server. Nothing in Squad launches one: the operator declares the server in the client's own
@@ -509,7 +520,7 @@ enumerable per-tool names do not.
 
 **ZCode is the one hard prerequisite.** ZCode treats every name in `toolchain.yml`'s
 `required-mcp-tools` as a required connected server, so a ZCode install that does not declare
-`kyber-weave` is a `squad doctor` failure for every agent, `conductor` included. On the other
+`kw-docs` is a `squad doctor` failure for every agent, `conductor` included. On the other
 targets an unwired server is simply an inert grant.
 
 **Three harnesses have no per-agent surface, and that is the finding rather than a gap.** Cursor
@@ -522,10 +533,10 @@ harness does not honour. Kilo, Antigravity, and Pi do have a per-agent surface, 
 wiring forms above were established against a pinned build — `@kilocode/cli` 7.8.18 for Kilo,
 `agy` 1.4.12 for Antigravity, and `pi-mcp-adapter` 7.0.0 for Pi's tool naming — rather than
 assumed. On Pi the naming is the one place the spelling differs per harness: the namespace maps the
-server's hyphen to an underscore, so the entries read `mcp__kyber_weave__…`, and a
-`mcp__kyber-weave__…` entry on Pi names no registered tool.
+server's hyphen to an underscore, so the entries read `mcp__kw_docs__…`, and a
+`mcp__kw-docs__…` entry on Pi names no registered tool.
 
-**If you author an agent,** do not add a per-agent MCP declaration for `kyber-weave`: the rule
+**If you author an agent,** do not add a per-agent MCP declaration for `kw-docs`: the rule
 derives it from the capability profile, and a hand-written copy is a second source that will go
 stale. Two edits do exist, and both are declared rather than derived:
 
@@ -534,7 +545,7 @@ stale. Two edits do exist, and both are declared rather than derived:
   `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun the squad's own
   roster contract.
 - **Copilot's per-agent entry** lives in the agent's own `copilot-tools` list. That is where
-  `conductor` gains `kyber-weave/*`, and the visible review diff for that grant is a frontmatter
+  `conductor` gains `kw-docs/*`, and the visible review diff for that grant is a frontmatter
   line on the primary agent, not a renderer change.
 
 ---
@@ -806,6 +817,13 @@ It reports these:
 - **Retained in-repo state**: a registered project, still live, that holds `.kyber-weave/squad.lock.yml` or
   `.kyber-weave/squad.receipt.json` from an earlier release. Squad retained these files, and they should be
   removed from version control. A stale project is not warned about this way.
+- **Leftover MCP server keys**: a client configuration still declaring one of the pre-rename server
+  keys — `kyber-weave`, `kyberdash`, or `kyber-weave-arbiter` — where doctor can prove it is the old
+  spelling of `kw-docs`, `kw-dash`, or `kw-arbiter`. It is reported as `KW-MCP-WIRE-007`
+  (**Warning**) and left in place: nothing is rewritten, and the verb's exit code does not change.
+  The remedy is `kyber-weave docs mcp-migrate`. An old key that is present but not provably ours is
+  `KW-MCP-WIRE-008` (**Info**) and is likewise reported and left alone. `kyber-weave docs init`
+  reports the same two findings, with the same effect on its exit code.
 
 ---
 
@@ -1068,7 +1086,7 @@ renders no hooks either — and record `arbiter-not-enforced` in the receipt.
 | `antigravity` | Squad's owned top-level group `kyber-arbiter` in `.agents/hooks.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, and returns are unobservable — completion checks answer `returns-unobservable` and allow. Each rendered agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
 | `factory` | An owned block in `.factory/hooks.json` — unless `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, in which case the block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded: Factory reads that `settings.json` key only while `hooks.json` is absent, and rendering the file would silently disable the user's hooks. The fix, printed with the record: move the user's hooks into `.factory/hooks.json`, then run `squad update`. |
 | `devin` | An owned block in `.devin/hooks.v1.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, so each dispatcher agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
-| `warp`, `zcode` | No hooks. Register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in the harness's own MCP configuration — Squad writes no MCP configuration for either — and until then only the advisory marker fallback enforces there. |
+| `warp`, `zcode` | No hooks. Register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in the harness's own MCP configuration — Squad writes no MCP configuration for either — and until then only the advisory marker fallback enforces there. |
 
 On `codex`, `cursor`, `antigravity`, `factory`, and `devin` the hooks live in a file the
 user also owns — or, on Antigravity, beside groups the user owns. Squad splices its own
@@ -1088,7 +1106,7 @@ install`, `squad install`, and `squad update` print the applicable step:
 | Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
-| Warp, ZCode | No hooks to trust. Setup instead: register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
+| Warp, ZCode | No hooks to trust. Setup instead: register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 Configure the provider and key per user with `kyber-weave arbiter install --target <t>

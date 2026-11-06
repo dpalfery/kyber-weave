@@ -9,15 +9,15 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the roster parity invariant between the kyber-weave MCP server and the shipped
+/// Pins the roster parity invariant between the kw-docs MCP server and the shipped
 /// kyber-squad toolchain: every tool <c>DocsTools</c> exposes must appear under
-/// <c>required-mcp-tools.kyber-weave</c>.
+/// <c>required-mcp-tools.kw-docs</c>.
 /// </summary>
 /// <remarks>
 /// The roster is what the renderers grant from and what <c>squad doctor</c> checks an install
 /// against, so a tool the server exposes but the roster omits is invisible to every canonical
 /// agent — and it fails silently, because a roster that is merely short reports nothing.
-/// <c>docs_status</c> shipped after the roster was last verified and went missing for exactly
+/// <c>docs_get_source_repository_and_revision</c> shipped after the roster was last verified and went missing for exactly
 /// that reason. This guard closes the class of defect rather than the instance, and carries no
 /// exception list: an allow-list only one layer knows about is the drift it exists to catch.
 /// </remarks>
@@ -32,9 +32,9 @@ public sealed class SquadToolchainRosterGuardTests
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         Assert.True(
-            source.Toolchain.RequiredMcpTools.TryGetValue("kyber-weave", out IReadOnlyList<string>? declared),
-            "products/kyber-squad/toolchain.yml declares no 'kyber-weave' roster under "
-            + "required-mcp-tools, so no canonical agent is granted any kyber-weave tool.");
+            source.Toolchain.RequiredMcpTools.TryGetValue("kw-docs", out IReadOnlyList<string>? declared),
+            "products/kyber-squad/toolchain.yml declares no 'kw-docs' roster under "
+            + "required-mcp-tools, so no canonical agent is granted any kw-docs tool.");
         Assert.NotNull(declared);
 
         IReadOnlyList<string> exposed = ExposedMcpToolNames();
@@ -49,9 +49,9 @@ public sealed class SquadToolchainRosterGuardTests
 
         Assert.True(
             missing.Length == 0,
-            $"products/kyber-squad/toolchain.yml omits {missing.Length} tool(s) the kyber-weave MCP "
+            $"products/kyber-squad/toolchain.yml omits {missing.Length} tool(s) the kw-docs MCP "
             + $"server exposes: {string.Join(", ", missing)}. Add each under "
-            + "required-mcp-tools.kyber-weave; the renderers grant from this roster and `squad doctor` "
+            + "required-mcp-tools.kw-docs; the renderers grant from this roster and `squad doctor` "
             + "checks an install against it, so an omitted tool is silently unavailable to every "
             + "canonical agent.");
     }

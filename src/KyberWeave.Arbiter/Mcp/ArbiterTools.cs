@@ -85,7 +85,7 @@ public sealed record ArbiterFacts
 /// rules, and report readiness. Every response leads with the provenance line.
 /// </summary>
 /// <remarks>
-/// <c>arbiter_evaluate</c> routes through the hook's own decision engine rather than a
+/// <c>arbiter_evaluate_agent_dispatch_or_return</c> routes through the hook's own decision engine rather than a
 /// parallel evaluator, so an event decided here is decided exactly as the hook would
 /// decide it. The rendering of the envelope and the notes stays in the engine for the
 /// same reason. A serve evaluation has no harness, so it is recorded under the
@@ -104,7 +104,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <summary>The largest client text one MCP call may embed, in characters.</summary>
     private const int MaxTextChars = 256 * 1024;
 
-    [McpServerTool(Name = "arbiter_evaluate", ReadOnly = false, OpenWorld = false)]
+    [McpServerTool(Name = "arbiter_evaluate_agent_dispatch_or_return", ReadOnly = false, OpenWorld = false)]
     [Description("""
         Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
         """)]
@@ -259,9 +259,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         return provenance + "\noutcome: allow";
     }
 
-    [McpServerTool(Name = "arbiter_rules", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "arbiter_list_effective_rules_by_trigger", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Lists the Arbiter rules the effective configuration sets, one row per rule, with its step, question, answers and effects. Use when asked which rules decide a trigger such as delegate, lens.spawn or gate.select, or what a named rule asks and changes. Use to explain a block before retrying a dispatch. Do not use to decide whether a live dispatch is allowed; use arbiter_evaluate for that.
+        Lists the Arbiter rules the effective configuration sets, one row per rule, with its step, question, answers and effects. Use when asked which rules decide a trigger such as delegate, lens.spawn or gate.select, or what a named rule asks and changes. Use to explain a block before retrying a dispatch. Do not use to decide whether a live dispatch is allowed; use arbiter_evaluate_agent_dispatch_or_return for that.
         """)]
     public string Rules(
         [Description("A trigger to list the rules of. Omit to list every trigger's rules.")]
@@ -306,9 +306,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         return sb.ToString().TrimEnd();
     }
 
-    [McpServerTool(Name = "arbiter_status", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "arbiter_check_configuration_and_key_readiness", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Reports whether the Arbiter is ready for this repository: the root it answers for, the rule-set hash and rule count, the provider, and whether its key resolves. Use when checking configuration before relying on arbiter_evaluate, or when a dispatch failed closed on a configuration or key error. The key value is never reported, only whether one was found.
+        Reports whether the Arbiter is ready for this repository: the root it answers for, the rule-set hash and rule count, the provider, and whether its key resolves. Use when checking configuration before relying on arbiter_evaluate_agent_dispatch_or_return, or when a dispatch failed closed on a configuration or key error. The key value is never reported, only whether one was found.
         """)]
     public string Status()
     {

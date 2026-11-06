@@ -58,7 +58,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "websearch",
         "external_directory",
         "doom_loop",
-        "kyber-weave_*",
+        "kw-docs_*",
         "task"
     ];
 
@@ -97,7 +97,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "websearch",
         "external_directory",
         "doom_loop",
-        "kyber-weave_*",
+        "kw-docs_*",
         "task"
     ];
 
@@ -220,20 +220,20 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 }
             }
 
-            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow,
+            // D8 MCP mapping: kw-docs_* granted to agents with filesystem.read: allow,
             // excluding suppressed (subagent) shared identities, whose canonical skill is the only
             // projection emitted. A primary shared identity keeps the grant: it edits files and
-            // runs commands. The pure orchestrator is not excluded any more: kyber-weave carries
-            // agent_coding_standards, which the conductor needs to point its delegates at the
+            // runs commands. The pure orchestrator is not excluded any more: kw-docs carries
+            // docs_get_coding_standard_for_technology, which the conductor needs to point its delegates at the
             // standards they are held to.
             bool readAllowed = SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.OpenCode);
             bool expectedKwMcp = !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
             Assert.True(
-                permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
-                $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
+                permissionMap.Children.ContainsKey(new YamlScalarNode("kw-docs_*")),
+                $"Agent '{agent.Name}' leaves 'kw-docs_*' unpinned.");
             Assert.Equal(
                 expectedKwMcp ? "allow" : "deny",
-                RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
+                RequireScalar(permissionMap, "kw-docs_*", agent.Name));
 
             // Delegation lowering
             bool delegateAllowed =
@@ -306,7 +306,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "allow",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
-                ["kyber-weave_*"] = "allow",
+                ["kw-docs_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
                     ["azure-reader"] = "allow",
@@ -336,7 +336,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "deny",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
-                ["kyber-weave_*"] = "allow",
+                ["kw-docs_*"] = "allow",
                 ["task"] = "deny"
             });
 
@@ -361,7 +361,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "allow",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
-                ["kyber-weave_*"] = "allow",
+                ["kw-docs_*"] = "allow",
                 ["task"] = "deny"
             });
 
@@ -618,7 +618,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The pure orchestrator's rendered permission map allows <c>kyber-weave_*</c>.
+    /// The pure orchestrator's rendered permission map allows <c>kw-docs_*</c>.
     /// </summary>
     /// <remarks>
     /// OpenCode merges an agent's permission map with the global config, where most keys default
@@ -637,7 +637,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Assert.True(
             SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.OpenCode),
             "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
-            + "cannot state the conductor is entitled to kyber-weave.");
+            + "cannot state the conductor is entitled to kw-docs.");
 
         SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.OpenCode);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -650,7 +650,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             conductor.Name);
         YamlMappingNode permissionMap = RequireMapping(frontmatter, "permission", conductor.Name);
 
-        Assert.Equal("allow", RequireScalar(permissionMap, "kyber-weave_*", conductor.Name));
+        Assert.Equal("allow", RequireScalar(permissionMap, "kw-docs_*", conductor.Name));
     }
 
     private static void AssertPermissions(

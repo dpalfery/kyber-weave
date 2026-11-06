@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackageId>KyberWeave.Core.Docs</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <Description>The DocGraph engine: parses, validates, searches, exports, scaffolds and drift-checks the governed documentation corpus.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Rich coding standards templates embedded from products/kyber-squad/standards -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\README.md" LogicalName="Standards.azure.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\README.md" LogicalName="Standards.csharp.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\README.md" LogicalName="Standards.data-access-layer.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\README.md" LogicalName="Standards.github-actions.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\README.md" LogicalName="Standards.go.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\README.md" LogicalName="Standards.maui.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\README.md" LogicalName="Standards.pulumi.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\README.md" LogicalName="Standards.python.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\README.md" LogicalName="Standards.react.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\README.md" LogicalName="Standards.rust.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\README.md" LogicalName="Standards.sql.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only, as in KyberWeave.Core: see the note there. -->
+    <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
+    <PackageReference Include="Markdig" Version="1.5.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

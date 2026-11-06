@@ -4,7 +4,30 @@ Kyber-Weave governs the artifacts that shape agent behaviour. **What** it does a
 lives in [`docs/`](docs/README.md) — this file is only operational rules for working in the
 code without breaking the repository.
 
+## Writing style: applies to everything you write
+
+This covers every message to the user, every doc, commit message, PR description and code
+comment, and every prompt or handoff to another agent.
+
+Assume the reader is switching between several tasks and remembers nothing about this one.
+Write for a strong developer who is reading it for the first time.
+
+- **Bottom line first.** Open with what happened, what you found, or what you need.
+- **No assumed context.** Don't rely on earlier messages, other files or past sessions.
+  Give the minimum background in one line.
+- **Plain words.** Explain every name, ID, acronym or piece of jargon the first time it
+  appears. Never use internal labels like plan IDs or task numbers as if the reader knows them.
+- **Short.** Cut anything the reader doesn't need in order to act or decide.
+- **Messages to the user** must also follow [How to respond to the user](products/kyber-squad/response-guidance.default.md).
+
 ## Commands
+
+### Code comments
+
+**Write few.** Code that follows the coding standards needs no comments; add one only where
+the code departs significantly from those standards. Public APIs are the exception: they
+always get XML doc comments (`///`). The writing style above still applies to every comment
+you do write.
 
 ### The inner loop
 
@@ -22,6 +45,10 @@ gate before Ready / Kilo review. Map changed files to tests:
   `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
   `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
   Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
+- Repository policy (scripts, workflows, gate configuration, docs prose, source scans): the
+  same commands against `tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj`.
+  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`,
+  and runs its two source scans (spawn sites, upstream names) on every .NET loop.
 - KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
   (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
   zero tests. Check the run reports a non-zero test count.
@@ -62,7 +89,7 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
-`dotnet test` and dash `ts-test` gates in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
+`dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
 already run through it. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
@@ -91,11 +118,13 @@ tracked diffs; afterwards undo only tracked edits init introduced. Blocked or un
 init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
-Before `docs/` greps, use Kyber-Weave MCP `docs_explore`; before contract changes,
-`docs_for_symbol`; for taxonomy, `docs_glossary` and `docs_analysis_candidates`. No CLI
-equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
-current guidance. Confirm each response's `provenance:` `root=` matches
-`git rev-parse --show-toplevel` (`docs_status`); a mismatch means the wrong repository.
+Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_documentation`;
+before contract changes, `docs_find_documents_citing_code_symbol`; for taxonomy,
+`docs_look_up_glossary_term_definition` and `docs_find_duplicates_conflicts_ambiguous_terms`.
+No CLI equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
+current guidance. The server's configuration key is `kw-docs`. Confirm each response's
+`provenance:` `root=` matches `git rev-parse --show-toplevel`
+(`docs_get_source_repository_and_revision`); a mismatch means the wrong repository.
 
 ## Non-negotiables
 
@@ -128,7 +157,7 @@ Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
 | Working on | Read |
 |---|---|
 | Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
-| The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
+| The engine — `KyberWeave.Core`, `KyberWeave.Core.Docs` and `KyberWeave.Core.Squad` | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |

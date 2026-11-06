@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-05
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0046-docs-explore-section-answer
@@ -137,10 +137,11 @@ coverage without dragging an otherwise matching document under the 0.25 floor. S
 such terms still accumulate in `askedFor`, so an off-topic question remains an explicit
 miss.
 
-## One leaf answer (`docs_explore`)
+## One leaf answer (`docs_answer_question_from_repo_documentation`)
 
-After documents clear the relevance floor, [`docs_explore`](mcp-runbook.md) scores **leaves**
-inside them and returns one answer blob. A leaf is the preamble, the prose before a `##`
+After documents clear the relevance floor,
+[`docs_answer_question_from_repo_documentation`](mcp-runbook.md) scores **leaves** inside them and
+returns one answer blob. A leaf is the preamble, the prose before a `##`
 section's first `###`, or a `###` subsection. Deeper headings stay inside their parent
 `###`. Sibling leaves under one `##` compete for that topic's score; confidence compares
 topics, not every leaf.
@@ -151,7 +152,7 @@ marked incomplete and a **stateless cursor** returns the next span of the **same
 same question without a cursor starts again at the first span.
 
 The tool accepts **`query`** and an optional **`cursor`** only. `maxDocs` and `charBudget`
-are not parameters on `docs_explore`.
+are not parameters on it.
 
 **Confidence** is `tanh((winning topic score − best other topic score) / 2)`, formatted
 `0.00`–`1.00`, and halved when the reply is incomplete. The raw relevance score is not
@@ -162,19 +163,22 @@ the preamble.
 
 Optional frontmatter **`lead`** and **`sections`** declare which leaf an exact document-id
 query returns and attach keywords and code-refs to slugs; those claims roll up to the
-document for ranking and for `docs_for_symbol`. **Index sections** — plan inventories, the
+document for ranking and for `docs_find_documents_citing_code_symbol`. **Index sections** —
+plan inventories, the
 ADR inventory, the todo inventory, the policy-line ledger, the reference inventory — are
 not answer text: a query that matches an inventory row is answered from the linked
 document's leaf instead.
 
 The public contract is recorded in [ADR 0046](../adr/0046-docs-explore-section-answer.md) and
-the [MCP runbook](mcp-runbook.md) tool section.
+the [MCP runbook](mcp-runbook.md) tool section. ADR 0046 is titled for the tool's former name; the
+decision it records is unchanged and the tool is now
+`docs_answer_question_from_repo_documentation`.
 
-## Excerpt budgeting (`agent_coding_standards`)
+## Excerpt budgeting (`docs_get_coding_standard_for_technology`)
 
 `charBudget` (default 12000, floor 1000, ceiling 120000) still governs
-**`agent_coding_standards`**, not `docs_explore`. It is a **total across every standard
-returned** for the technology, split with a 1500-character floor each.
+**`docs_get_coding_standard_for_technology`**, not the explore tool. It is a **total across every
+standard returned** for the technology, split with a 1500-character floor each.
 
 Within a standard, `##` sections are ranked by rarity-weighted similarity, selected until
 the budget runs out, then **emitted in document order** so the prose still reads. Short

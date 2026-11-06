@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests whose subject is the repository itself: its scripts, CI workflows, review-gate
+    configuration, documentation and source layout. They reference Core only (for the process
+    runner they drive scripts with), so they build without the hosts and feature assemblies,
+    and a C#-only change can skip them. See AGENTS.md in this directory for what belongs here.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Same two suppressions, for the same reasons, as KyberWeave.Tests.csproj. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- The classes keep the namespace they had in KyberWeave.Tests, so a fully-qualified class
+         name (CI filters, scripts/fast-loop-classes.txt) means the same test in either project. -->
+    <RootNamespace>KyberWeave.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.1" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared with KyberWeave.Tests rather than copied: the repository-root locator, the
+         disposable temp directory, and the per-process temp root the module initializer sets. -->
+    <Compile Include="..\KyberWeave.Tests\KyberWeaveTestPaths.cs" Link="Shared\KyberWeaveTestPaths.cs" />
+    <Compile Include="..\KyberWeave.Tests\TempDirectory.cs" Link="Shared\TempDirectory.cs" />
+    <Compile Include="..\KyberWeave.Tests\TestTempRoot.cs" Link="Shared\TestTempRoot.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

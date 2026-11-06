@@ -34,3 +34,26 @@ One top-level catch in `HookCommand` turns any exception into that harness's blo
 carrying `KW-ARB-HOOK-001`. On conductor dispatches the reason is an escalation
 envelope with `ANSWER: error`. Malformed stdin, missing or malformed configuration on
 a classified event, and an engine crash all block, never pass.
+
+## The MCP fallback (`serve`)
+
+`serve` is this binary's second surface: a stdio MCP server carrying the decision-gate
+fallback for the harnesses that render no hooks. Two names describe it, and they are not
+interchangeable.
+
+- **Server key `kw-arbiter`.** It is the value of `McpServerNames.Arbiter` in
+  `src/KyberWeave.Core/Configuration/`, never a literal in this project. Every rendered
+  grant and every client configuration is built from that key, so a literal spelled here
+  is how a grant stops resolving.
+- **Executable and argv are unchanged.** `kyber-weave-arbiter serve --repo-root <root>`
+  is what a client launches; `kw-arbiter` is what it declares the server as. A change to
+  one is not a change to the other.
+
+The three tools are `arbiter_evaluate_agent_dispatch_or_return`,
+`arbiter_list_effective_rules_by_trigger`, and
+`arbiter_check_configuration_and_key_readiness`. Their names are client-visible contract —
+a client registers them by exact name — so a rename has to carry the rendered grants and
+the docs with it, or the fallback stops resolving silently.
+
+The stdout rule above is the hook's. Under `serve`, stdout carries the MCP protocol and
+nothing else, for the same reason: one stray line corrupts the stream.

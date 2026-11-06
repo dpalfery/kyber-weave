@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 public sealed class ArbiterCanonicalSquadTests
 {
     private const string DecisionQuery = "decision.query";
-    private const string ArbiterServer = "kyber-weave-arbiter";
+    private const string ArbiterServer = "kw-arbiter";
 
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");

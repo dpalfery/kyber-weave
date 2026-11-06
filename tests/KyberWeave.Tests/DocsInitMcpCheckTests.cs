@@ -36,7 +36,7 @@ namespace KyberWeave.Tests;
 [Collection(DocsInitMcpCheckEnvironmentCollection.Name)]
 public sealed class DocsInitMcpCheckTests : IDisposable
 {
-    private const string KyberWeaveServer = "kyber-weave";
+    private const string KyberWeaveServer = "kw-docs";
 
     private const string McpBinary = "kyber-weave-mcp";
 
@@ -422,7 +422,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "."]
                 }
@@ -524,7 +524,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "."]
                 }
@@ -635,7 +635,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             """
             {
               "mcpServers": {
-                "kyber-weave": {
+                "kw-docs": {
                   "command": "kyber-weave-mcp",
                   "args": ["--repo-root", "/somewhere/else"]
                 }
@@ -835,6 +835,70 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         Assert.True(
             execution.Result == 0,
             $"docs init exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
+
+    /// <summary>
+    /// A proven old key is printed as <c>KW-MCP-WIRE-007</c> with the migrate verb, is not offered as a
+    /// wiring fix for the harness that holds it, and does not move <c>docs init</c>'s exit code.
+    /// </summary>
+    [Fact]
+    public void AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        DeclareServers(
+            repository,
+            """
+            kw-docs:
+              command: [kyber-weave-mcp, --repo-root, .]
+              provenance: first-party
+              level: required
+            """);
+        WriteFile(
+            repository,
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        string notice = TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
+        Assert.Contains(CursorConfigRelativePath, notice, StringComparison.Ordinal);
+        Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(CursorRemedyCommand, execution.Output, StringComparison.Ordinal);
+
+        // The repair offers no write for cursor: the old key is the reason the wire would be refused, so
+        // the rename notice is the only thing the operator is offered for that file.
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repository);
+        McpWiringReport report = McpWiringInspector.Inspect(repository, config.Mcp);
+        IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, repository);
+        Assert.DoesNotContain(fixes, fix => fix.Harness == Cursor);
+    }
+
+    /// <summary>
+    /// A leftover old key is reported even when the declaration names no server at all: the notice does
+    /// not depend on the inspector, which returns nothing when nothing is declared. The exit code is unchanged.
+    /// </summary>
+    [Fact]
+    public void AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        WriteFile(
+            repository,
+            ".kyber-weave/kyber-weave.yml",
+            "ontology:\n  docs-root: docs\nmcp:\n  required-servers: {}\n");
+        WriteFile(
+            repository,
+            CursorConfigRelativePath,
+            """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        TheLineContaining(execution.Output, "KW-MCP-WIRE-007");
+    }
 
     private static string[] OutputLines(string output) =>
         [.. output.Split('\n').Select(line => line.TrimEnd('\r'))];

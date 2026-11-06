@@ -81,6 +81,24 @@ kyber-weave docs init .                       # scaffold config, catalog, ontolo
 kyber-weave docs init . --docs-root docs --target agent-skills
 ```
 
+Older installs register the MCP servers under their former keys. Preview the rename
+with `docs mcp-migrate`, then name the harness target to write it. It renames the old
+server keys (`kyber-weave`, `kyberdash`, `kyber-weave-arbiter`) to the new ones
+(`kw-docs`, `kw-dash`, `kw-arbiter`) in repository-scope configuration.
+
+```bash
+kyber-weave docs mcp-migrate [path] [--target <slugs>] [--dry-run]
+```
+
+- With no `--target`, it previews and writes nothing.
+- A named `--target` writes that file and migrates the `.kyber-weave/kyber-weave.yml`
+  declaration. `declaration` is a valid slug for a host with no harness files.
+- `--dry-run` reports the same result and writes no bytes and no receipt.
+- Exit 0 for a preview, a success, or nothing to do. Exit 1 when any named target was
+  refused.
+- It changes only an entry it can prove is ours, by old key and launch command. It never
+  reads or writes user-scope files such as `~/.claude.json`.
+
 KyberDash shares one settings store across the CLI, the web dashboard, and the tray. Read
 and write it with the shared settings verbs — never by editing the store directly.
 

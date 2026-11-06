@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-06
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -47,6 +47,9 @@ This repository has no managed glossary, so the two overloaded names are fixed h
 - **Arbiter** — the feature: the rule engine, the `kyber-weave-arbiter` hook binary, and the
   `kyber-weave arbiter` CLI surface. Commands are `kyber-weave arbiter …`, the binary is
   `kyber-weave-arbiter`, rule ids are `KW-ARB-*`, and the configuration section is `arbiter:`.
+  The **MCP server key** is a fourth name and the only one that changed: `kw-arbiter`, taken from
+  `McpServerNames.Arbiter` in `src/KyberWeave.Core/Configuration/` rather than restated here. A
+  key, an executable, and a CLI verb are three contracts, so they do not share a spelling.
 - **JEV** — one decision-model provider behind the Arbiter (TypeSafe's cloud `jev-*`
   models), alongside local Ollama decision models (`nimble`, `tev1`). JEV never names the
   feature.
@@ -182,7 +185,7 @@ The degradation records these outcomes produce are listed once, in the
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts |
 | Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` |
-| Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate` | — |
+| Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — |
 
 Notes on the table:
 
@@ -286,26 +289,31 @@ harness.
 ## The MCP fallback (`serve`)
 
 `kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
-for the harnesses without hooks — Warp and ZCode. Three tools:
+for the harnesses without hooks — Warp and ZCode. Its server key is **`kw-arbiter`**
+(`McpServerNames.Arbiter`), which is the name a client configuration declares and the name a
+grant is built from; the executable and its argv are unchanged. Three tools:
 
-- **`arbiter_evaluate(trigger, facts)`** — evaluates one event exactly as the hook would:
-  the same facts, rules, ledger append and decision record, and the same allow, envelope or
-  review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
+- **`arbiter_evaluate_agent_dispatch_or_return(trigger, facts)`** — evaluates one event exactly as
+  the hook would: the same facts, rules, ledger append and decision record, and the same allow,
+  envelope or review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
   `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
   and records `caller-source: asserted`. Because the gated agent makes the call, this path
   is advisory.
-- **`arbiter_rules(trigger?)`** — lists the rule catalogue; read-only and closed-world.
-- **`arbiter_status()`** — reports the root, the rule-set hash, the rule count and the
-  provider state, never the key; read-only and closed-world.
+- **`arbiter_list_effective_rules_by_trigger(trigger?)`** — lists the rule catalogue; read-only
+  and closed-world.
+- **`arbiter_check_configuration_and_key_readiness()`** — reports the root, the rule-set hash,
+  the rule count and the provider state, never the key; read-only and closed-world.
 
 Every response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
-conductor calls `arbiter_evaluate` before each dispatch and after each return, and
+conductor calls `arbiter_evaluate_agent_dispatch_or_return` before each dispatch and after each
+return, and
 code-reviewer calls it once before the lens fan-out and once before the refutation
-fan-out. Holding `arbiter_evaluate` is the agent's signal to use the fallback: the
+fan-out. Holding `arbiter_evaluate_agent_dispatch_or_return` is the agent's signal to use the
+fallback: the
 `decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
 and denied for the other ten, and on Warp and ZCode an `allow` lowers to the
-`kyber-weave-arbiter` server alone. The setup step — Squad writes no MCP configuration for
+`kw-arbiter` server alone. The setup step — Squad writes no MCP configuration for
 either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-zcode).
 
 ## Related

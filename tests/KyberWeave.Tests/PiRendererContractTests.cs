@@ -71,7 +71,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// <summary>
     /// The live-verified overlay wiring (plan D10, probe sequence 2026-10-24):
     /// <c>research-agent</c>'s declared <c>pi-tools</c>. The renderer emits them after the
-    /// capability-derived CSV in declared canonical order, then the derived <c>kyber-weave</c>
+    /// capability-derived CSV in declared canonical order, then the derived <c>kw-docs</c>
     /// entries this suite pins separately.
     /// </summary>
     private static readonly string[] ResearchAgentOverlayTools =
@@ -88,14 +88,14 @@ public sealed class PiRendererContractTests : IDisposable
     private const string PiMcpProxyToolEntry = "ext:pi-mcp-adapter/mcp";
 
     /// <summary>The server ADR 0050 widens to every read-entitled agent.</summary>
-    private const string KyberWeaveServer = "kyber-weave";
+    private const string KyberWeaveServer = "kw-docs";
 
     /// <summary>
-    /// The namespace the adapter gives <c>kyber-weave</c>: the server name with <c>-</c> mapped
-    /// to <c>_</c> before any other character is replaced, so <c>mcp__kyber_weave__*</c> and
-    /// never <c>mcp__kyber-weave__*</c>.
+    /// The namespace the adapter gives <c>kw-docs</c>: the server name with <c>-</c> mapped
+    /// to <c>_</c> before any other character is replaced, so <c>mcp__kw_docs__*</c> and
+    /// never <c>mcp__kw-docs__*</c>.
     /// </summary>
-    private const string KyberWeaveNamespace = "kyber_weave";
+    private const string KyberWeaveNamespace = "kw_docs";
 
     private static IReadOnlyList<string> ComputeExpectedTools(SquadCapabilityProfile profile)
     {
@@ -116,7 +116,7 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The overlay entries the renderer derives for a <c>kyber-weave</c> grant on the adapter's
+    /// The overlay entries the renderer derives for a <c>kw-docs</c> grant on the adapter's
     /// deferred/tool-search surface: the proxy entry, then one entry per tool
     /// <c>toolchain.yml</c> declares for that server, in ordinal order.
     /// </summary>
@@ -428,7 +428,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// verified wiring of the 2026-10-24 reversal (plan D1/D9/D10/D11) — <c>extensions:</c> as
     /// the YAML sequence <c>[pi-mcp-adapter]</c>, the exact form proven live, and its three
     /// declared <c>ext:</c> tools after the capability CSV — and now carries the derived
-    /// <c>kyber-weave</c> entries after them, which is the merge order rather than a replacement.
+    /// <c>kw-docs</c> entries after them, which is the merge order rather than a replacement.
     /// <c>bash</c> stays absent (the read-only no-shell boundary), no bare <c>mcp</c> token
     /// appears (the loader's unknown-name rule), and the <c>context7</c> pair appears once —
     /// the derived grant reuses the agent's declared proxy entry rather than repeating it.
@@ -455,7 +455,7 @@ public sealed class PiRendererContractTests : IDisposable
             [.. ComputeExpectedTools(source.CapabilityProfiles.Profiles[researchAgent.CapabilityProfile])];
 
         // The derived list starts with the proxy entry the agent already declares, so it
-        // contributes only the kyber-weave names. Building the expectation this way states the
+        // contributes only the kw-docs names. Building the expectation this way states the
         // merge rule a second time rather than delegating it to the shared helper.
         string[] derivedKyberWeave =
         [
@@ -480,11 +480,11 @@ public sealed class PiRendererContractTests : IDisposable
 
     /// <summary>
     /// Every agent whose capability profile resolves and allows <c>filesystem.read</c> carries
-    /// the derived <c>kyber-weave</c> overlay, whichever agent declares it — ADR 0050's decision,
+    /// the derived <c>kw-docs</c> overlay, whichever agent declares it — ADR 0050's decision,
     /// and the reason <c>conductor</c>'s position in the roster changes nothing about its
     /// entitlement. The hyphenated namespace spelling fails here deliberately: the adapter's
-    /// deferred surface maps <c>kyber-weave</c> to <c>kyber_weave</c>, so an entry spelled
-    /// <c>mcp__kyber-weave__*</c> resolves against no registered Pi tool.
+    /// deferred surface maps <c>kw-docs</c> to <c>kw_docs</c>, so an entry spelled
+    /// <c>mcp__kw-docs__*</c> resolves against no registered Pi tool.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Pi_EveryReadEntitledSubagentCarriesTheDerivedKyberWeaveOverlay()
@@ -520,7 +520,7 @@ public sealed class PiRendererContractTests : IDisposable
                 tools.Contains(entry, StringComparer.Ordinal),
                 $"Agent '{agent.Name}' is entitled to '{KyberWeaveServer}' but renders no '{entry}'. " +
                 $"Rendered tools: {string.Join(", ", tools)}."));
-            Assert.DoesNotContain(tools, tool => tool.Contains("mcp__kyber-weave__", StringComparison.Ordinal));
+            Assert.DoesNotContain(tools, tool => tool.Contains("mcp__kw-docs__", StringComparison.Ordinal));
             Assert.Equal(tools.Count, tools.Distinct(StringComparer.Ordinal).Count());
             AssertExtensionsSequence(frontmatter, agent.Name, [.. ExpectedExtensions(source, agent)]);
         }
@@ -565,7 +565,7 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// <c>conductor</c> is entitled to <c>kyber-weave</c> but cannot carry it on Pi: a primary
+    /// <c>conductor</c> is entitled to <c>kw-docs</c> but cannot carry it on Pi: a primary
     /// agent lowers to a top-level skill, which declares no <c>tools</c> or <c>extensions</c>.
     /// The projection that loses the grant has to say so — a silent absence is indistinguishable
     /// from the grant never having been decided.
@@ -580,7 +580,7 @@ public sealed class PiRendererContractTests : IDisposable
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.True(
             SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Pi),
-            "ADR 0050 entitles the pure orchestrator to 'kyber-weave'.");
+            "ADR 0050 entitles the pure orchestrator to 'kw-docs'.");
         Assert.DoesNotContain(result.Files, f => f.RelativePath == $".pi/agents/{conductor.Name}.md");
 
         SquadDeploymentFile skill = Assert.Single(
@@ -1368,7 +1368,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
         string mutated = original
             .Replace("capability-profile: read-only", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
             .Replace(
-                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kyber-weave/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]\n" +
                 "pi-extensions: [pi-mcp-adapter]\n" +
                 "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]",
@@ -1438,7 +1438,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
         string mutated = original
             .Replace("capability-profile: read-only", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
             .Replace(
-                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kyber-weave/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]",
                 StringComparison.Ordinal);
 

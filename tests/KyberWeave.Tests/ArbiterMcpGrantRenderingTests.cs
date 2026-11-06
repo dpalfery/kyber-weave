@@ -9,10 +9,10 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the Arbiter MCP grants on the ZCode and Devin renderers (design §10.6, review
-/// 20.1 Major 3). The <c>kyber-weave-arbiter</c> server is excluded from the standard MCP
+/// 20.1 Major 3). The <c>kw-arbiter</c> server is excluded from the standard MCP
 /// grant on both targets. On ZCode its three tools are granted only when the render
 /// request carries an enabled, project-scope Arbiter wiring, and only to the orchestrator
-/// and the reviewer — the two agents whose contracts call <c>arbiter_evaluate</c>. With
+/// and the reviewer — the two agents whose contracts call <c>arbiter_evaluate_agent_dispatch_or_return</c>. With
 /// the wiring null, disabled or global the render is byte-identical to a corpus with no
 /// Arbiter support at all. Devin never grants the server. The fixture corpus is overlaid
 /// with a <c>decision.query</c> vocabulary entry and an Arbiter roster so the grant is
@@ -20,15 +20,15 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterMcpGrantRenderingTests : IDisposable
 {
-    private const string ArbiterServer = "kyber-weave-arbiter";
-    private const string ArbiterPrefix = "mcp__kyber-weave-arbiter__";
+    private const string ArbiterServer = "kw-arbiter";
+    private const string ArbiterPrefix = "mcp__kw-arbiter__";
     private const string StandardTool = "mcp__context7__query-docs";
 
     private static readonly string[] ArbiterTools =
     [
-        "mcp__kyber-weave-arbiter__arbiter_evaluate",
-        "mcp__kyber-weave-arbiter__arbiter_rules",
-        "mcp__kyber-weave-arbiter__arbiter_status",
+        "mcp__kw-arbiter__arbiter_evaluate_agent_dispatch_or_return",
+        "mcp__kw-arbiter__arbiter_list_effective_rules_by_trigger",
+        "mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness",
     ];
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
@@ -223,7 +223,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
     private static void WriteToolchain(ArbiterSquadFixture fixture, bool withArbiter)
     {
         string arbiterEntry = withArbiter
-            ? "  kyber-weave-arbiter:\n    - arbiter_evaluate\n    - arbiter_rules\n    - arbiter_status\n"
+            ? "  kw-arbiter:\n    - arbiter_evaluate_agent_dispatch_or_return\n    - arbiter_list_effective_rules_by_trigger\n    - arbiter_check_configuration_and_key_readiness\n"
             : string.Empty;
         File.WriteAllText(
             Path.Combine(fixture.Path, "toolchain.yml"),

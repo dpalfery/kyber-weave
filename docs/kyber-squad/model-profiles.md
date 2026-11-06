@@ -3,7 +3,7 @@ id: squad/model-profiles
 title: Model profiles and model presets
 doc-type: onboarding
 component: KyberSquad
-source-root: src/KyberWeave.Core/Squad
+source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
 last-reviewed: 2026-10-29
 status: current

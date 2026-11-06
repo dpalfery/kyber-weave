@@ -12,7 +12,7 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// The serve path's ledger records how the caller was named: everything an
-/// <c>arbiter_evaluate</c> client sends is asserted (design §12, R7), so the record
+/// <c>arbiter_evaluate_agent_dispatch_or_return</c> client sends is asserted (design §12, R7), so the record
 /// carries <c>caller-source: asserted</c>, never <c>harness</c> — no harness hook is
 /// involved. The hook path keeps recording <c>harness</c>.
 /// </summary>

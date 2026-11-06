@@ -44,6 +44,7 @@ Requires .NET SDK 10 (see `global.json`).
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
 ```
 
 Run the CLI from source:
