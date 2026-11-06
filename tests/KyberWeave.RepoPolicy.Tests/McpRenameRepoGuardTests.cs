@@ -125,6 +125,11 @@ public sealed class McpRenameRepoGuardTests
         "products/kyber-squad/mcp.json"
     ];
 
+    // The suffix a Windows install appends to an executable's file name: how a program is spelled on
+    // that platform rather than which program it is. Accepted on every platform, because a committed
+    // configuration is read on each of them.
+    private const string WindowsExecutableSuffix = ".exe";
+
     // A renamed key still launches the binary it always launched. The rename is a naming change,
     // not a distribution change: `kw-docs` runs `kyber-weave-mcp`, `kw-arbiter` runs
     // `kyber-weave-arbiter`, and `kw-dash` runs the dashboard binary's `mcp` verb. An entry that
@@ -258,6 +263,24 @@ public sealed class McpRenameRepoGuardTests
         Assert.Empty(LaunchViolations("fixture.json", "kw-docs", ["kyber-weave-mcp", "--repo-root", "."]));
         Assert.Empty(LaunchViolations("fixture.json", "kw-arbiter", ["kyber-weave-arbiter", "serve"]));
         Assert.Empty(LaunchViolations("fixture.json", "kw-dash", ["kyberdash", "mcp"]));
+
+        // The launch the runbook documents for a client started from a desktop icon: the same
+        // executable, spelled with the absolute directory it lives in. The rename moved the key and
+        // left the executable alone, so this is the shipped launch and must not be a finding.
+        Assert.Empty(LaunchViolations(
+            "fixture.json",
+            "kw-docs",
+            ["${userHome}/.local/bin/kyber-weave-mcp", "--repo-root", "."]));
+
+        // Accepting a directory is not accepting any name: the launch's file name still has to be
+        // the shipped binary's, so a renamed key that launches another program is still a violation,
+        // and so is a path-qualified lookalike that merely carries the shipped name.
+        Assert.NotEmpty(LaunchViolations("fixture.json", "kw-docs", ["kyberdash"]));
+        Assert.NotEmpty(
+            LaunchViolations("fixture.json", "kw-docs", ["/usr/local/bin/fake-kyber-weave-mcp", "--repo-root", "."]));
+
+        // The dashboard's `mcp` verb is still part of the launch `kw-dash` has to keep.
+        Assert.NotEmpty(LaunchViolations("fixture.json", "kw-dash", ["kyberdash"]));
 
         // A key renamed without its launch, a launch renamed to the key, and the dashboard's `mcp`
         // verb dropped are the three ways this goes wrong.
@@ -516,7 +539,17 @@ public sealed class McpRenameRepoGuardTests
             yield break;
         }
 
-        if (!string.Equals(command[0], expected, StringComparison.Ordinal))
+        // The proof that a launch runs the shipped binary is the binary's FILE NAME, not the exact
+        // string a configuration happens to spell. That is the plan's proof rule, and it is the one
+        // the code already applies on both sides of a rename: `McpServerRenamer.IsProven` proves a
+        // candidate entry by its file name (any directory, either case, an optional `.exe`) and
+        // `RequiredMcpServer.NamesShippedBinary` accepts a first-party claim the same way. The
+        // runbook is why it matters here: it tells an operator whose client is launched from a
+        // desktop icon to use an ABSOLUTE path, because a GUI process inherits a minimal PATH that
+        // usually excludes `~/.local/bin` — so `.cursor/mcp.json` launches
+        // `${userHome}/.local/bin/kyber-weave-mcp`. Comparing the whole argv[0] ordinally rejected
+        // that documented launch for a rename that only ever moved the key.
+        if (!LaunchesShippedBinary(command[0], expected))
         {
             yield return
                 $"{relativePath}: \"{serverKey}\" launches \"{command[0]}\" where it launched " +
@@ -533,6 +566,24 @@ public sealed class McpRenameRepoGuardTests
                 $"{relativePath}: \"{serverKey}\" must launch `kyberdash mcp`; the launch is " +
                 $"`{string.Join(' ', command)}`";
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="program" /> is the shipped binary <paramref name="expected" />, by the
+    /// repository's proof rule: argv[0]'s FILE NAME is the binary's, any directory, either case, an
+    /// optional <c>.exe</c> — the rule <c>McpServerRenamer.IsProven</c> applies to a rename candidate
+    /// and <c>RequiredMcpServer.NamesShippedBinary</c> applies to a first-party claim.
+    /// </summary>
+    /// <remarks>
+    /// The comparison is the whole file name, never a substring: a directory prefix and the case a
+    /// file system ignores are spelling, while <c>fake-kyber-weave-mcp</c> is a different program.
+    /// </remarks>
+    private static bool LaunchesShippedBinary(string program, string expected)
+    {
+        string fileName = Path.GetFileName(program);
+
+        return string.Equals(fileName, expected, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, expected + WindowsExecutableSuffix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<ServerEntry> ReadServerEntries(string relativePath)
