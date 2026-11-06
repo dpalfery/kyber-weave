@@ -91,6 +91,12 @@ public sealed class HookCommand
                 if (deferToProject)
                 {
                     log.WriteLine("Arbiter global scope: deferred-to-project.");
+                    string? disabledAllow = adapter.DisabledAllowDocument;
+                    if (disabledAllow is not null)
+                    {
+                        stdout.Write(disabledAllow);
+                    }
+
                     return 0;
                 }
 
@@ -190,7 +196,7 @@ public sealed class HookCommand
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
         return loaded.Success
             && loaded.Config is not null
-            && loaded.Config.Arbiter.Enabled;
+            && (loaded.Config.Arbiter.Enabled || loaded.Config.Arbiter.ExplicitlyEnabled == false);
     }
 
     private static string OneLine(string message) =>

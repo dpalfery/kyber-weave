@@ -4,9 +4,10 @@ title: User scope is the default scope for install and config
 doc-type: rule
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-06
 decided-by:
   - adr/0037-squad-state-in-user-home
+  - adr/0053-kyber-arbiter-three-step-decision-gates
 ---
 
 # User scope is the default scope for install and config
@@ -14,9 +15,10 @@ decided-by:
 > **USER SCOPE IS THE DEFAULT. INSTALLABLE PER-HARNESS ARTIFACTS WRITE TO THE USER STATE
 > ROOT UNDER `~/.kyber-weave/` unless the user chooses project scope explicitly with
 > `--project`. WHERE A HARNESS HAS A GLOBAL HOOK LOCATION, THE GLOBAL HOOK IS THE DEFAULT
-> INSTALL TARGET; WHERE ONLY A PROJECT LOCATION EXISTS, PROJECT SCOPE IS USED; WHERE NO HOOKS
-> ARE SUPPORTED, THE ARBITER MCP `kyber-weave arbiter serve` FALLBACK CARRIES THE
-> ENFORCEMENT PATH. THE ARBITER MCP IS A SEPARATE SERVER FROM THE DOCS MCP.**
+> INSTALL TARGET; WHERE ONLY A PROJECT LOCATION EXISTS, PROJECT SCOPE IS USED ONLY WHEN THE
+> USER EXPLICITLY CHOOSES `--project`; WHERE NO HOOKS ARE SUPPORTED, THE ARBITER MCP
+> `kyber-weave arbiter serve` FALLBACK CARRIES THE ENFORCEMENT PATH. THE ARBITER MCP IS A SEPARATE
+> SERVER FROM THE DOCS MCP.**
 
 This rule governs every feature that installs or configures per-harness state. It is current
 policy for the repository and carries the same standing as the other [rules](README.md).
@@ -37,9 +39,9 @@ its first choice is the user-level location, and project scope is a deliberate o
 - **Project scope is opt-in.** `--project` is the explicit request to place the artifact beside a
   repository instead of in the user-level state root.
 - **Global hook locations win when available.** When a harness has a global hook location, a
-  global install writes there by default. If a harness exposes only a project-scoped location,
-  project scope is used there even when a global install command is run and the user has not
-  chosen a different explicit scope.
+  global install writes there by default. For harnesses without global hooks, project scope is
+  used only when the user explicitly chooses `--project`; global install does not automatically
+  fall back to mutating project directories without `--project`.
 - **Unsupported hooks use the Arbiter MCP fallback.** When a harness has no supported hook path,
   the install still records the feature as enforceable through the Arbiter MCP server
   `kyber-weave arbiter serve` rather than silently claiming a hook was rendered.

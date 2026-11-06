@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -179,26 +180,32 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
 
     private static bool HasProjectHooksInstalled(string projectRoot)
     {
-        string[] candidatePaths =
-        [
-            ".claude",
-            ".codex",
-            ".cursor",
-            ".opencode",
-            ".pi",
-            ".factory",
-            ".agents",
-            Path.Combine(".github", "copilot"),
-            ".vscode",
-        ];
-
-        foreach (string candidate in candidatePaths)
+        try
         {
-            string full = Path.Combine(projectRoot, candidate);
-            if (Directory.Exists(full) || File.Exists(full))
+            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
+                null,
+                ArbiterCommandComposition.GetEnvironmentVariable);
+            SquadReceipt? receipt = stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
+            if (receipt is not null)
             {
-                return true;
+                if (receipt.Files.Any(f => f.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase))
+                    || receipt.Blocks.Any(b => b.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(b.Target)))
+                {
+                    return true;
+                }
             }
+
+            foreach (SquadTarget target in SquadTargetCatalog.All)
+            {
+                if (ArbiterUninstaller.HasDeployment(projectRoot, target, stateStore, SquadDeploymentScope.Project))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return false;
         }
 
         return false;

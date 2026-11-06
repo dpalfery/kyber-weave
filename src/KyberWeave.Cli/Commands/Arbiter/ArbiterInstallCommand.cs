@@ -346,24 +346,6 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         SquadArbiterWiring wiring =
             SquadCommandComposition.ResolveArbiterWiring(configLoad.Config.Arbiter);
 
-        if (scope == SquadDeploymentScope.Global && !settings.DryRun)
-        {
-            ISquadGlobalRootResolver globalRootsResolver = new SquadGlobalRoots(
-                _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
-                ArbiterCommandComposition.HomeDirectory());
-            try
-            {
-                string targetGlobalRoot = globalRootsResolver.ResolveGlobalRoot(target);
-                string shimPath = Path.Combine(targetGlobalRoot, "plugins", "kyber-arbiter.ts");
-                if (File.Exists(shimPath) && (existingReceipt is null || !existingReceipt.Files.Any(f => string.Equals(f.RelativePath, "plugins/kyber-arbiter.ts", StringComparison.Ordinal))))
-                {
-                    File.Delete(shimPath);
-                }
-            }
-            catch (Exception)
-            {
-            }
-        }
 
         SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
         SquadLifecycleResult result;

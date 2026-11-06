@@ -293,16 +293,12 @@ public sealed class PiRenderer : SquadHarnessRenderer
             return;
         }
 
-        if (context.Scope == SquadDeploymentScope.Global)
-        {
-            context.Files.Add(context.CreateFile(
-                "extensions/kyber-arbiter.ts",
-                ArbiterPluginShim.Render("pi", SquadDeploymentScope.Global)));
-            return;
-        }
+        string relativePath = context.Scope == SquadDeploymentScope.Global
+            ? "extensions/kyber-arbiter.ts"
+            : ArbiterExtensionFileRelativePath;
 
         context.Files.Add(context.CreateFile(
-            ArbiterExtensionFileRelativePath,
+            relativePath,
             RenderArbiterExtension(arbiter.HookTimeoutSeconds, context.Scope)));
     }
 

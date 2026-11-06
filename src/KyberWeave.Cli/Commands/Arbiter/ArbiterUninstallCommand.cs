@@ -131,33 +131,8 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             }
             else
             {
-                string current = Path.GetFullPath(".");
-                bool hasProjectReceipt;
-                try
-                {
-                    hasProjectReceipt = stateStore.ReadReceipt(current, SquadDeploymentScope.Project) is not null;
-                }
-                catch (Exception ex) when (ex is ArgumentException
-                                               or IOException
-                                               or UnauthorizedAccessException
-                                               or JsonException
-                                               or InvalidDataException
-                                               or InvalidOperationException)
-                {
-                    AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(ex.Message)}[/]");
-                    return 1;
-                }
-
-                if (hasProjectReceipt)
-                {
-                    scope = SquadDeploymentScope.Project;
-                    root = current;
-                }
-                else
-                {
-                    scope = SquadDeploymentScope.Global;
-                    root = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
-                }
+                scope = SquadDeploymentScope.Global;
+                root = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
             }
         }
 
@@ -298,11 +273,63 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         SquadTarget target,
         SquadStateStore stateStore)
     {
-        SquadReceipt? receipt;
+        string token = SquadTargetCatalog.GetToken(target);
+        string home = ArbiterCommandComposition.HomeDirectory();
+
         try
         {
-            receipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project)
-                      ?? stateStore.ReadReceipt(root, SquadDeploymentScope.Global);
+            IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
+            if (globalTargets.Any(t => !string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            SquadReceipt? globalReceipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+            if (globalReceipt is not null &&
+                (globalReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
+                 || globalReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
+            {
+                return true;
+            }
+
+            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            if (currentProjectReceipt is not null &&
+                (currentProjectReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
+                 || currentProjectReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
+            {
+                return true;
+            }
+
+            IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+            foreach (SquadProjectRegistryEntry project in projects)
+            {
+                SquadReceipt? projReceipt = stateStore.ReadReceipt(project.Path, SquadDeploymentScope.Project);
+                if (projReceipt is null)
+                {
+                    continue;
+                }
+
+                bool isCurrent = string.Equals(
+                    Path.GetFullPath(project.Path),
+                    Path.GetFullPath(root),
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (isCurrent)
+                {
+                    if (projReceipt.Files.Any(f => !string.Equals(f.Target, token, StringComparison.Ordinal))
+                        || projReceipt.Blocks.Any(b => !string.Equals(b.Target, token, StringComparison.Ordinal)))
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    if (projReceipt.Files.Count > 0 || projReceipt.Blocks.Count > 0)
+                    {
+                        return true;
+                    }
+                }
+            }
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
@@ -313,11 +340,6 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return false;
         }
 
-        if (receipt is null)
-            return false;
-
-        string token = SquadTargetCatalog.GetToken(target);
-        return receipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
-               || receipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal));
+        return false;
     }
 }

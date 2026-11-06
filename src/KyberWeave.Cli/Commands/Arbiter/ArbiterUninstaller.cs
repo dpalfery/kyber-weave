@@ -220,7 +220,12 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             targetRoot = _root;
         }
 
-        string candidate1 = Path.Combine(targetRoot, relativePath);
+        string token = SquadTargetCatalog.GetToken(target);
+        string normalizedRel = relativePath.StartsWith("." + token + "/", StringComparison.OrdinalIgnoreCase)
+            ? relativePath[(token.Length + 2)..]
+            : relativePath;
+
+        string candidate1 = Path.Combine(targetRoot, normalizedRel);
         if (File.Exists(candidate1))
             return candidate1;
 

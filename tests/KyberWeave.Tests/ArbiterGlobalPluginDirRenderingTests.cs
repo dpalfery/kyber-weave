@@ -63,7 +63,7 @@ public sealed class ArbiterGlobalPluginDirRenderingTests : IDisposable
             root => Path.Combine(root, ".pi", "agent"),
             "extensions/kyber-arbiter.ts");
 
-        Assert.Contains("tool.execute.before", content, StringComparison.Ordinal);
+        Assert.Contains("export default function", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter", content, StringComparison.Ordinal);
         Assert.Contains("--scope global", content, StringComparison.Ordinal);
         Assert.Equal("partial", Assert.Single(

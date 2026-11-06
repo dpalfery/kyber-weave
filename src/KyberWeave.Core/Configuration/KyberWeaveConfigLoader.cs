@@ -167,7 +167,7 @@ public static class KyberWeaveConfigLoader
             string explicitPath = Path.IsPathRooted(configPath)
                 ? configPath
                 : Path.Combine(homeDirectory, configPath);
-            return File.Exists(explicitPath) ? explicitPath : explicitPath;
+            return File.Exists(explicitPath) ? explicitPath : UserHostConfig.GetPath(homeDirectory);
         }
 
         return UserHostConfig.GetPath(homeDirectory);

@@ -432,6 +432,10 @@ internal sealed class SelfUpdater : IDisposable
         (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
 
         string? home = _readEnvironment("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = _readEnvironment("USERPROFILE");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
             && UserHostConfig.ReadGlobalTargets(home).Count > 0;
 

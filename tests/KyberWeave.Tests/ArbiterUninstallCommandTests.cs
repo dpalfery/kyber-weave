@@ -243,6 +243,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     [Fact]
     public void Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes()
     {
+        _isolated.Value = true;
         string home = _home.Path;
         string settingsPath = Path.Combine(home, ".claude", "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
@@ -291,7 +292,8 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Contains("kyber-weave-arbiter hook --harness claude", installed, StringComparison.Ordinal);
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
 
-        SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(null, _ => null);
+        FakeSquadUserPaths userPaths = new(home);
+        SquadStateStore stateStore = new(userPaths);
         string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
         Assert.True(File.Exists(receiptPath), "the real global install must write a global receipt");
 
@@ -396,7 +398,6 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         string nonOwned = Path.Combine(home, ".opencode", "plugins", "custom.ts");
         Directory.CreateDirectory(Path.GetDirectoryName(owned)!);
         Directory.CreateDirectory(Path.GetDirectoryName(nonOwned)!);
-        File.WriteAllText(owned, "// receipt-owned kyber-arbiter shim\n");
         File.WriteAllText(nonOwned, "// operator-owned plugin, never touched\n");
 
         ArbiterInstallCommand install = new();

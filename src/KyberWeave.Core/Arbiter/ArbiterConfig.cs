@@ -55,6 +55,9 @@ public sealed record ArbiterConfig
     /// <summary>Whether the Arbiter enforces anything. Squad renders hooks only when true.</summary>
     public bool Enabled { get; init; }
 
+    /// <summary>Whether <c>arbiter.enabled</c> was explicitly set in the configuration.</summary>
+    public bool? ExplicitlyEnabled { get; init; }
+
     /// <summary>Global scope configuration.</summary>
     public ArbiterGlobalConfig Global { get; init; } = new([]);
 

@@ -223,6 +223,13 @@ public static class ArbiterCommandComposition
         {
             if (TryLoadProjectConfigWithoutGlobal(settings, out config, out configPath))
             {
+                report.Add(new Diagnostic(
+                    RuleValidator.UserGlobalTargetsForbidden,
+                    Severity.Warning,
+                    $"[{RuleValidator.UserGlobalTargetsForbidden}] arbiter.global is only valid in the user-level config file; project config may not declare global targets.",
+                    "arbiter.global",
+                    FilePath: loaded.ConfigPath,
+                    Hint: "Remove arbiter.global from project configuration or move it to ~/.kyber-weave/kyber-weave.yml."));
                 return true;
             }
 

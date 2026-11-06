@@ -468,7 +468,31 @@ public static class SquadHookJsonBlock
 
     private static List<(string Pointer, JsonArray Array)> CursorArrays(JsonObject root, bool create)
     {
-        JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
+        bool hasRootArrays = root.ContainsKey("preToolUse") || root.ContainsKey("PreToolUse")
+            || root.ContainsKey("postToolUse") || root.ContainsKey("PostToolUse");
+        JsonObject hooks;
+        string pointerPrefix;
+        if (root["hooks"] is JsonObject nested)
+        {
+            hooks = nested;
+            pointerPrefix = "/hooks/";
+        }
+        else if (hasRootArrays)
+        {
+            hooks = root;
+            pointerPrefix = "/";
+        }
+        else if (create)
+        {
+            hooks = EnsureObject(root, "hooks");
+            pointerPrefix = "/hooks/";
+        }
+        else
+        {
+            hooks = new JsonObject();
+            pointerPrefix = "/hooks/";
+        }
+
         List<(string Pointer, JsonArray Array)> containers = [];
         foreach ((string lowerName, string pascalName) in new[] { ("preToolUse", "PreToolUse"), ("postToolUse", "PostToolUse") })
         {
@@ -496,7 +520,7 @@ public static class SquadHookJsonBlock
                 hooks[name] = array;
             }
 
-            containers.Add(($"/hooks/{name}", array));
+            containers.Add(($"{pointerPrefix}{name}", array));
         }
 
         return containers;
@@ -685,16 +709,32 @@ public static class SquadHookJsonBlock
         return current;
     }
 
-    private static bool HasSignature(JsonNode? node, string harness) =>
-        node is JsonValue value
-        && value.TryGetValue<string>(out string? command)
-        && command is not null
-        // Exact equality: a user hook whose command merely starts with our prefix
-        // (`--harness factory-evil`, `--harness factory --custom-flag`) is not ours,
-        // and splicing or removing it would silently delete the user's entry.
-        // A global hook carries '--scope global'.
-        && (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
-            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal));
+    private static bool HasSignature(JsonNode? node, string harness)
+    {
+        if (node is not JsonValue value || !value.TryGetValue<string>(out string? command) || command is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
+            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        int hookIndex = command.IndexOf("kyber-weave-arbiter hook", StringComparison.Ordinal);
+        if (hookIndex >= 0)
+        {
+            string remainder = command[(hookIndex + "kyber-weave-arbiter hook".Length)..].Trim();
+            if (string.Equals(remainder, "--harness " + harness, StringComparison.Ordinal)
+                || string.Equals(remainder, "--harness " + harness + " --scope global", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch

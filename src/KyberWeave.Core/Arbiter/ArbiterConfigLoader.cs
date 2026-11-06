@@ -83,6 +83,7 @@ public static class ArbiterConfigLoader
         return new ArbiterConfig
         {
             Enabled = section.Enabled ?? defaults.Enabled,
+            ExplicitlyEnabled = section.Enabled,
             Provider = MergeProvider(defaults.Provider, section.Provider),
             Rules = rules,
             OwnerFileKindMap = defaults.OwnerFileKindMap,
@@ -114,6 +115,7 @@ public static class ArbiterConfigLoader
         return new ArbiterConfig
         {
             Enabled = section?.Enabled ?? false,
+            ExplicitlyEnabled = section?.Enabled,
             Global = new ArbiterGlobalConfig(targets),
             Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
         };
