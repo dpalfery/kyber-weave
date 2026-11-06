@@ -18,15 +18,16 @@ Write for a strong developer who is reading it for the first time.
 - **Plain words.** Explain every name, ID, acronym or piece of jargon the first time it
   appears. Never use internal labels like plan IDs or task numbers as if the reader knows them.
 - **Short.** Cut anything the reader doesn't need in order to act or decide.
-- **Messages to the user** must also follow "How to respond to the user".
+- **Messages to the user** must also follow [How to respond to the user](products/kyber-squad/response-guidance.default.md).
 
 ## Commands
 
 ### Code comments
-**Code comments are the exception.** Code that follows the coding standards needs no
-comments. Add one only where the code departs significantly from those standards.
-Public APIs are the exception: they always get XML doc comments (`///`).
 
+**Write few.** Code that follows the coding standards needs no comments; add one only where
+the code departs significantly from those standards. Public APIs are the exception: they
+always get XML doc comments (`///`). The writing style above still applies to every comment
+you do write.
 
 ### The inner loop
 
