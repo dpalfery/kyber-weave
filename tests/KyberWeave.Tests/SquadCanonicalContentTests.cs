@@ -54,16 +54,35 @@ public sealed class SquadCanonicalContentTests
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
-    /// The opening of the one bullet that tells an agent it may name a session, verbatim and including
-    /// the Markdown emphasis, so the guard below is read from the instruction it governs.
+    /// The opening of the one bullet that tells an agent to set the session title, verbatim and
+    /// including the Markdown emphasis, so the requirement below is read from the instruction it governs.
     /// </summary>
-    private const string SessionTitleBulletLead = "- **Name the session after the work**";
+    private const string SessionTitleBulletLead = "- **Name the session after the work.**";
 
-    /// <summary>The condition on naming a session: only a mechanism the harness really exposes.</summary>
-    private const string SessionTitleMechanismGuard = "only where the harness exposes a confirmed way to set it";
+    /// <summary>The session-title bullet must tell the agent to set the title. The title is required.</summary>
+    private const string SessionTitleSetInstruction = "Set the session title to name the work being done.";
 
-    /// <summary>The second condition: an invented title is never acceptable.</summary>
-    private const string SessionTitleFabricationGuard = "never fabricate a title";
+    /// <summary>Once a pull request exists, the session title is that pull request's number and title.</summary>
+    private const string PrTitleSetInstruction =
+        "Once a PR is submitted, set the session title to the PR title prefixed by the Pull Request number";
+
+    /// <summary>The form the pull-request bullet has to show: the number, a space, then the title.</summary>
+    private const string PrTitleExample = "#123 Add the widget";
+
+    /// <summary>A later retitle has to move the session title with it.</summary>
+    private const string PrTitleRetitleInstruction =
+        "When the pull request title changes, update the session title to match";
+
+    /// <summary>
+    /// Phrases that tell an agent not to set a session title. The owner removed them: a shipped
+    /// default that carries one is instructing the agent to skip the title.
+    /// </summary>
+    private static readonly string[] SessionTitleHedges =
+    [
+        "never fabricate a title",
+        "leave it alone",
+        "only where the harness exposes a confirmed way to set it"
+    ];
 
     /// <summary>
     /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
@@ -472,19 +491,20 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// A session title is a harness capability, not a response rule. The shipped default records the one target
-    /// whose title no agent can set, so the default never instructs an agent to claim a capability the harness
-    /// does not expose.
+    /// The owner requires a session title. The shipped default must tell the agent to set one, and
+    /// must not say to leave it alone, to skip a harness that might not expose a setter, or to avoid
+    /// fabricating a title.
     /// </summary>
     [Fact]
-    public void TheShippedDefaultRecordsThatFactoryTitlesAreNotAgentSettable()
+    public void TheShippedDefaultRequiresTheSessionTitleToBeSet()
     {
-        string bullet = SessionTitleBullet(ReadResponseGuidanceDefault()) ?? string.Empty;
+        string guidance = ReadResponseGuidanceDefault();
 
         Assert.True(
-            bullet.Contains("Factory", StringComparison.Ordinal) &&
-            bullet.Contains("no agent can set", StringComparison.Ordinal),
-            "The session-title bullet in the shipped default must record that no agent can set a Factory session title.");
+            RequiresSessionTitle(guidance),
+            "The session-title bullet in the shipped default must tell the agent to set the session title " +
+            $"('{SessionTitleSetInstruction}').");
+        AssertShippedDefaultOmitsSessionTitleHedges(guidance);
     }
 
     /// <summary>
@@ -545,9 +565,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The shipped default states the session-title rule itself: name the session after the work,
-    /// and only where the harness exposes a confirmed mechanism, and never fabricate one. The rule
-    /// lives in the default now that the skill that used to carry it is being removed.
+    /// The shipped default states the session-title rule itself: name the session after the work
+    /// by setting the session title. The rule lives in the default now that the skill that used
+    /// to carry it is being removed.
     /// </summary>
     [Fact]
     public void TheShippedDefaultStatesTheSessionTitleRule()
@@ -562,79 +582,73 @@ public sealed class SquadCanonicalContentTests
             bullet.Contains("title", StringComparison.OrdinalIgnoreCase) &&
             bullet.Contains("work", StringComparison.OrdinalIgnoreCase),
             "The session-title bullet must say the title reflects the work.");
-        Assert.True(
-            CarriesSessionTitleGuard(guidance),
-            "The session-title rule in the shipped default must carry both its mechanism and fabrication guards.");
+        Assert.Contains(SessionTitleSetInstruction, bullet, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The deployed default replaces the skill's wording wherever it exists, so it carries the
-    /// session-title guard the matrix states. Without the guard, the default tells an agent to
-    /// name a session on a target that exposes no way to set one.
+    /// The requirement sits on the session-title bullet. A neighbouring bullet that says to set a
+    /// title, or a line that is not the emphasised bullet, does not satisfy it, and a bullet that
+    /// also says to leave the title alone does not either.
     /// </summary>
     [Fact]
-    public void TheShippedDefaultKeepsTheSessionTitleGuard()
+    public void TheSessionTitleRequirementSitsOnTheSessionTitleBullet()
     {
-        string guidance = ReadResponseGuidanceDefault();
-        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
-
-        Assert.True(
-            bullet.Length > 0,
-            "The shipped default must carry the session-title bullet, " +
-            $"'{SessionTitleBulletLead}', on one line.");
-        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
-        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The guard is a condition on the session-title instruction, not a phrase anywhere in the file. A
-    /// default whose session-title bullet drops the condition must fail even when another bullet still
-    /// says "never fabricate", which is what the whole-file search this replaced could not tell apart.
-    /// </summary>
-    [Fact]
-    public void TheSessionTitleGuardMustSitOnTheSessionTitleBullet()
-    {
-        string unguarded =
-            "- **Never fabricate a title.** Say what happened instead.\n" +
+        string requiredElsewhere =
+            "- **Set the session title to name the work being done.** Say what happened instead.\n" +
             $"{SessionTitleBulletLead} where it helps the reader.\n";
-        string guarded =
-            "- **Never fabricate a title.** Say what happened instead.\n" +
-            $"{SessionTitleBulletLead} {SessionTitleMechanismGuard}, and {SessionTitleFabricationGuard}.\n";
+        string required =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction}\n";
+        string hedged =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction} Where no agent can set one, leave it alone.\n";
 
         Assert.False(
-            CarriesSessionTitleGuard(unguarded),
-            "'never fabricate' in another bullet must not satisfy a session-title bullet that omits it.");
+            RequiresSessionTitle(requiredElsewhere),
+            "An instruction to set the title in another bullet must not satisfy a session-title bullet that omits it.");
         Assert.True(
-            CarriesSessionTitleGuard(guarded),
-            "A session-title bullet that carries both conditions must satisfy the pin.");
+            RequiresSessionTitle(required),
+            "A session-title bullet that tells the agent to set the title must satisfy the pin.");
         Assert.False(
-            CarriesSessionTitleGuard(
-                $"- Name the session after the work {SessionTitleMechanismGuard} and {SessionTitleFabricationGuard}.\n"),
+            RequiresSessionTitle(hedged),
+            "A session-title bullet that says to leave the title alone must not satisfy the pin.");
+        Assert.False(
+            RequiresSessionTitle($"- Name the session after the work. {SessionTitleSetInstruction}\n"),
             "A line that is not the emphasised session-title bullet must not satisfy the pin.");
     }
 
     /// <summary>
-    /// The pull-request title bullet tells an agent to rename the session after submit. It has to
-    /// carry the same mechanism and fabrication guards as the session-title bullet, or a harness
-    /// that cannot set a title — Factory derives one from the first message — is told to invent
-    /// one. It also has to follow a later retitle, or the mandated match goes stale when the
-    /// pull request is renamed.
+    /// The pull-request title bullet tells an agent to set the session title after submit, in the
+    /// form <c>#&lt;number&gt; &lt;PR title&gt;</c>, and to move that title when the pull request
+    /// is renamed. A retitle sentence that tells the agent to skip or not to fabricate does not
+    /// satisfy the pin: the owner requires the title to be set.
     /// </summary>
     [Fact]
-    public void ThePrTitleBulletCarriesTheSessionTitleGuardsAndTracksRetitles()
+    public void ThePrTitleBulletSetsTheSessionTitleAndTracksRetitles()
     {
         string guidance = ReadResponseGuidanceDefault();
-        string bullet = PrTitleBullet(guidance) ?? string.Empty;
 
         Assert.True(
-            bullet.Length > 0,
-            "The shipped default must state the pull-request title rule as the bullet '- **PR Title.**'.");
-        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
-        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
-        Assert.Contains(
-            "When the pull request title changes, update the session title to match",
-            bullet,
-            StringComparison.Ordinal);
+            PrTitleBulletRequiresTheSessionTitle(guidance),
+            "The shipped default must set the session title from the submitted pull request " +
+            $"('{PrTitleSetInstruction}'), show '{PrTitleExample}', and update it when the pull request title changes.");
+    }
+
+    /// <summary>
+    /// A hedge on the retitle sentence alone must fail. A whole-bullet search that only looks for
+    /// the retitle phrase would stay green while that sentence tells the agent not to set the title.
+    /// </summary>
+    [Fact]
+    public void ARetitleSentenceThatTellsTheAgentNotToSetTheTitleDoesNotSatisfyThePin()
+    {
+        string hedged =
+            "- **PR Title.** Once a PR is submitted, set the session title to the PR title " +
+            "prefixed by the Pull Request number: `#<number>` immediately followed by a space and " +
+            "the PR title, as in `#123 Add the widget` when the PR title is `Add the widget` and " +
+            "the PR number is 123. When the pull request title changes, update the session title " +
+            "to match only where the harness exposes a confirmed way to set it, and never fabricate a title.\n";
+
+        Assert.False(
+            PrTitleBulletRequiresTheSessionTitle(hedged),
+            "A retitle sentence that says to skip the title or not to fabricate one must not satisfy the pin.");
     }
 
     /// <summary>
@@ -1860,40 +1874,96 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The session-title bullet of a response-guidance document: the single line that opens with the
-    /// instruction to name the session after the work, or null when the document carries none.
+    /// The session-title bullet, including continuation lines, or null when the document carries
+    /// none. Continuation lines belong to the bullet: the requirement is read from the instruction
+    /// it governs, not from a neighbouring bullet.
     /// </summary>
     private static string? SessionTitleBullet(string guidance) =>
-        guidance
-            .Split('\n')
-            .Select(line => line.TrimEnd('\r'))
-            .FirstOrDefault(line => line.TrimStart().StartsWith(SessionTitleBulletLead, StringComparison.Ordinal));
+        ListItemStartingWith(guidance, SessionTitleBulletLead);
 
     /// <summary>
-    /// True when the session-title bullet carries both of its conditions. Scoped to that bullet because
-    /// the conditions are what constrain the instruction: a document that says "never fabricate" in
-    /// some other bullet, while its session-title instruction asks for a title unconditionally, has no
-    /// guard where the guard belongs.
+    /// True when the session-title bullet tells the agent to set the title and does not tell the
+    /// agent to skip it. Scoped to that bullet so a requirement in some other bullet cannot satisfy
+    /// a session-title instruction that omits it or hedges it.
     /// </summary>
-    private static bool CarriesSessionTitleGuard(string guidance)
+    private static bool RequiresSessionTitle(string guidance)
     {
         string? bullet = SessionTitleBullet(guidance);
         return bullet is not null
-               && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
-               && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+               && bullet.Contains(SessionTitleSetInstruction, StringComparison.Ordinal)
+               && !ContainsSessionTitleHedge(bullet);
     }
 
     /// <summary>
     /// The pull-request title list item, including its continuation lines, or null when the
-    /// document has none. Continuation lines belong to the bullet: the guards are read from
-    /// the instruction they constrain, not from a neighbouring bullet.
+    /// document has none.
     /// </summary>
-    private static string? PrTitleBullet(string guidance)
+    private static string? PrTitleBullet(string guidance) =>
+        ListItemStartingWith(guidance, "- **PR Title.**");
+
+    /// <summary>
+    /// True when the pull-request bullet sets the session title from the submitted pull request,
+    /// shows the <c>#&lt;number&gt; &lt;title&gt;</c> example, and the sentence that tracks a
+    /// retitle does not tell the agent to skip the title.
+    /// </summary>
+    private static bool PrTitleBulletRequiresTheSessionTitle(string guidance)
+    {
+        string? bullet = PrTitleBullet(guidance);
+        if (bullet is null
+            || !bullet.Contains(PrTitleSetInstruction, StringComparison.Ordinal)
+            || !bullet.Contains(PrTitleExample, StringComparison.Ordinal)
+            || ContainsSessionTitleHedge(bullet))
+        {
+            return false;
+        }
+
+        foreach (string sentence in bullet.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!sentence.Contains(PrTitleRetitleInstruction, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return !ContainsSessionTitleHedge(sentence);
+        }
+
+        return false;
+    }
+
+    /// <summary>Fails when the shipped default still tells an agent not to set a session title.</summary>
+    private static void AssertShippedDefaultOmitsSessionTitleHedges(string guidance)
+    {
+        foreach (string hedge in SessionTitleHedges)
+        {
+            Assert.False(
+                guidance.Contains(hedge, StringComparison.Ordinal),
+                $"The shipped default must not tell an agent '{hedge}'.");
+        }
+    }
+
+    private static bool ContainsSessionTitleHedge(string text)
+    {
+        foreach (string hedge in SessionTitleHedges)
+        {
+            if (text.Contains(hedge, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The list item that opens with <paramref name="lead"/>, including continuation lines, or
+    /// null when the document has none.
+    /// </summary>
+    private static string? ListItemStartingWith(string guidance, string lead)
     {
         string[] lines = guidance.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
         for (int i = 0; i < lines.Length; i++)
         {
-            if (!lines[i].TrimStart().StartsWith("- **PR Title.**", StringComparison.Ordinal))
+            if (!lines[i].TrimStart().StartsWith(lead, StringComparison.Ordinal))
             {
                 continue;
             }
