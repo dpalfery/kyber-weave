@@ -860,6 +860,12 @@
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
     },
     {
+      "file": "src/KyberWeave.Core/RunStart/RunStartRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(executable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Every child runs through the injected IProcessExecutor, which kyber-weave run start binds to ProcessExecutor.WithTimeout(120 s) (RunStartCommand.ToolTimeout); ProcessRunner.Run kills the child tree on expiry. argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
+    },
+    {
       "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
