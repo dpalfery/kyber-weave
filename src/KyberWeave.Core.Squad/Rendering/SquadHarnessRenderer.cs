@@ -28,6 +28,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public abstract class SquadHarnessRenderer : ISquadRenderer
 {
+    /// <summary>
+    /// Where canonical text names the harness that will run it, e.g. a run-start step that has to
+    /// report which harness it started.
+    /// </summary>
+    private const string HarnessPlaceholder = "{{harness}}";
+
     private protected SquadHarnessRenderer(SquadHarnessSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -79,7 +85,11 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 source.CapabilityProfiles,
                 source.FallbackProfiles);
 
-            return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
+            // The canonical text carries a {{harness}} placeholder where the name of the harness
+            // running it belongs; this is the one place it is answered, after validation so every
+            // source rule still reads what the author wrote.
+            SquadSource renderSource = SubstituteHarnessToken(source, Spec.Token);
+            return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
         catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)
         {
@@ -137,6 +147,54 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             throw new SquadRenderValidationException(
                 $"Resource '{resource.RelativePath}' owned by '{owner}' is not a canonical portable relative path.");
         }
+    }
+
+    /// <summary>
+    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, over
+    /// every piece of canonical text a render can emit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A deployed run cannot work out which harness it is in from its surroundings: the folder it
+    /// happened to run in was wrong once (a Command Code run inside the <c>Devin</c> checkout), and
+    /// so was an environment variable (<c>OPENCODE_CONFIG</c> set in a Claude session). So the
+    /// canonical text asks the question and the catalogue answers it here, per target.
+    /// </para>
+    /// <para>
+    /// This is the whole of the substitution, deliberately: agent bodies, skill bodies,
+    /// descriptions and resource content are the surfaces a harness's prose travels on, and every
+    /// renderer reaches all of them through this pipeline. Substituting per renderer is what would
+    /// leave the defect this method exists to prevent, where an agent file carries the token and
+    /// its skill projection still carries the braces.
+    /// </para>
+    /// <para>
+    /// A text with no placeholder comes back as the same string instance, so a corpus that has not
+    /// adopted the placeholder renders byte for byte as it did before.
+    /// </para>
+    /// </remarks>
+    private static SquadSource SubstituteHarnessToken(SquadSource source, string token)
+    {
+        static string ReplaceText(string text, string replacement) =>
+            text.Replace(HarnessPlaceholder, replacement, StringComparison.Ordinal);
+
+        static IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources, string replacement) =>
+            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content, replacement) })];
+
+        return source with
+        {
+            Agents = [.. source.Agents.Select(agent => agent with
+            {
+                Description = ReplaceText(agent.Description, token),
+                InstructionBody = ReplaceText(agent.InstructionBody, token),
+                Resources = ReplaceResources(agent.Resources, token)
+            })],
+            Skills = [.. source.Skills.Select(skill => skill with
+            {
+                Description = ReplaceText(skill.Description, token),
+                InstructionBody = ReplaceText(skill.InstructionBody, token),
+                Resources = ReplaceResources(skill.Resources, token)
+            })]
+        };
     }
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
