@@ -275,6 +275,28 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     /// <summary>
+    /// <c>doctor</c> stays quiet for <c>jev-1.13-free</c> only when every enabled step-1
+    /// rule names it. A check scoped to one rule id stays green when a later step-1 rule
+    /// omits the free id and <c>KW-ARB-CONFIG-007</c> warns for that rule.
+    /// </summary>
+    [Fact]
+    public void Jev113Free_ProducesNoUntunedModelDiagnostic()
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel("jev-1.13-free")).ToList();
+        Assert.Empty(diagnostics);
+
+        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        {
+            if (!rule.Enabled || rule.Ask is null)
+            {
+                continue;
+            }
+
+            Assert.Contains("jev-1.13-free", rule.Ask.TunedFor ?? []);
+        }
+    }
+
+    /// <summary>
     /// <c>jev-1.13-free</c> is the free id of the shipped <c>jev-1.13.0</c> threshold.
     /// <c>KW-ARB-CLAIM-001</c> accepts it at the same floor.
     /// </summary>
