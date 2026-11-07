@@ -430,26 +430,43 @@ the fixed build (D5) on the owner's machine.
 
 ## Closeout mapping
 
-| ID | Destination | Evidence |
-|---|---|---|
-| D1 | [docs/plans/README.md](../plans/README.md) and this plan | The fix lives on branch `fix/arbiter-global-block-identity` off `origin/main`; the rename branch carries neither the plan nor the fix. |
-| D2 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Governs the identity rule in H1. |
-| D3 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records that bare global paths stay, so the design intent is not lost. |
-| D4 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | Governs the v3 global shape in H2. |
-| D5 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | The contract behind the test fixture is H2. Documentation waiver: the fixture itself has zero surviving invariant for a future reader. |
-| D6 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records the three duplicate refusals in H1. |
-| D7 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs per-verb lifecycle behaviour in H3. |
-| D8 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records that the receipt is the block-path source in H1. |
-| D9 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | The amended ADR, per H2. |
-| D10 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs the unchanged default in H3. |
-| D11 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs verification in H3. |
-| D12 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Test-first and autonomous delivery are recorded by this plan and its index row. Documentation waiver: a process row with zero surviving technical invariant. |
-| D13 | [docs/cli-command-surface.md](../cli-command-surface.md) | Governs draft-PR delivery in H4. |
-| AP1 | [docs/plans/README.md](../plans/README.md) and this plan | Approve-and-execute recorded in Decisions and the index row. Documentation waiver: process provenance, not a durable technical item. |
-| H1 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Scope-aware block identity paragraph. |
-| H2 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | v3 global shape and identity rule, amended in place. |
-| H3 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Hooks paragraph for global multi-target behaviour. |
-| H4 | [docs/cli-command-surface.md](../cli-command-surface.md) | `arbiter install` / `arbiter uninstall` global-scope rows. |
+**Completed 2026-11-07.** The permanent `## Decisions` table above is preserved
+intact, and every decision and Design harvest item is mapped to a live governed document below.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| T1 RED | `SquadGlobalBlockReceiptTests` (2 tests), `ArbiterInstallCommandTests.Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks` — all failed with the shipped `hooks.json` message. |
+| T2 GREEN | `SquadStateStore.cs` scope-aware identity; block and render suites green (601 + 48). |
+| T3 RED | `SquadOwnedBlockStatusTests.Status_GlobalReportsEveryBlockWithItsTargetLabel`, `Doctor_GlobalFindsEveryBlockHealthy` — failed on bare `hooks.json` for codex. |
+| T4 GREEN | `SquadHookJsonBlock.TryResolveFormat`; status/doctor suites green. |
+| Documentation harvest | H1–H4 landed in the four destinations below. |
+| `docs validate . --merge-ready` | Pass, 0 findings. |
+| `docs drift .` | Pass, 0 findings. |
+
+### Mapping
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [`docs/plans/README.md`](../../plans/README.md) and this plan — the fix lives on `fix/arbiter-global-block-identity` off `origin/main`; the rename branch carries neither the plan nor the fix. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D2 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — the scope-aware identity rule, per H1. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D3 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — bare global block paths stay. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D4 | [`docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md`](../../adr/0054-squad-owned-blocks-in-shared-hook-files.md) — the v3 global shape, per H2. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D5 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — the contract behind the rc.20 fixture is H2. Documentation waiver: the fixture itself has zero surviving invariant for a future reader. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D6 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — the three duplicate refusals, per H1. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D7 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md) — per-verb lifecycle behaviour, per H3. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D8 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — the receipt is the block-path source, per H1. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D9 | [`docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md`](../../adr/0054-squad-owned-blocks-in-shared-hook-files.md) — amended in place, per H2. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D10 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md) — the unchanged default, per H3. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D11 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md) — verification, per H3. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D12 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — test-first and autonomous delivery recorded by this plan. Documentation waiver: a process row with zero surviving technical invariant. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| D13 | [`docs/cli-command-surface.md`](../../cli-command-surface.md) — draft-PR delivery, per H4. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| AP1 | [`docs/plans/README.md`](../../plans/README.md) and this plan — approve-and-execute in Decisions and the index row. Documentation waiver: process provenance, not a durable technical item. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| H1 | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) — scope-aware block identity paragraph. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| H2 | [`docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md`](../../adr/0054-squad-owned-blocks-in-shared-hook-files.md) — v3 global shape and identity rule, amended in place. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| H3 | [`docs/kyber-arbiter/runbook.md`](../../kyber-arbiter/runbook.md) — Hooks paragraph for global multi-target behaviour. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
+| H4 | [`docs/cli-command-surface.md`](../../cli-command-surface.md) — `arbiter install`/`uninstall` global-scope rows. | extends-component | KyberSquad, KyberArbiter | 2026-11-07 | archived |
 
 The live verification gates in this plan keep their `[NOT LIVE-VERIFIED]` marker until a
 fixed build is run against an isolated home and a real rc.20 home.
