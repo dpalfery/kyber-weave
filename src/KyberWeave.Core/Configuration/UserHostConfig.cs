@@ -84,14 +84,14 @@ public static class UserHostConfig
             return [];
         }
 
-        string yaml = File.ReadAllText(path);
-        if (string.IsNullOrWhiteSpace(yaml))
-        {
-            return [];
-        }
-
         try
         {
+            string yaml = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(yaml))
+            {
+                return [];
+            }
+
             ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
             if (section?.Global?.Targets is null)
             {
@@ -102,7 +102,7 @@ public static class UserHostConfig
                 .Where(target => !string.IsNullOrWhiteSpace(target))
                 .Distinct(StringComparer.Ordinal)];
         }
-        catch (YamlException)
+        catch (Exception ex) when (ex is YamlException or IOException or UnauthorizedAccessException)
         {
             return [];
         }

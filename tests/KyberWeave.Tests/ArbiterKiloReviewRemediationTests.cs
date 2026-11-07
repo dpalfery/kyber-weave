@@ -388,4 +388,54 @@ public sealed class ArbiterKiloReviewRemediationTests
         Assert.True(SquadHookJsonBlock.IsSquadEntry(SquadHookBlockFormat.Claude, claudeEntry));
         Assert.False(SquadHookJsonBlock.IsSquadEntry(SquadHookBlockFormat.Claude, cursorEntry));
     }
+
+    [Fact]
+    public void ReadGlobalTargets_WhenFileThrowsIOExceptionOrAccessDenied_ReturnsEmptyList()
+    {
+        using TempDirectory home = new();
+        string configDir = Path.Combine(home.Path, ".kyber-weave");
+        Directory.CreateDirectory(configDir);
+        string configPath = Path.Combine(configDir, "kyber-weave.yml");
+
+        File.WriteAllText(configPath, "arbiter:\n  global:\n    targets:\n      - 'cursor'\n");
+
+        using (FileStream lockStream = new(configPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+            Assert.Empty(targets);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(configPath, UnixFileMode.None);
+            try
+            {
+                IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+                Assert.Empty(targets);
+            }
+            finally
+            {
+                File.SetUnixFileMode(configPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+    }
+
+    [Fact]
+    public void ResolveGlobalHookPath_WhenGlobalRootsThrowsArgumentException_ReturnsNullWithoutThrowing()
+    {
+        using TempDirectory home = new();
+
+        ThrowingGlobalRoots throwingRoots = new(new ArgumentException("Invalid or relative root override"));
+        string? result = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, globalRoots: throwingRoots);
+        Assert.Null(result);
+
+        Func<string, string?> envWithRelativePath = varName => varName == "CURSOR_CONFIG_DIR" ? "relative/path" : null;
+        string? envResult = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, environmentReader: envWithRelativePath);
+        Assert.Null(envResult);
+    }
+
+    private sealed class ThrowingGlobalRoots(Exception exception) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) => throw exception;
+    }
 }

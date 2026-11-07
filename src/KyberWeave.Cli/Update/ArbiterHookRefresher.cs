@@ -223,7 +223,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         return SquadCommandComposition.ResolveArbiterWiring(ArbiterConfig.ProductDefaults).HookTimeoutSeconds;
     }
 
-    private static IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets(string home)
+    private IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets(string home)
     {
         foreach (string token in UserHostConfig.ReadGlobalTargets(home))
         {
@@ -233,21 +233,25 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
                 continue;
 
-            string? hookPath = ResolveGlobalHookPath(target, home);
+            string? hookPath = ResolveGlobalHookPath(target, home, environmentReader: _environmentReader);
             if (!string.IsNullOrWhiteSpace(hookPath))
                 yield return (SquadTargetCatalog.GetToken(target), hookPath);
         }
     }
 
-    private static string? ResolveGlobalHookPath(SquadTarget target, string home)
+    internal static string? ResolveGlobalHookPath(
+        SquadTarget target,
+        string home,
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
-        SquadGlobalRoots roots = new(_ => null, home);
+        ISquadGlobalRootResolver roots = globalRoots ?? new SquadGlobalRoots(environmentReader ?? (_ => null), home);
         string root;
         try
         {
             root = roots.ResolveGlobalRoot(target);
         }
-        catch (ArgumentOutOfRangeException)
+        catch (ArgumentException)
         {
             return null;
         }
