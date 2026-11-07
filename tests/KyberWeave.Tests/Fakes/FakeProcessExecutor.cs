@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Reflection;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
@@ -29,19 +29,7 @@ public sealed class FakeProcessExecutor : IProcessExecutor
     /// </summary>
     public FakeProcessExecutor WithMatchingArbiterProbe()
     {
-        Assembly assembly = typeof(SquadDoctorCommand).Assembly;
-        string? infoVersion =
-            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        string version = string.IsNullOrWhiteSpace(infoVersion)
-            ? assembly.GetName().Version?.ToString() ?? "0.0.0"
-            : infoVersion;
-        int plus = version.IndexOf('+', StringComparison.Ordinal);
-        if (plus > 0)
-        {
-            version = version[..plus];
-        }
-
-        version = version.Trim().TrimStart('v');
+        string version = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
         return WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {version}\n");
     }
 

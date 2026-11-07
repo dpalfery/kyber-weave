@@ -1,5 +1,5 @@
-using System.Reflection;
 using System.Text;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -322,6 +322,31 @@ public sealed class SquadArbiterCliTests : IDisposable
         Assert.DoesNotContain("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <c>WithMatchingArbiterProbe</c> has to satisfy the real doctor comparison. A stub that
+    /// trims the version on its own can drift and bring back <c>KW-ARB-BIN-001</c>.
+    /// </summary>
+    [Fact]
+    public void Doctor_WhenTheMatchingArbiterProbeIsStubbed_DoesNotReportKwArbBin001()
+    {
+        string workingDir = NewDir("arbiter-doctor-stub");
+        WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithMatchingArbiterProbe();
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: workingDir);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings { Path = workingDir, Global = false }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
+        Assert.Contains($"kyber-weave-arbiter {CliVersion()}", execution.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Doctor_OnZcodeRepoWithArbiterDisabled_DoesNotRequireTheArbiterServer()
     {
@@ -479,19 +504,8 @@ public sealed class SquadArbiterCliTests : IDisposable
         public string ResolveGlobalRoot(SquadTarget target) => root;
     }
 
-    private static string CliVersion()
-    {
-        Assembly assembly = typeof(SquadDoctorCommand).Assembly;
-        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        string version = infoVersion ?? assembly.GetName().Version?.ToString() ?? "0.0.0";
-        int plus = version.IndexOf('+', StringComparison.Ordinal);
-        if (plus > 0)
-        {
-            version = version[..plus];
-        }
-
-        return version.Trim().TrimStart('v');
-    }
+    private static string CliVersion() =>
+        CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 
     private string NewDir(string name)
     {
