@@ -1701,6 +1701,32 @@ public sealed class SquadCanonicalContentTests
             "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
     }
 
+    /// <summary>
+    /// The run-start step is one command, and every surface that describes it names that command. A
+    /// reference that describes the step without naming the command leaves the agent to reconstruct it
+    /// from prose, which is how the two entry points drifted apart in the first place.
+    /// </summary>
+    /// <param name="relativePath">A run-start surface, relative to the canonical Squad source root.</param>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    [InlineData("agents/conductor/references/intake-path.md")]
+    [InlineData("agents/conductor/references/plan-path.md")]
+    public void RunStartSurfacesNameTheRunStartCommand(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Matches(RunStartCommand, text);
+    }
+
+    /// <summary>
+    /// The <c>run start</c> invocation the run-start surfaces must name, matched tolerantly because the
+    /// prose around it is free to wrap or emphasise the command.
+    /// </summary>
+    private static readonly Regex RunStartCommand = new(
+        @"kyber-weave\s+run\s+start\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
