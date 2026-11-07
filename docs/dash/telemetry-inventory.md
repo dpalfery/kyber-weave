@@ -3,8 +3,9 @@ id: dash/telemetry-inventory
 title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
+component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 decided-by:
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
@@ -30,8 +31,7 @@ filter. A Gemini selector **label** may remain in the UI.
 
 ## Collector and canonical-record contract
 
-**[VERIFIED]** The local receiver accepts JSON and protobuf at both `POST /v1/traces` and
-`POST /v1/logs`. Non-model spans are quarantined at ingest and cannot create derived
+**[VERIFIED]** The local receiver accepts JSON and protobuf across `POST /v1/traces`, `POST /v1/logs`, and `POST /v1/metrics`. Non-model spans are quarantined at ingest and cannot create derived
 sessions. A log correlates by `(trace_id, span_id)`, then by session and bounded timestamp
 window; it enriches one existing span-shaped record, is idempotent, and is quarantined if
 it remains unmatched. Claude Code request-body logs follow a stricter rule, described in
