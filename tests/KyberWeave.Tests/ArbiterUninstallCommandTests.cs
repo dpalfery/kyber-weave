@@ -503,6 +503,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     [Fact]
     public void AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing()
     {
+        _isolated.Value = true;
         SquadStateStore store = new(new BlankHomeUserPaths(Path.Combine(_temp.Path, "blank-home")));
 
         Assert.False(
