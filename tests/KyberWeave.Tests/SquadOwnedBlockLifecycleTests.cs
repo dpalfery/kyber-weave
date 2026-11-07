@@ -468,39 +468,45 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// <summary>
     /// The retained-schema rule the uninstall plan applies: a receipt that still owns a
     /// block stays on v3, while one whose blocks are all gone drops to the block-less
-    /// schema for its scope (v2 at global scope, v1 at project scope). Removal keeps a
-    /// block only when its path is now a directory, so both blocks here point at
-    /// directories and the plan's schema branch is the only thing under test.
+    /// schema for its scope (v2 at global scope, v1 at project scope). Blocks are uninstalled
+    /// through FormatForTarget; conflicted hook files retain their block on v3, while cleanly
+    /// removed blocks transition a v3 receipt to v2.
     /// </summary>
     [Fact]
     public void UninstallGlobalRetainedSchemaFollowsTheWriterRule()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadReceipt twoBlocks = new(
-            "kyber-squad.receipt/v3",
-            SquadDeploymentScope.Global,
-            fixture.Path,
-            InstalledAt,
-            [],
-            [])
-        {
-            Blocks =
-            [
-                new SquadOwnedBlock("hooks.json", "cursor", true, []),
-                new SquadOwnedBlock("hooks.json", "codex", true, []),
-            ]
-        };
+        using TempDirectory fixtureCorrupted = new TempDirectory();
+        GlobalBlockDeployment installedCorrupted = InstallGlobalBlocks(
+            fixtureCorrupted, SquadTarget.Cursor, SquadTarget.Codex);
+        SquadReceipt twoBlocks = Assert.IsType<SquadReceipt>(
+            installedCorrupted.Store.ReadReceipt(installedCorrupted.Home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", twoBlocks.Schema);
+        Assert.Equal(2, twoBlocks.Blocks.Count);
 
-        Directory.CreateDirectory(Path.Combine(fixture.Path, "hooks.json"));
+        // Corrupt both hook files so RemoveBlockContent throws SquadDeploymentConflictException,
+        // exercising FormatForTarget during uninstall while retaining both blocks.
+        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Cursor), "{ unclosed json");
+        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Codex), "{ unclosed json");
 
         SquadDeploymentPlan keepBoth = SquadDeploymentPlan.CreateUninstall(
-            fixture.Path,
+            installedCorrupted.Home,
             SquadDeploymentScope.Global,
-            twoBlocks);
+            twoBlocks,
+            installedCorrupted.Roots);
+
+        using TempDirectory fixtureClean = new TempDirectory();
+        GlobalBlockDeployment installedClean = InstallGlobalBlocks(
+            fixtureClean, SquadTarget.Cursor, SquadTarget.Codex);
+        SquadReceipt cleanReceipt = Assert.IsType<SquadReceipt>(
+            installedClean.Store.ReadReceipt(installedClean.Home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", cleanReceipt.Schema);
+        Assert.Equal(2, cleanReceipt.Blocks.Count);
+
         SquadDeploymentPlan keepNone = SquadDeploymentPlan.CreateUninstall(
-            fixture.Path,
+            installedClean.Home,
             SquadDeploymentScope.Global,
-            twoBlocks with { Blocks = [] });
+            cleanReceipt,
+            installedClean.Roots);
 
         Assert.Equal(2, keepBoth.Receipt.Blocks.Count);
         Assert.Equal("kyber-squad.receipt/v3", keepBoth.Receipt.Schema);
