@@ -1373,6 +1373,11 @@ function decodeQuantileOrBucketDataPoint(pointMsg: PbMessage, attrField: number)
   }
 }
 
+function pbTemporality(message: PbMessage): number | undefined {
+  const t = pbNumber(message, 2)
+  return t === 1 || t === 2 ? t : undefined
+}
+
 function metricFromProtobuf(
   message: PbMessage,
   resource: Record<string, unknown>,
@@ -1387,6 +1392,21 @@ function metricFromProtobuf(
   const unit = pbString(message, 3)
 
   const gaugeMsg = pbMessage(message, 5)
+  const sumMsg = pbMessage(message, 7)
+  const histMsg = pbMessage(message, 9)
+  const expHistMsg = pbMessage(message, 10)
+  const summaryMsg = pbMessage(message, 11)
+
+  const presentShapes = [gaugeMsg, sumMsg, histMsg, expHistMsg, summaryMsg].filter(
+    (m) => m !== undefined,
+  )
+  if (presentShapes.length > 1) {
+    throw new OtlpDecodeError(`${where}: multiple metric data oneof fields set`)
+  }
+
+  const metricResource = { ...resource }
+  const metricScope = { ...scope }
+
   if (gaugeMsg !== undefined) {
     const dataPoints = pbMessages(gaugeMsg, 1, `${where}.gauge.data_points`).map(decodeNumberDataPoint)
     return {
@@ -1395,14 +1415,13 @@ function metricFromProtobuf(
       ...(unit !== undefined ? { unit } : {}),
       kind: 'gauge',
       dataPoints,
-      resource,
-      scope,
+      resource: metricResource,
+      scope: metricScope,
     }
   }
 
-  const sumMsg = pbMessage(message, 7)
   if (sumMsg !== undefined) {
-    const temporality = pbNumber(sumMsg, 2)
+    const temporality = pbTemporality(sumMsg)
     const isMonotonicRaw = pbBigInt(sumMsg, 3)
     const dataPoints = pbMessages(sumMsg, 1, `${where}.sum.data_points`).map(decodeNumberDataPoint)
     return {
@@ -1413,14 +1432,13 @@ function metricFromProtobuf(
       ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
       ...(isMonotonicRaw !== undefined ? { isMonotonic: isMonotonicRaw !== 0n } : {}),
       dataPoints,
-      resource,
-      scope,
+      resource: metricResource,
+      scope: metricScope,
     }
   }
 
-  const histMsg = pbMessage(message, 9)
   if (histMsg !== undefined) {
-    const temporality = pbNumber(histMsg, 2)
+    const temporality = pbTemporality(histMsg)
     const dataPoints = pbMessages(histMsg, 1, `${where}.histogram.data_points`).map((p) =>
       decodeQuantileOrBucketDataPoint(p, 9),
     )
@@ -1431,14 +1449,13 @@ function metricFromProtobuf(
       kind: 'histogram',
       ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
       dataPoints,
-      resource,
-      scope,
+      resource: metricResource,
+      scope: metricScope,
     }
   }
 
-  const expHistMsg = pbMessage(message, 10)
   if (expHistMsg !== undefined) {
-    const temporality = pbNumber(expHistMsg, 2)
+    const temporality = pbTemporality(expHistMsg)
     const dataPoints = pbMessages(expHistMsg, 1, `${where}.exponential_histogram.data_points`).map((p) =>
       decodeQuantileOrBucketDataPoint(p, 1),
     )
@@ -1449,12 +1466,11 @@ function metricFromProtobuf(
       kind: 'exponentialHistogram',
       ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
       dataPoints,
-      resource,
-      scope,
+      resource: metricResource,
+      scope: metricScope,
     }
   }
 
-  const summaryMsg = pbMessage(message, 11)
   if (summaryMsg !== undefined) {
     const dataPoints = pbMessages(summaryMsg, 1, `${where}.summary.data_points`).map((p) =>
       decodeQuantileOrBucketDataPoint(p, 7),
@@ -1465,8 +1481,8 @@ function metricFromProtobuf(
       ...(unit !== undefined ? { unit } : {}),
       kind: 'summary',
       dataPoints,
-      resource,
-      scope,
+      resource: metricResource,
+      scope: metricScope,
     }
   }
 
@@ -1476,8 +1492,8 @@ function metricFromProtobuf(
     ...(unit !== undefined ? { unit } : {}),
     kind: 'unknown',
     dataPoints: [],
-    resource,
-    scope,
+    resource: metricResource,
+    scope: metricScope,
   }
 }
 

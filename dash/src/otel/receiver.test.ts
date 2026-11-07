@@ -1124,14 +1124,14 @@ function encodeMetricDataPoint(
   if (point.timeUnixNano !== undefined) {
     fields.push(...pbFixed64Field(3, BigInt(point.timeUnixNano)))
   }
-  if (kind === 'histogram' || kind === 'summary') {
+  if (kind === 'histogram' || kind === 'summary' || kind === 'exponentialHistogram') {
     if (point.count !== undefined) {
       fields.push(...pbFixed64Field(4, BigInt(point.count)))
     }
     if (point.sum !== undefined) {
       fields.push(...pbFixed64Field(5, doubleBits(point.sum)))
     }
-    const attrField = kind === 'histogram' ? 9 : 7
+    const attrField = kind === 'histogram' ? 9 : kind === 'exponentialHistogram' ? 1 : 7
     if (point.attributes && point.attributes.length > 0) {
       for (const attr of point.attributes) {
         fields.push(...pbLengthDelimited(attrField, pbKeyValue(attr)))
@@ -1673,6 +1673,10 @@ describe('decodeOtlpMetricsProtobuf', () => {
       'test.exponentialHistogram',
       'test.summary',
     ])
+    const expHist = decoded.find((m: OtlpMetric) => m.kind === 'exponentialHistogram')
+    expect(expHist?.dataPoints).toHaveLength(1)
+    expect(expHist?.dataPoints[0]?.count).toBe(5)
+    expect(expHist?.dataPoints[0]?.sum).toBeCloseTo(20.0, 1)
   })
 
   it('decodes as_int and as_double NumberDataPoints with stripped attributes and string timestamps', () => {
@@ -1806,6 +1810,61 @@ describe('decodeOtlpMetricsProtobuf', () => {
       kind: 'unknown',
       dataPoints: [],
     })
+  })
+
+  it('rejects a metric with multiple oneof data shapes set, throwing OtlpDecodeError', () => {
+    // Malformed metric carrying both gauge (field 5) and sum (field 7)
+    const malformedMetric = [
+      ...pbStringField(1, 'malformed.metric'),
+      ...pbSubmessage(5, pbSubmessage(1, pbFixed64Field(4, doubleBits(10.0)))),
+      ...pbSubmessage(7, pbSubmessage(1, pbFixed64Field(6, 20n))),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, malformedMetric),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    expect(() => decodeOtlpMetricsProtobuf(bytes)).toThrow(OtlpDecodeError)
+  })
+
+  it('returns independent resource and scope objects for sibling metrics in the same batch', () => {
+    const bytes = protobufMetricsFixture([
+      { name: 'm1', kind: 'gauge', dataPoints: [{ asInt: 1 }] },
+      { name: 'm2', kind: 'gauge', dataPoints: [{ asInt: 2 }] },
+    ])
+
+    const [m1, m2] = decodeOtlpMetricsProtobuf(bytes)
+    expect(m1?.resource).not.toBe(m2?.resource)
+    expect(m1?.scope).not.toBe(m2?.scope)
+    expect(m1?.resource).toEqual(m2?.resource)
+    expect(m1?.scope).toEqual(m2?.scope)
+  })
+
+  it('normalizes unknown or invalid aggregationTemporality to undefined', () => {
+    const sumWithUnknownTemporality = [
+      ...pbStringField(1, 'sum.with.invalid.temporality'),
+      ...pbSubmessage(7, [
+        ...pbVarintField(2, 99), // 99 is invalid
+        ...pbSubmessage(1, pbFixed64Field(6, 42n)),
+      ]),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, sumWithUnknownTemporality),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    const [metric] = decodeOtlpMetricsProtobuf(bytes)
+    expect(metric?.aggregationTemporality).toBeUndefined()
   })
 
   it('throws OtlpDecodeError on truncated protobuf payload', () => {
