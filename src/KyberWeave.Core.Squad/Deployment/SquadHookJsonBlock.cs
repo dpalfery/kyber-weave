@@ -71,6 +71,44 @@ public static class SquadHookJsonBlock
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
 
+    /// <summary>
+    /// Resolves the hook-file shape of one receipt-owned block, reading the receipt that recorded
+    /// it rather than a render that may no longer exist.
+    /// </summary>
+    /// <remarks>
+    /// The recorded target decides the shape first: four of the six formats write the same bare
+    /// <c>hooks.json</c> beneath their own global root, so under global scope the path names the
+    /// file but cannot name the format (global block identity plan, D8). The per-format portable
+    /// path stays the fallback for a receipt whose target owns no shared hook file, which is the
+    /// project- and instance-scope shape where the path alone is unique.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the block's shape is known; otherwise <see langword="false"/>.</returns>
+    public static bool TryResolveFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+
+        SquadHookBlockFormat? ownedByTarget = SquadTargetCatalog.TryResolve(block.Target, out SquadTarget target)
+            ? FormatOwnedBy(target)
+            : null;
+        if (ownedByTarget is { } known)
+        {
+            format = known;
+            return true;
+        }
+
+        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
+        {
+            if (string.Equals(RelativePath(candidate), block.RelativePath, StringComparison.OrdinalIgnoreCase))
+            {
+                format = candidate;
+                return true;
+            }
+        }
+
+        format = default;
+        return false;
+    }
+
     /// <summary>Whether a hook entry (or group) is one of Squad's, by command signature.</summary>
     /// <remarks>
     /// Cursor entries are flat and carry their own command. Codex, Factory and Devin entries
@@ -748,6 +786,23 @@ public static class SquadHookJsonBlock
             SquadHookBlockFormat.Devin => "devin",
             SquadHookBlockFormat.Antigravity => "antigravity",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
+        };
+
+    /// <summary>
+    /// The shape that owns <paramref name="target"/>'s hooks, or <see langword="null"/> when the
+    /// target keeps no shared hook file. The inverse of <see cref="Harness"/>, kept beside it so the
+    /// two cannot drift apart.
+    /// </summary>
+    private static SquadHookBlockFormat? FormatOwnedBy(SquadTarget target) =>
+        target switch
+        {
+            SquadTarget.Cursor => SquadHookBlockFormat.Cursor,
+            SquadTarget.Claude => SquadHookBlockFormat.Claude,
+            SquadTarget.Codex => SquadHookBlockFormat.Codex,
+            SquadTarget.Factory => SquadHookBlockFormat.Factory,
+            SquadTarget.Devin => SquadHookBlockFormat.Devin,
+            SquadTarget.Antigravity => SquadHookBlockFormat.Antigravity,
+            _ => null,
         };
 
     /// <summary>

@@ -758,9 +758,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
     /// it should carry rather than reading as a whole-file miss. A deployment without a
     /// receipt, or a receipt without blocks, is reported as skipped rather than failed:
-    /// there is nothing owned to drift. The format is resolved from the recorded relative
-    /// path the same way uninstall resolves it, so diagnosis never depends on a render
-    /// that may no longer exist.
+    /// there is nothing owned to drift. Both the file's path and its shape are read from the
+    /// receipt, so diagnosis never depends on a render that may no longer exist and never
+    /// needs a scope of its own to say where a global block lives.
     /// </remarks>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
     private bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
@@ -817,7 +817,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 continue;
             }
 
-            if (!TryResolveBlockFormat(block, out SquadHookBlockFormat format))
+            if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
             {
                 AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
                 hasDrift = true;
@@ -890,40 +890,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         return hasDrift;
-    }
-
-    /// <summary>
-    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
-    /// path, so diagnosis never depends on a render that may no longer exist.
-    /// </summary>
-    private static bool TryResolveBlockFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
-    {
-        if (string.Equals(block.Target, "claude", StringComparison.OrdinalIgnoreCase))
-        {
-            format = SquadHookBlockFormat.Claude;
-            return true;
-        }
-
-        if (string.Equals(block.Target, "cursor", StringComparison.OrdinalIgnoreCase))
-        {
-            format = SquadHookBlockFormat.Cursor;
-            return true;
-        }
-
-        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
-        {
-            if (string.Equals(
-                    SquadHookJsonBlock.RelativePath(candidate),
-                    block.RelativePath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                format = candidate;
-                return true;
-            }
-        }
-
-        format = default;
-        return false;
     }
 
     private static string GetCliVersion()

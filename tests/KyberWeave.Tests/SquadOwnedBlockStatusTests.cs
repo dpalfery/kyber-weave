@@ -18,6 +18,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockStatusTests
 {
+    /// <summary>
+    /// The bare global hook path four of the five formats write beneath their own root; only the
+    /// target tells them apart, which is the whole subject of the global cases below.
+    /// </summary>
+    private const string GlobalHooksPath = "hooks.json";
+
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
@@ -283,12 +289,157 @@ public sealed class SquadOwnedBlockStatusTests
         Assert.Contains("/hooks/", execution.Output, StringComparison.Ordinal);
     }
 
+    // ----------------------------------------------------------------------------------
+    // Global scope: each target's block sits beneath that target's own root
+    // ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>--global</c> status names every block with its own target, because four of the five
+    /// formats write the same bare <c>hooks.json</c> beneath their own global root: the target is
+    /// the only thing that tells the two lines apart, and a block whose recorded path is that bare
+    /// name must be reported as healthy rather than called an unknown shared hook file.
+    /// </summary>
+    [Fact]
+    public void Status_GlobalReportsEveryBlockWithItsTargetLabel()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
+
+        SquadStatusCommand command = new(stateStore: installed.Store, globalRoots: installed.GlobalRoots);
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = installed.Home,
+                Global = true,
+            }));
+
+        Assert.True(
+            execution.Result == 0,
+            $"A global home with two healthy blocks reported exit {execution.Result}:{Environment.NewLine}"
+            + execution.Output);
+        Assert.Contains("hooks.json (cursor) 2 entries", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("hooks.json (codex) 2 entries", execution.Output, StringComparison.Ordinal);
+        Assert.Contains(
+            "All deployed files match the recorded receipt.",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>--global</c> doctor finds a two-block home healthy. Reading the receipt is the whole
+    /// check: both blocks resolve through their own target's root, so a green result has to mean
+    /// both were inspected, not that the first one hid the second.
+    /// </summary>
+    [Fact]
+    public void Doctor_GlobalFindsEveryBlockHealthy()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            installed.Store.UserPaths,
+            installed.Home,
+            installed.GlobalRoots,
+            null,
+            installed.Store);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = installed.Home,
+                Global = true,
+            }));
+
+        Assert.True(
+            execution.Result == 0,
+            $"A global home with two healthy blocks reported exit {execution.Result}:{Environment.NewLine}"
+            + execution.Output);
+        Assert.Contains("Owned blocks: 2 blocks, 4 entries healthy", execution.Output, StringComparison.Ordinal);
+    }
+
     private static SquadRenderedBlock CursorBlock(string marker) =>
         new(
             "cursor",
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
             [new SquadRenderedBlockEntry("preToolUse", CursorEntry($"kyber-weave-arbiter hook --harness cursor --probe {marker}"))]);
+
+    /// <summary>
+    /// One global block. The marker rides the matcher, never the command: the command is the
+    /// ownership signature, so a marker inside it would make the entry unowned.
+    /// </summary>
+    private static SquadRenderedBlock GlobalHooksBlock(SquadTarget target)
+    {
+        string token = SquadTargetCatalog.GetToken(target);
+        string command = $"kyber-weave-arbiter hook --harness {token} --scope global";
+        return target switch
+        {
+            SquadTarget.Cursor => new SquadRenderedBlock(
+                token,
+                GlobalHooksPath,
+                SquadHookBlockFormat.Cursor,
+                [
+                    new SquadRenderedBlockEntry("preToolUse", CursorEntry(command)),
+                    new SquadRenderedBlockEntry("postToolUse", CursorEntry(command)),
+                ]),
+            SquadTarget.Codex => new SquadRenderedBlock(
+                token,
+                GlobalHooksPath,
+                SquadHookBlockFormat.Codex,
+                [
+                    new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(command)),
+                    new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(command)),
+                ]),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(target),
+                target,
+                "Only the targets whose global hook file is named hooks.json are built here."),
+        };
+    }
+
+    private static JsonObject MatcherGroup(string command) =>
+        new()
+        {
+            ["matcher"] = "Task",
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = command,
+                    ["timeout"] = 5,
+                }),
+        };
+
+    /// <summary>
+    /// A home holding one global receipt with a cursor and a codex block, installed through the
+    /// same plan and transaction an install uses. Each block is written beneath its own target's
+    /// global root, which is why both record the bare path <c>hooks.json</c>.
+    /// </summary>
+    private static GlobalBlockDeployment InstallGlobalBlocks(TempDirectory fixture)
+    {
+        FakeSquadUserPaths userPaths = new(fixture.Path);
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        SquadStateStore store = new(userPaths);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            globalRoots: globalRoots,
+            blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
+        new SquadTransaction(store).Execute(plan);
+        return new GlobalBlockDeployment(store, globalRoots, home);
+    }
 
     private static JsonObject CursorEntry(string command) =>
         new()
@@ -332,6 +483,15 @@ public sealed class SquadOwnedBlockStatusTests
 
     private static string Digest(string content) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+    /// <summary>
+    /// An isolated home with a global deployment in it: the store that reads its receipt, the
+    /// resolver that finds each target's root, and the home these global commands are anchored at.
+    /// </summary>
+    private sealed record GlobalBlockDeployment(
+        SquadStateStore Store,
+        SquadGlobalRoots GlobalRoots,
+        string Home);
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {

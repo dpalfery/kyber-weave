@@ -736,8 +736,9 @@ public sealed class SquadDeploymentPlan
             : receipt.Layout;
         // The schema follows the same rule as the writer: a project receipt that still owns
         // a block stays on v3, while one whose blocks are all gone drops back to v1 so it
-        // serializes byte-identical to every block-less receipt. Global receipts never own
-        // blocks, so their schema carries over untouched.
+        // serializes byte-identical to every block-less receipt. A global receipt carries
+        // its recorded schema over untouched, which is v3 when it owns blocks and v2 when
+        // it does not.
         string retainedSchema = scope == SquadDeploymentScope.Global
             ? receipt.Schema
             : retainedBlocks.Count > 0 ? SquadStateStore.ReceiptSchemaV3 : SquadStateStore.ReceiptSchemaV1;
