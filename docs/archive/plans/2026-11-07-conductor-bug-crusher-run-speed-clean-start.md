@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-bug-crusher-run-speed-clean-start
 title: Conductor and bug-crusher run speed, slice 1 - clean start
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-07
@@ -10,18 +10,19 @@ last-reviewed: 2026-11-07
 development-mode: test-first
 autonomy: autonomous
 documentation-impact: extends-component
-impact-components: [KyberSquad, DocGraph, CI Pipelines, Distribution]
+impact-components: [KyberSquad, DocGraph, CI Pipelines]
 ---
 
 # Conductor and bug-crusher run speed, slice 1 - clean start
 
-**Status: Ready.** Approved for execution 2026-11-07; decision AP1 records the approve-and-execute
-gate carried by the conductor's `AUTONOMOUS_APPROVAL` input under resolved autonomy `autonomous`.
-Per the convention the parent design established, the frontmatter stays `status: current` (the
-frontmatter vocabulary is closed: current, draft, needs-review, superseded) while this status line
-and the plan index row carry the Ready lifecycle state. **Development mode:** `test-first` (packet
-input). **Autonomy:** `autonomous` (packet input; every open item decided and recorded below).
-**Scale:** `extends-component`, components `KyberSquad`, `DocGraph`, `CI Pipelines`, `Distribution`.
+**Status: Archived.** Closed 2026-11-07 by `docs-dev`; the Closeout section at the end records the
+acceptance verification and maps every decision and Design harvest item to the canonical document
+that now carries it. Approved for execution 2026-11-07 by decision AP1, the approve-and-execute gate
+carried by the conductor's `AUTONOMOUS_APPROVAL` input under resolved autonomy `autonomous`.
+**Development mode:** `test-first` (packet input). **Autonomy:** `autonomous` (packet input; every
+open item decided and recorded below). **Scale:** `extends-component`, components `KyberSquad`,
+`DocGraph`, `CI Pipelines`, `Distribution` at authoring time — `Distribution` was dropped at
+closeout, and the Closeout mapping says why.
 
 This is a child plan, carved from the approved parent design for conductor and bug-crusher run
 speed (branch `claude/docs/conductor-bug-crusher-run-speed`, deliberately not present in this
@@ -191,11 +192,13 @@ DocGraph, CI Pipelines, Distribution]`.
 
 ## ADR for this slice
 
-One new ADR at the next free number (from 0060), in `docs/adr/`, with its row in
+One new ADR at the next free number, in `docs/adr/`, with its row in
 `docs/adr/README.md`: **Runs start from the fetched remote and carry the harness name.** It
 records D8, D9, D14, D21 and D42. The rejected alternatives to state: checking out `main` first,
 detecting the harness from the folder name, detecting it from an environment variable, and
-changing branch protection. The ADR is written by the slice's closeout, not now.
+changing branch protection. **Written by the closeout as
+[ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md)** —
+0060 was the next free number at the time, as planned.
 
 ## Test contract
 
@@ -338,10 +341,69 @@ description.
 
 ## Closeout
 
-`docs-dev` closes this child plan in this slice's pull request: it harvests this slice's Design
-harvest rows, writes the new ADR described above with its row in `docs/adr/README.md`, archives
-this plan with `git mv` into `docs/archive/plans/`, moves its row to Archived Plans in
-`docs/plans/README.md`, and runs `docs validate . --merge-ready` and `docs drift .`.
+**Closed 2026-11-07 by `docs-dev`.** The plan was moved from `docs/plans/` to `docs/archive/plans/`
+with `git mv`, and its row moved to Archived Plans in the [plan inventory](../../plans/README.md).
+
+**Acceptance verification, row by row, against the tree rather than against this plan.** Every task
+in the Test contract has its artifact in the branch and its behaviour in the shipped code:
+
+| Task | What was verified |
+|---|---|
+| T1 | `tests/KyberWeave.Tests/ArbiterUninstallCommandTests.cs` sets `_isolated.Value = true` in `AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing`, so the test no longer reads the real home folder. |
+| T2 | The RED classes exist: `RunSettingsConfigTests`, `RunStartPlannerTests`, `RunStartCommandTests`, `Arbiter/ArbiterClassificationTests`, `SquadHarnessTokenRenderTests`, and the policy project's `PrNamingScriptTests` and `PrNamingWorkflowTests`. |
+| T3 | `stop-on-tool-failure` and `run:` load through `ConfigRegConfigLoader`; `StopsOnToolFailure` returns `true` when the key is absent, so an absent setting stops in code; the three settings publish as mode properties only when set (`ConfigRegConfig.Resolve`, `ConfigRegValidator` adoption set). |
+| T4 | `RunStartCommand` carries the four exit codes, `RunStartPlanner.TryNameBranch` composes `[<owner>.<agent>.]<harness>/<type>/<slug>`, `RunStartRunner` fetches `origin --prune` and creates with `--no-track`, and `--json` prints the keys documented on the canonical page. `TriggerClassifier` classifies `RUN-START: true` as `investigate`. |
+| T5 | `SquadHarnessRenderer.SubstituteHarnessToken` replaces `{{harness}}` once, over agent and skill descriptions, bodies and resources. |
+| T6 | `docs/standards/github-actions/README.md` declares the technology; the Config Reg block lists `<github-actions-coding-standard>`. |
+| T7 | `scripts/check-pr-name.sh`, the `pr-naming` job `CI Summary` needs, and `.github/workflows/pr-naming-recheck.yml` on `pull_request: edited`. `ci.yml` carries no `edited` event. |
+| T8 | Both entry points name `run start` and the shell-or-dispatch route, pinned by `SquadCanonicalContentTests` and `SquadWorktreeMcpContractTests`. |
+| T9 | This closeout: the harvest rows below, ADR 0060, and the archive. |
+
+**Evidence for the slice's own gates.** The two documentation gates were run from the repository
+root after the archive: `docs validate . --merge-ready` and `docs drift .` both reported zero
+findings, which is what proves the archive is complete and every joined symbol still resolves. The
+scratch pull request that proves the naming job end to end (T7's live check) is a CI-run observation
+and is not claimed here.
+
+## Closeout mapping
+
+Every decision D1, D8, D9, D12, D13, D14, D21, D33, D41, D42, AP1 and Q1, and every Design harvest
+item, maps to a destination below. Documentation-impact for every migrated row: `extends-component`.
+Every mapped document carries `last-reviewed: 2026-11-07` or later, and status: archived.
+
+`Distribution` was dropped from `impact-components` at closeout. The document that carries the
+harvested `run start` reference, [`docs/cli-command-surface.md`](../../cli-command-surface.md),
+declares no `component` frontmatter and is the aggregation index rather than the Distribution
+component's page; [`docs/distribution.md`](../../distribution.md) and
+[`docs/install.md`](../../install.md) describe the release and install paths, which this slice did
+not change. Nothing was re-reviewed to satisfy the field, and the two documents that did carry
+`Distribution` were left alone.
+
+| ID | Destination | Durable fact | Impact components |
+|---|---|---|---|
+| D1 | [configuration, Run controls](../../configuration.md#run-controls); [kyber-squad architecture, run start](../../kyber-squad/architecture.md#run-start-fetch-and-branch-first) | A failed tool at run start stops the run when `stop-on-tool-failure` is absent or `true`, and only warns when it is `false`; the default lives in code, not in instruction text | KyberSquad |
+| D8 | [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md); [kyber-squad architecture, run start](../../kyber-squad/architecture.md#run-start-fetch-and-branch-first); [CLI command surface, `run start`](../../cli-command-surface.md#run--run-start) | Fetch `origin --prune`, then branch from `run.base-branch` or `origin/HEAD`; `main` is never assumed, and a resume keeps the branch it resumes | KyberSquad |
+| D9 | [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md); [CLI command surface, `run start`](../../cli-command-surface.md#run--run-start); [CI workflows runbook, the pull request naming check](../../ci-pipelines/workflows-runbook.md#the-pull-request-naming-check-and-its-recheck) | The harness name is carried in the branch and the title and checked in CI; Dependabot is exempt by author, and `manual` names work done under no harness | CI Pipelines |
+| D12 | [plan inventory, Active Plans](../../plans/README.md) | A plan is open only while it is built, and the pull request that finishes it archives it, so a design spanning several pull requests ships as one plan per slice on the slice's own branch | KyberSquad |
+| D13 | [GitHub Actions standard, Names are identifiers](../../standards/github-actions/README.md#names-are-identifiers); [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md) | The one durable outcome of the reordering is that the `github-actions` standard is declared before the workflow that needs it; the slice ordering itself is execution provenance with no surviving invariant | CI Pipelines |
+| D14 | [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md); [CI workflows runbook, the pull request naming check](../../ci-pipelines/workflows-runbook.md#the-pull-request-naming-check-and-its-recheck); [GitHub Actions standard, Names are identifiers](../../standards/github-actions/README.md#names-are-identifiers) | CI gains no `edited` event; the rule is a `pr-naming` job that `CI Summary` needs and a recheck workflow on `pull_request: edited` that re-runs both jobs by their display names | CI Pipelines |
+| D21 | [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md); [CLI command surface, `run start`](../../cli-command-surface.md#run--run-start); [configuration, Run controls](../../configuration.md#run-controls) | One command, its four exit codes, its `--json` keys, and the `RUN-START: true` dispatch the Arbiter classifies as `investigate` so the roster check and `KW-ARB-READONLY-001` still apply | KyberSquad |
+| D33 | [DocGraph architecture, mode properties](../../docgraph/architecture.md#mode-properties-are-not-paths); [configuration, Run controls](../../configuration.md#run-controls) | The three setting names, the defaults (`true`, `origin/HEAD`, `true`), that an unknown boolean is refused, and that a setting publishes a mode property only when it was written | DocGraph |
+| D41 | [kyber-squad architecture, the harness token](../../kyber-squad/architecture.md#the-harness-token-is-substituted-once-in-the-render-pipeline); [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md) | `{{harness}}` is replaced once in the shared render pipeline with the target's catalogue token, because a folder name and an environment variable were both the wrong answer | KyberSquad |
+| D42 | [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md); [CLI command surface, `run start`](../../cli-command-surface.md#run--run-start); [CI workflows runbook, the pull request naming check](../../ci-pipelines/workflows-runbook.md#the-pull-request-naming-check-and-its-recheck) | The branch and title shapes, the thirteen tokens plus `manual` with Antigravity written `antigravity`, and that `run start` composes what the naming check enforces | CI Pipelines |
+| AP1 | Documentation waiver: execution-approval provenance, transient, with no surviving invariant. The approval is this plan's; the behaviour it authorized is mapped in the other rows. | Test contract and execute approval | KyberSquad |
+| Q1 | Documentation waiver: where two test classes physically live, test-fixture scoped, and pinned by `tests/KyberWeave.RepoPolicy.Tests/AGENTS.md` plus the classes' own namespace rather than by a governed document | The policy project's classes keep the `KyberWeave.Tests` namespace, so one fully-qualified name resolves in either project | KyberSquad |
+| `run start`, its exit codes, branch and title format | [CLI command surface, `run start`](../../cli-command-surface.md#run--run-start) | Design harvest: the verb, its flags, exit codes `0`/`1`/`2`/`3`, the `--json` keys, the branch and title shapes, and the recorded limit on `--resume` | Distribution → KyberSquad (the page declares no component; see the note above) |
+| `stop-on-tool-failure` and the `run:` settings | [configuration, Run controls](../../configuration.md#run-controls) | Design harvest: the three settings, their defaults, the Config Reg publication rule, and that an absent `stop-on-tool-failure` means stop | DocGraph |
+| PR naming job and recheck | [CI workflows runbook, the pull request naming check](../../ci-pipelines/workflows-runbook.md#the-pull-request-naming-check-and-its-recheck) | Design harvest: the `pr-naming` job, that `CI Summary` needs it, and the `pr-naming-recheck.yml` on `pull_request: edited` | CI Pipelines |
+
+**ADR.** One record, [ADR 0060](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md),
+created with this closeout. It records D8, D9, D14, D21 and D42, and the four rejected alternatives:
+checking out `main` first, detecting the harness from the folder name, detecting it from an
+environment variable, and changing branch protection. D1, D12, D13, D33, D41, AP1 and Q1 are
+documentation-only: `no ADR — ADR waiver:` each refines behaviour whose boundary the canonical pages
+above already state, and none of them changes a boundary, a dependency, a schema, or a persistent
+format.
 
 ## Rules that stay
 

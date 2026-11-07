@@ -56,6 +56,11 @@ policy test already enforce are named by the test, not restated as prose.
   the repository-policy tests, and job `name:` values are what a reviewer reads in the pull
   request's check list. Rename either deliberately, and update the test that pins it in the same
   change.
+- **A job another workflow re-runs is addressed by its display `name:`.** The API identifies a job
+  by `name:`, never by its key in the workflow. `pr-naming-recheck.yml` re-runs `ci.yml`'s
+  `pr-naming` job and then `CI Summary` by those two strings, so a rename that misses the recheck
+  fails its step rather than reporting a green summary nobody re-checked. `ci.yml` says the same at
+  the `pr-naming` job: rename one, rename both.
 - The gate names in `.kyber-weave/kyber-weave.yml` are the identifiers a review cites. A workflow
   step that runs a gate repeats that gate's argv rather than an equivalent, so the command in the
   workflow and the command in the gate cannot disagree. `ts-gates` states this at the job.
