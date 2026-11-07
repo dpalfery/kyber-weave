@@ -1,5 +1,5 @@
-using System.Reflection;
 using System.Text.Json;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
@@ -95,7 +95,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         bool hasIssues = false;
 
         // 1. CLI Version
-        string cliVersion = GetCliVersion();
+        string cliVersion = CliAssemblyVersion.Informational(typeof(SquadDoctorCommand).Assembly);
         AnsiConsole.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
         // 2. Renderer coverage — which of the declared targets can actually install today.
@@ -288,7 +288,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_executor);
         ToolProbeResult arbiterResult = arbiterProbe.Probe();
-        string cliVersion = NormalizeCliVersion(GetCliVersion());
+        string cliVersion = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 
         if (arbiterResult is { IsAvailable: true, Version: not null }
             && string.Equals(arbiterResult.Version, cliVersion, StringComparison.Ordinal))
@@ -311,17 +311,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
         return configResult.Success && configResult.Config?.Arbiter.Enabled == true;
-    }
-
-    /// <summary>
-    /// Normalizes the CLI version for comparison against the probe's semver: the assembly
-    /// informational version may carry <c>+build</c> metadata the probe never emits.
-    /// </summary>
-    private static string NormalizeCliVersion(string version)
-    {
-        int plus = version.IndexOf('+', StringComparison.Ordinal);
-        string normalized = plus > 0 ? version[..plus] : version;
-        return normalized.Trim().TrimStart('v');
     }
 
     /// <summary>
@@ -924,15 +913,5 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         format = default;
         return false;
-    }
-
-    private static string GetCliVersion()
-    {
-        Assembly assembly = typeof(SquadDoctorCommand).Assembly;
-        string? infoVersion =
-            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(infoVersion)) return infoVersion;
-
-        return assembly.GetName().Version?.ToString() ?? "0.0.0";
     }
 }

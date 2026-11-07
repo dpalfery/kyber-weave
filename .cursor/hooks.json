@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "kyber-weave-arbiter hook --harness cursor",
+        "matcher": "Task",
+        "timeout": 5,
+        "failClosed": true
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "kyber-weave-arbiter hook --harness cursor",
+        "matcher": "Task",
+        "timeout": 5,
+        "failClosed": true
+      }
+    ]
+  }
+}

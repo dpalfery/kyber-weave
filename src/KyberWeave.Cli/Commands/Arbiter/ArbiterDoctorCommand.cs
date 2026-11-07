@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Reflection;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
@@ -312,7 +312,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     {
         ArbiterProcessProbe probe = new(ArbiterCommandComposition.ArbiterProbeExecutor());
         ToolProbeResult result = probe.Probe();
-        string cliVersion = NormalizeCliVersion(GetCliVersion());
+        string cliVersion = CliAssemblyVersion.ForProbe(typeof(ArbiterDoctorCommand).Assembly);
 
         if (result is { IsAvailable: true, Version: not null }
             && string.Equals(result.Version, cliVersion, StringComparison.Ordinal))
@@ -399,27 +399,5 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         {
             return false;
         }
-    }
-
-    private static string GetCliVersion()
-    {
-        Assembly assembly = typeof(ArbiterDoctorCommand).Assembly;
-        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(infoVersion))
-            return infoVersion;
-
-        return assembly.GetName().Version?.ToString() ?? "0.0.0";
-    }
-
-    /// <summary>
-    /// Normalizes the CLI version for comparison against the probe's semver: the
-    /// assembly informational version may carry <c>+build</c> metadata the probe
-    /// never emits. Mirrors the Squad doctor comparison so both cite the same version.
-    /// </summary>
-    private static string NormalizeCliVersion(string version)
-    {
-        int plus = version.IndexOf('+', StringComparison.Ordinal);
-        string normalized = plus > 0 ? version[..plus] : version;
-        return normalized.Trim().TrimStart('v');
     }
 }

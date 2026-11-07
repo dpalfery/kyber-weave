@@ -440,3 +440,8 @@ mcp:
     #   provenance: third-party
     #   level: recommended
     #   install: codegraph init .   # printed verbatim when the binary is absent
+
+arbiter:
+  enabled: true
+  provider:
+    kind: none
