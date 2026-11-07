@@ -51,6 +51,8 @@ kyber-weave review gates . --base <ref> --out artifacts/gates.json
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
+The end-of-run council (`code-reviewer`) appends `--council` to the gates command, because only the council and CI may run the full-suite gates. Anyone else running this procedure, including the pre-push self-review gate, never adds it.
+
 Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
 denied write tool on the reviewer does not block the run. If the files cannot be persisted,
 keep the JSON from the command's response and pass it to `review verdict`.
@@ -246,6 +248,7 @@ Procedure above and the host's declared gates.
    request description. A verdict computed before a fix is void. List any major-or-worse
    finding still open by id in the pull request description. Minor/Info findings never
    block. Required CI decides readiness; the verdict does not gate the push or the ready step.
+   Run the gates command without `--council`. The CLI refuses the full-suite gates, and each refusal is a blocking failure that names the targeted alternatives; report those as "not run here, CI runs them", and do not count a refusal as a code finding in the verdict.
 3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.

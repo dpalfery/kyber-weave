@@ -141,3 +141,6 @@ ruff check . && ruff format --check .
 mypy --strict
 pytest
 ```
+
+The `pytest` line is the gate the review council and CI run. A dev agent never runs the full suite;
+it runs the tests covering its change (`pytest <path>::<test_name>`).

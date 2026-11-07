@@ -40,11 +40,11 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    `vitest related --run <files>` with paths relative to the package's directory,
    `cargo test '<name>'` run from the crate's directory after `cargo fmt --check` and
    `cargo clippy -- -D warnings`). Confirm every targeted run reports a non-zero test count: a
-   wrong filter or path matches nothing and exits 0. Do not run the full suite locally: CI runs it (on
-   Linux too, for cross-platform repositories). Run it locally only when the fix touches
-   cross-cutting code (shared core libraries, the repository's gate config, build or toolchain
-   config, CI workflows, migrations or schemas; the repository's AGENTS.md names the exact
-   paths) or to reproduce a CI failure. Do not rely on a worker's "tests pass"; read the totals.
+   wrong filter or path can match nothing and still exit 0. Do not run the full suite locally: CI runs it (on
+   Linux too, for cross-platform repositories). A fix to cross-cutting code (shared core libraries,
+   the repository's gate config, build or toolchain config, CI workflows, migrations or schemas)
+   is no exception: run a targeted set.
+   To reproduce a CI failure, run the classes or files CI reported. Do not rely on a worker's "tests pass"; read the totals.
 6. **Push (never force-push), then reply.** Replies must cite commits that exist on the remote,
    so push first. Stacked PRs: fix bottom-up, merge each level into the next, push all levels.
 7. **Reply to every comment you acted on with the fix commit hash**, one line, linking the

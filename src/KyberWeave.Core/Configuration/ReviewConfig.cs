@@ -46,6 +46,11 @@ public sealed record ReviewGate(
     /// standard output. For tools that report a problem by listing it and still exit zero, such as <c>gofmt -l</c>.
     /// </summary>
     public bool FailOnOutput { get; init; }
+
+    /// <summary>
+    /// Whether this gate runs the full product suite. Only the review council and CI may run it; see <see cref="FullSuiteGate"/>.
+    /// </summary>
+    public bool FullSuite { get; init; }
 }
 
 /// <summary>

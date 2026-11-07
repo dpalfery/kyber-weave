@@ -130,6 +130,9 @@ scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
 ```
 
+The two test lines are the gates the review council and CI run. A dev agent never runs a full
+suite; it adds a name filter to `cargo test` and a path to the UI `test` command.
+
 Each command runs through the process watchdog, `scripts/proc-guard.sh run --`
 ([runbook](../../../dash/runbook.md#running-tests-safely)).
 

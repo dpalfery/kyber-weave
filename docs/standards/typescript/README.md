@@ -114,9 +114,12 @@ For changes under `dash/`, run the applicable gates from the repository instruct
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
 scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
+
+`<files>` are relative to `dash/`. The whole `npm --prefix dash run test` suite is the review
+council's and CI's gate; a dev agent does not run it.
 
 Run each command through `scripts/proc-guard.sh run --` (the process watchdog); see
 [Running tests safely](../../dash/runbook.md#running-tests-safely).

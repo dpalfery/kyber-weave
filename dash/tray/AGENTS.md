@@ -48,7 +48,7 @@ Run each command from the repository root through the process watchdog, `scripts
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash run typecheck
 scripts/proc-guard.sh run -- npm --prefix dash run lint          # already covers dash/tray/ui
-scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files relative to dash/>
 scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
 
@@ -56,9 +56,15 @@ The popover UI has its own gates after `npm --prefix dash/tray/ui ci`:
 
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
-scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
+scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
 `npm --prefix dash run lint` does not cover the Rust crate — `cargo fmt`, `cargo clippy` and
-`cargo test` are yours to run for any change under `src-tauri/`.
+a filtered `cargo test` are yours to run for any change under `src-tauri/`. Check the result line
+shows a non-zero `passed` count.
+
+These are targeted runs. The review council and CI run the whole suites and the whole crate; no
+dev agent does.

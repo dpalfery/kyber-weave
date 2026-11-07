@@ -152,4 +152,7 @@ npm run build            # when the package builds
 npm test                 # vitest run (or the declared runner)
 ```
 
+The `npm test` line is the gate the review council and CI run. A dev agent never runs the full
+suite; it runs the tests covering its change (`npx vitest run <path>`).
+
 A repository with several packages names each package's gates here.

@@ -207,7 +207,7 @@ failed gate.
 | `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
 | `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
-| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, or its working directory does not exist. Error when blocking, warning otherwise. |
+| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 
 ### Duplicates — `review duplicates`

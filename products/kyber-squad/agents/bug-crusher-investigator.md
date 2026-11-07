@@ -29,7 +29,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 
 # Method
 
-**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
+**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. If that command is the full suite, run only the failing classes it reported: never run the full test suite yourself. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
 
 If you cannot reproduce it, say so plainly and name what you would need (branch, environment variable, database state, exact command). Do not paper over it by diagnosing from the code alone. An unreproduced defect gets no fix.
 

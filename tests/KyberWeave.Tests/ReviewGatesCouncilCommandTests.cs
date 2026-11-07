@@ -4,6 +4,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -274,6 +275,42 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(0, run);
         AssertDiagnostic(run.Output, GateNotStarted, "WARNING");
         Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A full-suite gate refused for a run with no <c>--council</c> never started, so it is reported as
+    /// <c>KW-REVIEW-033</c> at Error and never as <c>KW-REVIEW-022</c>. The other gates still run.
+    /// </summary>
+    /// <remarks>
+    /// Regression guard: the refusal used to reuse the failed-check id, which told a reader that the suite ran and failed.
+    /// The refusal applies only when stdin is redirected, which is how a dev agent's shell runs. From an interactive
+    /// terminal the operator may run anything, so the test is skipped there rather than asserting a refusal that cannot happen.
+    /// </remarks>
+    [Fact]
+    public void ARefusedFullSuiteGateIsReportedAsNotStartedNotAsFailedAndTheOtherGatesStillRun()
+    {
+        if (!Console.IsInputRedirected)
+            throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
+
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: test
+                                  full-suite: true
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                                - id: repository-wide
+                                  run: [git, --version]
+                            """);
+
+        CliRun run = Cli(GatesCommand("--format", "json"));
+
+        AssertExitCode(1, run);
+        AssertRendered(run, "test: refused");
+        AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
+        Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        using JsonDocument report = ReadReport();
+        Assert.True(GatePassed(report, "repository-wide"));
     }
 
     // -----------------------------------------------------------------------------------------

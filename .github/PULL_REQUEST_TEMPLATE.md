@@ -9,7 +9,7 @@
 ## Test plan
 
 - [ ] `dotnet build KyberWeave.sln -c Release`
-- [ ] `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`
+- [ ] Tests covering this change pass (`dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~<TestClass>"`); CI runs the full suite
 - [ ] Manual checks (describe if needed):
 
 ## Checklist
