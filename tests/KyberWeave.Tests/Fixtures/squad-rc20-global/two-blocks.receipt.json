@@ -1,0 +1,1110 @@
+{
+  "schema": "kyber-squad.receipt/v3",
+  "scope": "global",
+  "layout": "per-target-roots",
+  "targetRoot": "/private/tmp/kyber-weave-rc20-home-cursor",
+  "installedAtUtc": "2026-11-07T15:44:54.7502240Z",
+  "degradations": [
+    {
+      "target": "cursor",
+      "subject": "architect",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "azure-reader",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "bug-crusher",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "bug-crusher-investigator",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "code-reviewer",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "conductor",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "csharp-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "dal-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "docs-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "github-devops",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "go-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "maui-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "product-owner",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "pulumi-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "python-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "react-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "research-agent",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "review-lens",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "review-triage",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "rust-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "sql-database-architect",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "tauri-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "test-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "typescript-dev",
+      "code": "permission-not-expressible"
+    },
+    {
+      "target": "cursor",
+      "subject": "arbiter",
+      "code": "arbiter-not-enforced"
+    }
+  ],
+  "files": [
+    {
+      "relativePath": "agents/architect.md",
+      "sha256": "c475e54c44f0b3bf7ac4218fc49554bc2d4e5a1f1a1b153dc6e1b1e28d57c159",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/arbiter-escalation.md",
+      "sha256": "7e954ca5a39bbd39f7c3e968a2b55343e1b6ca7a228dd4d0d918a2de7b9cd338",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/autonomy-decisions.md",
+      "sha256": "87e87e5952890e2017fe08e00d6dc3ee3909d4fd3140d57a2318aefb57ed5445",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/intake-assessment.md",
+      "sha256": "faa142ab5d7f0931f69aa6ad22f3c5ff6559fbe917e98a3c391cc35a9cd5e7c4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/plan-authoring.md",
+      "sha256": "ecd3f7b7af9a838fc72fdbaa02fb77cc7dcf0d2eee30957acb17e6be31cee428",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/standard-verification.md",
+      "sha256": "09cad59e29134d4ce6f45258506d41406fa86ac2fe6600a61bb1d44201dae66e",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/architect/references/test-first-contract.md",
+      "sha256": "7e8e36b320665f99d6d2324e45adb787204edf362c1c85ff3a0ab84939d29cfb",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/azure-reader.md",
+      "sha256": "54e0cf381b80a44f80d5e7482218666995df39ca8b8bc100d017a528fa097314",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/bug-crusher-investigator.md",
+      "sha256": "53c21b5379ed191b9d5cf1a73299443d58a9b0fe1eaa922ebdf5fd86da7830c2",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/code-reviewer.md",
+      "sha256": "85ba974f04bf4a97a74a46c0e9e48d920df5db341affd6c0b738fe766f56f0b7",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/SKILL.md",
+      "sha256": "fa24f8a899a2bf5b1eaa945c974c4a3d08426b3c57a15c2e482678a8c7d6bb0d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/conductor/references/autonomy.md",
+      "sha256": "d73a299de69a20a30138f84a15a20bb9ae4d73beb00edcdb0b263422e62522e1",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/conductor/references/execution-and-review.md",
+      "sha256": "21d6a1ce4475d0b2e13c229134f4c312e008e3b5d9af78ef83c24dc9b00319f5",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/conductor/references/intake-path.md",
+      "sha256": "6ee0c58fa923d31c8daaded393939e5e46213e585d3ac8850c48939228b49a5e",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/conductor/references/plan-path.md",
+      "sha256": "dca4047e06b9245c34fe2e2c9cbe9cf87d07aa8aa3ea0adf4031d1c21720b2cc",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/conductor/conductor/references/spec-path.md",
+      "sha256": "6f3a1415a338bacdfdb37973557cbc2d45b2827ffdeb712a92ddb83ca8b94177",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/csharp-dev.md",
+      "sha256": "b9e77efd1990bc57a0b4a4839657cec5f15e6916bd21e1afa2f9d870339f593b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/dal-dev.md",
+      "sha256": "e802c19f95feac90e826044b20a91939a4292b663d09c53082a2c43eecdd9313",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/docs-dev.md",
+      "sha256": "3d00d38441ec8205498d0b9df3237ff47c83869bc27b328b013bf9789e1bdab6",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/github-devops.md",
+      "sha256": "f40a5393ea85ca87040733123048e0212ebd325a2b5619e632c09187061f6cd0",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/go-dev.md",
+      "sha256": "e3518534ae66ecfdf4359b218685daf21160a781c49379a74f8eae4f5540c2f7",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/maui-dev.md",
+      "sha256": "11621f35951c3ef62ac71945ad190caa8f6b2419915260ec6acbc65eedf073c4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/pulumi-dev.md",
+      "sha256": "9d1a529441f6f20b04a6569e46d83edf288e9fa7bd2d53f0dbd705700cc05ff9",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/python-dev.md",
+      "sha256": "e62d66c15761e432df911c0791c30f60802aaa752f910131fb0373e6bde48ccf",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/react-dev.md",
+      "sha256": "1f710b3e0279906d010cd3e072bf599585e7623165cf105ae5afc945dcf968bd",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/research-agent.md",
+      "sha256": "6ebbf1724c1e22776cee5ab3437e1007036553b3f6721b5399cd749201dc8c18",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/review-lens.md",
+      "sha256": "d89d5fb84b0b312d40505f8f75f44b585bb63a8c68330f798f8de65b526ba0fa",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/review-triage.md",
+      "sha256": "8bef0d529ad0ca2765ebf3f43d1f475128515f8ef2967dfb7c62d141aaa00a33",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/rust-dev.md",
+      "sha256": "498b7cce07a8ced5ae7e3a048ff7793c4a67acc259f58c197cca8e7418a1ab37",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/sql-database-architect.md",
+      "sha256": "4f5ff7b889d26b9b12e7601f208c499ae326fcb0dc9fce5b57c418233932eab4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/tauri-dev.md",
+      "sha256": "c4688829fed46f4b619e07f67e4445d5a35aa3077b9901a0c356a040c973fbaa",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/test-dev.md",
+      "sha256": "824a98eef3631b19ab2c05ac1e3c19d896ab6c67bbd6d3e4b806bbcd1b6c0875",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "agents/typescript-dev.md",
+      "sha256": "2e139d3a36140c873968e4546ba505064d8602e25ce01915b5d695fd5d65cc31",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/app-docs-standard/SKILL.md",
+      "sha256": "46644b015da550584f8388c4c450d7a7d8df9ea64a3508abb1d389ab8d44316c",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/architecture-decision-record/SKILL.md",
+      "sha256": "59ef4140d5c67ac5a6709023663423feb58ff57803b39ece114fedba2137a400",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/azure-cli/SKILL.md",
+      "sha256": "ce5c823e733d81da51dc48e665e447defc570908708fc48f997ae653aac0f115",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/azure-naming/SKILL.md",
+      "sha256": "df13f0ac027bab01024c709638168da26276d5e8737270592355a86d309efb51",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/bug-crusher/SKILL.md",
+      "sha256": "35c9b37e865f1ce1abe855a6c59837aaed2d04e8b8ef87caf558d4b70fe786e5",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/SKILL.md",
+      "sha256": "98e9388566be7943dc815b684f03b7dd9987fbf57139880f9249a5631fa7bd74",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/azure.md",
+      "sha256": "315ae01bcd91cd8ddc731c6ed6e7ac99db63e978b3356fe162e53329035657f1",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/csharp.md",
+      "sha256": "ba78a6228f05fc091df6b58a0e79cf36c606798599b62807c0ff08db9aedf0e3",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/github-actions.md",
+      "sha256": "4c8b0a673b8cc8d6196248f0c4f987025cd0cbf460b5938092c0fdd93f71d71b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/go.md",
+      "sha256": "3239055349d581171c632297e5dbceedd32118a4e6d487f0e54ed4e8c2a0cf42",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/authz-tenancy.md",
+      "sha256": "77343550256aadd3d21905832efaa705ed3a7906b3f741b2881efc20b73876df",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/blast-radius-revertibility.md",
+      "sha256": "9f6336e64afda919480a2d6e116592c8e1e8344a33fd9b2b9941085410a166b4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/correctness.md",
+      "sha256": "6c656967e2e49c06abd47f2152800a5c61b0c5d40a90f4f0c5f287093ec64a6e",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/dependency-supply-chain.md",
+      "sha256": "7063cbf9cbe9051a3c4e697bf003caa518c99e08f5732ace4676d85f2670435b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/di-composition.md",
+      "sha256": "741891fba60c501d65a3f52cfe866ba11e395fe6360a73fe6d5e194e169dae63",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/documentation-accuracy.md",
+      "sha256": "6e55fcddfea4b831336cf7ebaaed3c978845381671e91a1c93a94b3b1b47840d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/duplicate-implementation.md",
+      "sha256": "eaed92e3ea02a276303613e0fe403ed72ab2396985f532d7287129a7db8f3290",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/infra-workflow.md",
+      "sha256": "c4068a1189ff5b0dd70ec503a4bb18f7ebbc8856566d41b7828d90dfd33afb46",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/intent-alignment.md",
+      "sha256": "1ae7ec299ebef9f0082dd3ca173bd1b007d260d5952ac41f65f8426a9928fd83",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/model-placement.md",
+      "sha256": "60c87631edc4b74394807d616cd4f837970f85d18a58db44d4797cfefc941d4a",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/performance.md",
+      "sha256": "c238a5d1ec4640a2b4781290fb98f8d99bbe51db41623458f64bf704fc083766",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/prior-art.md",
+      "sha256": "b5df6e0716113b3fa783e4f61a6786217a037c93af4dab3705e8c0a6aed9c1cf",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/security.md",
+      "sha256": "70756a3cc776ba5666c45707596fa9c8246ee4acb03dbaadc66447a0579d5a2d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/static-analysis-triage.md",
+      "sha256": "715abee554cd9819744a173167898b96795ec2d92a95fc085e22807a8954070a",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/supportability.md",
+      "sha256": "ba67475f3b74d82e70f7e7ff58910f5698aabdc23b71fdd3e32763a5fec08139",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/test-adequacy.md",
+      "sha256": "0d6de5d2e65cfd71a12406400cf6230cfc076f09ff6f9049eb894e0969996709",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/lenses/test-infrastructure.md",
+      "sha256": "40b5113d4a926497f9a49c906840673238615104e57881841071f5ffd7f087d5",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/pulumi.md",
+      "sha256": "ae8b2b59203ecf0e2858289bd4d7fbc4be2177d49a972b360abe614238b264a2",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/python.md",
+      "sha256": "8de93d475220eb680d20695414e5d5aed5d703b20b4375b2c0dab380cc1a15f0",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/react.md",
+      "sha256": "80d93e88e572aca525f3eece5379483488c119024615e025a114a0ea898c1e06",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/rust.md",
+      "sha256": "3dc7a7a137cb2defc5237813c06347cd12edf9c584ad6b8d2bc15c2d0dd51d6e",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/sql.md",
+      "sha256": "db05cb416360d13e76a872215c31997a7f4b9fd74fa6deab70bc492824235de8",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/tauri.md",
+      "sha256": "bc040e92e730e0c7ef33da893ebe704eb1aea1483b8129f4df5fa795c0895381",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review/references/typescript.md",
+      "sha256": "60dfeb8a29ccc5e348287606bdd1c4aed7e5f564653e40fe15de95aa77313d96",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review-loop/SKILL.md",
+      "sha256": "98b7a9bd92a007cc3d7b9e8ba9663330ecfa19649494ea3347831968805ec338",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/code-review-loop/code-review-loop.md",
+      "sha256": "7fe20b785228426131c99fa091077d8fc1e9625ea3ca0a2f49dcdef40a296a68",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/codegraph/SKILL.md",
+      "sha256": "d763286edc711fb58d11ff186381d1b7cc88729d52928b22fde0475781da4f45",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/create-pull-request/SKILL.md",
+      "sha256": "1904c4362da7756b32fd40e0a5318e81903759c34d7d534ee188bb76dc0ee641",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/create-pull-request/providers/azure-devops.md",
+      "sha256": "182ee084a2c6aab7457eb7033e43b8eb51fabc99804b28bcc266f979157f5f63",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/create-pull-request/providers/github.md",
+      "sha256": "7a5b7d546ee85c8789d0b0836d738f53c3c84b342b2af3c154f0b2c79f7bacfb",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/create-pull-request/scripts/github-create-pr.ps1",
+      "sha256": "a42cd7611eac3759d82129aa9220d3cb5d139a63715e1246b3549208b7683c29",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/create-pull-request/scripts/github-create-pr.sh",
+      "sha256": "8d9600b4acb8278ae179e3227b32abab19663ccc9d53023a756ead097d9e1aa1",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/SKILL.md",
+      "sha256": "b0236ec8b31ea62cf703e317e0c86a71513062cd9f0e86a42d58529a560064e4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/aspnetcore-webapi.md",
+      "sha256": "8065605ce7fe338b17e62f51b75b3b374e93835fd9c1685b8040865c6e98e9c4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/azure-ai-rag.md",
+      "sha256": "ecfab9faef289a8c94e55f36f10e21751fe0e16edde558677c11f2ea08a5e66f",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/bff-yarp.md",
+      "sha256": "6f118b5eff1d5c8d226ea9deca414e247036131992640bba9d005c3652a956cf",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/build-commands.md",
+      "sha256": "cdc0f63eea3c5002d37abb4878d3bfce8237ede21e01ba1a657b15543117f00b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/file-upload.md",
+      "sha256": "c8bd4e7c0a4f5768dcd4d0994f99ea1f457c5c3616f92f01b44d0e17332af2c8",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csharp-dev/references/opentelemetry.md",
+      "sha256": "9f0ff621f9ef30ca4be5712fdbcfe0cca481b00020c9abada975c15a7d1e282a",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/csp-security/SKILL.md",
+      "sha256": "00f6402451e0ed8c42d443af0f83cfca3cf128434db999cee4a609adc4c72e96",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/dal-dev/SKILL.md",
+      "sha256": "4409c828d6ae0a759cab4e53a45dd1b604f5ad2c0435ff4501e46fbb2ad817f5",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/dal-dev/references/adonet-repository.md",
+      "sha256": "402a22d7e83a6d55a918c6861cfac6d185b0cac51d481169b06cfc1a3b0fd5f4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/dal-dev/references/migration-scripts.md",
+      "sha256": "93ea08bae22c5076ccb1e05df88eba24f44644e45ac86e1c833602dfda6e8e79",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/dal-dev/references/schema-design.md",
+      "sha256": "1547df67ce9f3b30c971c9217a3dde8cbfcfdbc98d4f87e9eb20cb32fe850603",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/dp-code-reviewer/SKILL.md",
+      "sha256": "7a9042e919ec615009d3a6a0537c0172be1d12830f37a1bb92322505d487dbc4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-cli/SKILL.md",
+      "sha256": "2de5215841103be8ebb7ce0d372da69e2fe644a6ef3479df98e0001fced9e2e1",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/SKILL.md",
+      "sha256": "b3e6c365db3933491b9c4516356eff66def143720ce3124cc8eaf1650a8e3989",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/build-performance.md",
+      "sha256": "dbf85bed2dd07e7676e93d0b2f57cc360f04067d22eb18f94c9bc29bbb090f25",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/ci-build-diagnostics.md",
+      "sha256": "cc192b0970b29fb6a16ea1d16400119e6daddc77d4b242fb84e50c803d1ae859",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/directory-build-organization.md",
+      "sha256": "cfa9b19f6f0ce11c2ccc6e771716e0ecfd1d74fb2a5796295ec1133786020667",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/incremental-build.md",
+      "sha256": "f96bf8ca14ac6e3c6b60c427a6b0855328e98001569401bdca22e70475bb65dd",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/msbuild-anti-patterns.md",
+      "sha256": "29f0e93265b514968dd9dec97c834bbd95e4303c6d366a9bb3ec46c9de37f645",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/github-devops/references/msbuild-modernization.md",
+      "sha256": "60d0c8186dfa0aa5e6f20694f96f3f8ebe04cdb686898c6b0a6dfdd0608de258",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/go-dev/SKILL.md",
+      "sha256": "4a7aa4aa15bce6b7edc6af6f6ea1eb62db4d65f253b2fe70e49e9dba18dc5ee1",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/go-dev/references/concurrency.md",
+      "sha256": "e0ea3fa0d9c971cb1e4ff4bd026fe12f9b938602168d37e9e68ce07c25634a46",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/go-dev/references/errors-and-context.md",
+      "sha256": "25badf5f06400b049ed617efee0e9b9c06aa521eebfcdda2e91c33d71cfb1952",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/go-dev/references/gates-and-platforms.md",
+      "sha256": "f13d5bbed8edc04aa1f049b74db98c955fb8ef63be681d08343f63b74aa274da",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/go-dev/references/modules-and-cross-compilation.md",
+      "sha256": "5fad254cb4410ccfe6b47fac1941111aeebffdb274b3c27a55f84391855cd3cc",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kilo-review-loop/SKILL.md",
+      "sha256": "3bf17146765b008c6ba3a0969a99f5b3defb56a7de913f47cd120670b1f7e223",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kilo-review-loop/scripts/post_replies.py",
+      "sha256": "2dc8e109ae97865aec2451390fa3897f9142b6d5554319f524d284b4c87c94a8",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-docs-authoring/SKILL.md",
+      "sha256": "af0399d6f3877afc9fdcfa637c08d93f98fe852a969534b501d0dce1f86b953d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-docs-integrity-review/SKILL.md",
+      "sha256": "8ceef1ce2ac41dccbb6fc300ddcf792e6e9a5126aeeefbc9e214246be734acfe",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-docs-onboarding-and-assessment/SKILL.md",
+      "sha256": "de1bc0cd9330433b33a14c6a87d1f69f62b648b88b6fe4aa7db4d166a0fab4c4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-docs-onboarding-and-assessment/references/templates.md",
+      "sha256": "c4e78067a332dee354f0e0c4d522017ae59b95ae9c9f0c45235d747aaa99a008",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-weave-cli/SKILL.md",
+      "sha256": "f11e80d200737aa065a645cf8674bdc9c8e0de783fb46a8a93ab20bf4d28e2e4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/kyber-weave-model-profile/SKILL.md",
+      "sha256": "ce81c69cf643339b30ca88adb6d9f4b30f890201e39fd1df7877774694ec6d4b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/lm-studio-cli/SKILL.md",
+      "sha256": "469c0915b7c48cc5edd9b27bf4aa40d049b122e5a2c83f99a5eca0be85bde07e",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/SKILL.md",
+      "sha256": "84718884c2031ae27435b342cb59951960062d52fda90bf06ab857731695e428",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/app-lifecycle.md",
+      "sha256": "b7841dffafe892586bcb63049f051fb7a3fe9e56d4f695dc918eed2011993c46",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/collectionview.md",
+      "sha256": "55eb4895734e6e7505002496b1d0721133ff371c389a227ecdccc9764061ccf7",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/data-binding.md",
+      "sha256": "dd176aa4dcc621472749945347392c4f987c1fbf97b14ea2cdadcd25d8e47d5f",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/dependency-injection.md",
+      "sha256": "36c14e3bf9270c8464559ba9b9bc21601061a8c99eafff4f299e2e72b3f8855f",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/environment-doctor.md",
+      "sha256": "70ea30dcd2c7c5388f298bb185cee6751dd110ee1714f2dbb7162961c4e825da",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/safe-area.md",
+      "sha256": "72b0db5eb0a18d57d93b4ff4c6321314fe9613095b0f8c43101539be209d70b8",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/shell-navigation.md",
+      "sha256": "f3ecffe5fe8520408e9a2f257f485251683062619ac3d4ea165db0aa05552e37",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/maui-dev/references/theming.md",
+      "sha256": "e86a22ef2a9313d7b533986dd087e61c483c2b2d8bd44eec72a6ee7838210595",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/pr-review-fix-comments/SKILL.md",
+      "sha256": "d202ae4b87e5e19de0c119521968e7b7ef5c78242048d9e53ab74845b997df86",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/pr-review-fix-comments/providers/azure-devops.md",
+      "sha256": "046f3fc2297b2f3c4292c9988b27faa8cf77314b1907e21b7a0c50636f6d0129",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/pr-review-fix-comments/providers/github.md",
+      "sha256": "83f8a241913b393eada27d62d4a5db88fc9afed9c468123451321fe015c6a348",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/SKILL.md",
+      "sha256": "b8648a7d9ef00571f5d06445e71b9a1af03b219016b7396c493ad2bcb4b00131",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/autonomy-decisions.md",
+      "sha256": "82344fbe4312268142d659922e517f668c9dcb7290fd5bf4298d79121198cf5a",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/closeout-phase.md",
+      "sha256": "d9e684517e90f019299deadd2e146aae4a5c3560125390dc45ff83f981fae982",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/design-phase.md",
+      "sha256": "6daf1dda54c92f7b6679c83d735df302293e3a28741677b4439e72a3cfc2dc2b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/requirements-phase.md",
+      "sha256": "4c50f79067d1840810bb08ebea29439cfe39745f1bb0f7b4482d6e40a744e669",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/spec-authoring.md",
+      "sha256": "0972633c5fc94f63b34b02d041d5121e76c0d687f003a0ac69bc486a3edb4435",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/product-owner/references/tasks-phase.md",
+      "sha256": "4f1c17d292099dcae1cc86b93e08e99c86849d41b556e1a07a6c2ee1dadf9a1d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/python-dev/SKILL.md",
+      "sha256": "110c2cbfda093c6a71c419b2bb192b7a3293568426d869855a0f6a4513f56e96",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/python-dev/references/fact-grounded-coding.md",
+      "sha256": "a277b9a7c4d54769b8203ac3880c431ec8db9181e4a5a20fa59148b54bdafc3b",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/python-dev/references/pylance-docs.md",
+      "sha256": "a7d75d1666a39bb7a983030385e385890a9f4cbd37bffc15c7819cb7e326ab95",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/python-dev/references/pylance-refactoring.md",
+      "sha256": "53b9ecddafd2cefd7c65db327e81c4d1a9d0f30622d4dbd0a26575b52440b667",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/resharper-clt/SKILL.md",
+      "sha256": "ae8123b9c39f680ad4fb905a65485396f5374b33047268ebd7209b4f1efa7518",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/rust-dev/SKILL.md",
+      "sha256": "2f8411efa8f29c0fb61511f10f4e535a560a03a861d8a067e83dd1a567755acb",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/rust-dev/references/async-tokio.md",
+      "sha256": "600b9675b5a0dd07811617f01ad8a508dff1e18310b8b2603b11513b6b974ebf",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/rust-dev/references/cross-compilation.md",
+      "sha256": "68f44705ccf67c8e01ac2fc59057fa0fcea64e54816decadf21d48d47e21f956",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/rust-dev/references/errors-and-boundaries.md",
+      "sha256": "b8bb4e19428c4dd35c50c04d8db785fe84fb6ef1d7795eea03d8d875c48068a8",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/rust-dev/references/gates-and-platforms.md",
+      "sha256": "a5cf73ab2f1dd72be6bcbf538e64d2bb379f1d55e666fc4a8a65a236933a1719",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/security-review/SKILL.md",
+      "sha256": "23e7e70a8163019bad2a933ae1d129a8a571d570b4dbe87ed2c0640ad6ab4c5d",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/setup-dev-environment/SKILL.md",
+      "sha256": "5409aa5f3231b84136a0f000a24c01136693cd52dc247926a03b99cb95011a42",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/setup-dev-environment/references/inventory.md",
+      "sha256": "66639b2b1bace60984d241be8c7d4bd13f6fae95eaef689411511a86401d7e80",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/spec-conductor/SKILL.md",
+      "sha256": "f404adb19c82450a2265495c152b1aea82dd99f28a8af6ab01a8710a4062e43a",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/task-gate/SKILL.md",
+      "sha256": "d76d0cda431e2b09f94af7ea8cb2788cdbdb30d5b7da1de47fc41e49538696c4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/SKILL.md",
+      "sha256": "ec0918ec1e7bc8bc00fa84c0c467a3d96da233dca6d48efb0bf538eca2c4feb4",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/e2e-test-patterns.md",
+      "sha256": "0de2c11043b26b1bc4cad51803f5ead45ad149b608e494de5a7d52c24a99e7a9",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/integration-test-patterns.md",
+      "sha256": "f0fb565a9b70ff6f08a968bf4d927dda6995f9bbcabbac512c211226f5f44c09",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/mock-usage-analysis.md",
+      "sha256": "c6c722d8d8dfc6b7c3d99257714b6220dad50e54be062cf972e9f4bb35c11327",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/rust-go-test-patterns.md",
+      "sha256": "7a1aaaf20ab601d57a1fe3932f999578ee23dfc4d76c5c0dbbf9dc22eb031149",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/test-maintainability.md",
+      "sha256": "fac16fc72b58729456587f0e60e67886d64923e7ae391a9c615a6beb02724788",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/test-dev/references/unit-test-patterns.md",
+      "sha256": "bbf27e36d028fedc387beff4f336dc90a678800a18aae7c96c7ecf1076b1e2f0",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/typescript-dev/SKILL.md",
+      "sha256": "98b64f19e0764b95dd11ff575f0843596d8288f9e0bc909545eb1caf12cebdcd",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/typescript-dev/references/data-access.md",
+      "sha256": "db81bfa7614fa2d4f4e34510ab887afcebe919f40970229feedc33255edc5b6f",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/typescript-dev/references/errors-and-async.md",
+      "sha256": "0b52662ca3dadfb49bfa3ada31a0925e797e7e24e76f628b06c1037cb49c6fab",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/typescript-dev/references/esm-and-gates.md",
+      "sha256": "70a9e8051db80965b568995af56069637089302330e1bba2e7c6f7ac3e7bbea7",
+      "target": "cursor",
+      "adopted": false
+    },
+    {
+      "relativePath": "skills/typescript-dev/references/types-and-absent-values.md",
+      "sha256": "cfeeeffb293e78d6d30d0fb26f590f6c90b10cbb458b3ee30b3513fd60250550",
+      "target": "cursor",
+      "adopted": false
+    }
+  ],
+  "blocks": [
+    {
+      "relativePath": "hooks.json",
+      "target": "cursor",
+      "createdFile": true,
+      "entries": [
+        {
+          "container": "/hooks/preToolUse/0",
+          "sha256": "5db0bf0b390001853e2b0d3daf3042716d8d93093c0e11b47c18681819eee3e7"
+        },
+        {
+          "container": "/hooks/postToolUse/0",
+          "sha256": "5db0bf0b390001853e2b0d3daf3042716d8d93093c0e11b47c18681819eee3e7"
+        }
+      ]
+    },
+    {
+      "relativePath": "hooks.json",
+      "target": "codex",
+      "createdFile": true,
+      "entries": [
+        {
+          "container": "/hooks/PreToolUse/0",
+          "sha256": "f548daa3559b6733a1763889eb729f8e50410b8968d7aa62bcd12aed3dcb72d6"
+        },
+        {
+          "container": "/hooks/PostToolUse/0",
+          "sha256": "f548daa3559b6733a1763889eb729f8e50410b8968d7aa62bcd12aed3dcb72d6"
+        }
+      ]
+    }
+  ],
+  "homeFiles": [
+    {
+      "relativePath": "response-guidance.md",
+      "sha256": "c182c2849b83cfbabe4cf4f4c2997158a659499b6cc6a84bf04370b28e3b7461"
+    }
+  ]
+}

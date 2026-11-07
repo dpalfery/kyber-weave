@@ -535,8 +535,71 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(host));
     }
 
+    /// <summary>
+    /// Three block-bearing targets installed in turn into one home all exit 0, and the single
+    /// global receipt records one <c>hooks.json</c> block per target. This is the reported
+    /// defect: the second install exited 1 with "Squad receipt block path 'hooks.json' for target
+    /// 'cursor' is not a unique portable deployment path." and rolled back, so one home could
+    /// hold only one of cursor, codex, factory and antigravity. Each install prepends the target
+    /// it just wrote, so the blocks are stored in the reverse of installation order; the contract
+    /// is the set of blocks one receipt holds, never their sequence, and a target recorded twice
+    /// has to fail rather than collapse into that set.
+    /// </summary>
+    [Fact]
+    public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
+    {
+        string host = NewDir("install-three-global-blocks");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
+        ArbiterInstallCommand command = new();
+
+        CommandExecution cursor = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "cursor", Provider = "none" }));
+        AssertInstalled(cursor, "cursor");
+
+        CommandExecution codex = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "codex", Provider = "none" }));
+        AssertInstalled(codex, "codex");
+
+        CommandExecution factory = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "factory", Provider = "none" }));
+        AssertInstalled(factory, "factory");
+
+        string receiptPath = Path.Combine(
+            _home.Path,
+            ".kyber-weave",
+            "squad",
+            "global",
+            "squad.receipt.json");
+        Assert.True(File.Exists(receiptPath), $"Expected one global receipt at '{receiptPath}'.");
+
+        SquadStateStore reader = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "cli-receipt-reader")));
+        SquadReceipt receipt = reader.DeserializeReceipt(File.ReadAllText(receiptPath));
+
+        Assert.Equal(SquadDeploymentScope.Global, receipt.Scope);
+        Assert.Equal(3, receipt.Blocks.Count);
+
+        Dictionary<string, string> pathByTarget = new(StringComparer.Ordinal);
+        Assert.All(
+            receipt.Blocks,
+            block => Assert.True(
+                pathByTarget.TryAdd(block.Target, block.RelativePath),
+                $"The receipt holds more than one block for target '{block.Target}'."));
+
+        string[] expectedTargets = ["codex", "cursor", "factory"];
+        Assert.Equal(expectedTargets, pathByTarget.Keys.Order(StringComparer.Ordinal));
+        Assert.All(pathByTarget.Values, path => Assert.Equal("hooks.json", path));
+    }
+
     private static string ConfigPath(string host) =>
         Path.Combine(host, ".kyber-weave", "kyber-weave.yml");
+
+    private static void AssertInstalled(CommandExecution execution, string target) =>
+        Assert.True(
+            execution.ExitCode == 0,
+            $"The global '{target}' install exited {execution.ExitCode}: {execution.Output}");
 
     private string NewDir(string name)
     {

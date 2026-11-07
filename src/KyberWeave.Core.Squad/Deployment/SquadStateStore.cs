@@ -1269,12 +1269,13 @@ public sealed class SquadStateStore
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
 
-        // Uniqueness is scoped the way the deployment engine scopes physical files. Project
-        // scope writes every target beneath the one deployment root, so two targets claiming
-        // one path would claim one physical file and the path alone must be unique. Global
-        // scope writes beneath each target's own root, so the same relative path legitimately
-        // appears once per target and only (target, path) must be unique — mirroring
-        // SquadDeploymentPlan's deployment identity.
+        // Uniqueness is scoped the way the deployment engine scopes physical files. Project and
+        // instance scope write every target beneath the one deployment root, so two targets
+        // claiming one path would claim one physical file and the path alone must be unique.
+        // Global scope writes beneath each target's own root, so the same relative path
+        // legitimately appears once per target and only (target, path) must be unique. Both this
+        // loop and the block loop derive that identity from StoredDeploymentIdentity, so a stored
+        // file and a stored block can never disagree about which physical file they claim.
         HashSet<string> deployedIdentities = new(StringComparer.OrdinalIgnoreCase);
         foreach (SquadOwnedFile? file in receipt.Files)
         {
@@ -1304,9 +1305,8 @@ public sealed class SquadStateStore
             ValidateDigest(file.Sha256, "file digest");
             ValidateCanonicalTarget(file.Target, "file target");
 
-            string deploymentIdentity = receipt.Scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
-                ? portableIdentity
-                : SquadDeploymentPlan.DeployedFileIdentity(file.Target, portableIdentity);
+            string deploymentIdentity =
+                StoredDeploymentIdentity(receipt.Scope, file.Target, portableIdentity);
             if (!deployedIdentities.Add(deploymentIdentity))
                 throw new InvalidDataException(
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
@@ -1361,10 +1361,12 @@ public sealed class SquadStateStore
 
     /// <summary>
     /// Validates the owned blocks the way owned files are validated: every block names a
-    /// portable canonical path for an exact canonical target, every entry carries a
-    /// JSON-pointer container and a digest, and both levels are unique. Project scope
-    /// writes every target beneath the one deployment root, so the path alone is the
-    /// block identity — blocks are project-only, so no per-target identity applies.
+    /// portable canonical path for an exact canonical target, every entry carries a JSON-pointer
+    /// container and a digest, and one block cannot claim the same container twice. A block's
+    /// deployment identity follows the same scope-aware rule a stored file's does — the portable
+    /// path alone under project and instance scope, the target beside the path under global
+    /// scope — because global deployment writes each target beneath its own root, where four of
+    /// the five formats legitimately name the same bare <c>hooks.json</c>.
     /// </summary>
     private static void ValidateReceiptBlocks(SquadReceipt receipt)
     {
@@ -1401,7 +1403,8 @@ public sealed class SquadStateStore
 
             ValidateCanonicalTarget(block.Target, "block target");
 
-            if (!blockIdentities.Add(portableIdentity))
+            if (!blockIdentities.Add(
+                    StoredDeploymentIdentity(receipt.Scope, block.Target, portableIdentity)))
             {
                 throw new InvalidDataException(
                     $"Squad receipt block path '{block.RelativePath}' for target '{block.Target}' " +
@@ -1426,6 +1429,26 @@ public sealed class SquadStateStore
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Derives the deployment identity of one stored path — a deployed file's or an owned
+    /// block's — from the scope it was written in. Project and instance scope deploy every target
+    /// beneath the one root, so the portable path alone identifies the physical file. Global
+    /// scope deploys each target beneath its own root, so the same portable path names a
+    /// different physical file per target and the target is part of the identity. Both receipt
+    /// loops call this one rule so they cannot disagree, and it mirrors
+    /// <see cref="SquadDeploymentPlan.DeployedFileIdentity" />, the identity the deployment engine
+    /// itself uses.
+    /// </summary>
+    private static string StoredDeploymentIdentity(
+        SquadDeploymentScope scope,
+        string target,
+        string portablePath)
+    {
+        return scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
+            ? portablePath
+            : SquadDeploymentPlan.DeployedFileIdentity(target, portablePath);
     }
 
     private static void ValidateCanonicalTarget(string? value, string fieldName)
@@ -1542,9 +1565,12 @@ public sealed class SquadStateStore
     /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
     /// (present only if the receipt was hand-authored to include it — always Global, per A3)
     /// and a required <c>layout</c> added, restricted to its two canonical tokens; schema v3
-    /// is the exact v1 project field set plus a required <c>blocks</c>, with <c>scope</c>
-    /// restricted to <c>project</c>. A reader that predates v3 falls into the v1 branch and
-    /// refuses the unknown <c>blocks</c> field outright rather than misreading it.
+    /// is the v1 field set plus a required <c>blocks</c>, with <c>scope</c> allowed to be
+    /// <c>project</c> or <c>global</c>, <c>layout</c> and <c>homeFiles</c> permitted beside it,
+    /// and a canonical <c>layout</c> required once the scope is <c>global</c> — the shape rc.20
+    /// writes for a global install that owns hook blocks. A reader that predates v3 falls into
+    /// the v1 branch and refuses the unknown <c>blocks</c> field outright rather than misreading
+    /// it.
     /// </summary>
     private static void ValidateReceiptJsonShape(JsonElement root)
     {
