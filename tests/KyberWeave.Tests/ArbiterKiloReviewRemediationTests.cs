@@ -359,7 +359,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         SquadReceipt? updatedReceipt = store.ReadReceipt(home, SquadDeploymentScope.Global);
         Assert.NotNull(updatedReceipt);
 
-            SquadOwnedBlock cursorBlock = Assert.Single(updatedReceipt.Blocks, b => b.Target == "cursor");
+        SquadOwnedBlock cursorBlock = Assert.Single(updatedReceipt.Blocks, b => b.Target == "cursor");
         Assert.NotEqual(oldDigest, cursorBlock.Entries[0].Sha256);
 
         SquadOwnedFile kiloFile = Assert.Single(updatedReceipt.Files, f => f.Target == "kilo");
