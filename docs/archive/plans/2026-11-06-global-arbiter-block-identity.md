@@ -2,7 +2,7 @@
 id: plans/global-arbiter-block-identity
 title: Global Arbiter installs accept more than one block-bearing target
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-06
@@ -15,7 +15,7 @@ impact-components: [KyberSquad, KyberArbiter]
 
 # Global Arbiter installs accept more than one block-bearing target
 
-**Status: Ready — approved for execution (`autonomous: recommendation accepted`).**
+**Status: Archived — complete 2026-11-07.**
 Development mode `test-first`; autonomy `autonomous`; scale `extends-component` over
 `KyberSquad` and `KyberArbiter`.
 
@@ -430,6 +430,26 @@ the fixed build (D5) on the owner's machine.
 
 ## Closeout mapping
 
-Filled in at T7: one row per harvest row above, each naming the destination and confirming the durable
-item it promised is present and states what the row says. Evidence that a check is documentation, not
-a live harness run, is stated there — the live gates keep their `[NOT LIVE-VERIFIED]` marker.
+| ID | Destination | Evidence |
+|---|---|---|
+| D1 | [docs/plans/README.md](../plans/README.md) and this plan | The fix lives on branch `fix/arbiter-global-block-identity` off `origin/main`; the rename branch carries neither the plan nor the fix. |
+| D2 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Governs the identity rule in H1. |
+| D3 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records that bare global paths stay, so the design intent is not lost. |
+| D4 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | Governs the v3 global shape in H2. |
+| D5 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | The contract behind the test fixture is H2. Documentation waiver: the fixture itself has zero surviving invariant for a future reader. |
+| D6 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records the three duplicate refusals in H1. |
+| D7 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs per-verb lifecycle behaviour in H3. |
+| D8 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Records that the receipt is the block-path source in H1. |
+| D9 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | The amended ADR, per H2. |
+| D10 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs the unchanged default in H3. |
+| D11 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Governs verification in H3. |
+| D12 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Test-first and autonomous delivery are recorded by this plan and its index row. Documentation waiver: a process row with zero surviving technical invariant. |
+| D13 | [docs/cli-command-surface.md](../cli-command-surface.md) | Governs draft-PR delivery in H4. |
+| AP1 | [docs/plans/README.md](../plans/README.md) and this plan | Approve-and-execute recorded in Decisions and the index row. Documentation waiver: process provenance, not a durable technical item. |
+| H1 | [docs/kyber-squad/architecture.md](../kyber-squad/architecture.md) | Scope-aware block identity paragraph. |
+| H2 | [docs/adr/0054-squad-owned-blocks-in-shared-hook-files.md](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) | v3 global shape and identity rule, amended in place. |
+| H3 | [docs/kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) | Hooks paragraph for global multi-target behaviour. |
+| H4 | [docs/cli-command-surface.md](../cli-command-surface.md) | `arbiter install` / `arbiter uninstall` global-scope rows. |
+
+The live verification gates in this plan keep their `[NOT LIVE-VERIFIED]` marker until a
+fixed build is run against an isolated home and a real rc.20 home.
