@@ -614,6 +614,30 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// The pull-request title bullet tells an agent to rename the session after submit. It has to
+    /// carry the same mechanism and fabrication guards as the session-title bullet, or a harness
+    /// that cannot set a title — Factory derives one from the first message — is told to invent
+    /// one. It also has to follow a later retitle, or the mandated match goes stale when the
+    /// pull request is renamed.
+    /// </summary>
+    [Fact]
+    public void ThePrTitleBulletCarriesTheSessionTitleGuardsAndTracksRetitles()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = PrTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            "The shipped default must state the pull-request title rule as the bullet '- **PR Title.**'.");
+        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
+        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
+        Assert.Contains(
+            "When the pull request title changes, update the session title to match",
+            bullet,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A specialist digest relayed to the human is presented in the shape the response-preferences block sets.
     /// Relay is the boundary where a worker's digest becomes a response, so the conductor contract has to say so.
     /// </summary>
@@ -1857,6 +1881,38 @@ public sealed class SquadCanonicalContentTests
         return bullet is not null
                && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
                && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The pull-request title list item, including its continuation lines, or null when the
+    /// document has none. Continuation lines belong to the bullet: the guards are read from
+    /// the instruction they constrain, not from a neighbouring bullet.
+    /// </summary>
+    private static string? PrTitleBullet(string guidance)
+    {
+        string[] lines = guidance.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].TrimStart().StartsWith("- **PR Title.**", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            List<string> item = [lines[i].Trim()];
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                if (lines[j].Length == 0 || lines[j].TrimStart().StartsWith("- ", StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                item.Add(lines[j].Trim());
+            }
+
+            return string.Join(' ', item);
+        }
+
+        return null;
     }
 
     /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
