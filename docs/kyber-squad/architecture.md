@@ -1417,12 +1417,14 @@ adherence is therefore probabilistic. What keeps it checkable is the ordered sha
 line, a bounded bottom line, and an explicit decisions section are structure a reviewer can see is
 present or absent. A deterministic prose-format gate is deferred future work, not a delivered claim.
 
-**Session-title matrix (reference).** The shipped default carries a conditional session-title rule.
-On `factory` a title is not agent-settable: it derives from the conversation's first message, and no
-agent-facing mechanism to set one was found. On every other target the rule is to set the title to
-reflect the work only where that target exposes a confirmed mechanism, and never to fabricate one. A
-target that cannot set a title, or whose mechanism is unconfirmed, is treated as infeasible rather
-than guessed at.
+**Session-title matrix (reference).** The shipped default requires a session title. The agent sets
+the session title to name the work being done on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. Once a pull request is
+submitted, the agent sets the session title to the pull request number, a space, and the pull
+request title, as in `#123 Add the widget`, on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. When the pull request
+title changes, update the session title to match on every harness except Factory, which derives
+the session title from the conversation's first message and has no setter.
 
 **No ADR — ADR waiver:** this reverses a skill-carrier choice inside the existing renderer and
 receipt architecture. It adds no boundary, schema, or dependency.
