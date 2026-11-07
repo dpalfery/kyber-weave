@@ -1395,9 +1395,13 @@ line, a bounded bottom line, and an explicit decisions section are structure a r
 present or absent. A deterministic prose-format gate is deferred future work, not a delivered claim.
 
 **Session-title matrix (reference).** The shipped default requires a session title. The agent sets
-it to name the work being done. Once a pull request is submitted, the agent sets the session title
-to the pull request number, a space, and the pull request title, as in `#123 Add the widget`, and
-updates that session title when the pull request title changes.
+the session title to name the work being done on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. Once a pull request is
+submitted, the agent sets the session title to the pull request number, a space, and the pull
+request title, as in `#123 Add the widget`, on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. When the pull request
+title changes, update the session title to match on every harness except Factory, which derives
+the session title from the conversation's first message and has no setter.
 
 **No ADR — ADR waiver:** this reverses a skill-carrier choice inside the existing renderer and
 receipt architecture. It adds no boundary, schema, or dependency.

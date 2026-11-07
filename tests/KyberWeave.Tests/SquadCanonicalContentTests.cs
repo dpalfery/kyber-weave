@@ -60,7 +60,7 @@ public sealed class SquadCanonicalContentTests
     private const string SessionTitleBulletLead = "- **Name the session after the work.**";
 
     /// <summary>The session-title bullet must tell the agent to set the title. The title is required.</summary>
-    private const string SessionTitleSetInstruction = "Set the session title to name the work being done.";
+    private const string SessionTitleSetInstruction = "Set the session title to name the work being done";
 
     /// <summary>Once a pull request exists, the session title is that pull request's number and title.</summary>
     private const string PrTitleSetInstruction =
@@ -72,6 +72,19 @@ public sealed class SquadCanonicalContentTests
     /// <summary>A later retitle has to move the session title with it.</summary>
     private const string PrTitleRetitleInstruction =
         "When the pull request title changes, update the session title to match";
+
+    /// <summary>
+    /// Factory has no setter. The sentence that tells the agent to set or update a title names that
+    /// limit; a following sentence does not constrain the instruction the agent just read.
+    /// </summary>
+    private const string FactorySessionTitleException = "on every harness except Factory";
+
+    /// <summary>
+    /// How Factory gets a title. A general skip is not this clause, and this clause is not a reason
+    /// to skip the title on any other harness.
+    /// </summary>
+    private const string FactorySessionTitleMechanism =
+        "derives the session title from the conversation's first message and has no setter";
 
     /// <summary>
     /// Phrases that tell an agent not to set a session title. The owner removed them: a shipped
@@ -493,7 +506,8 @@ public sealed class SquadCanonicalContentTests
     /// <summary>
     /// The owner requires a session title. The shipped default must tell the agent to set one, and
     /// must not say to leave it alone, to skip a harness that might not expose a setter, or to avoid
-    /// fabricating a title.
+    /// fabricating a title. Factory is the one harness with no setter: each instruction sentence
+    /// names that limit and how Factory derives the title.
     /// </summary>
     [Fact]
     public void TheShippedDefaultRequiresTheSessionTitleToBeSet()
@@ -505,6 +519,65 @@ public sealed class SquadCanonicalContentTests
             "The session-title bullet in the shipped default must tell the agent to set the session title " +
             $"('{SessionTitleSetInstruction}').");
         AssertShippedDefaultOmitsSessionTitleHedges(guidance);
+        AssertShippedDefaultStatesTheFactorySessionTitleLimit(guidance);
+    }
+
+    /// <summary>
+    /// "Leave it alone" in some other bullet is not a session-title hedge. The pin reads the
+    /// session-title bullets, so an unrelated use of those words must not fail it.
+    /// </summary>
+    [Fact]
+    public void AnUnrelatedBulletThatSaysLeaveItAloneDoesNotFailTheSessionTitlePin()
+    {
+        string guidance =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction} {FactorySessionTitleException}, " +
+            $"which {FactorySessionTitleMechanism}.\n" +
+            $"- **PR Title.** {PrTitleSetInstruction}: `{PrTitleExample}`. " +
+            $"{PrTitleRetitleInstruction} {FactorySessionTitleException}, which {FactorySessionTitleMechanism}.\n" +
+            "- **Close the note.** When the note is finished, leave it alone.\n";
+
+        Assert.True(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            "An unrelated 'leave it alone' must not fail the session-title pin " +
+            $"(the pin reported '{offending}').");
+    }
+
+    /// <summary>
+    /// A session-title bullet that tells the agent to skip the title in general still fails. An
+    /// unrelated bullet that uses the same words does not make that skip acceptable.
+    /// </summary>
+    [Fact]
+    public void ASessionTitleBulletThatSaysToLeaveTheTitleAloneStillFailsThePin()
+    {
+        string guidance =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction}. Where no agent can set one, leave it alone.\n" +
+            "- **Close the note.** When the note is finished, leave it alone.\n";
+
+        Assert.False(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            "A session-title bullet that says to leave the title alone must fail the pin.");
+        Assert.Equal("leave it alone", offending);
+    }
+
+    /// <summary>
+    /// The architecture matrix states the same rule as the shipped default, including why Factory
+    /// cannot set or update the title. An unconditional update sentence does not.
+    /// </summary>
+    [Fact]
+    public void TheSessionTitleMatrixStatesHowFactoryGetsItsTitle()
+    {
+        string path = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "docs", "kyber-squad", "architecture.md");
+        string matrix = ParagraphStartingWith(
+            File.ReadAllText(path),
+            "**Session-title matrix (reference).**");
+
+        Assert.True(
+            matrix.Length > 0,
+            "docs/kyber-squad/architecture.md must carry the session-title matrix.");
+        AssertSentenceCarriesTheFactoryLimit(matrix, "name the work being done");
+        AssertSentenceCarriesTheFactoryLimit(matrix, PrTitleRetitleInstruction);
+        Assert.Contains("#123 Add the widget", matrix, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1930,15 +2003,114 @@ public sealed class SquadCanonicalContentTests
         return false;
     }
 
-    /// <summary>Fails when the shipped default still tells an agent not to set a session title.</summary>
+    /// <summary>
+    /// Fails when a session-title bullet tells an agent not to set a session title. Other bullets
+    /// are out of scope: the same words there are not this instruction.
+    /// </summary>
     private static void AssertShippedDefaultOmitsSessionTitleHedges(string guidance)
     {
-        foreach (string hedge in SessionTitleHedges)
+        Assert.True(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            $"The session-title guidance must not tell an agent '{offending}'.");
+    }
+
+    /// <summary>
+    /// True when neither the session-title bullet nor the pull-request bullet carries a general
+    /// skip. A missing bullet is not a hedge; the presence pins cover that.
+    /// </summary>
+    private static bool SessionTitleBulletsOmitHedges(string guidance, out string? offending)
+    {
+        offending = null;
+        foreach (string? bullet in new[] { SessionTitleBullet(guidance), PrTitleBullet(guidance) })
         {
-            Assert.False(
-                guidance.Contains(hedge, StringComparison.Ordinal),
-                $"The shipped default must not tell an agent '{hedge}'.");
+            if (bullet is null)
+            {
+                continue;
+            }
+
+            foreach (string hedge in SessionTitleHedges)
+            {
+                if (bullet.Contains(hedge, StringComparison.Ordinal))
+                {
+                    offending = hedge;
+                    return false;
+                }
+            }
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The shipped default's set, submit, and retitle sentences each name Factory and how it
+    /// derives the title. A later sentence does not stand in for that.
+    /// </summary>
+    private static void AssertShippedDefaultStatesTheFactorySessionTitleLimit(string guidance)
+    {
+        AssertSentenceCarriesTheFactoryLimit(
+            SessionTitleBullet(guidance) ?? string.Empty,
+            SessionTitleSetInstruction);
+        AssertSentenceCarriesTheFactoryLimit(
+            PrTitleBullet(guidance) ?? string.Empty,
+            PrTitleSetInstruction);
+        AssertSentenceCarriesTheFactoryLimit(
+            PrTitleBullet(guidance) ?? string.Empty,
+            PrTitleRetitleInstruction);
+    }
+
+    /// <summary>
+    /// The sentence containing <paramref name="instruction"/> also states the Factory limit.
+    /// </summary>
+    private static void AssertSentenceCarriesTheFactoryLimit(string text, string instruction)
+    {
+        string sentence = SentenceContaining(text, instruction) ?? string.Empty;
+        Assert.Contains(instruction, sentence, StringComparison.Ordinal);
+        Assert.Contains(FactorySessionTitleException, sentence, StringComparison.Ordinal);
+        Assert.Contains(FactorySessionTitleMechanism, sentence, StringComparison.Ordinal);
+    }
+
+    /// <summary>The sentence in <paramref name="text"/> that contains <paramref name="instruction"/>.</summary>
+    private static string? SentenceContaining(string text, string instruction)
+    {
+        foreach (string sentence in text.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (sentence.Contains(instruction, StringComparison.Ordinal))
+            {
+                return sentence;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The paragraph that opens with <paramref name="lead"/>, or empty when the document has none.
+    /// </summary>
+    private static string ParagraphStartingWith(string text, string lead)
+    {
+        string[] lines = text.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].StartsWith(lead, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            List<string> paragraph = [lines[i].Trim()];
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                if (lines[j].Length == 0)
+                {
+                    break;
+                }
+
+                paragraph.Add(lines[j].Trim());
+            }
+
+            return string.Join(' ', paragraph);
+        }
+
+        return string.Empty;
     }
 
     private static bool ContainsSessionTitleHedge(string text)
