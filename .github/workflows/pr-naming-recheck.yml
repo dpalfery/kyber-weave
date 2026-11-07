@@ -1,0 +1,159 @@
+# PR naming recheck — re-runs the `pr-naming` job of a pull request's latest CI run when its
+# title is edited.
+#
+# CI deliberately does not listen to `edited` (.github/workflows/ci.yml). Adding it there would
+# cancel and restart every CI run whenever someone fixed a typo in a description, throwing away a
+# full test cycle for an event that changes nothing but the pull request's text. The title does
+# need re-checking, though: `scripts/check-pr-name.sh` reads it, so a corrected title has to turn
+# a red `CI Summary` green without a code push. That is the state a maintainer is stuck in: the
+# required check is red, the code is unchanged, and there is nothing to push.
+#
+# So this workflow does one narrow thing: it finds the latest completed CI run for the pull
+# request's head commit, re-runs that run's naming job against the live title, and re-runs
+# `CI Summary` afterwards so the required check reports the new verdict.
+#
+# Why a re-run of the CI run rather than a check of its own: `CI Summary` is the required status
+# check, and only a run of ci.yml produces it. A check that ran here would leave the red required
+# check red, and the pull request unmergeable with nothing to click.
+#
+# Skipping the job when the title did not change is correct here, unlike a skip inside ci.yml: no
+# required check depends on this workflow. A pull request can never look green because this job
+# did not run — the verdict that matters is the one on the CI run, and this workflow only ever
+# makes it re-evaluate.
+#
+# No checkout and no fork code: this workflow reads the API and posts re-run requests. A pull
+# request from a fork triggers it with the base repository's token, and executing nothing from the
+# head is what keeps that token out of reach.
+
+name: PR naming recheck
+
+"on":
+  pull_request:
+    types: [edited]
+
+# The floor. The one job that needs more narrows its own block below.
+permissions:
+  contents: read
+
+concurrency:
+  # One recheck per pull request: a second title edit while the first recheck is still waiting
+  # supersedes it, because both would re-run the same job.
+  group: pr-naming-recheck-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    name: Recheck the pull request name
+    runs-on: ubuntu-latest
+    # Bounded: the CI naming job takes well under a minute, and this budget covers the wait for it
+    # plus the wait for the summary. A deadlock fails the workflow instead of holding a runner.
+    timeout-minutes: 20
+    # A body edit, a base-branch change, a label change and a draft toggle all arrive as `edited`.
+    # Only the title can change this verdict.
+    if: github.event.changes.title != null
+    permissions:
+      contents: read
+      # Re-running a job of another workflow run. Nothing here writes to the repository.
+      actions: write
+    steps:
+      - name: Re-run the naming job and the summary that depends on it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # The display names of the two jobs in ci.yml. The API identifies a job by its `name:`,
+          # not by its key in the workflow, so these two strings are the join between the files.
+          # ci.yml says the same at the `pr-naming` job: rename one, rename both. A rename that
+          # misses here fails the step below rather than passing silently.
+          NAMING_JOB: Pull request name
+          SUMMARY_JOB: CI Summary
+        run: |
+          set -euo pipefail
+
+          api() {
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$@"
+          }
+
+          # Runs the newest first, so the first element is the latest run for this head commit.
+          # Only a completed run is re-runnable.
+          runs="$(api "${API_URL}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&per_page=1")"
+          run_id="$(jq -r '.workflow_runs[0].id // empty' <<<"${runs}")"
+          run_status="$(jq -r '.workflow_runs[0].status // empty' <<<"${runs}")"
+
+          if [ -z "${run_id}" ]; then
+            echo "::warning::No CI run found for ${HEAD_SHA}, so there is nothing to recheck. CI has not started for this pull request yet; edit the title after it has."
+            exit 0
+          fi
+
+          if [ "${run_status}" != "completed" ]; then
+            echo "::warning::The latest CI run for ${HEAD_SHA} (${run_id}) is ${run_status}, not completed. Its naming job has not necessarily read the edited title yet, so there is nothing to re-run."
+            exit 0
+          fi
+
+          jobs="$(api "${API_URL}/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")"
+          naming_job="$(jq -r --arg name "${NAMING_JOB}" '[.jobs[] | select(.name == $name)][0].id // empty' <<<"${jobs}")"
+          summary_job="$(jq -r --arg name "${SUMMARY_JOB}" '[.jobs[] | select(.name == $name)][0].id // empty' <<<"${jobs}")"
+
+          if [ -z "${naming_job}" ]; then
+            echo "::error::CI run ${run_id} has no job named '${NAMING_JOB}'. Either ci.yml renamed the pr-naming job's display name without updating NAMING_JOB in this workflow, or the run predates the naming check."
+            exit 1
+          fi
+
+          echo "CI run ${run_id} for ${HEAD_SHA}: naming job ${naming_job}, summary job ${summary_job:-none}."
+
+          # Waits for a job re-run to finish and prints its conclusion on stdout, so the caller can
+          # branch on the verdict. The progress lines go to stderr, which keeps stdout to the
+          # verdict alone. A wait that runs out fails the workflow rather than reporting a verdict
+          # it does not have.
+          wait_for_job() {
+            local job_id="$1" deadline="$2" state status conclusion
+            while :; do
+              state="$(api "${API_URL}/repos/${REPOSITORY}/actions/jobs/${job_id}" | jq -r '"\(.status) \(.conclusion // "-")"')"
+              status="${state%% *}"
+              conclusion="${state#* }"
+              echo "job ${job_id}: ${status} ${conclusion}" >&2
+              if [ "${status}" = "completed" ]; then
+                printf '%s' "${conclusion}"
+                return 0
+              fi
+              if [ "$(date +%s)" -ge "${deadline}" ]; then
+                echo "::error::Job ${job_id} was still ${status} when the wait ran out; this workflow cannot report a verdict for it."
+                exit 1
+              fi
+              sleep 10
+            done
+          }
+
+          deadline=$(( $(date +%s) + 600 ))
+
+          # The naming job re-reads the title from the API, so the re-run judges the edited title.
+          api --request POST "${API_URL}/repos/${REPOSITORY}/actions/jobs/${naming_job}/rerun" > /dev/null
+          echo "Re-running the naming job."
+          naming_conclusion="$(wait_for_job "${naming_job}" "${deadline}")"
+
+          # `CI Summary` is the required check and it ran against the naming job's previous result,
+          # so it has to run again now the verdict has changed. It is re-run after the naming job
+          # finishes, never before: started first, it would read the old result and stay wrong.
+          summary_conclusion=''
+          if [ -n "${summary_job}" ]; then
+            api --request POST "${API_URL}/repos/${REPOSITORY}/actions/jobs/${summary_job}/rerun" > /dev/null
+            echo "Re-running CI Summary."
+            summary_conclusion="$(wait_for_job "${summary_job}" "${deadline}")"
+          fi
+
+          echo "naming=${naming_conclusion} summary=${summary_conclusion:-none}"
+
+          if [ "${naming_conclusion}" != "success" ]; then
+            echo "::error::The pull request name still does not conform (naming job: ${naming_conclusion}). Fix the branch or the title; the naming rule and the shapes it accepts are in scripts/check-pr-name.sh."
+            exit 1
+          fi
+
+          if [ -n "${summary_job}" ] && [ "${summary_conclusion}" != "success" ]; then
+            echo "::error::CI Summary is ${summary_conclusion} after the naming job passed, so another required job in that CI run failed. That is CI's verdict, not this workflow's; open the run above."
+            exit 1
+          fi
