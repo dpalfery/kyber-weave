@@ -35,6 +35,26 @@ public static class TestSquadCorpus
     public static SquadSource CanonicalSource => LazyCanonicalSource.Value;
 
     /// <summary>
+    /// The canonical text as a render for <paramref name="target"/> must emit it: the corpus's
+    /// <c>{{harness}}</c> placeholder replaced with that target's own token.
+    /// </summary>
+    /// <remarks>
+    /// The renderer answers the placeholder once, in the shared pipeline, so a contract test that
+    /// compares rendered output against the canonical corpus byte for byte has to answer it here
+    /// too. The replacement is written in this test helper rather than called from
+    /// <c>SquadHarnessRenderer.SubstituteHarnessToken</c>: an expectation computed by the code
+    /// under test passes whatever that code does, so the renderer could ship the braces and the
+    /// suite would not notice. Only the token comes from the product, through
+    /// <see cref="SquadTargetCatalog.GetToken"/>, which is the same catalogue the renderer reads —
+    /// a hand-copied list of thirteen tokens would go stale the day one changed.
+    /// </remarks>
+    public static string ExpectedRenderText(SquadTarget target, string canonicalText)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalText);
+        return canonicalText.Replace("{{harness}}", SquadTargetCatalog.GetToken(target), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Gets a thread-safe cached baseline render for the specified target and deployment scope.
     /// Faulted renders are evicted so subsequent retries can succeed.
     /// </summary>

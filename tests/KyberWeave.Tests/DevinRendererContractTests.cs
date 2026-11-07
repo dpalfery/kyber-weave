@@ -154,7 +154,7 @@ public sealed class DevinRendererContractTests : IDisposable
 
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
             Assert.Equal(
-                CollapseToSingleLine(agent.Description),
+                CollapseToSingleLine(TestSquadCorpus.ExpectedRenderText(SquadTarget.Devin, agent.Description)),
                 RequireScalar(frontmatter, "description", agent.Name));
 
             // Every subagent's profile pins a Devin model: an unpinned custom subagent runs on
@@ -173,7 +173,7 @@ public sealed class DevinRendererContractTests : IDisposable
             ];
             Assert.Equal(expectedTools, RequireSequence(frontmatter, "allowed-tools", agent.Name));
 
-            Assert.Equal(NormalizeBody(agent.InstructionBody), body);
+            Assert.Equal(NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Devin, agent.InstructionBody)), body);
         }
     }
 
@@ -315,7 +315,9 @@ public sealed class DevinRendererContractTests : IDisposable
         Assert.Equal(ApprovedLoweredSkillKeys, FrontmatterKeys(frontmatter));
         Assert.Equal(conductor.Name, RequireScalar(frontmatter, "name", conductor.Name));
         Assert.Equal(UserOnlyTriggers, RequireSequence(frontmatter, "triggers", conductor.Name));
-        Assert.Equal(NormalizeBody(conductor.InstructionBody), body);
+        Assert.Equal(
+            NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Devin, conductor.InstructionBody)),
+            body);
 
         foreach (SquadResource resource in conductor.Resources)
         {

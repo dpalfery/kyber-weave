@@ -235,7 +235,7 @@ public sealed class SquadRendererSharedContractTests
     /// The skill document is the pipeline's, not the harness's: each canonical skill a harness does
     /// not suppress ships once, under the harness's skills directory, with its keys in order, its
     /// name, its description lowered by the spec's line-break rule, the spec's license, and its body
-    /// verbatim.
+    /// verbatim once the canonical <c>{{harness}}</c> placeholder is resolved for this harness.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShippedTargetsAtEachScope))]
@@ -271,14 +271,16 @@ public sealed class SquadRendererSharedContractTests
                 frontmatter.Children.Keys.OfType<YamlScalarNode>().Select(key => key.Value));
             Assert.Equal(skill.Name, SquadRenderedOutput.RequireScalar(frontmatter, "name", skill.Name));
             Assert.Equal(
-                SquadHarnessLowering.SingleLine(skill.Description, spec.DescriptionLineBreaks),
+                SquadHarnessLowering.SingleLine(
+                    TestSquadCorpus.ExpectedRenderText(target, skill.Description),
+                    spec.DescriptionLineBreaks),
                 SquadRenderedOutput.RequireScalar(frontmatter, "description", skill.Name));
             Assert.Equal(
                 spec.SkillLicense,
                 frontmatter.Children.TryGetValue(new YamlScalarNode("license"), out YamlNode? license)
                     ? ((YamlScalarNode)license).Value
                     : null);
-            Assert.Equal(Normalized(skill.InstructionBody), body);
+            Assert.Equal(Normalized(TestSquadCorpus.ExpectedRenderText(target, skill.InstructionBody)), body);
         }
     }
 
