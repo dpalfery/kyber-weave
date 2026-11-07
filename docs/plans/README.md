@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 ---
 
 # Kyber-Weave Plan Inventory
@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-07-conductor-bug-crusher-run-speed-clean-start.md](2026-11-07-conductor-bug-crusher-run-speed-clean-start.md) | Ready — approved 2026-11-07 (AP1); executing | 2026-11-07 | Slice 1 (clean start) of the approved parent design for conductor and bug-crusher run speed: fetch and branch from the remote base before anyone investigates or plans, carry the harness name in branch and pull-request title, make a broken tool a stop rather than a warning, repair the always-failing Arbiter uninstall test, add the `pr-naming` CI check, and declare the `github-actions` standard. |
 
 ## Archived Plans
 
