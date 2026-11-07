@@ -501,6 +501,7 @@ public sealed class AnalysisPersistenceTests
             () => StartSqliteLock(
                 persistence.DatabasePath,
                 probeTimeoutSeconds: 0,
+                acquireAckQuery: "SELECT 'UNEXPECTED' AS _",
                 beforeProbe: process => process.StandardInput.Dispose()));
 
         Assert.IsType<TimeoutException>(exception.InnerExceptions[0]);
