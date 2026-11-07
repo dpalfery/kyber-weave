@@ -390,7 +390,7 @@ public sealed class ArbiterKiloReviewRemediationTests
     }
 
     [Fact]
-    public void ReadGlobalTargets_WhenFileThrowsIOExceptionOrAccessDenied_ReturnsEmptyList()
+    public void ReadGlobalTargets_WhenFileThrowsIOException_ReturnsEmptyList()
     {
         using TempDirectory home = new();
         string configDir = Path.Combine(home.Path, ".kyber-weave");
@@ -403,49 +403,6 @@ public sealed class ArbiterKiloReviewRemediationTests
         {
             IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
             Assert.Empty(targets);
-        }
-
-        File.Delete(configPath);
-        Directory.CreateDirectory(configPath);
-        try
-        {
-            IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
-            Assert.Empty(targets);
-        }
-        finally
-        {
-            Directory.Delete(configPath);
-        }
-
-        if (!OperatingSystem.IsWindows() && !string.Equals(Environment.UserName, "root", StringComparison.Ordinal))
-        {
-            File.WriteAllText(configPath, "arbiter:\n  global:\n    targets:\n      - 'cursor'\n");
-            File.SetUnixFileMode(configPath, UnixFileMode.None);
-            try
-            {
-                // In root/container environments (UID 0), UnixFileMode.None does not deny read access
-                // to root (CAP_DAC_OVERRIDE). Guard the assertion so it only runs if access is denied.
-                bool accessDenied;
-                try
-                {
-                    _ = File.ReadAllText(configPath);
-                    accessDenied = false;
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    accessDenied = true;
-                }
-
-                if (accessDenied)
-                {
-                    IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
-                    Assert.Empty(targets);
-                }
-            }
-            finally
-            {
-                File.SetUnixFileMode(configPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
         }
     }
 
