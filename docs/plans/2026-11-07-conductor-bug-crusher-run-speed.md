@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-bug-crusher-run-speed
 title: Make conductor and bug-crusher runs faster and cheaper without losing a quality check
 doc-type: plan
-status: draft
+status: current
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-07
@@ -15,7 +15,7 @@ impact-components: [KyberSquad, DocGraph, ReviewCouncil, KyberArbiter, CI Pipeli
 
 # Make conductor and bug-crusher runs faster and cheaper without losing a quality check
 
-**Status: Draft.** Waiting for the owner's **approve and execute** decision. Nothing has been implemented.
+**Status: Ready.** Approved and ready to execute (decision `AP1`). Nothing has been implemented.
 **Development mode:** `test-first` (packet input).
 **Autonomy:** `autonomous` (packet input; every open item is decided and recorded below).
 **Scale:** `extends-component`, components `KyberSquad`, `DocGraph`, `ReviewCouncil`, `KyberArbiter`, `CI Pipelines`, `Distribution`.
@@ -144,7 +144,7 @@ The first eleven rows are the owner's and are settled. The rest were decided und
 | D42 | What is the name format? | Branch `[<owner>.<agent>.]<harness>/<type>/<slug>`, for example `commandcode/fix/arbiter-global-block-identity`. Title suffix `[<harness>]`, for example `fix(arbiter): qualify global block identity by target [commandcode]`. Tokens are the 13 catalogue tokens plus `manual`, with `agy` written as `antigravity`. Dependabot is exempt by the pull request's author. | A suffix keeps the conventional prefix first. Nothing in CI filters on branch names and nothing parses titles today. The tag lands in `main`'s history and the changelog, which lists subjects as they are. A branch on an open pull request can be renamed through the GitHub API, so no grandfathering is needed. | autonomous: recommendation accepted |
 | D43 | Is `cleanupcode` removed from the task-end pass? | Off by default. The skill stays for InspectCode review work. | `.editorconfig` already makes `var`, predefined types and unused usings warnings, the style gate checks them, and the whitespace gate checks formatting. Redundant qualifiers surface only in end-of-run InspectCode, as a rework item, and the rule map says so. It rewrote existing code in the first RED task, and the worker reverted it. The agent text also tells workers to run `dotnet format analyzers`, which the C# standard says task gates omit. | autonomous: recommendation accepted |
 | D44 | The Arbiter's lens-skip rule reads a set that is empty on a committed tree. Is that in scope? | Yes. `review.changed-paths` becomes committed plus dirty paths against the review base, and `KW-ARB-LENS-001` no longer skips on an empty set. T27's RED test confirms the behaviour first. | `HookGitFacts.cs:31` uses only `GetDirtyStatuses`. An empty list passes `subset-of ["**/*.md"]`, which would mark `correctness` and `test-adequacy` not applicable. Seen by reading, not by running. Delivery already pushes before the council, and fix 3 makes a clean tree the normal case, so leaving it would lose a quality check. | autonomous: recommendation accepted |
-| AP1 | Is the Test contract approved, and may this plan execute? | Pending the owner's **approve and execute** decision. Recommended: approve as written. On approval, execution follows D12. | Not a planning decision. It stays pending until the conductor relays the owner's answer. | pending approve-and-execute gate |
+| AP1 | Is the Test contract approved, and may this plan execute? | Approved as written, as recommended. Execution follows D12. | Not a planning decision. Resolved by the conductor carrying `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`. | autonomous: recommendation accepted |
 
 ## Investigation findings
 

@@ -35,7 +35,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| [2026-11-07-conductor-bug-crusher-run-speed.md](2026-11-07-conductor-bug-crusher-run-speed.md) | Draft | 2026-11-07 | Make conductor and bug-crusher runs faster and cheaper without losing a quality check: working code search for workers, ready-to-paste task prompts, one gate run to a verdict, a clean start from the fetched remote, and project knowledge out of portable files. |
+| [2026-11-07-conductor-bug-crusher-run-speed.md](2026-11-07-conductor-bug-crusher-run-speed.md) | Ready | 2026-11-07 | Make conductor and bug-crusher runs faster and cheaper without losing a quality check: working code search for workers, ready-to-paste task prompts, one gate run to a verdict, a clean start from the fetched remote, and project knowledge out of portable files. |
 
 ## Archived Plans
 
