@@ -74,6 +74,12 @@ public sealed class SquadCanonicalContentTests
         "When the pull request title changes, update the session title to match";
 
     /// <summary>
+    /// The architecture matrix's submit sentence. The product bullet words that moment
+    /// differently, so the matrix pin cannot reuse <see cref="PrTitleSetInstruction"/>.
+    /// </summary>
+    private const string SessionTitleMatrixSubmitInstruction = "Once a pull request is submitted";
+
+    /// <summary>
     /// Factory has no setter. The sentence that tells the agent to set or update a title names that
     /// limit; a following sentence does not constrain the instruction the agent just read.
     /// </summary>
@@ -560,8 +566,8 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The architecture matrix states the same rule as the shipped default, including why Factory
-    /// cannot set or update the title. An unconditional update sentence does not.
+    /// The architecture matrix states the same rule as the shipped default. The set, submit, and
+    /// retitle sentences each name Factory. Dropping the limit from the submit sentence does not.
     /// </summary>
     [Fact]
     public void TheSessionTitleMatrixStatesHowFactoryGetsItsTitle()
@@ -576,6 +582,7 @@ public sealed class SquadCanonicalContentTests
             matrix.Length > 0,
             "docs/kyber-squad/architecture.md must carry the session-title matrix.");
         AssertSentenceCarriesTheFactoryLimit(matrix, "name the work being done");
+        AssertSentenceCarriesTheFactoryLimit(matrix, SessionTitleMatrixSubmitInstruction);
         AssertSentenceCarriesTheFactoryLimit(matrix, PrTitleRetitleInstruction);
         Assert.Contains("#123 Add the widget", matrix, StringComparison.Ordinal);
     }
