@@ -490,12 +490,7 @@ public sealed class AnalysisPersistenceTests
         Assert.Contains("Output: 'UNEXPECTED'", exception.Message, StringComparison.Ordinal);
     }
 
-    // Deprecated: the sqlite lock fixture's aggregate-on-cleanup-failure path is a rare
-    // edge case, and this end-to-end form depends on child-process timing that fails
-    // deterministically in some environments. The helper code is unchanged; only this
-    // test is excluded from the run until the fixture is reworked to not need a live
-    // child process. See PR #533.
-    [Fact(Skip = "Deprecated: flaky child-process timing; helper code unchanged, see PR #533.")]
+    [Fact]
     public void StartSqliteLockWhenRollbackCleanupFailsPreservesCleanupDiagnosticInAggregateException()
     {
         RequireSqlite();

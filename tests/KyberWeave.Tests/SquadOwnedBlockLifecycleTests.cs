@@ -465,6 +465,34 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
     }
 
+    /// <summary>
+    /// A global receipt that loses its last block must drop back to v2, the schema the
+    /// writer emits for a block-less global receipt. Carrying the recorded v3 over leaves
+    /// a block-less receipt on a schema that requires at least one block.
+    /// </summary>
+    [Fact]
+    public void UninstallGlobalRemovesLastBlockAndDropsRetainedSchemaToV2()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture, SquadTarget.Cursor);
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(
+            installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
+        Assert.Single(receipt.Blocks);
+        string hooksFile = GlobalHookFile(installed.Roots, SquadTarget.Cursor);
+        Assert.True(File.Exists(hooksFile));
+
+        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+            installed.Home,
+            SquadDeploymentScope.Global,
+            receipt,
+            installed.Roots);
+        new SquadTransaction(installed.Store).Execute(uninstall);
+
+        SquadReceipt? retained = installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global);
+        Assert.Null(retained);
+    }
+
     // ----------------------------------------------------------------------------------
     // Global scope: each block lives beneath its own target's root, and the receipt says so
     // ----------------------------------------------------------------------------------
@@ -763,8 +791,12 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// plan and transaction an install uses. Each block is written beneath its own target's root,
     /// which is why both record the bare path <c>hooks.json</c>.
     /// </summary>
-    private static GlobalBlockDeployment InstallGlobalBlocks(TempDirectory fixture)
+    private static GlobalBlockDeployment InstallGlobalBlocks(
+        TempDirectory fixture,
+        params SquadTarget[] targets)
     {
+        if (targets.Length == 0)
+            targets = [SquadTarget.Cursor, SquadTarget.Codex];
         FakeSquadUserPaths userPaths = new(fixture.Path);
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
@@ -779,7 +811,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             globalRoots: roots,
-            blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
+            blocks: [.. targets.Select(target => GlobalHooksBlock(target))]);
         new SquadTransaction(store).Execute(plan);
         return new GlobalBlockDeployment(store, roots, home);
     }

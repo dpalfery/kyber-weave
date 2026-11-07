@@ -734,14 +734,16 @@ public sealed class SquadDeploymentPlan
         SquadReceiptLayout retainedLayout = scope == SquadDeploymentScope.Global
             ? ClassifyGlobalLayout(retained)
             : receipt.Layout;
-        // The schema follows the same rule as the writer: a project receipt that still owns
-        // a block stays on v3, while one whose blocks are all gone drops back to v1 so it
-        // serializes byte-identical to every block-less receipt. A global receipt carries
-        // its recorded schema over untouched, which is v3 when it owns blocks and v2 when
-        // it does not.
-        string retainedSchema = scope == SquadDeploymentScope.Global
-            ? receipt.Schema
-            : retainedBlocks.Count > 0 ? SquadStateStore.ReceiptSchemaV3 : SquadStateStore.ReceiptSchemaV1;
+        // The schema follows the same rule as the writer: a receipt that still owns
+        // a block stays on v3, while one whose blocks are all gone drops back to the
+        // block-less schema for its scope (v1 at project scope, v2 at global scope)
+        // so it serializes byte-identical to every block-less receipt. A global receipt
+        // that keeps at least one block stays on v3.
+        string retainedSchema = retainedBlocks.Count > 0
+            ? SquadStateStore.ReceiptSchemaV3
+            : scope == SquadDeploymentScope.Global
+                ? SquadStateStore.ReceiptSchemaV2
+                : SquadStateStore.ReceiptSchemaV1;
         SquadReceipt retainedReceipt = receipt with
         {
             Files = retained,
@@ -1350,22 +1352,15 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
-    /// path, so removal never depends on a render that may no longer exist.
+    /// Resolves the hook-file shape for a receipt-owned block, reading the receipt the way
+    /// status and doctor do: the recorded target decides the shape first, and the per-format
+    /// portable path is only the fallback for a target that owns no shared hook file.
     /// </summary>
     private static SquadHookBlockFormat FormatForTarget(SquadOwnedBlock owned)
     {
         ArgumentNullException.ThrowIfNull(owned);
-        foreach (SquadHookBlockFormat format in Enum.GetValues<SquadHookBlockFormat>())
-        {
-            if (string.Equals(
-                    SquadHookJsonBlock.RelativePath(format),
-                    owned.RelativePath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return format;
-            }
-        }
+        if (SquadHookJsonBlock.TryResolveFormat(owned, out SquadHookBlockFormat format))
+            return format;
 
         throw new SquadDeploymentConflictException(
             $"Squad receipt block '{owned.RelativePath}' is not a known shared hook file. " +

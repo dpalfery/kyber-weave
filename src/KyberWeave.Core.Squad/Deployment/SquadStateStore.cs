@@ -1366,7 +1366,7 @@ public sealed class SquadStateStore
     /// deployment identity follows the same scope-aware rule a stored file's does — the portable
     /// path alone under project and instance scope, the target beside the path under global
     /// scope — because global deployment writes each target beneath its own root, where four of
-    /// the five formats legitimately name the same bare <c>hooks.json</c>.
+    /// the six formats legitimately name the same bare <c>hooks.json</c>.
     /// </summary>
     private static void ValidateReceiptBlocks(SquadReceipt receipt)
     {
