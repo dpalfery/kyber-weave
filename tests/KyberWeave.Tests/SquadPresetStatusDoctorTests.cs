@@ -266,7 +266,8 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SeedDeployment(tempHome, SquadDeploymentScope.Global, stateStore, presets);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithMatchingArbiterProbe();
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         DoctorPresetTestRenderer renderer = new();
 
