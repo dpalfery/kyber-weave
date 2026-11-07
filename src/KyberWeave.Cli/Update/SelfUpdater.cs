@@ -216,7 +216,7 @@ internal sealed class SelfUpdater : IDisposable
             }
 
             // The arbiter ships like kyber-weave-mcp, under this host's .NET RID.
-            if (ShouldUpdateArbiter(options, version, windows))
+            if (ShouldUpdateArbiter(options, version, windows, sums))
             {
                 staged.Add(StageBinary(
                     ArbiterBaseName,
@@ -423,17 +423,23 @@ internal sealed class SelfUpdater : IDisposable
         if (options.NoArbiter || _arbiterHookRefresher is null)
             return;
 
-        string installed = Path.Combine(
+        string arbiter = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(ArbiterBaseName, windows));
-        if (!File.Exists(installed))
-        {
-            _log("kyber-weave-arbiter is not installed; leaving arbiter hooks unchanged");
+        if (!File.Exists(arbiter))
             return;
-        }
 
         (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
-        if (!loaded)
+
+        string? home = _readEnvironment("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = _readEnvironment("USERPROFILE");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
+            && UserHostConfig.ReadGlobalTargets(home).Count > 0;
+
+        if (!loaded && !hasConfiguredGlobalTargets)
             return;
 
         ArbiterHookRefreshResult outcome;
@@ -453,7 +459,7 @@ internal sealed class SelfUpdater : IDisposable
             return;
         }
 
-        if (roots.Count == 0)
+        if (roots.Count == 0 && !hasConfiguredGlobalTargets)
             _log("arbiter hooks are checked");
         else if (outcome.Failed > 0)
             _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +
@@ -839,15 +845,12 @@ internal sealed class SelfUpdater : IDisposable
         return true;
     }
 
-    /// <summary>Decides whether this update should replace an installed arbiter.</summary>
+    /// <summary>Decides whether this release ships the Arbiter binary this update should install.</summary>
     /// <remarks>
-    /// Update replaces what is installed; it does not add a binary the user left out.
-    /// <c>install.sh --no-arbiter</c> is an explicit opt-out, and a machine that installed
-    /// before the arbiter existed never chose to run it either — so an absent binary is reported
-    /// rather than silently created. Both skips are logged, because a silent one reads as the
-    /// update having covered the arbiter when it did not.
+    /// The update installs the released Arbiter asset even when it was never previously present,
+    /// so the follow-up refresh can rebind any already-deployed global hooks to the current binary.
     /// </remarks>
-    private bool ShouldUpdateArbiter(SelfUpdateOptions options, string version, bool windows)
+    private bool ShouldUpdateArbiter(SelfUpdateOptions options, string version, bool windows, string sums)
     {
         if (options.NoArbiter)
             return false;
@@ -858,16 +861,8 @@ internal sealed class SelfUpdater : IDisposable
             return false;
         }
 
-        string installed = Path.Combine(
-            _host.InstallDirectory,
-            BinaryInstaller.InstalledFileName(ArbiterBaseName, windows));
-        if (!File.Exists(installed))
-        {
-            _log($"kyber-weave-arbiter is not installed in {_host.InstallDirectory}; add it with scripts/install.sh");
-            return false;
-        }
-
-        return true;
+        string archiveName = BinaryInstaller.ArchiveName(ArbiterBaseName, _host.Rid);
+        return sums.Contains(archiveName, StringComparison.Ordinal);
     }
 
     private bool IsRunningImage(string destination)

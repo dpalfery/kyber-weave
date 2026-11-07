@@ -16,11 +16,20 @@ public static class ArbiterConfigLoader
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
 
-    internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section)
+    internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section) =>
+        Merge(defaults, section, isUserConfig: false);
+
+    private static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section, bool isUserConfig)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         if (section is null)
             return defaults;
+
+        if (!isUserConfig && section.Global is not null)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.UserGlobalTargetsForbidden}] arbiter.global is only valid in the user-level config file; project config may not declare global targets.");
+        }
 
         // A rule id may expand to one rule per trigger, so shipped rules are keyed
         // by distinct id rather than by row.
@@ -77,6 +86,7 @@ public static class ArbiterConfigLoader
         return new ArbiterConfig
         {
             Enabled = section.Enabled ?? defaults.Enabled,
+            ExplicitlyEnabled = section.Enabled,
             Provider = MergeProvider(defaults.Provider, section.Provider),
             Rules = rules,
             OwnerFileKindMap = defaults.OwnerFileKindMap,
@@ -91,6 +101,33 @@ public static class ArbiterConfigLoader
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
         KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
         return Merge(defaults, document.Arbiter);
+    }
+
+    /// <summary>Loads the user-level host config YAML, where <c>arbiter.global.targets</c> is valid.</summary>
+    public static ArbiterConfig LoadUserConfig(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
+        ArbiterConfig defaults = LoadEmbeddedDefaults();
+        ArbiterConfig merged = Merge(defaults, section, isUserConfig: true);
+
+        IReadOnlyList<string> targets = section?.Global?.Targets is null
+            ? []
+            : [.. section.Global.Targets
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.Ordinal)];
+
+        return new ArbiterConfig
+        {
+            Enabled = merged.Enabled,
+            ExplicitlyEnabled = merged.ExplicitlyEnabled,
+            Global = new ArbiterGlobalConfig(targets),
+            Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
+            Rules = merged.Rules,
+            OwnerFileKindMap = merged.OwnerFileKindMap,
+            LensPaths = merged.LensPaths,
+        };
     }
 
     /// <summary>

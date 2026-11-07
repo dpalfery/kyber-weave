@@ -27,6 +27,62 @@ public static class KyberWeaveConfigLoader
         return FromDocument(document, yaml, repositoryRoot: null);
     }
 
+    /// <summary>
+    /// Loads the per-user host config file under <c>~/.kyber-weave/kyber-weave.yml</c>, where
+    /// <c>arbiter.global.targets</c> is valid and must not be rejected as a project-scope error.
+    /// </summary>
+    public static KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        string root = Path.GetFullPath(homeDirectory);
+        string? path = ResolveUserConfigPath(root, configPath);
+        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !File.Exists(path)))
+        {
+            throw new FileNotFoundException(
+                $"Kyber-Weave config file not found: {path}",
+                path);
+        }
+
+        if (path is null || !File.Exists(path))
+            return KyberWeaveConfig.ProductDefaults;
+
+        string yaml = File.ReadAllText(path);
+        return LoadUserConfigYaml(yaml);
+    }
+
+    public static KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        string root = Path.GetFullPath(homeDirectory);
+        string? path = ResolveUserConfigPath(root, configPath);
+        if (path is null)
+            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+
+        if (!string.IsNullOrWhiteSpace(configPath) && !File.Exists(path))
+        {
+            return KyberWeaveConfigLoadResult.Fail(
+                $"Kyber-Weave config file not found: {path}",
+                path);
+        }
+
+        if (!File.Exists(path))
+            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+
+        try
+        {
+            string yaml = File.ReadAllText(path);
+            return KyberWeaveConfigLoadResult.Ok(LoadUserConfigYaml(yaml), path);
+        }
+        catch (YamlException ex)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+        }
+    }
+
     public static KyberWeaveConfig Load(string repoRoot, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
@@ -109,6 +165,42 @@ public static class KyberWeaveConfigLoader
         }
 
         return explicitPath;
+    }
+
+    private static string? ResolveUserConfigPath(string homeDirectory, string? configPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            return Path.IsPathRooted(configPath)
+                ? configPath
+                : Path.Combine(homeDirectory, configPath);
+        }
+
+        return UserHostConfig.GetPath(homeDirectory);
+    }
+
+    private static KyberWeaveConfig LoadUserConfigYaml(string yaml)
+    {
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
+        OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
+        return new KyberWeaveConfig
+        {
+            Ontology = ontology,
+            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness),
+            DocsAnalysis = DocsAnalysisConfigLoader.Merge(
+                DocsAnalysisConfig.ProductDefaults,
+                document.DocsAnalysis,
+                ontology),
+            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
+            ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg, document.Autonomy),
+            Review = ReviewConfigLoader.Merge(
+                ReviewConfig.ProductDefaults,
+                document.Review,
+                null,
+                ReviewConfigLoader.UnknownKeyWarnings(yaml)),
+            Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+        };
     }
 
     /// <summary>

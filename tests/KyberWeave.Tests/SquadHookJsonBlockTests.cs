@@ -16,6 +16,7 @@ public sealed class SquadHookJsonBlockTests
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",
+            SquadHookBlockFormat.Claude => "claude",
             SquadHookBlockFormat.Codex => "codex",
             SquadHookBlockFormat.Factory => "factory",
             SquadHookBlockFormat.Devin => "devin",
@@ -75,7 +76,7 @@ public sealed class SquadHookJsonBlockTests
                     ["postToolUse"] = new JsonArray(post.Select(Clone).ToArray()),
                 },
             },
-            SquadHookBlockFormat.Codex => new JsonObject
+            SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude => new JsonObject
             {
                 ["hooks"] = new JsonObject
                 {

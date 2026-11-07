@@ -260,6 +260,8 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-CONFIG-008` | Error | Effect not allowed for the rule's trigger family, or a remapped `undecidable` |
 | `KW-ARB-CONFIG-009` | Error | User override holds a key other than `provider` |
 | `KW-ARB-CONFIG-010` | Error | Non-loopback endpoint uses `http` |
+| `KW-ARB-CONFIG-011` | Error | `arbiter.global` is declared in a project config; user-level `arbiter.global.targets` is the only valid global schema |
+| `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
 | `KW-ARB-LOG-001` | Warning | `artifacts/arbiter/` is not ignored by git |
 | `KW-ARB-BIN-001` | Warning | `kyber-weave-arbiter` missing from `PATH`, or version differs from the CLI's |

@@ -27,14 +27,15 @@ so every harness gets the same behaviour and the rules stay in one place.
 
 2. **Exit 0** — nothing is wrong. Stop here and carry on with the original task.
 
-3. **Exit 3** — the `codegraph` executable is not on `PATH`. Stop, and ask the user to
-   install it. Do not install it yourself, do not fetch an installer, and do not work
-   around it by guessing at an index. Say plainly that CodeGraph is missing, quote the
-   `fix:` line the command printed, and continue the original task without CodeGraph if
-   the user prefers.
+3. **Exit 3** — the `codegraph` executable is not on `PATH`. Stop, tell the user to
+   install it, and do not try to provision or work around the missing index yourself. Do
+   not install it yourself, do not fetch an installer, and do not guess at an index. Say
+   plainly that CodeGraph is missing, quote the `fix:` line the command printed, and
+   continue the original task without CodeGraph if the user prefers.
 
 4. **Exit 1 with `codegraph.index`** and the binary present — the index is missing, stale,
-   or failed to build. Provision it once:
+   or failed to build. Provision it immediately, with no user approval gate before the
+   repository-local init:
 
    ```bash
    kyber-weave doctor --provision

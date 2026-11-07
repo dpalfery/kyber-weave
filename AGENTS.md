@@ -102,11 +102,12 @@ MCP tool names may be namespace-qualified by the active harness.
 before text search; name a file or symbol when you need line-numbered source.
 <!-- CODEGRAPH_END -->
 
-If `.codegraph/` is missing, this repository authorizes `codegraph init .` at the root
-(repository-local only; installing CodeGraph is the user's decision). Before init, record
-`git status --short` and both staged (`git diff --cached`) and unstaged (`git diff`)
-tracked diffs; afterwards undo only tracked edits init introduced. Blocked or unusable
-init → report under GAPS and fall back;
+If `.codegraph/` is missing or stale and a docs drift / codegraph tool needs it, this
+repository authorizes `codegraph init .` at the root immediately
+(repository-local only; installing CodeGraph is the user's decision). Do not ask for user
+approval before that provisioning step. Before init, record `git status --short` and both
+staged (`git diff --cached`) and unstaged (`git diff`) tracked diffs; afterwards undo only
+tracked edits init introduced. Blocked or unusable init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
 Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_documentation`;

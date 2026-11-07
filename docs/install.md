@@ -165,8 +165,11 @@ Kyber-Weave release tag it shipped in. The two version lines are independent.
 The Arbiter has its own floor on the same pattern: `kyber-weave-arbiter-<rid>` assets first
 appear in **0.1.7-rc.17**. Releases before that publish none, so the script installs the CLI
 and MCP alone when it is not met. `kyber-weave-arbiter --version` prints
-`kyber-weave-arbiter <semver>`; `squad doctor` and `arbiter doctor` probe it. See
-[distribution](distribution.md#per-asset-version-floors) for the shared mechanism.
+`kyber-weave-arbiter <semver>`; `squad doctor` and `arbiter doctor` probe it. The Arbiter
+install command defaults to global scope, records the target in `arbiter.global.targets` in
+`~/.kyber-weave/kyber-weave.yml`, and keeps project scope as the opt-in path with
+`--project` and `--path` (project only). See [distribution](distribution.md#per-asset-version-floors)
+for the shared mechanism.
 
 ## The KyberDash tray
 
@@ -505,7 +508,7 @@ kyberdash menubar --update
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
 arbiter and reports an absent one rather than creating it. After replacing binaries, update
-also re-renders the arbiter hooks/scripts for each registered project with `arbiter.enabled`
+also re-renders the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml` and for each registered project with `arbiter.enabled`
 (reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render.
 `--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
@@ -636,14 +639,14 @@ sequence did (`docs init`, hand-edit `arbiter.enabled: true`, `squad install --t
 kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"
 ```
 
-It ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets
-`arbiter.enabled: true` non-destructively, renders the target through the existing Squad
-install pipeline, applies the provider (`--provider ""` means `none`), stores the key in the
-OS credential store, verifies, and prints the target's trust step. `--target` is required and
-validated against the Squad target roster; `--global` is rejected; a second run is an
-idempotent no-op. `--arbiter-key` is visible in argv and shell history — `--key-stdin` and
-`TYPESAFE_API_KEY` stay the safer paths. See the [Kyber Arbiter runbook](kyber-arbiter/runbook.md#setup-doctor-audit)
-and [ADR 0053](adr/0053-kyber-arbiter-three-step-decision-gates.md).
+It defaults to global scope, writes `~/.kyber-weave/kyber-weave.yml` (reusing the `docs init`
+scaffold), records the target in `arbiter.global.targets`, sets `arbiter.enabled: true`
+non-destructively, renders the target through the existing Squad install pipeline, applies the
+provider (`--provider ""` means `none`), stores the key in the OS credential store,
+verifies, and prints the target's trust step. `--project` opts into repository scope, `--path`
+is valid only with it, `--global --project` exits `2` with `KW-ARB-INSTALL-001`, and a second
+run is an idempotent no-op. `--arbiter-key` is visible in argv and shell history —
+`--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. See the [Kyber Arbiter runbook](kyber-arbiter/runbook.md#setup-doctor-audit) and [ADR 0053](adr/0053-kyber-arbiter-three-step-decision-gates.md).
 
 Without the Arbiter, scaffold the repository directly:
 

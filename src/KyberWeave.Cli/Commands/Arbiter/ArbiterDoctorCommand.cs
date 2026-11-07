@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -7,7 +8,9 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -44,11 +47,17 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        AnsiConsole.Profile.Width = int.MaxValue;
         DiagnosticReport report = new();
         _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
+        string home = ArbiterCommandComposition.HomeDirectory();
+        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
+        bool projectEnabled = config.Arbiter.Enabled;
 
         AnsiConsole.MarkupLine("[bold]Kyber-Arbiter Doctor[/]");
         AnsiConsole.WriteLine();
+        WriteGlobalScope(globalTargets);
+        WriteProjectScope(projectEnabled, globalTargets.Count > 0);
 
         report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
         report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
@@ -56,6 +65,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckLogIgnored(settings, report);
         CheckBinary(report);
         CheckGuard(config, settings, report);
+        CheckProjectHooks(settings.Path, projectEnabled, report);
         CheckAdvisoryPostDispatchTargets();
 
         CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
@@ -65,6 +75,141 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
+
+    private static void WriteGlobalScope(IReadOnlyList<string> targets)
+    {
+        AnsiConsole.MarkupLine("[bold]GLOBAL scope[/]");
+        if (targets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [grey]no global targets configured.[/]");
+            return;
+        }
+
+        foreach (string token in targets)
+        {
+            string reason = GlobalReason(token);
+            string label = TargetDisplayName(token);
+            AnsiConsole.MarkupLine($"  {Markup.Escape(label)}: {Markup.Escape(reason)}");
+        }
+    }
+
+    private static void WriteProjectScope(bool enabled, bool projectOverridesGlobal)
+    {
+        AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
+        if (enabled)
+        {
+            AnsiConsole.MarkupLine("  project overrides global");
+            AnsiConsole.MarkupLine("  arbiter.enabled: true");
+            return;
+        }
+
+        if (projectOverridesGlobal)
+        {
+            AnsiConsole.MarkupLine("  project does not override global");
+            return;
+        }
+
+        AnsiConsole.MarkupLine("  no project override");
+    }
+
+    private static string GlobalReason(string token)
+    {
+        if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+        {
+            return "enforced-global";
+        }
+
+        IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [target],
+            SquadDeploymentScope.Global);
+        return records.Count == 0 ? "enforced-global" : (records[0].Details ?? "enforced-global");
+    }
+
+    private static string TargetDisplayName(string token)
+    {
+        if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+        {
+            return token;
+        }
+
+        return target switch
+        {
+            SquadTarget.Claude => "Claude",
+            SquadTarget.Codex => "Codex",
+            SquadTarget.Copilot => "Copilot",
+            SquadTarget.Cursor => "Cursor",
+            SquadTarget.OpenCode => "OpenCode",
+            SquadTarget.Pi => "Pi",
+            SquadTarget.Warp => "Warp",
+            SquadTarget.ZCode => "ZCode",
+            SquadTarget.Kilo => "Kilo",
+            SquadTarget.Antigravity => "Antigravity",
+            SquadTarget.Factory => "Factory",
+            SquadTarget.Devin => "Devin",
+            SquadTarget.CommandCode => "CommandCode",
+            _ => token,
+        };
+    }
+
+    private static void CheckProjectHooks(string? projectRoot, bool enabled, DiagnosticReport report)
+    {
+        if (!enabled)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            projectRoot = Directory.GetCurrentDirectory();
+        }
+
+        if (HasProjectHooksInstalled(projectRoot))
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Project hooks: installed.");
+            return;
+        }
+
+        AnsiConsole.MarkupLine("  [yellow]warn[/] Project [bold]arbiter.enabled: true[/]: no project hooks installed; ungated by design.");
+        report.Add(new Diagnostic(
+            "KW-ARB-PROJECT-001",
+            Severity.Warning,
+            "Project enables Arbiter but has no project hooks installed; it remains ungated by design.",
+            "arbiter.enabled",
+            Hint: "Install the project hooks for the target harnesses or set arbiter.enabled to false."));
+    }
+
+    private static bool HasProjectHooksInstalled(string projectRoot)
+    {
+        try
+        {
+            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
+                null,
+                ArbiterCommandComposition.GetEnvironmentVariable);
+            SquadReceipt? receipt = stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
+            if (receipt is not null)
+            {
+                if (receipt.Files.Any(f => f.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase))
+                    || receipt.Blocks.Any(b => b.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(b.Target)))
+                {
+                    return true;
+                }
+            }
+
+            foreach (SquadTarget target in SquadTargetCatalog.All)
+            {
+                if (ArbiterUninstaller.HasDeployment(projectRoot, target, stateStore, SquadDeploymentScope.Project))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return false;
+        }
+
+        return false;
+    }
 
     private static void CheckKey(KyberWeaveConfig config, DiagnosticReport report)
     {

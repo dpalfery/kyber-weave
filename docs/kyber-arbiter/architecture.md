@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -129,8 +129,9 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 `returns-unobservable`, which allows and is logged; the in-flight overlap check still
 runs.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` for configuration and rules,
-`KW-ARB-KEY-001` for a missing key, `KW-ARB-LOG-001` for an un-ignored log directory,
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-011` and `KW-ARB-INSTALL-001`
+for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
+`KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
 `KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
 and `KW-ARB-HOOK-001` for a fail-closed hook error. See the
@@ -146,6 +147,17 @@ enabled. A host may tune a shipped rule's `enabled`, confidence/probability thre
 never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_API_KEY`,
 then the OS credential-store entry for the endpoint origin. Full shape and merge rules are
 in [configuration](../configuration.md).
+
+The install surface defaults to global scope. `kyber-weave arbiter install --target <t>`
+stores the target list in `~/.kyber-weave/kyber-weave.yml` under `arbiter.global.targets`,
+while `--project` opts into repository scope and `--path` is valid only with that flag. The
+project config still wins when it has `arbiter.enabled: true`: a global runtime hook emits
+`deferred-to-project`, leaves the ledger untouched, and the project decision remains the one
+that actually gates the dispatch. The user-level check remains the fallback when no project
+config is present, and the per-root ledger stays under `~/.kyber-weave/arbiter/projects/<root-key>/`.
+Declaring `arbiter.global` inside a repository configuration file is rejected as `KW-ARB-CONFIG-011`.
+Passing mutually exclusive scope flags (`--global` and `--project`) or `--path` without
+`--project` fails with client-input exit code `2` and `KW-ARB-INSTALL-001`.
 
 ## Provider and models
 
@@ -166,9 +178,9 @@ step-1 rule on the trigger answers `undecidable`.
 
 ## Harness facts
 
-One table covers every harness. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
+One table covers every harness at project scope. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
 OpenCode; Phase 2 adds Pi, Codex and Cursor; Phase 3 adds Kilo, Antigravity, Factory and
-Devin, and leaves Warp and ZCode fallback-only, served by [`serve`](#the-mcp-fallback-serve).
+Devin, and leaves Warp and ZCode fallback-only at project scope, served by [`serve`](#the-mcp-fallback-serve).
 The degradation records these outcomes produce are listed once, in the
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy).
 
@@ -191,11 +203,13 @@ Notes on the table:
 
 On Claude and Copilot in VS Code the caller is trusted, so gating does not depend on the
 marker — though Squad agents still write `KYBER-ARBITER: true` on every hooked dispatch,
-and `audit` reports a missing one. Hooks render only when the project's `arbiter.enabled`
-is true; a global install renders no hooks and records `arbiter-not-enforced`. Trust gates
-(Claude's workspace dialog, VS Code's trusted workspace plus `chat.useHooks`) are surfaced
-at install time — see the [runbook](runbook.md) and
-[Squad onboarding](../kyber-squad/onboarding.md).
+and `audit` reports a missing one. Hooks render at user scope by default (recording installed
+targets in `arbiter.global.targets`), or at project scope when `--project` is passed and
+`arbiter.enabled: true`. Project scope overrides global scope at runtime: when a project's
+`.kyber-weave/kyber-weave.yml` has `arbiter.enabled: true`, the global hook logs
+`deferred-to-project` and skips evaluation. Trust gates (Claude's workspace dialog, VS Code's
+trusted workspace plus `chat.useHooks`) are surfaced at install time — see the
+[runbook](runbook.md) and [Squad onboarding](../kyber-squad/onboarding.md).
 
 On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
@@ -286,10 +300,40 @@ still block. On Antigravity and Devin, post-dispatch outcomes are not delivered 
 they are recorded and reported by `audit`. No trust gate is documented for any Phase 3
 harness.
 
+### Verified global-hook matrix
+
+Research verified against vendor documentation governs the user-level global hook installation for each of the thirteen harnesses. Tiers distinguish enforced global hooks, project-only hooks, partial coverage, and MCP fallback (`kyber-weave-arbiter serve`).
+
+| Harness | Global hook location (verified) | Owned artifact | Layers merge or override? | Block-on-dispatch / trust notes | Tier and group | Evidence |
+|---|---|---|---|---|---|---|
+| Claude Code | `~/.claude/settings.json` (user-owned settings) | owned marked block inside the user's settings file | project `.claude/settings.json` also runs, but waits on workspace trust | `preToolUse` deny: yes | enforced-global | [Claude settings](https://code.claude.com/docs/en/settings.md) · [Claude hooks](https://code.claude.com/docs/en/hooks.md) |
+| Copilot CLI and Copilot in VS Code | `~/.copilot/hooks/kyber-arbiter.json` (or `$COPILOT_HOME/hooks`); JSON `version: 1` | owned file `~/.copilot/hooks/kyber-arbiter.json` | sources policy > user > project > plugins all run | `preToolUse` deny: yes; VS Code requires `chat.useHooks` and a trusted workspace (Preview). VS Code `runSubagent` tool dispatch unconfirmed by name → degraded `dispatch-unconfirmed` | enforced-global (CLI); enforced-global, degraded (VS Code) | [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference) · [VS Code agent hooks](https://code.visualstudio.com/docs/agent-customization/hooks) |
+| Codex | `~/.codex/hooks.json` or `~/.codex/config.toml` | owned block in `~/.codex/hooks.json` | all sources load, none replaces | one-time user trust review required; `[features] hooks=false` disables; blocking applies to tool hooks | enforced-global | [Codex hooks](https://developers.openai.com/codex/hooks) |
+| Cursor | `~/.cursor/hooks.json` | owned entries in `~/.cursor/hooks.json` | auto-reloads; global-vs-project precedence unstated | exit code 2 blocks; `preToolUse` supported | enforced-global | [Cursor hooks](https://cursor.com/docs/hooks) |
+| Antigravity | `~/.gemini/config/hooks.json`; project `.agents/hooks.json` | owned group in `~/.gemini/config/hooks.json` | no merge policy documented | `PreToolUse` decision `deny` | enforced-global | [Antigravity hooks](https://antigravity.google/docs/hooks.md) |
+| Factory | `~/.factory/hooks.json`; project `.factory/hooks.json` | owned block in `~/.factory/hooks.json` | `settings.json` `hooks` key read only if `hooks.json` is absent; existing renderer shadow handling preserved | per existing Factory hook renderer | enforced-global | [Factory hooks guide](https://docs.factory.ai/cli/configuration/hooks-guide) |
+| Devin | `~/.config/devin/config.json` (also reads Claude-compatible config) | owned block in the Devin global config | all sources load | block via decision / exit 2 | enforced-global | [Devin hooks](https://docs.devin.ai/cli/extensibility/hooks/overview) |
+| ZCode | global-only `~/.zcode/cli/config.json` with `hooks.enabled: true`; project hooks ignored | hooks are not rendered at project or global scope without manual harness flag enablement; falls back to `kyber-weave-arbiter serve` | n/a (global only) | `PreToolUse` deny: yes; hooks require manual `hooks.enabled: true` in harness config | fallback-only (degraded with fallback) | [ZCode hooks](https://zcode.z.ai/en/docs/hooks) |
+| CommandCode | `cmd.hooks({ beforeToolCall })` mods vs `~/.commandcode/settings.json` | owned file or owned block only | n/a | design check evaluated mods vs settings; block-on-dispatch unproven, so degraded with recorded reason `dispatch-unconfirmed` at both scopes; next step register `kyber-weave-arbiter serve` in CommandCode's MCP configuration | degraded (`dispatch-unconfirmed`) | [CommandCode settings](https://commandcode.ai/docs/settings) · [CommandCode mods](https://commandcode.ai/docs/mods) |
+| OpenCode | `~/.config/opencode/plugins/` (auto-loaded) | owned plugin file `~/.config/opencode/plugins/kyber-arbiter.ts` (ADR 0026 amendment) | arrays merge, none replace | before-hook blocks by throwing; `task` dispatch unconfirmed by name → degraded `dispatch-unconfirmed` | enforced-global, degraded | [OpenCode plugins](https://opencode.ai/v2/docs/plugins) |
+| Kilo | `~/.config/kilo/plugin/` (auto-registered) | owned plugin file `~/.config/kilo/plugin/kyber-arbiter.ts` (ADR 0026 amendment) | order: builtins > global config > global plugin dir > project config > project plugin dir | block by throwing; `KILO_PURE=1` skips external plugins; `task` dispatch unconfirmed → degraded `dispatch-unconfirmed` | enforced-global, degraded | [Kilo plugins](https://kilo.ai/docs/automate/extending/plugins) |
+| Pi | `~/.pi/agent/extensions/` | owned extension file `~/.pi/agent/extensions/kyber-arbiter.ts` under `SquadGlobalRoots` (`~/.pi/agent`) rendered only from the Pi body (`spawnSync` + `pi.on`), never `ArbiterPluginShim` | n/a | extension loader (`loader.js:486`) requires bare-function default export; tier partial until block-on-dispatch is proven, MCP fallback otherwise | partial | [Pi coding agent](https://github.com/gotgenes/pi-coding-agent) |
+| Warp | none — no hooks | nothing written; user registers `kyber-weave-arbiter serve` in `~/.warp/.mcp.json` | n/a | MCP fallback only | fallback-only | [Warp documentation](https://docs.warp.dev) |
+
+### Install output table
+
+`kyber-weave arbiter install` prints a structured table for every target:
+- **Tier**: `enforced-global`, `enforced-project`, `partial`, or `fallback-only`.
+- **Written path & artifact**: the exact filesystem path and artifact type (own file, owned block, plugin file, or nothing).
+- **Reason & next step**: for unenforced or degraded targets, the reason code (`fallback-only`, `project-only`, `dispatch-unconfirmed`, `hooks-disabled-by-harness`) and actionable next step (e.g. register `kyber-weave-arbiter serve` in MCP config).
+- **Off-switches & trust steps**: harness-side trust requirements (e.g. Codex `/hooks` trust review, `[features] hooks=false`; Kilo `KILO_PURE=1`; VS Code `chat.useHooks` and trusted workspace; ZCode `hooks.enabled: true`; Claude workspace trust dialog).
+
+`--dry-run` prints the identical table with "would write" and makes zero changes on disk.
+
 ## The MCP fallback (`serve`)
 
 `kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
-for the harnesses without hooks — Warp and ZCode. Its server key is **`kw-arbiter`**
+for harnesses without hooks or with degraded dispatch (such as Warp, CommandCode, or ZCode). Its server key is **`kw-arbiter`**
 (`McpServerNames.Arbiter`), which is the name a client configuration declares and the name a
 grant is built from; the executable and its argv are unchanged. Three tools:
 
@@ -314,7 +358,7 @@ fallback: the
 `decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
 and denied for the other ten, and on Warp and ZCode an `allow` lowers to the
 `kw-arbiter` server alone. The setup step — Squad writes no MCP configuration for
-either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-zcode).
+either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-commandcode-and-project-scope-zcode).
 
 ## Related
 

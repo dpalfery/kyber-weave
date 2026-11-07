@@ -13,7 +13,8 @@ public enum SquadHookBlockFormat
     Codex,
     Factory,
     Devin,
-    Antigravity
+    Antigravity,
+    Claude,
 }
 
 /// <summary>One managed entry written by a splice: its JSON pointer and canonical digest.</summary>
@@ -66,6 +67,7 @@ public static class SquadHookJsonBlock
             SquadHookBlockFormat.Factory => ".factory/hooks.json",
             SquadHookBlockFormat.Devin => ".devin/hooks.v1.json",
             SquadHookBlockFormat.Antigravity => ".agents/hooks.json",
+            SquadHookBlockFormat.Claude => "settings.json",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
 
@@ -88,8 +90,15 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude)
         {
+            if (obj["hooks"] is JsonArray cursorHooks)
+            {
+                return cursorHooks.Count > 0
+                    && cursorHooks.All(hook => hook is JsonObject hookObj
+                        && HasSignature(hookObj["command"], Harness(format)));
+            }
+
             return HasSignature(obj["command"], Harness(format));
         }
 
@@ -207,7 +216,7 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        JsonObject? parent = format == SquadHookBlockFormat.Cursor || format == SquadHookBlockFormat.Codex
+        JsonObject? parent = format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude
             ? root["hooks"] as JsonObject
             : root;
         if (parent is null)
@@ -452,7 +461,7 @@ public static class SquadHookJsonBlock
     {
         return format switch
         {
-            SquadHookBlockFormat.Cursor => CursorArrays(root, create),
+            SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude => CursorArrays(root, create),
             SquadHookBlockFormat.Codex => PrefixedArrays(root, "/hooks", create),
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(root, create),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
@@ -461,11 +470,42 @@ public static class SquadHookJsonBlock
 
     private static List<(string Pointer, JsonArray Array)> CursorArrays(JsonObject root, bool create)
     {
-        JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
-        List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "preToolUse", "postToolUse" })
+        bool hasRootArrays = root.ContainsKey("preToolUse") || root.ContainsKey("PreToolUse")
+            || root.ContainsKey("postToolUse") || root.ContainsKey("PostToolUse");
+        JsonObject hooks;
+        string pointerPrefix;
+        if (root["hooks"] is JsonObject nested)
         {
+            hooks = nested;
+            pointerPrefix = "/hooks/";
+        }
+        else if (hasRootArrays)
+        {
+            hooks = root;
+            pointerPrefix = "/";
+        }
+        else if (create)
+        {
+            hooks = EnsureObject(root, "hooks");
+            pointerPrefix = "/hooks/";
+        }
+        else
+        {
+            hooks = new JsonObject();
+            pointerPrefix = "/hooks/";
+        }
+
+        List<(string Pointer, JsonArray Array)> containers = [];
+        foreach ((string lowerName, string pascalName) in new[] { ("preToolUse", "PreToolUse"), ("postToolUse", "PostToolUse") })
+        {
+            string name = hooks.ContainsKey(pascalName) ? pascalName : lowerName;
             JsonArray? array = hooks[name] as JsonArray;
+            if (array is null && hooks[name == lowerName ? pascalName : lowerName] is JsonArray alternate)
+            {
+                name = name == lowerName ? pascalName : lowerName;
+                array = alternate;
+            }
+
             if (array is null)
             {
                 if (!create)
@@ -482,7 +522,7 @@ public static class SquadHookJsonBlock
                 hooks[name] = array;
             }
 
-            containers.Add(($"/hooks/{name}", array));
+            containers.Add(($"{pointerPrefix}{name}", array));
         }
 
         return containers;
@@ -562,7 +602,7 @@ public static class SquadHookJsonBlock
         format switch
         {
             SquadHookBlockFormat.Cursor => new JsonObject { ["version"] = 1, ["hooks"] = new JsonObject() },
-            SquadHookBlockFormat.Codex => new JsonObject { ["hooks"] = new JsonObject() },
+            SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude => new JsonObject { ["hooks"] = new JsonObject() },
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin or SquadHookBlockFormat.Antigravity => new JsonObject(),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
@@ -579,9 +619,9 @@ public static class SquadHookJsonBlock
             throw new InvalidOperationException("A managed hook entry must be a JSON object.");
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format == SquadHookBlockFormat.Cursor && obj["hooks"] is null)
         {
-            var projected = new JsonObject();
+            JsonObject projected = new();
             foreach (string field in new[] { "command", "matcher", "timeout", "failClosed" })
             {
                 if (obj[field] is JsonNode value)
@@ -671,19 +711,38 @@ public static class SquadHookJsonBlock
         return current;
     }
 
-    private static bool HasSignature(JsonNode? node, string harness) =>
-        node is JsonValue value
-        && value.TryGetValue<string>(out string? command)
-        && command is not null
-        // Exact equality: a user hook whose command merely starts with our prefix
-        // (`--harness factory-evil`, `--harness factory --custom-flag`) is not ours,
-        // and splicing or removing it would silently delete the user's entry.
-        && string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal);
+    private static bool HasSignature(JsonNode? node, string harness)
+    {
+        if (node is not JsonValue value || !value.TryGetValue<string>(out string? command) || command is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
+            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        int hookIndex = command.IndexOf("kyber-weave-arbiter hook", StringComparison.Ordinal);
+        if (hookIndex >= 0)
+        {
+            string remainder = command[(hookIndex + "kyber-weave-arbiter hook".Length)..].Trim();
+            if (string.Equals(remainder, "--harness " + harness, StringComparison.Ordinal)
+                || string.Equals(remainder, "--harness " + harness + " --scope global", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",
+            SquadHookBlockFormat.Claude => "claude",
             SquadHookBlockFormat.Codex => "codex",
             SquadHookBlockFormat.Factory => "factory",
             SquadHookBlockFormat.Devin => "devin",

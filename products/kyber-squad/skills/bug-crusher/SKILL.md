@@ -40,7 +40,7 @@ This applies where a human reads the text and nowhere else. The investigator's v
 
 When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — run `kyber-weave doctor --check` before anything else. It is read-only. Record one line in the run record: `run-start doctor: <exit> <check ids>`.
 
-**Warn and continue.** A failure is a line in the record, never a stop, and nothing is ever installed. Exit 1 with `codegraph.index` and the binary present: run `kyber-weave doctor --provision` once (repository-local init is authorised by the root `AGENTS.md`). Exit 3, the `codegraph` executable is missing: in supervised mode ask the user, quoting the printed `fix:` line; in autonomous mode record it as pending human review. Do not install it in either mode. When the repository has no governed docs, skip this step entirely.
+**Warn and continue.** A failure is a line in the record, never a stop, and nothing is ever installed. Exit 1 with `codegraph.index` and the binary present: run `kyber-weave doctor --provision` immediately (repository-local init is already authorised by the root `AGENTS.md`; do not ask for approval before that step). Exit 3, the `codegraph` executable is missing: in supervised mode tell the user to install it, quoting the printed `fix:` line; in autonomous mode record it as pending human review. Do not install it in either mode. When the repository has no governed docs, skip this step entirely.
 
 ## 1. Investigate — always first, always delegated
 

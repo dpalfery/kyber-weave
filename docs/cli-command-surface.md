@@ -86,9 +86,9 @@ kyberdash --version
 `kyber-weave-mcp`, an installed `kyber-weave-arbiter`, the installed `kyberdash`, and an installed KyberDash tray — after
 SHA-256 verification. It delegates the tray step to `kyberdash menubar --update`. It does not
 wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. After replacing
-binaries it re-renders the arbiter hooks/scripts for each registered project with
-`arbiter.enabled` (reusing the Squad update path; `--no-arbiter` or an absent arbiter skips
-it). After the binaries
+binaries it re-renders the arbiter hooks/scripts for global targets registered under
+`arbiter.global.targets` and each registered project with `arbiter.enabled` (reusing the
+Squad update path; `--no-arbiter` or an absent arbiter skips it). After the binaries
 commit, it reconciles KyberDash in one run: `kyberdash engine ensure --if-running`, the tray
 relaunch when needed, then `kyberdash kyber capture plugin install --harness opencode --preserve
 --if-installed` and `kyberdash kyber capture plugin install --harness factory --preserve
@@ -277,8 +277,8 @@ Owned by the [Kyber Arbiter runbook](kyber-arbiter/runbook.md), with the engine 
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`arbiter install`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--provider <KIND>` (`none` \| `systemone`; empty resolves to `none`), `--arbiter-key <KEY>`, `--key-stdin`, `--dry-run`, `--yes`, `-g\|--global` (rejected) | One-command install: ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets `arbiter.enabled: true` non-destructively, renders the target through the existing Squad install pipeline, applies the provider, stores the key in the OS credential store, verifies, and prints the target's trust step. `--target` is validated through `SquadTargetCatalog`; `--global` is rejected (exit `2`). `--arbiter-key` prints an argv/shell-history warning; `--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. Idempotent: a second run is a no-op (exit `0`). |
-| [`arbiter uninstall`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--remove-key` | Remove only Squad-owned arbiter files/blocks for the target (owned plugin/extension files, owned hook blocks). `--remove-key` also deletes the stored key; without it the key is untouched. |
+| [`arbiter install`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--provider <KIND>` (`none` \| `systemone`; empty resolves to `none`), `--arbiter-key <KEY>`, `--key-stdin`, `--dry-run`, `--yes`, `-g\|--global`, `--project`, `--path <PATH>` (project only) | One-command install: defaults to global scope (`~/.kyber-weave/kyber-weave.yml` and `arbiter.global.targets`). It sets `arbiter.enabled: true` non-destructively, renders the target through the existing Squad install pipeline, applies the provider, stores the key in the OS credential store, verifies, and prints the target's trust step. `--project` opts into repo scope, `--path` is valid only with it, and `--global --project` exits `2` with `KW-ARB-INSTALL-001`. `--arbiter-key` prints an argv/shell-history warning; `--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. Idempotent: a second run is a no-op (exit `0`). |
+| [`arbiter uninstall`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `-g\|--global`, `--project`, `--path <PATH>` (project only), `--remove-key` | Remove only Squad-owned arbiter files/blocks for the target (owned plugin/extension files, owned hook blocks). Defaults to user/global scope (removes only global-receipt-owned files/blocks and target from `arbiter.global.targets`); `--project` opts into repo scope (`--path` valid only with it). `--remove-key` deletes the stored key and warns when another scope still shares the key. |
 | [`arbiter setup`](kyber-arbiter/runbook.md#setup-doctor-audit) | provider choice; `--key-stdin` | Choose provider (`none`, TypeSafe cloud, local Ollama); stores the key in the OS credential store. |
 | [`arbiter status`](kyber-arbiter/runbook.md#setup-doctor-audit) | — | Show provider, model, endpoint origin, whether a key resolves — never the value. |
 | [`arbiter doctor`](kyber-arbiter/runbook.md#setup-doctor-audit) | — | Warn on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries. |
@@ -349,7 +349,7 @@ Owned by [Updating](install.md#updating).
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for registered projects with `arbiter.enabled` (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. |
+| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` and registered projects with `arbiter.enabled` (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. |
 
 ### `doctor` — repository documentation tooling
 
@@ -467,7 +467,7 @@ risk. The three rules below mirror the contract in
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
-| `arbiter install`, `arbiter uninstall` | `2` for a client-input error (missing or unknown `--target`, `--global` on install, a keyed provider with no key — `KW-ARB-KEY-001`, an invalid `--provider`, a declined confirmation), `1` for an operational failure (unreadable/unwritable config or state, failed Squad render, failed verification); `0` for success or an idempotent no-op |
+| `arbiter install`, `arbiter uninstall` | `2` for a client-input error (missing or unknown `--target`, combining `--global` and `--project` or `--path` without `--project` — `KW-ARB-INSTALL-001`, a keyed provider with no key — `KW-ARB-KEY-001`, an invalid `--provider`, a declined confirmation), `1` for an operational failure (unreadable/unwritable config or state, failed Squad render, failed verification); `0` for success or an idempotent no-op |
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |

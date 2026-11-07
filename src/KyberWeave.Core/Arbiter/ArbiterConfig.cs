@@ -46,11 +46,20 @@ public sealed record ArbiterFileKindMapEntry(IReadOnlyList<string> Patterns, str
 /// <param name="NotApplicableWhenAllMatch">Changed paths all matching these skip the lens.</param>
 public sealed record ArbiterLensPathEntry(string Lens, IReadOnlyList<string> NotApplicableWhenAllMatch);
 
+/// <summary>Global scope settings under <c>arbiter.global</c>.</summary>
+public sealed record ArbiterGlobalConfig(IReadOnlyList<string> Targets);
+
 /// <summary>The <c>arbiter:</c> host configuration.</summary>
 public sealed record ArbiterConfig
 {
     /// <summary>Whether the Arbiter enforces anything. Squad renders hooks only when true.</summary>
     public bool Enabled { get; init; }
+
+    /// <summary>Whether <c>arbiter.enabled</c> was explicitly set in the configuration.</summary>
+    public bool? ExplicitlyEnabled { get; init; }
+
+    /// <summary>Global scope configuration.</summary>
+    public ArbiterGlobalConfig Global { get; init; } = new([]);
 
     /// <summary>Non-secret provider configuration.</summary>
     public ArbiterProviderConfig Provider { get; init; } = ArbiterProviderConfig.DefaultNone;

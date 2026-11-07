@@ -17,6 +17,16 @@ public sealed class ArbiterInstallSettings : AnalysisSettings
     [Description("Harness target to install Arbiter hooks for (for example kilo).")]
     public string? Target { get; set; }
 
+    /// <summary>The project-root override for an explicit project install.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("Project root to install into; valid only with --project.")]
+    public string? PathOption { get; set; }
+
+    /// <summary>Opt into the project-scoped install; the default is the global user-home scope.</summary>
+    [CommandOption("--project")]
+    [Description("Install into the project root instead of the global user-home scope.")]
+    public bool Project { get; set; }
+
     /// <summary>The provider kind: none or systemone. An empty value resolves to none.</summary>
     [CommandOption("--provider <KIND>")]
     [Description("Provider kind: none or systemone. An empty value resolves to none.")]
@@ -32,9 +42,9 @@ public sealed class ArbiterInstallSettings : AnalysisSettings
     [Description("Read the TypeSafe key from stdin instead of a masked prompt.")]
     public bool KeyStdin { get; set; }
 
-    /// <summary>Rejected: the install is project-scoped and never writes to the home tree.</summary>
+    /// <summary>Target the per-user global scope rather than the project root.</summary>
     [CommandOption("-g|--global")]
-    [Description("Not supported for arbiter install, which is always project-scoped.")]
+    [Description("Install into the global user-home scope. This is the default; it cannot be combined with --project.")]
     public bool Global { get; set; }
 
     /// <summary>Preview the planned changes without writing anything.</summary>

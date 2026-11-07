@@ -5,9 +5,17 @@ internal sealed class ArbiterYamlSection
 {
     public bool? Enabled { get; set; }
 
+    public ArbiterGlobalYaml? Global { get; set; }
+
     public ArbiterProviderYaml? Provider { get; set; }
 
     public List<ArbiterRuleYaml>? Rules { get; set; }
+}
+
+/// <summary>The <c>arbiter.global</c> mapping under the user-level config.</summary>
+internal sealed class ArbiterGlobalYaml
+{
+    public List<string>? Targets { get; set; }
 }
 
 /// <summary>The <c>arbiter.provider</c> mapping. Non-secret: the key never appears here.</summary>

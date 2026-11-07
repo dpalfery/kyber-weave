@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -1068,25 +1068,33 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
 
 ## Arbiter hooks
 
-`kyber-weave arbiter install --target <t>` is the one-command path: it ensures
-`.kyber-weave/kyber-weave.yml`, sets `arbiter.enabled: true` non-destructively, and renders
-[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks alongside the agents through
-the existing Squad install pipeline, then applies the provider, stores the key, verifies, and
-prints the trust step. `squad install` and `squad update` render the same hooks when the
-project's `arbiter.enabled` is true. `--provider ""` means `none`; a second install is an
-idempotent no-op.
-Ten targets are hooked: `claude`, `copilot`, `opencode`, `pi`, `codex`, `cursor`, `kilo`,
-`antigravity`, `factory`, and `devin`. `warp` and `zcode` render no hooks — they are
-fallback-only, and any global-scope install (which has no project configuration to read)
-renders no hooks either — and record `arbiter-not-enforced` in the receipt.
+`kyber-weave arbiter install --target <t>` is the one-command path: by default it writes in
+user/global scope, updates `~/.kyber-weave/kyber-weave.yml`, records the target in
+`arbiter.global.targets`, sets `arbiter.enabled: true` non-destructively, and renders
+[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks through the existing Squad
+install pipeline. Use `--project` to opt into repository scope and `--path <PATH>` only with
+that flag. `squad install` and `squad update` render the same hooks when the project's
+`arbiter.enabled` is true. `--provider ""` means `none`; a second install is an idempotent
+no-op. The runtime `--scope global` hook resolves the project config first; when the project
+has `arbiter.enabled: true` it logs `deferred-to-project`, writes no ledger entry, and lets the
+project decision win.
+
+Ten targets are hooked in user/global scope: `claude`, `copilot`, `opencode`, `pi`, `codex`,
+`cursor`, `kilo`, `antigravity`, `factory`, and `devin`. `commandcode` operates under degraded
+trust (`dispatch-unconfirmed`). `warp` and `zcode` render no hooks by default and are classed as
+fallback-only (register `kw-arbiter` via `kyber-weave-arbiter serve` in MCP settings; ZCode is
+fallback-only at both project and global scope because hooks are not rendered without manual
+harness flag enablement `hooks.enabled: true` in `~/.zcode/cli/config.json`).
 
 | Target | What is rendered |
 |---|---|
-| `kilo` | The owned plugin shim `.kilo/plugin/kyber-arbiter.ts`. The shim resolves and verifies the repo root from its own plugin location (nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds it into the spawn and envelope `cwd`, and blocks clearly when none resolves. |
-| `antigravity` | Squad's owned top-level group `kyber-arbiter` in `.agents/hooks.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, and returns are unobservable — completion checks answer `returns-unobservable` and allow. Each rendered agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
-| `factory` | An owned block in `.factory/hooks.json` — unless `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, in which case the block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded: Factory reads that `settings.json` key only while `hooks.json` is absent, and rendering the file would silently disable the user's hooks. The fix, printed with the record: move the user's hooks into `.factory/hooks.json`, then run `squad update`. |
-| `devin` | An owned block in `.devin/hooks.v1.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, so each dispatcher agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
-| `warp`, `zcode` | No hooks. Register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in the harness's own MCP configuration — Squad writes no MCP configuration for either — and until then only the advisory marker fallback enforces there. |
+| `kilo` | The owned plugin shim `.kilo/plugin/kyber-arbiter.ts` (project) or `~/.config/kilo/plugin/kyber-arbiter.ts` (global). The shim resolves and verifies the repo root from its own plugin location (nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds it into the spawn and envelope `cwd`, and blocks clearly when none resolves. |
+| `antigravity` | Squad's owned top-level group `kyber-arbiter` in `.agents/hooks.json` (project) or `~/.gemini/config/hooks.json` (global). Post-dispatch outcomes are logged and reported by `audit`, never delivered, and returns are unobservable — completion checks answer `returns-unobservable` and allow. Each rendered agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
+| `factory` | An owned block in `.factory/hooks.json` (project) or `~/.factory/hooks.json` (global) — unless `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, in which case the block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded: Factory reads that `settings.json` key only while `hooks.json` is absent, and rendering the file would silently disable the user's hooks. The fix, printed with the record: move the user's hooks into `.factory/hooks.json`, then run `squad update`. |
+| `devin` | An owned block in `.devin/hooks.v1.json` (project) or `~/.config/devin/config.json` (global). Post-dispatch outcomes are logged and reported by `audit`, never delivered, so each dispatcher agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
+| `zcode` | Classed as fallback-only (degraded with fallback): hooks are not rendered at project or global scope without manual harness flag enablement (`hooks.enabled: true` in `~/.zcode/cli/config.json`). Register `kw-arbiter` via `kyber-weave-arbiter serve --repo-root <root>` in MCP configuration. |
+| `commandcode` | Operates under degraded trust (`dispatch-unconfirmed`); register `kw-arbiter` MCP server (`kyber-weave-arbiter serve --repo-root <root>`) as next step. |
+| `warp` | No hooks: MCP fallback only. Register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in Warp's configuration (`~/.warp/.mcp.json`). Squad writes no MCP configuration for Warp, so until registered only the advisory marker fallback enforces there. |
 
 On `codex`, `cursor`, `antigravity`, `factory`, and `devin` the hooks live in a file the
 user also owns — or, on Antigravity, beside groups the user owns. Squad splices its own
@@ -1094,8 +1102,8 @@ marked entries into those files
 ([ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
 entry's location and digest in `kyber-squad.receipt/v3`; the user's entries are left in
 place. A hand edit inside Squad's entries is reported by `squad status` and `squad doctor`
-as drift, naming the file and the container. On `pi` and `kilo` the hook is an owned
-extension/plugin file; the Pi file needs project trust to load (see below).
+as drift, naming the file and the container. On `pi`, `kilo`, and `opencode` the hook is an owned
+extension/plugin file (ADR 0026 amendment); the Pi file needs project trust to load (see below).
 
 A hook that never runs enforces nothing, so grant the trust gate at install time — `arbiter
 install`, `squad install`, and `squad update` print the applicable step:
@@ -1104,17 +1112,19 @@ install`, `squad install`, and `squad update` print the applicable step:
 |---|---|
 | Claude | Accept the workspace trust dialog. `claude -p` sessions never count and stay unenforced. |
 | Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
-| Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
+| Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. Global hook (`~/.codex/hooks.json`) requires a one-time user trust review. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
-| Warp, ZCode | No hooks to trust. Setup instead: register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
-| Cursor, Copilot CLI, OpenCode | No documented trust gate. |
+| ZCode | Ensure `hooks.enabled: true` is set in `~/.zcode/cli/config.json`. Reported as `hooks-disabled-by-harness` when missing or false; otherwise uses MCP fallback `kyber-weave-arbiter serve`. |
+| CommandCode | Degraded trust (`dispatch-unconfirmed`). Register `kw-arbiter` MCP server (`kyber-weave-arbiter serve --repo-root <root>`) in MCP configuration. |
+| Warp | No hooks to trust. Setup instead: register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
+| Cursor, Copilot CLI, OpenCode, Kilo | No documented trust gate. Kilo supports `KILO_PURE=1` to disable external plugins. |
 
 Configure the provider and key per user with `kyber-weave arbiter install --target <t>
 --provider <kind> (--arbiter-key <key> | --key-stdin)` — or `kyber-weave arbiter setup` for
 the provider/key step alone — and diagnose
 the whole installation — including the `kyber-weave-arbiter --version` probe — with
 `kyber-weave arbiter doctor` and `kyber-weave squad doctor`. `arbiter uninstall --target <t>`
-removes only Squad-owned arbiter files/blocks; add `--remove-key` to delete the stored key.
+removes only Squad-owned arbiter files/blocks in global scope by default (or project scope with `--project`); add `--remove-key` to delete the stored key.
 
 ---
 
@@ -1391,10 +1401,7 @@ repository that never set the flag never publishes the property, so nothing to u
 ```bash
 # Build APM distribution zip
 kyber-weave squad pack --format apm --out ./artifacts
-
-# Build Agent Plugins v1 zip (skills + MCP only)
 kyber-weave squad pack --format plugins --out ./artifacts
-
 # Build both distribution artifacts
 kyber-weave squad pack --format all --out ./artifacts
 ```

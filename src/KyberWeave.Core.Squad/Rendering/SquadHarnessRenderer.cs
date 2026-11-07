@@ -239,11 +239,12 @@ internal sealed class SquadHarnessRenderContext
 
     /// <summary>
     /// The Arbiter wiring to render, or null. A null or disabled wiring renders byte for byte as
-    /// before the field existed, and global scope has no project configuration to enforce from
-    /// (Req 22.4).
+    /// before the field existed. An enabled request stays visible at global scope so the render
+    /// can lower the request's global-scope command-line context without changing the byte-wise
+    /// output of an omitted or disabled wiring.
     /// </summary>
     public SquadArbiterWiring? EnabledArbiter =>
-        Request.Arbiter is { Enabled: true } && Scope == SquadDeploymentScope.Project ? Request.Arbiter : null;
+        Request.Arbiter is { Enabled: true } ? Request.Arbiter : null;
 
     /// <summary>
     /// The harness's own per-render state, created once on first use: a renderer is shared across
@@ -500,12 +501,18 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
-    public void AddArbiterPluginShim(string relativePath)
+    public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
     {
-        if (EnabledArbiter is not null)
+        if (EnabledArbiter is null)
         {
-            Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token)));
+            return;
         }
+
+        string relativePath = Scope == SquadDeploymentScope.Global
+            ? globalRelativePath ?? projectRelativePath
+            : projectRelativePath;
+
+        Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token, Scope)));
     }
 
     /// <summary>
@@ -520,10 +527,14 @@ internal sealed class SquadHarnessRenderContext
             return;
         }
 
-        string commandLine = ArbiterHookWiring.HookCommandLine(Token);
+        string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
+        string relativePath = Scope == SquadDeploymentScope.Global
+            && SquadHookJsonBlock.RelativePath(format).StartsWith("." + Token + "/", StringComparison.OrdinalIgnoreCase)
+            ? SquadHookJsonBlock.RelativePath(format)[(Token.Length + 2)..]
+            : SquadHookJsonBlock.RelativePath(format);
         Blocks.Add(new SquadRenderedBlock(
             Token,
-            SquadHookJsonBlock.RelativePath(format),
+            relativePath,
             format,
             [
                 new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),

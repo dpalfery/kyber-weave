@@ -11,6 +11,7 @@ namespace KyberWeave.Tests;
 /// <c>rules</c>, <c>plan</c>, <c>eval</c>, <c>audit</c>) and their exit codes.
 /// RED: the <c>arbiter</c> branch is not registered and the commands do not exist yet.
 /// </summary>
+[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCliCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

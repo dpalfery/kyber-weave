@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -187,6 +188,47 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     {
     }
 
+    private protected override void RenderArbiter(SquadHarnessRenderContext context)
+    {
+        if (context.EnabledArbiter is not { } arbiter || context.Scope != SquadDeploymentScope.Global)
+        {
+            return;
+        }
+
+        context.Blocks.Add(new SquadRenderedBlock(
+            "claude",
+            "settings.json",
+            SquadHookBlockFormat.Claude,
+            [
+                new SquadRenderedBlockEntry(
+                    "PreToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = "^(Agent|Task)$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    }),
+                new SquadRenderedBlockEntry(
+                    "PostToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = "^(Agent|Task)$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    })
+            ]));
+    }
+
     private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
         ArbiterPlan arbiter = context.GetOrCreateState(ArbiterPlan.Create);
@@ -218,6 +260,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
             context.EnabledArbiter,
+            context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets);
@@ -252,6 +295,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
             context.EnabledArbiter,
+            context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets);
@@ -280,11 +324,12 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     private static Dictionary<string, object?>? BuildArbiterHooks(
         SquadAgent agent,
         SquadArbiterWiring? arbiter,
+        SquadDeploymentScope scope,
         IReadOnlySet<string> dispatcherAgents,
         IReadOnlySet<string> guardedAgents,
         IReadOnlySet<string> dispatchTargets)
     {
-        if (arbiter is null || !arbiter.Enabled)
+        if (arbiter is null || !arbiter.Enabled || scope == SquadDeploymentScope.Global)
         {
             return null;
         }
@@ -298,7 +343,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             return null;
         }
 
-        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name);
+        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope);
 
         Dictionary<string, object?> HookEntry(string matcher) => new(StringComparer.Ordinal)
         {

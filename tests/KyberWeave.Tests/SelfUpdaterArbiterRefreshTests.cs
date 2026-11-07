@@ -4,9 +4,12 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -174,6 +177,102 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             log,
             line => line.Contains("0 project(s)", StringComparison.Ordinal)
                     && line.Contains("1 failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A user-level global target list is part of the update contract: a previously installed
+    /// global hook is refreshed so it points at the current Arbiter binary instead of a stale one.
+    /// </summary>
+    [Fact]
+    public void Refresh_RefreshesExistingGlobalArbiterHookListedInUserConfig()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
+
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Update-time refresh follows the user config gate: an already-installed global hook is refreshed
+    /// only for harnesses named in <c>arbiter.global.targets</c>, and it never rewrites foreign bytes.
+    /// </summary>
+    [Fact]
+    public void Update_RefreshesOnlyListedGlobalArbiterHooksWithoutTouchingForeignBytes()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
+
+        string foreign = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor), "foreign.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(foreign)!);
+        File.WriteAllText(foreign, "{\"user\":\"keep-me\"}");
+
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: new ArbiterHookRefresher(log.Add, environment));
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+        Assert.Equal("{\"user\":\"keep-me\"}", File.ReadAllText(foreign), StringComparer.Ordinal);
+    }
+
+    private static string WriteLegacyGlobalHook(string home, SquadTarget target, string legacyCommand)
+    {
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(target), "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+
+        string token = SquadTargetCatalog.GetToken(target);
+        string content = $$"""
+            {
+              "preToolUse": [
+                {
+                  "command": "{{legacyCommand}} --harness {{token}} --scope global",
+                  "matcher": "Task",
+                  "timeout": 5,
+                  "failClosed": true
+                }
+              ],
+              "postToolUse": []
+            }
+            """;
+
+        File.WriteAllText(hookPath, content);
+        return hookPath;
     }
 
     private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false)

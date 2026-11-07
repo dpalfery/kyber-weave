@@ -259,6 +259,31 @@ public sealed class HostConfigYamlTests
     }
 
     /// <summary>
+    /// Adds <c>arbiter.global.targets</c> as a user-level sequence without disturbing the rest of the file.
+    /// </summary>
+    [Fact]
+    public void AddsArbiterGlobalTargetsWithoutDuplicatingExistingTargets()
+    {
+        const string yaml =
+            """
+            # Hand-maintained host configuration
+            arbiter:
+              enabled: true
+              provider:
+                kind: systemone
+            """;
+
+        string result = HostConfigYaml.WithArbiterGlobalTargets(yaml, ["harness-token-01", "harness-token-02"]);
+
+        Assert.Contains("global:", result, StringComparison.Ordinal);
+        Assert.Contains("targets:", result, StringComparison.Ordinal);
+        Assert.Contains("- 'harness-token-01'", result, StringComparison.Ordinal);
+        Assert.Contains("- 'harness-token-02'", result, StringComparison.Ordinal);
+        Assert.Contains("# Hand-maintained host configuration", result, StringComparison.Ordinal);
+        Assert.Contains("kind: systemone", result, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The technologies edit reads the same line endings the configuration was written with. A
     /// lone-CR file is one long line to a <c>'\n'</c> split, so the <c>ontology:</c> key goes
     /// unfound and a second block is appended — two <c>ontology</c> keys, which YAML refuses to

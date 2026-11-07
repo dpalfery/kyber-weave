@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
@@ -19,8 +20,10 @@ namespace KyberWeave.Core.Doctor;
 ///         first error line, truncated, and the environment is never read or shown.
 ///     </para>
 /// </remarks>
-public static class McpLiveProbe
+public static partial class McpLiveProbe
 {
+    [GeneratedRegex(@"\s+rev=\S+(?:\s+dirty=\S+)?(?:\s+documents=\d+)?$")]
+    private static partial Regex TrailingMetadataRegex();
     /// <summary>The MCP protocol revision the probe offers. The server answers with the revision it supports.</summary>
     private const string ProtocolVersion = "2024-11-05";
 
@@ -186,6 +189,13 @@ public static class McpLiveProbe
                 "kyber-weave update");
 
         string served = FirstLine(text[(index + ProvenancePrefix.Length)..]).Trim();
+
+        // The provenance line carries metadata after the root, e.g. `root=<path> rev=<rev> dirty=<...> documents=<n>`.
+        // Strip the metadata while preserving spaces inside the real path, then compare the bare root to the resolved repo.
+        Match metadataMatch = TrailingMetadataRegex().Match(served);
+        if (metadataMatch.Success)
+            served = served[..metadataMatch.Index].Trim();
+
         bool matches = served.Length > 0 && SamePath(served, root);
         return matches
             ? new DoctorCheck("mcp.root", true, "server answers for this repository", null)

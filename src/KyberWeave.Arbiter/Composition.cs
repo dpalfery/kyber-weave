@@ -1,7 +1,9 @@
 using System.Reflection;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Arbiter;
 
@@ -51,6 +53,25 @@ public static class Composition
         {
             string? harness = OptionValue(args, "--harness");
             string? caller = OptionValue(args, "--caller");
+            HookScope scope = HookScope.Project;
+            string? home = OptionValue(args, "--home");
+
+            string? scopeToken = OptionValue(args, "--scope");
+            if (!string.IsNullOrWhiteSpace(scopeToken))
+            {
+                if (string.Equals(scopeToken, "global", StringComparison.OrdinalIgnoreCase))
+                {
+                    scope = HookScope.Global;
+                }
+                else if (!string.Equals(scopeToken, "project", StringComparison.OrdinalIgnoreCase))
+                {
+                    await stderr.WriteLineAsync(
+                        "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] [--scope project|global] [--home <path>].")
+                        .ConfigureAwait(false);
+                    return 2;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(harness))
             {
                 await stderr.WriteLineAsync(
@@ -63,7 +84,7 @@ public static class Composition
             {
                 string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
                 HookCommand command = (commandFactory ?? CreateDefault)(stderr);
-                return command.Run(harness, caller, stdinText, stdout, stderr);
+                return command.Run(harness, caller, stdinText, stdout, stderr, scope, home);
             }
             catch (Exception ex)
             {
@@ -173,9 +194,49 @@ public static class Composition
     /// malformed <c>.kyber-weave/kyber-weave.yml</c> is an internal error carrying
     /// <c>KW-ARB-HOOK-001</c>: the host fails closed on classified events.
     /// </summary>
-    internal static KyberWeaveConfig LoadHostConfig(string repoRoot)
+    internal static KyberWeaveConfig LoadHostConfig(string repoRoot) =>
+        LoadHostConfig(repoRoot, HookScope.Project, null);
+
+    internal static KyberWeaveConfig LoadHostConfig(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+
+        if (scope == HookScope.Global)
+        {
+            KyberWeaveConfigLoadResult project = KyberWeaveConfigLoader.TryLoad(repoRoot);
+            if (!project.Success)
+            {
+                throw new InvalidOperationException(
+                    $"{HookCommand.FailClosedCode}: failed to load project config '{project.ConfigPath}': {OneLine(project.Error ?? "unknown error")}");
+            }
+
+            if (project.Config is not null && project.Config.Arbiter.Enabled)
+            {
+                return project.Config;
+            }
+
+            string effectiveHome = ResolveHomeDirectory(homeDirectory);
+            string userConfigPath = UserHostConfig.GetPath(effectiveHome);
+            if (!File.Exists(userConfigPath))
+            {
+                throw new InvalidOperationException(
+                    $"{HookCommand.FailClosedCode}: missing user config '{userConfigPath}' for global scope. " +
+                    $"Create '{UserHostConfig.GetPath(effectiveHome)}'.");
+            }
+
+            try
+            {
+                string yaml = File.ReadAllText(userConfigPath);
+                KyberWeaveConfig config = new() { Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml) };
+                return config;
+            }
+            catch (Exception ex) when (ex is YamlException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"{HookCommand.FailClosedCode}: malformed user config '{userConfigPath}': {OneLine(ex.Message)}",
+                    ex);
+            }
+        }
 
         // Mirrors the lookup in KyberWeaveConfigLoader: the default directory path,
         // then the legacy root path. TryLoad alone cannot report "missing" because it
@@ -198,6 +259,23 @@ public static class Composition
         }
 
         return loaded.Config;
+    }
+
+    internal static string ResolveHomeDirectory(string? homeDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(homeDirectory) || string.Equals(homeDirectory, "~", StringComparison.Ordinal))
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        if (homeDirectory.StartsWith("~/", StringComparison.Ordinal))
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                homeDirectory[2..]);
+        }
+
+        return homeDirectory;
     }
 
     private static string? OptionValue(string[] args, string name)
@@ -223,7 +301,7 @@ public static class Composition
             return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
         }
 
-        Version? nameVersion = assembly.GetName().Version;
+        System.Version? nameVersion = assembly.GetName().Version;
         if (nameVersion is not null)
         {
             return nameVersion.ToString();

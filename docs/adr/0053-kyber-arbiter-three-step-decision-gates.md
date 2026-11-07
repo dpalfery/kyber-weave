@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -99,18 +99,27 @@ judgement about meaning is made without a confidence attached.
 18. **Delegation identity is explicit headers (D21, D27).** The conductor writes `PLAN_FILE:`
     and `TASK:`; code-reviewer writes `LENS:` and `REFUTE:` alongside the marker. Index
     inference is diagnosis only, never a decision input.
-19. **One-command install (D22).** `kyber-weave arbiter install --target <t>` is the install
-    path in force: it ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold),
-    sets `arbiter.enabled: true` non-destructively, renders the target through the existing
-    Squad install pipeline, applies the provider, stores the key in the OS credential store,
-    verifies, and prints the target's trust step. It replaces the three-part sequence (`docs
-    init`, hand-edit `arbiter.enabled`, `squad install --target <t>`, `arbiter setup`). The
-    binary still ships via `install.sh`/`kyber-weave update` with `--no-arbiter`, and
-    `kyber-weave update` re-renders the arbiter hooks/scripts for registered projects with
-    `arbiter.enabled` after replacing binaries (`--no-arbiter` or an absent arbiter skips it).
-    `arbiter uninstall --target <t>` removes only Squad-owned files/blocks; key deletion is
-    opt-in (`--remove-key`). A global install renders no hooks and records
-    `arbiter-not-enforced`.
+19. **One-command install (D22).** User scope is the default for every feature that installs or
+    configures per-harness artifacts. `kyber-weave arbiter install --target <t>` installs in
+    user scope by default, and `--project` is the opt-in project-scope variant. The command
+    ensures config at project scope (`.kyber-weave/kyber-weave.yml`) with scaffolding (reusing
+    the `docs init` scaffold), while global scope writes user config `~/.kyber-weave/kyber-weave.yml`
+    without scaffolding. In both scopes, it sets `arbiter.enabled: true` non-destructively,
+    renders the target through the existing Squad install pipeline, applies the provider, stores
+    the key in the OS credential store, verifies, and prints the target's trust step. It
+    replaces the three-part sequence (`docs init`, hand-edit `arbiter.enabled`, `squad install
+    --target <t>`, `arbiter setup`). The binary still ships via `install.sh`/`kyber-weave
+    update` with `--no-arbiter`, and `kyber-weave update` re-renders the arbiter hooks/scripts
+    for registered projects with `arbiter.enabled` after replacing binaries (`--no-arbiter` or
+    an absent arbiter skips it). `arbiter uninstall --target <t>` removes only Squad-owned
+    files/blocks; key deletion is opt-in (`--remove-key`). A global install renders user-level
+    hooks in each supported harness's global hook location; a harness with no global hook uses
+    project scope only when the user chooses `--project`; a harness with no hook support falls
+    back to the Arbiter MCP server `kyber-weave-arbiter serve`. Each rendered harness is tagged
+    as `enforced-global`, `enforced-project`, `partial`, or `fallback-only`, with reason codes
+    `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness` when
+    the matrix does not fully enforce it. The install output lists exactly what was written and
+    which harnesses are enforced versus fallback-only.
 20. **Size is justified, not cut to fit (D26, D29).** Each phase documents estimated changed
     lines by area as information. Correctness comes before line-count targets; the Phase 1
     size escalation past the review ceiling is accepted.
@@ -144,9 +153,9 @@ fact outside those declared states leaves the machine.
 - **Phase 1 exceeds the review ceiling.** At roughly 17,900 lines of code and tests it is
   over `review.policy.max-reviewable-lines`, so the Phase 1 verdict is `NEEDS_HUMAN` on size
   as well as on reserved paths. That escalation is accepted, not worked around.
-- **Unsupported harnesses stay advisory until Phase 3.** Warp and ZCode have no hooks; the
-  MCP fallback that covers them ships last, and affected triggers record
-  `arbiter-not-enforced` meanwhile.
+- **Unsupported harnesses stay fallback-only until the matrix is verified.** Warp and ZCode have
+  no hooks, and the MCP fallback records the harness as `fallback-only` with the reason code
+  `hooks-disabled-by-harness` or `dispatch-unconfirmed` until the hook matrix is verified.
 - **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
   is not committed; a fresh clone escalates dependent tasks until architect attests, after
   user confirmation, what is complete (D31).
@@ -160,11 +169,11 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (18 shipped), `KW-REVIEW-026` (gate not applicable), the degradation
-code `arbiter-not-enforced`, the record schemas `kyber-arbiter.decision/v1` and
-`kyber-arbiter.ledger/v1`, and the routing headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`,
-`LENS:`, and `REFUTE:` are permanent. Renaming one silently un-suppresses host tuning,
-receipts, and logs keyed on it.
+Rule ids `KW-ARB-*` (18 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+`fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
+record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
+headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, and `REFUTE:` are permanent.
+Renaming one silently un-suppresses host tuning, receipts, and logs keyed on it.
 
 ## Related
 
