@@ -2,6 +2,16 @@
 
 Use this path when the user supplies a plan or selects one from the directory named by **<plan-index>**.
 
+## Run start
+
+The run fetches and branches before any planning dispatch, so the plan — and everything built from it — lands on a named branch over a current base.
+
+- `kyber-weave run start --harness {{harness}} --type <type> --slug <slug>` when the run has no branch yet. The `--type` is the conventional type the work will be committed as, and the `--slug` is the work in lowercase hyphen-separated words, so the branch `[<owner>.<agent>.]<harness>/<type>/<slug>` says what the plan is for.
+- `--resume <branch>` when a plan already owns a branch and this run continues on it. The command reports whether that branch is ahead of or behind the base instead of creating a second branch for the same work. A numeric pull request reference is not accepted today; pass the branch the pull request is from, as a local branch or `origin/<branch>`.
+- Where the harness gives you no shell, dispatch `github-devops` with the exact command and `RUN-START: true`, which the Arbiter classifies as an `investigate` dispatch.
+
+The base is the branch `run.base-branch` declares, or `origin/HEAD` when the repository declares none — never an assumed `main`. Record the printed `base`, `branch`, `where`, `revision` and versions in the run record, and dispatch planning work into `where`: a planner reading a checkout the operator left on another branch plans against history the run is not building on.
+
 ## Route by lifecycle
 
 - **Ready, In progress, or Blocked:** treat the approved artifact as execution authority. Resume its ready queue at the first incomplete task whose dependencies and file scope permit work. Do not send it back to `architect` merely because `architect` authored it.
