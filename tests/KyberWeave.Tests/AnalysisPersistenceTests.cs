@@ -491,6 +491,23 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
+    public void StartSqliteLockWhenRollbackCleanupFailsPreservesCleanupDiagnosticInAggregateException()
+    {
+        RequireSqlite();
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+
+        AggregateException exception = Assert.Throws<AggregateException>(
+            () => StartSqliteLock(
+                persistence.DatabasePath,
+                probeTimeoutSeconds: 0,
+                beforeProbe: process => process.StandardInput.Dispose()));
+
+        Assert.IsType<TimeoutException>(exception.InnerExceptions[0]);
+        Assert.Contains(exception.InnerExceptions.Skip(1), inner => inner is IOException or InvalidOperationException);
+    }
+
+    [Fact]
     public void PublicPersistenceContractDoesNotAcceptCredentialsOrRequestHeaders()
     {
         string[] publicNames = typeof(SqliteAnalysisPersistence)
