@@ -1373,9 +1373,13 @@ function decodeQuantileOrBucketDataPoint(pointMsg: PbMessage, attrField: number)
   }
 }
 
-function pbTemporality(message: PbMessage): number | undefined {
+function pbTemporality(message: PbMessage, where: string): number | undefined {
   const t = pbNumber(message, 2)
-  return t === 1 || t === 2 ? t : undefined
+  if (t === undefined || t === 0) return undefined
+  if (t === 1 || t === 2) return t
+  throw new OtlpDecodeError(
+    `${where}.aggregation_temporality must be 1 (delta) or 2 (cumulative), got ${t}`,
+  )
 }
 
 function metricFromProtobuf(
@@ -1404,7 +1408,7 @@ function metricFromProtobuf(
     throw new OtlpDecodeError(`${where}: multiple metric data oneof fields set`)
   }
 
-  const metricResource = { ...resource }
+  const metricResource = structuredClone(resource)
   const metricScope = { ...scope }
 
   if (gaugeMsg !== undefined) {
@@ -1421,7 +1425,7 @@ function metricFromProtobuf(
   }
 
   if (sumMsg !== undefined) {
-    const temporality = pbTemporality(sumMsg)
+    const temporality = pbTemporality(sumMsg, `${where}.sum`)
     const isMonotonicRaw = pbBigInt(sumMsg, 3)
     const dataPoints = pbMessages(sumMsg, 1, `${where}.sum.data_points`).map(decodeNumberDataPoint)
     return {
@@ -1438,7 +1442,7 @@ function metricFromProtobuf(
   }
 
   if (histMsg !== undefined) {
-    const temporality = pbTemporality(histMsg)
+    const temporality = pbTemporality(histMsg, `${where}.histogram`)
     const dataPoints = pbMessages(histMsg, 1, `${where}.histogram.data_points`).map((p) =>
       decodeQuantileOrBucketDataPoint(p, 9),
     )
@@ -1455,7 +1459,7 @@ function metricFromProtobuf(
   }
 
   if (expHistMsg !== undefined) {
-    const temporality = pbTemporality(expHistMsg)
+    const temporality = pbTemporality(expHistMsg, `${where}.exponential_histogram`)
     const dataPoints = pbMessages(expHistMsg, 1, `${where}.exponential_histogram.data_points`).map((p) =>
       decodeQuantileOrBucketDataPoint(p, 1),
     )

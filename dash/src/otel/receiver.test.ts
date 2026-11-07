@@ -1676,7 +1676,7 @@ describe('decodeOtlpMetricsProtobuf', () => {
     const expHist = decoded.find((m: OtlpMetric) => m.kind === 'exponentialHistogram')
     expect(expHist?.dataPoints).toHaveLength(1)
     expect(expHist?.dataPoints[0]?.count).toBe(5)
-    expect(expHist?.dataPoints[0]?.sum).toBeCloseTo(20.0, 1)
+    expect(expHist?.dataPoints[0]?.sum).toBe(20.0)
   })
 
   it('decodes as_int and as_double NumberDataPoints with stripped attributes and string timestamps', () => {
@@ -1832,21 +1832,34 @@ describe('decodeOtlpMetricsProtobuf', () => {
     expect(() => decodeOtlpMetricsProtobuf(bytes)).toThrow(OtlpDecodeError)
   })
 
-  it('returns independent resource and scope objects for sibling metrics in the same batch', () => {
-    const bytes = protobufMetricsFixture([
-      { name: 'm1', kind: 'gauge', dataPoints: [{ asInt: 1 }] },
-      { name: 'm2', kind: 'gauge', dataPoints: [{ asInt: 2 }] },
-    ])
+  it('returns independent and deep-cloned resource and scope objects for sibling metrics', () => {
+    const bytes = protobufMetricsFixture(
+      [
+        { name: 'm1', kind: 'gauge', dataPoints: [{ asInt: 1 }] },
+        { name: 'm2', kind: 'gauge', dataPoints: [{ asInt: 2 }] },
+      ],
+      {
+        resourceAttributes: [
+          { key: 'tags', value: { t: 'array', v: [{ t: 'string', v: 'alpha' }] } },
+        ],
+      },
+    )
 
     const [m1, m2] = decodeOtlpMetricsProtobuf(bytes)
     expect(m1?.resource).not.toBe(m2?.resource)
     expect(m1?.scope).not.toBe(m2?.scope)
     expect(m1?.resource).toEqual(m2?.resource)
     expect(m1?.scope).toEqual(m2?.scope)
+
+    // Mutation of nested resource attributes on m1 must not affect m2
+    const m1Tags = m1?.resource['tags'] as unknown[]
+    expect(m1Tags).toEqual(['alpha'])
+    m1Tags.push('beta')
+    expect(m2?.resource['tags']).toEqual(['alpha'])
   })
 
-  it('normalizes unknown or invalid aggregationTemporality to undefined', () => {
-    const sumWithUnknownTemporality = [
+  it('rejects an invalid aggregationTemporality with OtlpDecodeError', () => {
+    const sumWithInvalidTemporality = [
       ...pbStringField(1, 'sum.with.invalid.temporality'),
       ...pbSubmessage(7, [
         ...pbVarintField(2, 99), // 99 is invalid
@@ -1855,7 +1868,28 @@ describe('decodeOtlpMetricsProtobuf', () => {
     ]
     const scopeMetrics = [
       ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
-      ...pbSubmessage(2, sumWithUnknownTemporality),
+      ...pbSubmessage(2, sumWithInvalidTemporality),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    expect(() => decodeOtlpMetricsProtobuf(bytes)).toThrow(OtlpDecodeError)
+  })
+
+  it('leaves aggregationTemporality undefined when omitted or unspecified (0)', () => {
+    const sumWithZeroTemporality = [
+      ...pbStringField(1, 'sum.with.zero.temporality'),
+      ...pbSubmessage(7, [
+        ...pbVarintField(2, 0), // 0 is AGGREGATION_TEMPORALITY_UNSPECIFIED
+        ...pbSubmessage(1, pbFixed64Field(6, 42n)),
+      ]),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, sumWithZeroTemporality),
     ]
     const resourceMetrics = [
       ...pbSubmessage(1, []),
