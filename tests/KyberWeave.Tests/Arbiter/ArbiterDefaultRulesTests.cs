@@ -274,6 +274,50 @@ public sealed class ArbiterDefaultRulesTests
         Assert.Empty(remaining);
     }
 
+    /// <summary>
+    /// <c>jev-1.13-free</c> is the free id of the shipped <c>jev-1.13.0</c> threshold.
+    /// <c>KW-ARB-CLAIM-001</c> accepts it at the same floor.
+    /// </summary>
+    [Fact]
+    public void Claim001_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-CLAIM-001", 0.9);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> floor on <c>KW-ARB-SCOPE-002</c>.
+    /// </summary>
+    [Fact]
+    public void Scope002_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-SCOPE-002", 0.8);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> floor on <c>KW-ARB-OWNER-002</c>.
+    /// </summary>
+    [Fact]
+    public void Owner002_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-OWNER-002", 0.8);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> ceiling on <c>KW-ARB-LENS-001</c>.
+    /// </summary>
+    [Fact]
+    public void Lens001_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        ArbiterRule lens = Shipped("KW-ARB-LENS-001");
+        Assert.NotNull(lens.Ask);
+        Assert.Equal("noul", lens.Ask.Type);
+        Assert.Null(lens.Ask.ConfidenceAtLeast);
+        Assert.Equal(0.1, lens.Ask.ProbabilityBelow);
+        Assert.Contains("jev-1.13.0", lens.Ask.TunedFor ?? []);
+        Assert.Contains("jev-1.13-free", lens.Ask.TunedFor ?? []);
+        AssertNoUntunedWarning("KW-ARB-LENS-001");
+    }
+
     private static string FirstMapOwner(string path)
     {
         foreach (ArbiterFileKindMapEntry entry in ArbiterConfig.ProductDefaults.OwnerFileKindMap)
@@ -287,6 +331,33 @@ public sealed class ArbiterDefaultRulesTests
 
     private static ArbiterRule Shipped(string id) =>
         ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);
+
+    private static ArbiterConfig WithModel(string model) =>
+        ArbiterConfig.ProductDefaults with
+        {
+            Provider = new ArbiterProviderConfig(
+                ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", model, 3000),
+        };
+
+    private static void AssertChoiceAcceptsFreeModel(string ruleId, double confidenceAtLeast)
+    {
+        ArbiterRule rule = Shipped(ruleId);
+        Assert.NotNull(rule.Ask);
+        Assert.Equal("choice", rule.Ask.Type);
+        Assert.Equal(confidenceAtLeast, rule.Ask.ConfidenceAtLeast);
+        Assert.Null(rule.Ask.ProbabilityBelow);
+        Assert.Contains("jev-1.13.0", rule.Ask.TunedFor ?? []);
+        Assert.Contains("jev-1.13-free", rule.Ask.TunedFor ?? []);
+        AssertNoUntunedWarning(ruleId);
+    }
+
+    private static void AssertNoUntunedWarning(string ruleId)
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel("jev-1.13-free")).ToList();
+        Assert.DoesNotContain(
+            diagnostics,
+            diagnostic => diagnostic.Code == RuleValidator.UntunedModel && diagnostic.Subject == ruleId);
+    }
 
     private static ArbiterConfig ReplaceRule(ArbiterRule replacement) =>
         ArbiterConfig.ProductDefaults with
