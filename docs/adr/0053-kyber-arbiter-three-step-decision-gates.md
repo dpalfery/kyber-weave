@@ -159,9 +159,10 @@ fact outside those declared states leaves the machine.
 - **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
   is not committed; a fresh clone escalates dependent tasks until architect attests, after
   user confirmation, what is complete (D31).
-- **Step-1 thresholds are tuned for one model.** Shipped thresholds start conservative for
-  `jev-1.13.0`; any other model warns in `doctor` until its thresholds are tuned from the
-  recorded decision log.
+- **Step-1 thresholds are tuned for Jev 1.13.** Shipped thresholds start conservative for
+  `jev-1.13.0`. `jev-1.13-free` is the free-tier id of that same model and shares those
+  floors, so `doctor` does not warn for it. Any other model warns in `doctor` until its
+  thresholds are tuned from the recorded decision log.
 - **Phase PRs target an integration branch.** While the specification was open,
   `docs validate --merge-ready` reported `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2
   PRs. Each phase PR targeted the long-lived integration branch `integration/kyber-arbiter`,

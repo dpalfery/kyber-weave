@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using KyberWeave.Cli;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 
@@ -19,6 +21,16 @@ public sealed class FakeProcessExecutor : IProcessExecutor
     {
         _cannedOutputs[command] = new ProcessResult(exitCode, stdout, string.Empty);
         return this;
+    }
+
+    /// <summary>
+    /// Stubs <c>kyber-weave-arbiter --version</c> with the CLI version doctor accepts
+    /// when the repository under test has enabled the Arbiter.
+    /// </summary>
+    public FakeProcessExecutor WithMatchingArbiterProbe()
+    {
+        string version = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
+        return WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {version}\n");
     }
 
     public FakeProcessExecutor WithFailure(string command, string message)

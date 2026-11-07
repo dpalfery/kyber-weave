@@ -18,4 +18,13 @@ focus past one paragraph.
   scope changes, spending, publishing, or anything hard to undo.
 - **Never label or mention this format.** No tags, no section headers for the structure, no
   meta-commentary. The shape speaks for itself.
-- **Name the session after the work** only where the harness exposes a confirmed way to set it, and never fabricate a title: where no agent can set one (Factory derives the title from the conversation's first message), leave it alone.
+- **Name the session after the work.** Set the session title to name the work being done
+  on every harness except Factory, which derives the session title from the
+  conversation's first message and has no setter.
+- **PR Title.** Once a PR is submitted, set the session title to the PR title
+  prefixed by the Pull Request number: `#<number>` immediately followed by a space and
+  the PR title, as in `#123 Add the widget` when the PR title is `Add the widget` and
+  the PR number is 123, on every harness except Factory, which derives the session
+  title from the conversation's first message and has no setter. When the pull request
+  title changes, update the session title to match on every harness except Factory,
+  which derives the session title from the conversation's first message and has no setter.
