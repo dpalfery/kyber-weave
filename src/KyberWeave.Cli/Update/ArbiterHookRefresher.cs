@@ -1,5 +1,8 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
@@ -98,6 +101,23 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (!string.IsNullOrWhiteSpace(home))
         {
             int globalTimeout = ResolveGlobalTimeout(home);
+            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
+                new SquadCommandComposition.CliSquadUserPaths(home, Path.Combine(home, ".config")),
+                _environmentReader);
+            SquadReceipt? receipt = null;
+            try
+            {
+                receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                _log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
+            }
+
+            bool receiptChanged = false;
+            List<SquadOwnedFile>? updatedFiles = receipt is not null ? new(receipt.Files) : null;
+            List<SquadOwnedBlock>? updatedBlocks = receipt is not null ? new(receipt.Blocks) : null;
+
             foreach ((string? targetToken, string? hookPath) in ResolveGlobalHookTargets(home))
             {
                 if (string.IsNullOrWhiteSpace(hookPath))
@@ -108,9 +128,37 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
                 try
                 {
-                    if (RefreshGlobalHook(hookPath, targetToken, globalTimeout))
+                    if (RefreshGlobalHook(hookPath, targetToken, globalTimeout, out string? newContent, out IReadOnlyList<SquadHookOwnedEntry>? newOwnedEntries))
                     {
                         globalRefreshed++;
+
+                        if (receipt is not null && !string.IsNullOrWhiteSpace(targetToken))
+                        {
+                            if (newOwnedEntries is { Count: > 0 } && updatedBlocks is not null)
+                            {
+                                int blockIdx = updatedBlocks.FindIndex(b => string.Equals(b.Target, targetToken, StringComparison.OrdinalIgnoreCase));
+                                if (blockIdx >= 0)
+                                {
+                                    SquadOwnedBlock existingBlock = updatedBlocks[blockIdx];
+                                    List<SquadOwnedBlockEntry> blockEntries = newOwnedEntries
+                                        .Select(e => new SquadOwnedBlockEntry(e.Location, e.Digest))
+                                        .ToList();
+                                    updatedBlocks[blockIdx] = existingBlock with { Entries = blockEntries };
+                                    receiptChanged = true;
+                                }
+                            }
+                            else if (!string.IsNullOrEmpty(newContent) && updatedFiles is not null)
+                            {
+                                int fileIdx = updatedFiles.FindIndex(f => string.Equals(f.Target, targetToken, StringComparison.OrdinalIgnoreCase));
+                                if (fileIdx >= 0)
+                                {
+                                    SquadOwnedFile existingFile = updatedFiles[fileIdx];
+                                    string newSha = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(newContent)));
+                                    updatedFiles[fileIdx] = existingFile with { Sha256 = newSha };
+                                    receiptChanged = true;
+                                }
+                            }
+                        }
                     }
                 }
                 catch (Exception ex) when (ex is InvalidOperationException
@@ -120,6 +168,25 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                 {
                     _log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
                     globalFailed++;
+                }
+            }
+
+            if (receipt is not null && receiptChanged)
+            {
+                try
+                {
+                    SquadReceipt updatedReceipt = receipt with
+                    {
+                        Files = updatedFiles ?? receipt.Files,
+                        Blocks = updatedBlocks ?? receipt.Blocks
+                    };
+                    string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+                    string serialized = stateStore.SerializeReceipt(updatedReceipt);
+                    AtomicFile.WriteAllText(receiptPath, serialized);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    _log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
                 }
             }
         }
@@ -175,7 +242,16 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
     private static string? ResolveGlobalHookPath(SquadTarget target, string home)
     {
         SquadGlobalRoots roots = new(_ => null, home);
-        string root = roots.ResolveGlobalRoot(target);
+        string root;
+        try
+        {
+            root = roots.ResolveGlobalRoot(target);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+
         return target switch
         {
             SquadTarget.Claude => Path.Combine(root, "settings.json"),
@@ -184,30 +260,68 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             SquadTarget.Factory => Path.Combine(root, "hooks.json"),
             SquadTarget.Devin => Path.Combine(root, "hooks.v1.json"),
             SquadTarget.Antigravity => Path.Combine(root, "hooks.json"),
+            SquadTarget.Kilo => Path.Combine(root, "plugin", "kyber-arbiter.ts"),
+            SquadTarget.OpenCode => Path.Combine(root, "plugins", "kyber-arbiter.ts"),
+            SquadTarget.Pi => Path.Combine(root, "extensions", "kyber-arbiter.ts"),
+            SquadTarget.Copilot => Path.Combine(root, "hooks", "kyber-arbiter.json"),
             _ => null,
         };
     }
 
-    private static bool RefreshGlobalHook(string hookPath, string? targetToken, int timeoutSeconds)
+    private static bool RefreshGlobalHook(
+        string hookPath,
+        string? targetToken,
+        int timeoutSeconds,
+        out string? newContent,
+        out IReadOnlyList<SquadHookOwnedEntry>? newOwnedEntries)
     {
+        newContent = null;
+        newOwnedEntries = null;
+
         if (string.IsNullOrWhiteSpace(targetToken))
             return false;
 
         if (!SquadTargetCatalog.TryResolve(targetToken, out SquadTarget target))
             return false;
 
+        if (target is SquadTarget.Kilo or SquadTarget.OpenCode or SquadTarget.Pi or SquadTarget.Copilot)
+        {
+            string rendered = target switch
+            {
+                SquadTarget.Kilo => ArbiterPluginShim.Render("kilo", SquadDeploymentScope.Global),
+                SquadTarget.OpenCode => ArbiterPluginShim.Render("opencode", SquadDeploymentScope.Global),
+                SquadTarget.Pi => PiRenderer.RenderArbiterExtension(timeoutSeconds, SquadDeploymentScope.Global),
+                SquadTarget.Copilot => Encoding.UTF8.GetString(
+                    CopilotRenderer.RenderCliHooksFile(timeoutSeconds, SquadDeploymentScope.Global, "hooks/kyber-arbiter.json").Content.Span),
+                _ => string.Empty
+            };
+
+            if (string.IsNullOrEmpty(rendered))
+                return false;
+
+            string before = File.Exists(hookPath) ? File.ReadAllText(hookPath) : string.Empty;
+            if (string.Equals(before, rendered, StringComparison.Ordinal))
+                return false;
+
+            AtomicFile.WriteAllText(hookPath, rendered);
+            newContent = rendered;
+            return true;
+        }
+
         if (!TryBuildGlobalHookEntries(target, timeoutSeconds, out SquadHookBlockFormat format, out JsonNode[] preToolUse, out JsonNode[] postToolUse))
             return false;
 
-        string before = File.ReadAllText(hookPath);
-        if (string.IsNullOrWhiteSpace(before))
+        string existing = File.Exists(hookPath) ? File.ReadAllText(hookPath) : string.Empty;
+        if (string.IsNullOrWhiteSpace(existing))
             return false;
 
-        (string spliced, _) = SquadHookJsonBlock.SpliceContent(format, before, preToolUse, postToolUse);
-        if (string.Equals(before, spliced, StringComparison.Ordinal))
+        (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SquadHookJsonBlock.SpliceContent(format, existing, preToolUse, postToolUse);
+        if (string.Equals(existing, spliced, StringComparison.Ordinal))
             return false;
 
         AtomicFile.WriteAllText(hookPath, spliced);
+        newContent = spliced;
+        newOwnedEntries = owned;
         return true;
     }
 
@@ -222,7 +336,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         switch (target)
         {
             case SquadTarget.Claude:
-                format = SquadHookBlockFormat.Cursor;
+                format = SquadHookBlockFormat.Claude;
                 preToolUse =
                 [
                     new JsonObject

@@ -194,8 +194,13 @@ public sealed class HookCommand
     private static bool IsGlobalScopeProjectDefer(string repoRoot)
     {
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-        return loaded.Success
-            && loaded.Config is not null
+        if (!loaded.Success)
+        {
+            throw new InvalidOperationException(
+                $"{FailClosedCode}: failed to load project config '{loaded.ConfigPath}': {OneLine(loaded.Error ?? "unknown error")}");
+        }
+
+        return loaded.Config is not null
             && (loaded.Config.Arbiter.Enabled || loaded.Config.Arbiter.ExplicitlyEnabled == false);
     }
 

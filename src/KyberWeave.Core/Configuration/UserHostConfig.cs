@@ -1,6 +1,7 @@
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -84,14 +85,26 @@ public static class UserHostConfig
         }
 
         string yaml = File.ReadAllText(path);
-        ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
-        if (section?.Global?.Targets is null)
+        if (string.IsNullOrWhiteSpace(yaml))
         {
             return [];
         }
 
-        return [.. section.Global.Targets
-            .Where(target => !string.IsNullOrWhiteSpace(target))
-            .Distinct(StringComparer.Ordinal)];
+        try
+        {
+            ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
+            if (section?.Global?.Targets is null)
+            {
+                return [];
+            }
+
+            return [.. section.Global.Targets
+                .Where(target => !string.IsNullOrWhiteSpace(target))
+                .Distinct(StringComparer.Ordinal)];
+        }
+        catch (YamlException)
+        {
+            return [];
+        }
     }
 }

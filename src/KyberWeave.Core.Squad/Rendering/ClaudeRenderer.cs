@@ -198,7 +198,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         context.Blocks.Add(new SquadRenderedBlock(
             "claude",
             "settings.json",
-            SquadHookBlockFormat.Cursor,
+            SquadHookBlockFormat.Claude,
             [
                 new SquadRenderedBlockEntry(
                     "PreToolUse",
@@ -329,7 +329,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         IReadOnlySet<string> guardedAgents,
         IReadOnlySet<string> dispatchTargets)
     {
-        if (arbiter is null || !arbiter.Enabled)
+        if (arbiter is null || !arbiter.Enabled || scope == SquadDeploymentScope.Global)
         {
             return null;
         }

@@ -535,7 +535,7 @@ public static partial class HostConfigYaml
             lines.Add(DefaultIndent + "global:");
             lines.Add(DefaultIndent + DefaultIndent + "targets:");
 
-            foreach (string target in targets.Distinct(StringComparer.Ordinal))
+            foreach (string target in targets.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 lines.Add(DefaultIndent + DefaultIndent + DefaultIndent + "- " + QuoteScalar(target));
             }
@@ -762,8 +762,8 @@ public static partial class HostConfigYaml
         }
 
         List<string> toAdd = targets
-            .Where(target => !existingTargets.Contains(target, StringComparer.Ordinal))
-            .Distinct(StringComparer.Ordinal)
+            .Where(target => !existingTargets.Contains(target, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (toAdd.Count == 0)
@@ -834,7 +834,7 @@ public static partial class HostConfigYaml
 
                 string afterDash = trimmed[1..].TrimStart();
                 (string itemValue, _) = SplitScalarAndSuffix(afterDash);
-                itemValue = itemValue.Trim('\'', '"');
+                itemValue = UnquoteScalar(itemValue);
                 if (!string.IsNullOrEmpty(itemValue))
                     existing.Add(itemValue);
             }
@@ -845,8 +845,8 @@ public static partial class HostConfigYaml
         }
 
         List<string> toAdd = targets
-            .Where(target => !existing.Contains(target, StringComparer.Ordinal))
-            .Distinct(StringComparer.Ordinal)
+            .Where(target => !existing.Contains(target, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (toAdd.Count == 0)
@@ -874,7 +874,7 @@ public static partial class HostConfigYaml
             blockIndent + "targets:"
         ];
 
-        foreach (string target in targets.Distinct(StringComparer.Ordinal))
+        foreach (string target in targets.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             toInsert.Add(blockIndent + DefaultIndent + "- " + QuoteScalar(target));
         }
@@ -896,7 +896,7 @@ public static partial class HostConfigYaml
             blockIndent + DefaultIndent + "targets:"
         ];
 
-        foreach (string target in targets.Distinct(StringComparer.Ordinal))
+        foreach (string target in targets.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             toInsert.Add(blockIndent + DefaultIndent + DefaultIndent + "- " + QuoteScalar(target));
         }

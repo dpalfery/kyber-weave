@@ -390,7 +390,7 @@ public sealed class PiRenderer : SquadHarnessRenderer
     /// or a non-zero status blocks, so the call fails closed rather than passing through.
     /// </para>
     /// </remarks>
-    private static string RenderArbiterExtension(int timeoutSeconds, SquadDeploymentScope scope)
+    public static string RenderArbiterExtension(int timeoutSeconds, SquadDeploymentScope scope)
     {
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
         string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;

@@ -13,7 +13,8 @@ public enum SquadHookBlockFormat
     Codex,
     Factory,
     Devin,
-    Antigravity
+    Antigravity,
+    Claude,
 }
 
 /// <summary>One managed entry written by a splice: its JSON pointer and canonical digest.</summary>
@@ -66,6 +67,7 @@ public static class SquadHookJsonBlock
             SquadHookBlockFormat.Factory => ".factory/hooks.json",
             SquadHookBlockFormat.Devin => ".devin/hooks.v1.json",
             SquadHookBlockFormat.Antigravity => ".agents/hooks.json",
+            SquadHookBlockFormat.Claude => "settings.json",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
 
@@ -88,16 +90,16 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude)
         {
             if (obj["hooks"] is JsonArray cursorHooks)
             {
                 return cursorHooks.Count > 0
                     && cursorHooks.All(hook => hook is JsonObject hookObj
-                        && (HasSignature(hookObj["command"], Harness(format)) || HasSignature(hookObj["command"], "claude")));
+                        && HasSignature(hookObj["command"], Harness(format)));
             }
 
-            return HasSignature(obj["command"], Harness(format)) || HasSignature(obj["command"], "claude");
+            return HasSignature(obj["command"], Harness(format));
         }
 
         return obj["hooks"] is JsonArray hooks
@@ -214,7 +216,7 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        JsonObject? parent = format == SquadHookBlockFormat.Cursor || format == SquadHookBlockFormat.Codex
+        JsonObject? parent = format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude
             ? root["hooks"] as JsonObject
             : root;
         if (parent is null)
@@ -459,7 +461,7 @@ public static class SquadHookJsonBlock
     {
         return format switch
         {
-            SquadHookBlockFormat.Cursor => CursorArrays(root, create),
+            SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude => CursorArrays(root, create),
             SquadHookBlockFormat.Codex => PrefixedArrays(root, "/hooks", create),
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(root, create),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
@@ -600,7 +602,7 @@ public static class SquadHookJsonBlock
         format switch
         {
             SquadHookBlockFormat.Cursor => new JsonObject { ["version"] = 1, ["hooks"] = new JsonObject() },
-            SquadHookBlockFormat.Codex => new JsonObject { ["hooks"] = new JsonObject() },
+            SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude => new JsonObject { ["hooks"] = new JsonObject() },
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin or SquadHookBlockFormat.Antigravity => new JsonObject(),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
@@ -740,6 +742,7 @@ public static class SquadHookJsonBlock
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",
+            SquadHookBlockFormat.Claude => "claude",
             SquadHookBlockFormat.Codex => "codex",
             SquadHookBlockFormat.Factory => "factory",
             SquadHookBlockFormat.Devin => "devin",

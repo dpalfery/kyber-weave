@@ -36,6 +36,13 @@ public static class KyberWeaveConfigLoader
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         string root = Path.GetFullPath(homeDirectory);
         string? path = ResolveUserConfigPath(root, configPath);
+        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !File.Exists(path)))
+        {
+            throw new FileNotFoundException(
+                $"Kyber-Weave config file not found: {path}",
+                path);
+        }
+
         if (path is null || !File.Exists(path))
             return KyberWeaveConfig.ProductDefaults;
 
@@ -164,10 +171,9 @@ public static class KyberWeaveConfigLoader
     {
         if (!string.IsNullOrWhiteSpace(configPath))
         {
-            string explicitPath = Path.IsPathRooted(configPath)
+            return Path.IsPathRooted(configPath)
                 ? configPath
                 : Path.Combine(homeDirectory, configPath);
-            return File.Exists(explicitPath) ? explicitPath : UserHostConfig.GetPath(homeDirectory);
         }
 
         return UserHostConfig.GetPath(homeDirectory);

@@ -200,7 +200,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     {
         CopilotPlan plan = context.GetOrCreateState(CopilotPlan.Create);
         SquadArbiterWiring? arbiter = context.EnabledArbiter;
-        if (plan.ArbiterHooks.Count > 0 || arbiter is not null)
+        bool shouldRender = context.Scope == SquadDeploymentScope.Global
+            ? arbiter is not null
+            : plan.ArbiterHooks.Count > 0;
+        if (shouldRender)
         {
             string relativePath = context.Scope == SquadDeploymentScope.Global
                 ? "hooks/kyber-arbiter.json"
@@ -382,7 +385,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
     /// </remarks>
-    private static SquadDeploymentFile RenderCliHooksFile(
+    public static SquadDeploymentFile RenderCliHooksFile(
         int timeoutSeconds,
         SquadDeploymentScope scope,
         string relativePath)

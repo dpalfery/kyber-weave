@@ -22,7 +22,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
     private static readonly IReadOnlyDictionary<SquadTarget, SquadHookBlockFormat> OwnedBlocks =
         new Dictionary<SquadTarget, SquadHookBlockFormat>
         {
-            [SquadTarget.Claude] = SquadHookBlockFormat.Cursor,
+            [SquadTarget.Claude] = SquadHookBlockFormat.Claude,
             [SquadTarget.Cursor] = SquadHookBlockFormat.Cursor,
             [SquadTarget.Codex] = SquadHookBlockFormat.Codex,
             [SquadTarget.Factory] = SquadHookBlockFormat.Factory,
@@ -100,9 +100,9 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 string path = ResolveGlobalBlockPath(target, block.RelativePath);
                 if (File.Exists(path))
                 {
-                    SquadHookBlockFormat blockFormat = target == SquadTarget.Claude
-                        ? SquadHookBlockFormat.Cursor
-                        : (OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat fmt) ? fmt : SquadHookBlockFormat.Cursor);
+                    SquadHookBlockFormat blockFormat = OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat fmt)
+                        ? fmt
+                        : SquadHookBlockFormat.Claude;
                     SquadHookJsonBlock.RemoveFile(blockFormat, path);
                 }
             }
@@ -145,7 +145,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         {
             string settingsPath = ResolveGlobalBlockPath(SquadTarget.Claude, "settings.json");
             if (File.Exists(settingsPath))
-                SquadHookJsonBlock.RemoveFile(SquadHookBlockFormat.Cursor, settingsPath);
+                SquadHookJsonBlock.RemoveFile(SquadHookBlockFormat.Claude, settingsPath);
             return;
         }
 
@@ -318,7 +318,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                     string before = File.ReadAllText(settingsPath);
                     return !string.Equals(
                         SquadHookJsonBlock.NormalizeContent(before),
-                        SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Cursor, before),
+                        SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Claude, before),
                         StringComparison.Ordinal);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException)

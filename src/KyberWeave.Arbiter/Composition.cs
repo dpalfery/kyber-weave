@@ -204,7 +204,13 @@ public static class Composition
         if (scope == HookScope.Global)
         {
             KyberWeaveConfigLoadResult project = KyberWeaveConfigLoader.TryLoad(repoRoot);
-            if (project.Success && project.Config is not null && project.Config.Arbiter.Enabled)
+            if (!project.Success)
+            {
+                throw new InvalidOperationException(
+                    $"{HookCommand.FailClosedCode}: failed to load project config '{project.ConfigPath}': {OneLine(project.Error ?? "unknown error")}");
+            }
+
+            if (project.Config is not null && project.Config.Arbiter.Enabled)
             {
                 return project.Config;
             }

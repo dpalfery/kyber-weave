@@ -314,6 +314,18 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// </summary>
     private static bool TryResolveBlockFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
     {
+        if (string.Equals(block.Target, "claude", StringComparison.OrdinalIgnoreCase))
+        {
+            format = SquadHookBlockFormat.Claude;
+            return true;
+        }
+
+        if (string.Equals(block.Target, "cursor", StringComparison.OrdinalIgnoreCase))
+        {
+            format = SquadHookBlockFormat.Cursor;
+            return true;
+        }
+
         foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
         {
             if (string.Equals(

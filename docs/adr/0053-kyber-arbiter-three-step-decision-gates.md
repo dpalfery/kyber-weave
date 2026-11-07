@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -102,23 +102,24 @@ judgement about meaning is made without a confidence attached.
 19. **One-command install (D22).** User scope is the default for every feature that installs or
     configures per-harness artifacts. `kyber-weave arbiter install --target <t>` installs in
     user scope by default, and `--project` is the opt-in project-scope variant. The command
-    ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets
-    `arbiter.enabled: true` non-destructively, renders the target through the existing Squad
-    install pipeline, applies the provider, stores the key in the OS credential store, verifies,
-    and prints the target's trust step. It replaces the three-part sequence (`docs init`,
-    hand-edit `arbiter.enabled`, `squad install --target <t>`, `arbiter setup`). The binary
-    still ships via `install.sh`/`kyber-weave update` with `--no-arbiter`, and `kyber-weave
-    update` re-renders the arbiter hooks/scripts for registered projects with `arbiter.enabled`
-    after replacing binaries (`--no-arbiter` or an absent arbiter skips it). `arbiter uninstall
-    --target <t>` removes only Squad-owned files/blocks; key deletion is opt-in
-    (`--remove-key`). A global install renders user-level hooks in each supported harness's global
-    hook location; a harness with no global hook uses project scope only when the user chooses
-    `--project`; a harness with no hook support falls back to the Arbiter MCP server
-    `kyber-weave arbiter serve`. Each rendered harness is tagged as `enforced-global`,
-    `enforced-project`, `partial`, or `fallback-only`, with reason codes `fallback-only`,
-    `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness` when the matrix does
-    not fully enforce it. The install output lists exactly what was written and which harnesses
-    are enforced versus fallback-only.
+    ensures config at project scope (`.kyber-weave/kyber-weave.yml`) with scaffolding (reusing
+    the `docs init` scaffold), while global scope writes user config `~/.kyber-weave/kyber-weave.yml`
+    without scaffolding. In both scopes, it sets `arbiter.enabled: true` non-destructively,
+    renders the target through the existing Squad install pipeline, applies the provider, stores
+    the key in the OS credential store, verifies, and prints the target's trust step. It
+    replaces the three-part sequence (`docs init`, hand-edit `arbiter.enabled`, `squad install
+    --target <t>`, `arbiter setup`). The binary still ships via `install.sh`/`kyber-weave
+    update` with `--no-arbiter`, and `kyber-weave update` re-renders the arbiter hooks/scripts
+    for registered projects with `arbiter.enabled` after replacing binaries (`--no-arbiter` or
+    an absent arbiter skips it). `arbiter uninstall --target <t>` removes only Squad-owned
+    files/blocks; key deletion is opt-in (`--remove-key`). A global install renders user-level
+    hooks in each supported harness's global hook location; a harness with no global hook uses
+    project scope only when the user chooses `--project`; a harness with no hook support falls
+    back to the Arbiter MCP server `kyber-weave-arbiter serve`. Each rendered harness is tagged
+    as `enforced-global`, `enforced-project`, `partial`, or `fallback-only`, with reason codes
+    `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness` when
+    the matrix does not fully enforce it. The install output lists exactly what was written and
+    which harnesses are enforced versus fallback-only.
 20. **Size is justified, not cut to fit (D26, D29).** Each phase documents estimated changed
     lines by area as information. Correctness comes before line-count targets; the Phase 1
     size escalation past the review ceiling is accepted.

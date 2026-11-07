@@ -16,13 +16,16 @@ public static class ArbiterConfigLoader
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
 
-    internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section)
+    internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section) =>
+        Merge(defaults, section, isUserConfig: false);
+
+    private static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section, bool isUserConfig)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         if (section is null)
             return defaults;
 
-        if (section.Global is not null)
+        if (!isUserConfig && section.Global is not null)
         {
             throw new YamlException(
                 $"[{RuleValidator.UserGlobalTargetsForbidden}] arbiter.global is only valid in the user-level config file; project config may not declare global targets.");
@@ -106,6 +109,9 @@ public static class ArbiterConfigLoader
         ArgumentNullException.ThrowIfNull(yaml);
 
         ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
+        ArbiterConfig defaults = LoadEmbeddedDefaults();
+        ArbiterConfig merged = Merge(defaults, section, isUserConfig: true);
+
         IReadOnlyList<string> targets = section?.Global?.Targets is null
             ? []
             : [.. section.Global.Targets
@@ -114,10 +120,13 @@ public static class ArbiterConfigLoader
 
         return new ArbiterConfig
         {
-            Enabled = section?.Enabled ?? false,
-            ExplicitlyEnabled = section?.Enabled,
+            Enabled = merged.Enabled,
+            ExplicitlyEnabled = merged.ExplicitlyEnabled,
             Global = new ArbiterGlobalConfig(targets),
             Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
+            Rules = merged.Rules,
+            OwnerFileKindMap = merged.OwnerFileKindMap,
+            LensPaths = merged.LensPaths,
         };
     }
 

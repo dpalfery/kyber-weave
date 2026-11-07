@@ -10,7 +10,7 @@ last-reviewed: 2026-11-05
 
 # Confirm that sub-agent dispatch fires the global Arbiter before-hook
 
-The [Arbiter global install plan](../plans/2026-11-04-arbiter-global-install.md) installs the
+The [Arbiter global install plan](../archive/plans/2026-11-04-arbiter-global-install.md) installs the
 Arbiter before-hook at the user's global hook location wherever a harness supports one. The vendor
 documentation read on 2026-11-05 is generic on four points, so each is recorded as unconfirmed and
 non-blocking, with the observed fallback:

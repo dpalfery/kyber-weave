@@ -154,7 +154,7 @@ public sealed class CursorRenderer : SquadHarnessRenderer
     private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds, SquadDeploymentScope scope) =>
         new(
             "cursor",
-            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
+            scope == SquadDeploymentScope.Global ? "hooks.json" : SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
             SquadHookBlockFormat.Cursor,
             [
                 new SquadRenderedBlockEntry("preToolUse", ArbiterHookEntry(timeoutSeconds, scope)),

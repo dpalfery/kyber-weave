@@ -45,7 +45,7 @@ public static class ArbiterHookWiring
     private const string EnforcedGlobalReason = "enforced-global";
     private const string PartialReason = "partial";
     private const string DispatchUnconfirmedReason = "dispatch-unconfirmed";
-    private const string HooksDisabledByHarnessReason = "hooks-disabled-by-harness";
+    internal const string HooksDisabledByHarnessReason = "hooks-disabled-by-harness";
     private const string CommandName = "kyber-weave-arbiter";
 
     private static readonly HashSet<string> KnownReasonCodes = new(StringComparer.Ordinal)
@@ -359,7 +359,7 @@ public static class ArbiterHookWiring
         return records;
     }
 
-    private static string? DegradationReason(
+    internal static string? DegradationReason(
         string token,
         SquadDeploymentScope scope,
         IReadOnlySet<string> hookedTargets,

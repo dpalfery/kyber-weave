@@ -218,6 +218,14 @@ public static class ArbiterCommandComposition
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(report);
 
+        if (string.IsNullOrWhiteSpace(settings.Path))
+        {
+            report.Add(MapLoadFailure("Repository path must not be empty.", null));
+            config = KyberWeaveConfig.ProductDefaults;
+            configPath = null;
+            return false;
+        }
+
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(settings.Path, settings.Config);
         if (!loaded.Success)
         {
@@ -284,22 +292,22 @@ public static class ArbiterCommandComposition
             return false;
         }
 
-        string yaml = File.ReadAllText(repoConfigPath);
-        string sanitized = StripProjectGlobalTargets(yaml);
-        if (string.Equals(yaml, sanitized, StringComparison.Ordinal))
-        {
-            config = KyberWeaveConfig.ProductDefaults;
-            configPath = repoConfigPath;
-            return false;
-        }
-
         try
         {
+            string yaml = File.ReadAllText(repoConfigPath);
+            string sanitized = StripProjectGlobalTargets(yaml);
+            if (string.Equals(yaml, sanitized, StringComparison.Ordinal))
+            {
+                config = KyberWeaveConfig.ProductDefaults;
+                configPath = repoConfigPath;
+                return false;
+            }
+
             config = KyberWeaveConfigLoader.LoadFromYaml(sanitized);
             configPath = repoConfigPath;
             return true;
         }
-        catch (YamlException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException)
         {
             config = KyberWeaveConfig.ProductDefaults;
             configPath = repoConfigPath;
@@ -309,7 +317,10 @@ public static class ArbiterCommandComposition
 
     private static string? ResolveProjectConfigPath(string repoRoot, string? configPath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+        if (string.IsNullOrWhiteSpace(repoRoot))
+        {
+            return null;
+        }
 
         if (!string.IsNullOrWhiteSpace(configPath))
         {
