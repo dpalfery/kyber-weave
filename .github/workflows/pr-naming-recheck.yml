@@ -8,9 +8,12 @@
 # a red `CI Summary` green without a code push. That is the state a maintainer is stuck in: the
 # required check is red, the code is unchanged, and there is nothing to push.
 #
-# So this workflow does one narrow thing: it finds the latest completed CI run for the pull
-# request's head commit, re-runs that run's naming job against the live title, and re-runs
-# `CI Summary` afterwards so the required check reports the new verdict.
+# So this workflow does one thing: it finds the latest completed CI run for the pull request's
+# head commit, re-runs that run's naming job, and reports the verdict of the attempt that re-run
+# produced. One POST, because GitHub's "Re-run a job from a workflow run" re-runs the job *and its
+# dependent jobs*: `CI Summary` restarts by itself, reads the naming job's new result through its
+# `needs`, and the required check turns green. A second POST for `CI Summary` is not only
+# redundant, it is refused — the run is `in_progress` again by then, and the API answers 403.
 #
 # Why a re-run of the CI run rather than a check of its own: `CI Summary` is the required status
 # check, and only a run of ci.yml produces it. A check that ran here would leave the red required
@@ -19,9 +22,10 @@
 # Skipping the job when the title did not change is correct here, unlike a skip inside ci.yml: no
 # required check depends on this workflow. A pull request can never look green because this job
 # did not run — the verdict that matters is the one on the CI run, and this workflow only ever
-# makes it re-evaluate.
+# makes it re-evaluate. The run OBJECT still appears and its job still skips: `pull_request:
+# types: [edited]` cannot filter by which property changed, so the guard is a job-level `if:`.
 #
-# No checkout and no fork code: this workflow reads the API and posts re-run requests. A pull
+# No checkout and no fork code: this workflow reads the API and posts one re-run request. A pull
 # request from a fork triggers it with the base repository's token, and executing nothing from the
 # head is what keeps that token out of reach.
 
@@ -45,8 +49,9 @@ jobs:
   recheck:
     name: Recheck the pull request name
     runs-on: ubuntu-latest
-    # Bounded: the CI naming job takes well under a minute, and this budget covers the wait for it
-    # plus the wait for the summary. A deadlock fails the workflow instead of holding a runner.
+    # Bounded: the naming job takes well under a minute and the summary that follows it takes
+    # about the same, so the ten-minute wait inside the step always ends first. A deadlock fails
+    # the workflow instead of holding a runner.
     timeout-minutes: 20
     # A body edit, a base-branch change, a label change and a draft toggle all arrive as `edited`.
     # Only the title can change this verdict.
@@ -56,12 +61,13 @@ jobs:
       # Re-running a job of another workflow run. Nothing here writes to the repository.
       actions: write
     steps:
-      - name: Re-run the naming job and the summary that depends on it
+      - name: Re-run the naming job and report the new attempt's verdict
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_URL: ${{ github.api_url }}
           REPOSITORY: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SERVER_URL: ${{ github.server_url }}
           # The display names of the two jobs in ci.yml. The API identifies a job by its `name:`,
           # not by its key in the workflow, so these two strings are the join between the files.
           # ci.yml says the same at the `pr-naming` job: rename one, rename both. A rename that
@@ -71,19 +77,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          api() {
-            curl --fail --silent --show-error \
+          # Each response is written to a file and then read with jq, so no API call hides inside a
+          # command substitution and every refusal passes through the one place below that names it.
+          work="$(mktemp -d)"
+          trap 'rm -rf "${work}"' EXIT
+          body="${work}/body.json"
+
+          # A non-2xx is a named error carrying the status and the response body. `curl --fail` is
+          # deliberately absent: it turns a refusal into a bare exit code, and the body is the only
+          # thing that says why (a 403 here means the run is busy; a 404 means it is gone).
+          request() {
+            local method="$1" url="$2" curl_status=0 status
+            status="$(curl --silent --show-error \
+              --request "${method}" \
               --header "Authorization: Bearer ${GH_TOKEN}" \
               --header "Accept: application/vnd.github+json" \
               --header "X-GitHub-Api-Version: 2022-11-28" \
-              "$@"
+              --output "${body}" \
+              --write-out '%{http_code}' \
+              "${url}")" || curl_status=$?
+            if [ "${curl_status}" -ne 0 ]; then
+              echo "::error::${method} ${url} did not reach the API (curl exit ${curl_status})."
+              exit 1
+            fi
+            case "${status}" in
+              2[0-9][0-9]) ;;
+              *)
+                echo "::error::${method} ${url} returned HTTP ${status}: $(head -c 600 "${body}" 2>/dev/null || true)"
+                exit 1
+                ;;
+            esac
           }
 
-          # Runs the newest first, so the first element is the latest run for this head commit.
-          # Only a completed run is re-runnable.
-          runs="$(api "${API_URL}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&per_page=1")"
-          run_id="$(jq -r '.workflow_runs[0].id // empty' <<<"${runs}")"
-          run_status="$(jq -r '.workflow_runs[0].status // empty' <<<"${runs}")"
+          # Runs are newest first, so the first element is the latest run for this head commit.
+          request GET "${API_URL}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&per_page=1"
+          run_id="$(jq -r '.workflow_runs[0].id // empty' < "${body}")"
+          run_status="$(jq -r '.workflow_runs[0].status // empty' < "${body}")"
+          attempt="$(jq -r '.workflow_runs[0].run_attempt // empty' < "${body}")"
 
           if [ -z "${run_id}" ]; then
             echo "::warning::No CI run found for ${HEAD_SHA}, so there is nothing to recheck. CI has not started for this pull request yet; edit the title after it has."
@@ -95,34 +125,54 @@ jobs:
             exit 0
           fi
 
-          jobs="$(api "${API_URL}/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")"
-          naming_job="$(jq -r --arg name "${NAMING_JOB}" '[.jobs[] | select(.name == $name)][0].id // empty' <<<"${jobs}")"
-          summary_job="$(jq -r --arg name "${SUMMARY_JOB}" '[.jobs[] | select(.name == $name)][0].id // empty' <<<"${jobs}")"
-
+          request GET "${API_URL}/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100"
+          naming_job="$(jq -r --arg name "${NAMING_JOB}" '[.jobs[] | select(.name == $name)][0].id // empty' < "${body}")"
           if [ -z "${naming_job}" ]; then
             echo "::error::CI run ${run_id} has no job named '${NAMING_JOB}'. Either ci.yml renamed the pr-naming job's display name without updating NAMING_JOB in this workflow, or the run predates the naming check."
             exit 1
           fi
+          if [ -z "${attempt}" ]; then
+            attempt="$(jq -r --arg name "${NAMING_JOB}" '[.jobs[] | select(.name == $name)][0].run_attempt // empty' < "${body}")"
+          fi
+          attempt_known=0
+          case "${attempt}" in
+            '' | *[!0-9]*) attempt=0 ;;
+            *) attempt_known=1 ;;
+          esac
 
-          echo "CI run ${run_id} for ${HEAD_SHA}: naming job ${naming_job}, summary job ${summary_job:-none}."
+          run_url="${SERVER_URL}/${REPOSITORY}/actions/runs/${run_id}"
+          echo "CI run ${run_id} (attempt ${attempt}) for ${HEAD_SHA}: naming job ${naming_job}. ${run_url}"
 
-          # Waits for a job re-run to finish and prints its conclusion on stdout, so the caller can
-          # branch on the verdict. The progress lines go to stderr, which keeps stdout to the
-          # verdict alone. A wait that runs out fails the workflow rather than reporting a verdict
-          # it does not have.
-          wait_for_job() {
-            local job_id="$1" deadline="$2" state status conclusion
+          # Wait for the re-run to produce a verdict of its own.
+          #
+          # The wait follows the RUN's run_attempt, not the job's state, and that is the whole fix
+          # for the stale verdict. A re-run gives the attempt brand-new job ids, and the id that was
+          # posted keeps reporting the attempt it ran in for ever: the run that exposed this read
+          # `completed failure` from attempt 1 three seconds after the request, and still read it
+          # minutes later, while attempt 2 had gone green. So a `completed` state alone is the
+          # previous verdict, not this one.
+          #
+          # Where the attempt number cannot be read, the fallback is to require seeing the run leave
+          # `completed` at least once, because only a re-run restarts a completed run. Neither
+          # signal within the wait fails the step rather than guessing a verdict.
+          wait_for_run() {
+            local deadline="$1" restarting=0 status now
             while :; do
-              state="$(api "${API_URL}/repos/${REPOSITORY}/actions/jobs/${job_id}" | jq -r '"\(.status) \(.conclusion // "-")"')"
-              status="${state%% *}"
-              conclusion="${state#* }"
-              echo "job ${job_id}: ${status} ${conclusion}" >&2
-              if [ "${status}" = "completed" ]; then
-                printf '%s' "${conclusion}"
+              request GET "${API_URL}/repos/${REPOSITORY}/actions/runs/${run_id}"
+              status="$(jq -r '.status // empty' < "${body}")"
+              now="$(jq -r '.run_attempt // empty' < "${body}")"
+              case "${now}" in '' | *[!0-9]*) now=0 ;; esac
+              if [ "${status}" != "completed" ]; then
+                restarting=1
+              elif [ "${attempt_known}" -eq 1 ] && [ "${now}" -gt "${attempt}" ]; then
                 return 0
+              elif [ "${attempt_known}" -eq 0 ] && [ "${restarting}" -eq 1 ]; then
+                return 0
+              else
+                echo "Run ${run_id} still reports attempt ${now} as completed; that is the verdict from before the edit, so waiting."
               fi
               if [ "$(date +%s)" -ge "${deadline}" ]; then
-                echo "::error::Job ${job_id} was still ${status} when the wait ran out; this workflow cannot report a verdict for it."
+                echo "::error::Run ${run_id} never started a new attempt for the naming re-run (last seen: ${status}, attempt ${now}). No verdict exists for the edited title; the re-run request did not restart the run."
                 exit 1
               fi
               sleep 10
@@ -131,29 +181,73 @@ jobs:
 
           deadline=$(( $(date +%s) + 600 ))
 
-          # The naming job re-reads the title from the API, so the re-run judges the edited title.
-          api --request POST "${API_URL}/repos/${REPOSITORY}/actions/jobs/${naming_job}/rerun" > /dev/null
-          echo "Re-running the naming job."
-          naming_conclusion="$(wait_for_job "${naming_job}" "${deadline}")"
+          # One POST. GitHub re-runs this job and the jobs that depend on it, so `CI Summary`
+          # restarts on its own and re-reads the naming result through its `needs`. The naming job
+          # fetches the title from the API, so the re-run judges the edited title.
+          request POST "${API_URL}/repos/${REPOSITORY}/actions/jobs/${naming_job}/rerun"
+          echo "Re-running the naming job; GitHub re-runs CI Summary with it because it depends on it."
 
-          # `CI Summary` is the required check and it ran against the naming job's previous result,
-          # so it has to run again now the verdict has changed. It is re-run after the naming job
-          # finishes, never before: started first, it would read the old result and stay wrong.
+          wait_for_run "${deadline}"
+
+          # The verdict belongs to the attempt the re-run started, and the attempt's jobs carry new
+          # ids. So the verdict is the newest job with the naming display name whose id is not the
+          # one that was re-run, and — where the attempt number is readable — one that reports the
+          # run's new attempt. Waiting here also covers the API listing the new jobs a moment after
+          # the run object reports them.
+          rechecked_job=''
+          rechecked_attempt=0
+          tries=0
+          while :; do
+            request GET "${API_URL}/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100"
+            rechecked_job="$(jq -r --arg name "${NAMING_JOB}" --argjson posted "${naming_job}" \
+              '[.jobs[] | select(.name == $name and .id != $posted)] | max_by(.id) | .id // empty' < "${body}")"
+            if [ -n "${rechecked_job}" ]; then
+              rechecked_attempt="$(jq -r --argjson id "${rechecked_job}" '[.jobs[] | select(.id == $id)][0].run_attempt // 0' < "${body}")"
+              case "${rechecked_attempt}" in '' | *[!0-9]*) rechecked_attempt=0 ;; esac
+              if [ "${attempt_known}" -eq 0 ] || [ "${rechecked_attempt}" -gt "${attempt}" ]; then
+                break
+              fi
+              echo "The newest '${NAMING_JOB}' job is attempt ${rechecked_attempt}, not the re-run; waiting."
+            else
+              echo "No '${NAMING_JOB}' job from the re-run is listed yet; waiting."
+            fi
+            tries=$((tries + 1))
+            if [ "${tries}" -ge 6 ]; then
+              echo "::error::Run ${run_id} reports a new attempt but lists no '${NAMING_JOB}' job for it, so the verdict for the edited title cannot be read. ${run_url}"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          naming_conclusion="$(jq -r --argjson id "${rechecked_job}" '[.jobs[] | select(.id == $id)][0].conclusion // empty' < "${body}")"
+
+          # The dependent job's verdict, read the same way: the newest summary job is the one this
+          # re-run produced. Its attempt must be the new one; when it is not, the endpoint did not
+          # carry the dependent job and the required check still holds the old verdict.
+          summary_job="$(jq -r --arg name "${SUMMARY_JOB}" '[.jobs[] | select(.name == $name)] | max_by(.id) | .id // empty' < "${body}")"
+          summary_attempt=0
           summary_conclusion=''
           if [ -n "${summary_job}" ]; then
-            api --request POST "${API_URL}/repos/${REPOSITORY}/actions/jobs/${summary_job}/rerun" > /dev/null
-            echo "Re-running CI Summary."
-            summary_conclusion="$(wait_for_job "${summary_job}" "${deadline}")"
+            summary_attempt="$(jq -r --argjson id "${summary_job}" '[.jobs[] | select(.id == $id)][0].run_attempt // 0' < "${body}")"
+            case "${summary_attempt}" in '' | *[!0-9]*) summary_attempt=0 ;; esac
+            summary_conclusion="$(jq -r --argjson id "${summary_job}" '[.jobs[] | select(.id == $id)][0].conclusion // empty' < "${body}")"
           fi
 
-          echo "naming=${naming_conclusion} summary=${summary_conclusion:-none}"
+          echo "attempt ${rechecked_attempt}: naming=${naming_conclusion:-unknown}; ${SUMMARY_JOB} on attempt ${summary_attempt}: ${summary_conclusion:-unknown}. ${run_url}"
+
+          if [ -n "${summary_job}" ] && [ "${attempt_known}" -eq 1 ] && [ "${summary_attempt}" -le "${attempt}" ]; then
+            echo "::error::${SUMMARY_JOB} is still attempt ${summary_attempt} while the naming job is attempt ${rechecked_attempt}: the re-run did not restart the dependent job, so the required check still carries the old verdict. ${run_url}"
+            exit 1
+          fi
 
           if [ "${naming_conclusion}" != "success" ]; then
-            echo "::error::The pull request name still does not conform (naming job: ${naming_conclusion}). Fix the branch or the title; the naming rule and the shapes it accepts are in scripts/check-pr-name.sh."
+            echo "::error::The pull request name still does not conform (naming job on attempt ${rechecked_attempt}: ${naming_conclusion:-no verdict}). Fix the branch or the title; the rule and the shapes it accepts are in scripts/check-pr-name.sh. ${run_url}"
             exit 1
           fi
 
-          if [ -n "${summary_job}" ] && [ "${summary_conclusion}" != "success" ]; then
-            echo "::error::CI Summary is ${summary_conclusion} after the naming job passed, so another required job in that CI run failed. That is CI's verdict, not this workflow's; open the run above."
+          if [ -n "${summary_conclusion}" ] && [ "${summary_conclusion}" != "success" ]; then
+            echo "::error::The name conforms, but ${SUMMARY_JOB} re-ran as ${summary_conclusion}, so a required job in that CI run failed. The summary's table on ${run_url} names it; that is CI's verdict, not this workflow's."
             exit 1
           fi
+
+          echo "The pull request name conforms and ${SUMMARY_JOB} is ${summary_conclusion:-not reported}. ${run_url}"
