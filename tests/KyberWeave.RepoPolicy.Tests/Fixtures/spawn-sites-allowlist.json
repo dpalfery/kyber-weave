@@ -1236,6 +1236,18 @@
       "text": "return ProcessRunner.Run(startInfo, string.Empty, LoopTimeout);",
       "count": 1,
       "bound": "LoopTimeout (30 s) kills the tree. The child is fast-loop.sh in a temporary repository with stub toolchain executables first on PATH; the stubs exit at once."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/PrNamingScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run below with its 30 s timeout, which kills the child tree. The child is bash running scripts/check-pr-name.sh with argv only (--title, --branch, --author), in the repository root, and the script reads its arguments and prints a verdict, so it exits at once."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/PrNamingScriptTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. One invocation of scripts/check-pr-name.sh per test with a fixed argv and no stdin; the script self-exits with its verdict."
     }
   ]
 }
