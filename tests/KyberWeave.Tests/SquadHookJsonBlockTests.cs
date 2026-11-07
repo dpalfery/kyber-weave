@@ -452,3 +452,42 @@ public sealed class SquadHookJsonBlockTests
         Assert.Equal(Garbage, File.ReadAllText(path));
     }
 }
+
+public sealed class SquadHookFormatResolutionTests
+{
+    private static SquadOwnedBlock Block(string relativePath, string target) =>
+        new(relativePath, target, false, []);
+
+    [Fact]
+    public void BareGlobalPathResolvesByRecordedTarget()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block("hooks.json", "codex"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Codex, format);
+    }
+
+    [Fact]
+    public void PrefixedProjectPathResolvesByRecordedTarget()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(".codex/hooks.json", "codex"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Codex, format);
+    }
+
+    [Fact]
+    public void MismatchedTargetAndPathFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block(".cursor/hooks.json", "codex"), out _));
+    }
+
+    [Fact]
+    public void UnknownTargetFallsBackToPathMatch()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(".cursor/hooks.json", "hal9000"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Cursor, format);
+    }
+
+    [Fact]
+    public void UnknownTargetAndUnknownPathFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("nope.json", "hal9000"), out _));
+    }
+}

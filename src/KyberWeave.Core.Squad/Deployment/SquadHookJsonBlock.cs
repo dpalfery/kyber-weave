@@ -78,9 +78,12 @@ public static class SquadHookJsonBlock
     /// <remarks>
     /// The recorded target decides the shape first: four of the six formats write the same bare
     /// <c>hooks.json</c> beneath their own global root, so under global scope the path names the
-    /// file but cannot name the format (global block identity plan, D8). The per-format portable
-    /// path stays the fallback for a receipt whose target owns no shared hook file, which is the
-    /// project- and instance-scope shape where the path alone is unique.
+    /// file but cannot name the format (global block identity plan, D8). A target that owns no
+    /// shared hook file falls through to the per-format portable path, which is the
+    /// project- and instance-scope shape where the path alone is unique. A corrupt record —
+    /// a target whose own shape names a different path than the one recorded — fails closed
+    /// instead of resolving, so status, doctor and uninstall report the corrupt receipt
+    /// rather than operating on the wrong shape.
     /// </remarks>
     /// <returns><see langword="true"/> when the block's shape is known; otherwise <see langword="false"/>.</returns>
     public static bool TryResolveFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
@@ -92,8 +95,18 @@ public static class SquadHookJsonBlock
             : null;
         if (ownedByTarget is { } known)
         {
-            format = known;
-            return true;
+            string expectedPath = RelativePath(known);
+            bool pathIsBare = !block.RelativePath.Contains('/', StringComparison.Ordinal);
+            bool pathMatchesOwnShape =
+                string.Equals(block.RelativePath, expectedPath, StringComparison.OrdinalIgnoreCase);
+            if (pathIsBare || pathMatchesOwnShape)
+            {
+                format = known;
+                return true;
+            }
+
+            format = default;
+            return false;
         }
 
         foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
