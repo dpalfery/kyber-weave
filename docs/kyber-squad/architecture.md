@@ -504,13 +504,16 @@ root. The in-repo copies of earlier releases are read by migration and retained 
 - **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
 - **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
 - **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
-- **Blocks in shared hook files (`kyber-squad.receipt/v3`)**: a project-scope receipt
-  that owns entries inside a shared hook file serializes as `kyber-squad.receipt/v3` —
-  the v1 project field set plus `blocks`, each with `relativePath`, `target`,
-  `createdFile`, and `entries` of `container` (an RFC 6901 JSON pointer to the entry)
-  and `sha256` (over the entry's compact JSON). A v3 receipt is written only at
-  project scope and only when a block exists; receipts without blocks stay byte-identical
-  v1 or v2. An older CLI refuses a v3 receipt with exit code 1. See
+- **Blocks in shared hook files (`kyber-squad.receipt/v3`)**: a receipt that owns entries
+  inside a shared hook file serializes as `kyber-squad.receipt/v3`, each block carrying
+  `relativePath`, `target`, `createdFile`, and `entries` of `container` (an RFC 6901 JSON
+  pointer to the entry) and `sha256` (over the entry's compact JSON). This replaces the
+  earlier "a project-scope receipt" and "written only at project scope": a block receipt is
+  written at project **and** global scope. A project v3 receipt is the v1 field set plus
+  `blocks`; a global v3 receipt is the v2 field set — `scope: global` with its required
+  `layout` — plus `blocks` and, when it owns any, `homeFiles`. Instance scope never owns a
+  block, and a receipt without blocks stays byte-identical v1 or v2. An older CLI refuses a
+  v3 receipt with exit code 1. See
   [owned blocks](#owned-blocks-in-shared-hook-files) below and
   [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md).
 
@@ -532,7 +535,8 @@ document, and an existing user file at a block path is not an unmanaged collisio
 | `devin` | `.devin/hooks.v1.json` | `/PreToolUse`, `/PostToolUse` — the whole file is the hooks object in the Claude Code format | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness devin` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 
-All five blocks render when the Arbiter is enabled at project scope: the Cursor and Codex
+All five blocks render when the Arbiter is enabled, at project scope and at global scope —
+this replaces the earlier "at project scope" alone. The Cursor and Codex
 blocks landed in Phase 2, and the Factory, Devin, and Antigravity shapes in Phase 3. Pi's
 owned extension file is a whole owned file, not a block. Only documented fields are
 written, never a sentinel key, and shared-file hook commands carry no `--caller` because
@@ -545,6 +549,25 @@ writes. On `factory` the lifecycle first runs the shadowing check: when
 block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded
 instead, because Factory reads that `hooks` key only while `hooks.json` is absent and
 rendering the file would silently disable the user's hooks.
+
+**Scope-aware block identity.** A block's recorded path is relative to the root it deploys
+beneath, so the same format names a different path at each scope: project scope keeps the
+target's project directory (`.cursor/hooks.json`), and global scope keeps only what is left
+beneath that target's own global root — `cursor`, `codex` and `factory` each record
+`hooks.json`, and `devin` records `hooks.v1.json`. Several targets therefore record one
+identical relative path at global scope, and the path alone cannot tell them apart. The
+receipt validator derives every stored block's deployment identity from one private helper
+that the stored-file loop calls too: the portable path alone under `project` and `instance`
+scope, where every target writes beneath one deployment root and two targets claiming one
+path would claim one physical file; and target plus path under `global` scope, where the
+target is the only thing that separates the files. One helper for both loops is what keeps a
+stored file and a stored block from ever disagreeing about which physical file a claim names.
+The duplicate refusals are unchanged: one target claiming a path twice is refused at every
+scope, two targets claiming one path is refused at project and instance scope, and one block
+claiming the same container twice is refused. A global receipt therefore owns blocks exactly
+as a project receipt does, and `status`, `doctor`, `update` and uninstall read a block's path
+from the receipt instead of recomputing it from a per-format constant, so the recorded claim
+and the file they inspect are the same one.
 
 A hand-edited or missing owned entry is drift, reported by `squad status` and
 `squad doctor` naming the file and the container. `squad update` rewrites the block

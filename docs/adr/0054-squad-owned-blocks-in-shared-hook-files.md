@@ -5,7 +5,7 @@ doc-type: adr
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-11-07
 ---
 
 # ADR 0054: Squad owns marked entries in shared hook files
@@ -17,6 +17,11 @@ Squad writes receipt-tracked blocks into hook files the user also owns, identifi
 the hook command signature. This is the exception to the owned-files-not-settings
 boundary that [ADR 0053](0053-kyber-arbiter-three-step-decision-gates.md) decision 6
 announces and defers here, as Req 8.3 requires.
+
+Amended 2026-11-07, in place: decision 4's receipt contract covers a global receipt that
+owns blocks, and states the scope-aware block identity that makes it readable. The
+amendment refines a boundary this ADR already draws, so it adds no new ADR and no new
+schema id.
 
 ## Context
 
@@ -57,11 +62,28 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
    newline), so a splice rewrites the file's formatting even when its hooks are
    unchanged.
 4. **The receipt tracks each entry's location and digest.** Receipts that own a block
-   serialize as `kyber-squad.receipt/v3`: the v1 project field set plus `blocks`,
-   each with `relativePath`, `target`, `createdFile`, and `entries` of
-   `container` (an RFC 6901 JSON pointer to the entry, e.g. `/hooks/preToolUse/0`)
-   and `sha256` (over the entry's compact JSON). Receipts without blocks stay
-   byte-identical v1 or v2, and an older reader refuses v3 with exit code 1.
+   serialize as `kyber-squad.receipt/v3`, each block with `relativePath`, `target`,
+   `createdFile`, and `entries` of `container` (an RFC 6901 JSON pointer to the entry,
+   e.g. `/hooks/preToolUse/0`) and `sha256` (over the entry's compact JSON). A v3 receipt
+   is written at project scope and at global scope (amended 2026-11-07, below). A project
+   v3 receipt is the v1 project field set plus `blocks`; a global v3 receipt is the v2
+   global field set — `scope: global` with its required `layout` (`single-root` or
+   `per-target-roots`) — plus `blocks`, and `homeFiles` when the receipt owns any home
+   file. Instance scope never owns a block. Receipts without blocks stay byte-identical
+   v1 or v2, and an older reader refuses v3 with exit code 1 — unchanged by the
+   amendment. **(Amended 2026-11-07.)** The block's *identity* is scope-aware, because a
+   path alone cannot name a block at global scope: each renderer writes a block relative
+   to the root it deploys beneath, so `cursor`, `codex` and `factory` each record the bare
+   `hooks.json` beneath their own global root and `devin` records `hooks.v1.json`. A stored
+   block is therefore identified by its portable path alone under `project` and `instance`
+   scope, where every target writes beneath one deployment root, and by target *and* path
+   under `global` scope. One helper in `SquadStateStore` derives that identity for the
+   stored-file loop and the stored-block loop alike, so the two can never disagree about
+   which physical file a claim names. The duplicate refusals are unchanged: one target
+   claiming a path twice at any scope, two targets claiming one path at project or instance
+   scope, and one block claiming one container twice are all still refused. Global receipts
+   may therefore own blocks, and `status`, `doctor`, `update` and uninstall read a block's
+   path from the receipt rather than recomputing it from a per-format constant.
 5. **The plan-side splice is the file splice.** `SquadDeploymentPlan` calls the
    content-level `SquadHookJsonBlock.SpliceContent` that the file-level splice also
    uses, so a dry run and an install cannot diverge. Planning stays side-effect free
@@ -105,9 +127,11 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
   looks for the untouched entry anywhere in its container and reports drift only when
   no such entry exists.
 - **v3 receipts need a current CLI.** A receipt with blocks is unreadable by older
-  readers, which refuse it with exit code 1 rather than misreading ownership.
-  Receipts without blocks are unaffected, so harnesses that need no shared file
-  never force the upgrade.
+  readers, which refuse it with exit code 1 rather than misreading ownership. This holds
+  for a global v3 receipt exactly as for a project one: the older reader does not know the
+  schema, so it refuses the file instead of reading a global receipt as a project receipt
+  or dropping the blocks it cannot see. Receipts without blocks are unaffected, so harnesses
+  that need no shared file never force the upgrade.
 - **Hand edits inside the block are drift, not adoption.** Editing a Squad entry by
   hand does not transfer ownership; it is reported until the next update rewrites
   it (or `--replace-managed` is passed). User entries beside the block are never
