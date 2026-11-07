@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
+|---|---|---|---|---|---|
+| [2026-11-06-global-arbiter-block-identity.md](2026-11-06-global-arbiter-block-identity.md) | Ready — approved for execution (autonomous: recommendation accepted) | 2026-11-06 | — | Harvest pending, see the plan's Design harvest: [kyber-squad/architecture.md](../kyber-squad/architecture.md) (H1), [adr/0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md) amended in place (H2), [kyber-arbiter/runbook.md](../kyber-arbiter/runbook.md) (H3), [cli-command-surface.md](../cli-command-surface.md) (H4) | Since 0.1.8-rc.20, a global `kyber-weave arbiter install --target` works for the first block-bearing target and fails for the second, because a stored block is identified by its portable path alone while four targets legitimately share the bare name `hooks.json` under global scope. Fix the identity, keep reading rc.20's receipts, and make status, doctor, update and uninstall agree. |
 
 ## Archived Plans
 
