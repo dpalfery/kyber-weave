@@ -16,9 +16,10 @@ through the configuration registry rather than carrying their own. Only standard
 
 This repository declares [C#](csharp/README.md), [test](test/README.md),
 [TypeScript](typescript/README.md), [Rust](rust/README.md), and [Tauri](tauri/README.md)
-standards, and a [Go](go/README.md) standard for Go code that does not exist yet. Rust and Tauri
-cover the KyberDash tray crate; Tauri covers only the Tauri layer and defers language rules to
-Rust. The authoritative list is the Config Reg block in the repository root
+standards, a [Go](go/README.md) standard for Go code that does not exist yet, and a
+[GitHub Actions](github-actions/README.md) standard for the workflows under `.github/workflows/`.
+Rust and Tauri cover the KyberDash tray crate; Tauri covers only the Tauri layer and defers
+language rules to Rust. The authoritative list is the Config Reg block in the repository root
 [`AGENTS.md`](../../AGENTS.md), which is regenerated on every `docs init` run — this file is not.
 
 ## Declaring a technology
