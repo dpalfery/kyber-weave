@@ -405,13 +405,42 @@ public sealed class ArbiterKiloReviewRemediationTests
             Assert.Empty(targets);
         }
 
-        if (!OperatingSystem.IsWindows())
+        File.Delete(configPath);
+        Directory.CreateDirectory(configPath);
+        try
         {
+            IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+            Assert.Empty(targets);
+        }
+        finally
+        {
+            Directory.Delete(configPath);
+        }
+
+        if (!OperatingSystem.IsWindows() && !string.Equals(Environment.UserName, "root", StringComparison.Ordinal))
+        {
+            File.WriteAllText(configPath, "arbiter:\n  global:\n    targets:\n      - 'cursor'\n");
             File.SetUnixFileMode(configPath, UnixFileMode.None);
             try
             {
-                IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
-                Assert.Empty(targets);
+                // In root/container environments (UID 0), UnixFileMode.None does not deny read access
+                // to root (CAP_DAC_OVERRIDE). Guard the assertion so it only runs if access is denied.
+                bool accessDenied;
+                try
+                {
+                    _ = File.ReadAllText(configPath);
+                    accessDenied = false;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    accessDenied = true;
+                }
+
+                if (accessDenied)
+                {
+                    IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+                    Assert.Empty(targets);
+                }
             }
             finally
             {
