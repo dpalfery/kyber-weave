@@ -96,10 +96,13 @@ public static class SquadHookJsonBlock
         if (ownedByTarget is { } known)
         {
             string expectedPath = RelativePath(known);
-            bool pathIsBare = !block.RelativePath.Contains('/', StringComparison.Ordinal);
+            string expectedFileName = Path.GetFileName(expectedPath);
+            string recordedFileName = Path.GetFileName(block.RelativePath);
+            bool fileNameMatchesOwnShape =
+                string.Equals(recordedFileName, expectedFileName, StringComparison.OrdinalIgnoreCase);
             bool pathMatchesOwnShape =
                 string.Equals(block.RelativePath, expectedPath, StringComparison.OrdinalIgnoreCase);
-            if (pathIsBare || pathMatchesOwnShape)
+            if (fileNameMatchesOwnShape && (pathMatchesOwnShape || !block.RelativePath.Contains('/', StringComparison.Ordinal)))
             {
                 format = known;
                 return true;

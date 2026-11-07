@@ -466,31 +466,46 @@ public sealed class SquadOwnedBlockLifecycleTests
     }
 
     /// <summary>
-    /// A global receipt that loses its last block must drop back to v2, the schema the
-    /// writer emits for a block-less global receipt. Carrying the recorded v3 over leaves
-    /// a block-less receipt on a schema that requires at least one block.
+    /// The retained-schema rule the uninstall plan applies: a receipt that still owns a
+    /// block stays on v3, while one whose blocks are all gone drops to the block-less
+    /// schema for its scope (v2 at global scope, v1 at project scope). Removal keeps a
+    /// block only when its path is now a directory, so both blocks here point at
+    /// directories and the plan's schema branch is the only thing under test.
     /// </summary>
     [Fact]
-    public void UninstallGlobalRemovesLastBlockAndDropsRetainedSchemaToV2()
+    public void UninstallGlobalRetainedSchemaFollowsTheWriterRule()
     {
         using TempDirectory fixture = new TempDirectory();
-        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture, SquadTarget.Cursor);
-        SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
-        Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
-        Assert.Single(receipt.Blocks);
-        string hooksFile = GlobalHookFile(installed.Roots, SquadTarget.Cursor);
-        Assert.True(File.Exists(hooksFile));
-
-        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
-            installed.Home,
+        SquadReceipt twoBlocks = new(
+            "kyber-squad.receipt/v3",
             SquadDeploymentScope.Global,
-            receipt,
-            installed.Roots);
-        new SquadTransaction(installed.Store).Execute(uninstall);
+            fixture.Path,
+            InstalledAt,
+            [],
+            [])
+        {
+            Blocks =
+            [
+                new SquadOwnedBlock("hooks.json", "cursor", true, []),
+                new SquadOwnedBlock("hooks.json", "codex", true, []),
+            ]
+        };
 
-        SquadReceipt? retained = installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global);
-        Assert.Null(retained);
+        Directory.CreateDirectory(Path.Combine(fixture.Path, "hooks.json"));
+
+        SquadDeploymentPlan keepBoth = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Global,
+            twoBlocks);
+        SquadDeploymentPlan keepNone = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Global,
+            twoBlocks with { Blocks = [] });
+
+        Assert.Equal(2, keepBoth.Receipt.Blocks.Count);
+        Assert.Equal("kyber-squad.receipt/v3", keepBoth.Receipt.Schema);
+        Assert.Empty(keepNone.Receipt.Blocks);
+        Assert.Equal("kyber-squad.receipt/v2", keepNone.Receipt.Schema);
     }
 
     // ----------------------------------------------------------------------------------
@@ -507,7 +522,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     public void UpdateGlobalRewritesEveryBlockWithoutDrift()
     {
         using TempDirectory fixture = new TempDirectory();
-        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
+        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture, SquadTarget.Cursor, SquadTarget.Codex);
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
 
@@ -795,8 +810,6 @@ public sealed class SquadOwnedBlockLifecycleTests
         TempDirectory fixture,
         params SquadTarget[] targets)
     {
-        if (targets.Length == 0)
-            targets = [SquadTarget.Cursor, SquadTarget.Codex];
         FakeSquadUserPaths userPaths = new(fixture.Path);
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);

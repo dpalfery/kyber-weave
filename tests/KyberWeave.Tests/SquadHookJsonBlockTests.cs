@@ -479,6 +479,14 @@ public sealed class SquadHookFormatResolutionTests
     }
 
     [Fact]
+    public void CrossBareNameMismatchFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("hooks.v1.json", "codex"), out _));
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("settings.json", "codex"), out _));
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("hooks.json", "devin"), out _));
+    }
+
+    [Fact]
     public void UnknownTargetFallsBackToPathMatch()
     {
         Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(".cursor/hooks.json", "hal9000"), out SquadHookBlockFormat format));
