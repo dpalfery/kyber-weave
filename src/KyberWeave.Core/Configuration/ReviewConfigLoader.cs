@@ -365,9 +365,10 @@ public static class ReviewConfigLoader
                 $"{where} is empty. Name a directory relative to the repository root, or remove the key.");
         }
 
+        string trimmed = declared.Trim();
         // Both separators are accepted on every host; the stored form uses '/' only.
-        string spelled = declared.Replace('\\', '/');
-        if (spelled.StartsWith('/') || Path.IsPathRooted(declared))
+        string spelled = trimmed.Replace('\\', '/');
+        if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
         {
             throw new YamlException(
                 $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
