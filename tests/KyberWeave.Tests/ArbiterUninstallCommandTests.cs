@@ -510,6 +510,46 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             ArbiterUninstallCommand.AnotherTargetIsDeployed(_temp.Path, SquadTarget.Kilo, store));
     }
 
+    /// <summary>
+    /// Two block-bearing targets in one home write <c>hooks.json</c> beneath their own global
+    /// roots, so the files differ even though the recorded paths do not. Uninstalling one target
+    /// must remove that target's block and leave the other's file and receipt entry intact: the
+    /// receipt is the ownership record, and a removal that recomputed the path instead of reading
+    /// it would look for the block where it is not.
+    /// </summary>
+    [Fact]
+    public void Uninstall_GlobalCodex_RemovesOnlyTheCodexBlockAndKeepsTheCursorBlock()
+    {
+        string home = _home.Path;
+        InstallGlobal(home, "cursor");
+        InstallGlobal(home, "codex");
+
+        string cursorHooks = Path.Combine(home, ".cursor", "hooks.json");
+        string codexHooks = Path.Combine(home, ".codex", "hooks.json");
+        Assert.Equal(
+            ["codex", "cursor"],
+            ReadGlobalReceipt(home).Blocks.Select(block => block.Target).Order(StringComparer.Ordinal).ToArray());
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "codex" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains(
+            "kyber-weave-arbiter hook --harness cursor",
+            File.ReadAllText(cursorHooks),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "kyber-weave-arbiter hook --harness codex",
+            File.ReadAllText(codexHooks),
+            StringComparison.Ordinal);
+
+        SquadOwnedBlock remaining = Assert.Single(ReadGlobalReceipt(home).Blocks);
+        Assert.Equal("cursor", remaining.Target);
+        Assert.Equal("hooks.json", remaining.RelativePath);
+    }
+
     private void InstallGlobal(string home, string target)
     {
         ArbiterInstallCommand command = new();
@@ -531,6 +571,19 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name));
         Directory.CreateDirectory(userPaths.HomeDirectory);
         return new SquadStateStore(userPaths);
+    }
+
+    /// <summary>
+    /// The home-anchored global receipt, read through a store whose home is elsewhere so the read
+    /// cannot depend on the ambient home this class isolates only inside <see cref="Capture"/>.
+    /// </summary>
+    private SquadReceipt ReadGlobalReceipt(string home)
+    {
+        string path = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.receipt.json");
+        Assert.True(File.Exists(path), $"Expected one global receipt at '{path}'.");
+
+        SquadStateStore reader = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "global-receipt-reader")));
+        return reader.DeserializeReceipt(File.ReadAllText(path));
     }
 
     private static void WriteReceipt(

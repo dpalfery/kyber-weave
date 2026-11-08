@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -59,6 +59,23 @@ target (owned plugin/extension files, owned hook blocks); it defaults to user/gl
 and removes the target from `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml`.
 Use `--project` to uninstall from a repository scope instead. `--remove-key` deletes the
 stored key and warns when another scope still shares the key; without it the key is untouched.
+
+Global scope carries several block-bearing targets in one receipt, in any order: `cursor`,
+`codex`, `factory`, `antigravity` and `devin` each record a block there, and a global install
+merges the requested target into the receipt the earlier installs wrote instead of replacing
+them, so `arbiter install --target cursor`, then `--target codex`, then `--target factory`
+leaves three blocks in `~/.kyber-weave/squad/global/squad.receipt.json` and each command
+exits `0`. Each block's recorded path is relative to that target's own global root, so
+several targets legitimately record the same file name; the receipt tells them apart by
+target, exactly as it separates its owned files. Every verb reads that recorded path back
+rather than recomputing it from a format constant: `squad status --global` and `squad doctor`
+list each block with its target label and report drift per owned entry; a repeat
+`arbiter install` for any target runs the update path over every target the receipt owns and
+rewrites each block it still finds intact; and `arbiter uninstall --target <t>` removes only
+that target's block, leaves the others in place, and deletes the receipt only when it owns no
+file and no block any more. See the
+[Squad block identity](../kyber-squad/architecture.md#owned-blocks-in-shared-hook-files)
+rules for why the target is part of a block's identity there.
 
 The Kilo plugin shim resolves and verifies the repo root from its own plugin location
 (walking up to the nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds that root
