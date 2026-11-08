@@ -21,7 +21,7 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
-  - adr/0060-code-editing-runs-stop-on-unusable-tools
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -1295,7 +1295,7 @@ When conductor executes concurrent tasks in isolated git worktrees, MCP configur
 
 #### The worktree limitation, per role
 
-The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on another branch can be answered about the wrong code. Every docs response carries `branch=` and `repo=` in its provenance line, and `repo=` is the git directory every worktree of the repository shares — a different `root=` with the same `repo=` is another worktree of your repository, not a foreign one ([ADR 0060](../adr/0060-code-editing-runs-stop-on-unusable-tools.md)):
+The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on another branch can be answered about the wrong code. Every docs response carries `branch=` and `repo=` in its provenance line, and `repo=` is the git directory every worktree of the repository shares — a different `root=` with the same `repo=` is another worktree of your repository, not a foreign one ([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 | Role | Code questions | Docs and standards | If the check fails |
 |---|---|---|---|

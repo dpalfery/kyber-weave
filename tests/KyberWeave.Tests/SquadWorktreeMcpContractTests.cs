@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 
@@ -28,6 +29,22 @@ public sealed class SquadWorktreeMcpContractTests
 
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string McpRunbookDocPath = "docs/docgraph/mcp-runbook.md";
+
+    private const string BugCrusherSkillPath = "products/kyber-squad/skills/bug-crusher/SKILL.md";
+
+    /// <summary>
+    ///     The condition that starts the second route: the harness gives the orchestrator no way to run a
+    ///     command itself. The nouns are the ones the shipped prose may use for that capability.
+    /// </summary>
+    private static readonly Regex NoShellCondition = new(
+        @"(?i)\b(?:no|without|lacks?|has no|have no)\b[^\r\n]{0,60}" +
+        @"\b(?:shell|terminal|subprocess|bash|command execution|command runner)\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Handing the step to a worker instead of running it in the orchestrator's own context.</summary>
+    private static readonly Regex DispatchRoute = new(
+        @"(?i)\bdispatc(?:h|hes|hing|hed)\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static string ReadRepoFile(string relativePath)
     {
@@ -70,6 +87,24 @@ public sealed class SquadWorktreeMcpContractTests
         Assert.Matches(
             @"(?i)\b(?:fail(?:s|ing)?\s+closed|reject(?:s|ing)?|forbid(?:s|den)?)\b[^\r\n]*(?:symlink[^\r\n]*\.codegraph|\.codegraph\s+symlink)\b",
             content);
+    }
+
+    /// <summary>
+    ///     The conductor's "never block a run" line and its instruction to run the run-start check only
+    ///     agree when the check has a second route: run it in the harness's shell when the orchestrator
+    ///     has one, and dispatch a worker to run it when the harness gives the orchestrator none. Both
+    ///     entry points state that route, so neither has to choose between blocking the run and skipping
+    ///     the check.
+    /// </summary>
+    [Theory]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(BugCrusherSkillPath)]
+    public void RunStartSurfaces_RouteTheCheckThroughTheShellOrDispatchSeam(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        Assert.Matches(NoShellCondition, content);
+        Assert.Matches(DispatchRoute, content);
     }
 
     /// <summary>

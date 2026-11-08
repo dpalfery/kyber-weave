@@ -36,7 +36,13 @@ This applies where a human reads the text and nowhere else. The investigator's v
 
 # Workflow
 
-## 0. Run-start tooling check
+**Fetch and branch first.** Run `kyber-weave run start --harness {{harness}} --type fix --slug <slug> --failing-version <version>` from the repository root before you dispatch anyone. It fetches `origin` with `--prune`, starts from the branch `run.base-branch` declares or from `origin/HEAD` when the repository declares none — never an assumed `main` — and creates `[<owner>.<agent>.]<harness>/<type>/<slug>` with no upstream tracking. A clean checkout nothing else is using is branched in place; a dirty or shared one gets a worktree of its own, and the path it prints is the one everything after this works in. Record the printed `base`, `branch`, `where`, `revision` and the three versions; they are what the investigator and the pull request are held to.
+
+Where the harness gives you a shell, run it yourself. Where it gives you no shell, dispatch `github-devops` with that exact command and `RUN-START: true`, which the Arbiter classifies as an `investigate` dispatch, so the roster check and `KW-ARB-READONLY-001` still apply. This skill's roster names `bug-crusher-investigator` and `docs-dev` only, so that dispatch is escalated rather than run on its own: in supervised mode the human decides it, and in autonomous mode it is recorded as pending human review. When it is not approved, stop and report the unapproved dispatch — run start is never skipped, because a defect with no branch has no clean base to reproduce against and nothing to commit to.
+
+Exit `2` is input the command refused — correct the harness token, type or slug and re-run once. Exit `3` is the missing `codegraph` binary, handled as the check below handles it. Exit `1` is a tool failure: it stops the run when `stop-on-tool-failure` is on (a failed fetch alone only warns when it is off), and is otherwise relayed as a blocker rather than worked around.
+
+## 0. Run start, then the tooling check
 
 When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — the session begins with `kyber-weave doctor --ensure` before anything else. It leaves the tooling working in one command: it syncs the CodeGraph index or initialises it, restores any tracked file the initialisation rewrote, proves the index with one `codegraph explore` call and the docs server with one call, and repairs once with `codegraph index` before retrying once. Record one line in the run record: `run-start doctor: <exit> <check ids>`.
 
@@ -45,6 +51,8 @@ When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists 
 ## 1. Investigate — always first, always delegated
 
 Spawn `bug-crusher-investigator` with everything the human gave you: the failing command, the stack trace, the error text, the file they mentioned, what they were doing when it broke. Include the raw output verbatim rather than your summary of it — your paraphrase of a stack trace is already a diagnosis, and diagnosing is not your job.
+
+Pass the run-start facts too: `where` the branch sits, its `branch` name, and the three versions — the failing binary's from `--failing-version`, `HEAD`, and the base. Comparing them is how the investigator tells a defect in the commit under review from one the base already carries, so it is handed those three rather than sent to work them out. If any run-start fact is missing, stop, re-run run start to obtain the facts, or mark the defect UNREPRODUCED rather than dispatching the investigator into an ambient checkout.
 
 The investigator is read-only and returns a structured verdict:
 
@@ -100,6 +108,6 @@ You keep ownership when a defect escalates; you do not hand the human off to `co
 
 ## 6. Report
 
-Close with what actually happened, in the response format. The report covers what broke, the root cause, what changed, the verification output, whether a regression test was added, and the review verdict. Include the `run-start doctor:` line from step 0, the run record and the docs-dev review outcome in the report and the pull request description, which carries the same report. If you escalated, say what tripped it — the human is calibrating when to reach for this skill versus `conductor`, and that signal is the most useful thing you can give them.
+Close with what actually happened, in the response format. The report covers what broke, the root cause, what changed, the verification output, whether a regression test was added, and the review verdict. Include the `run-start` branch and base from step 0, the `run-start doctor:` line from step 0, the run record and the docs-dev review outcome in the report and the pull request description, which carries the same report. If you escalated, say what tripped it — the human is calibrating when to reach for this skill versus `conductor`, and that signal is the most useful thing you can give them.
 
 Paste the verification output verbatim; the format shapes the prose around it, not the evidence.

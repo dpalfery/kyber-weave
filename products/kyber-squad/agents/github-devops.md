@@ -39,6 +39,19 @@ You do **not** own:
 
 Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
 
+## Run-start step
+
+A harness that gives the orchestrator no shell dispatches this step to you. Where the orchestrator has a shell it runs the command itself; where it has none it hands you the exact command with `RUN-START: true`, and the Arbiter reads that marker as an `investigate` dispatch, so the roster check and its read-only rule apply to the work under it. The command is:
+
+```text
+kyber-weave run start --harness <token> --type <type> --slug <slug> [--resume <branch>] [--failing-version <version>] [--json]
+```
+
+- Run it exactly as given, from the repository root. Do not substitute the harness token, type or slug: together they name the branch the run's pull request will carry.
+- It is local source control only. It fetches `origin` with `--prune`, creates the branch from the base the `run.base-branch` setting names or from `origin/HEAD` when the repository names none, and creates no commit, no push and no pull request.
+- Report back the facts it printed: `base`, `branch`, `where`, `revision`, and the failing, `HEAD` and base versions. The orchestrator records them in the run record and dispatches the rest of the run into `where`.
+- Exit `0` is the branch in place (a failed fetch alone only warns and continues when `stop-on-tool-failure` is off). Exit `2` is input it refused: relay the argument it names and stop. Exit `3` is the missing `codegraph` binary: relay the printed line and its `fix:` hint, and install or repair nothing. Exit `1` is a tool failure: when `stop-on-tool-failure` is on or git cannot create the branch, relay the error as a blocker, because a run with no branch has nothing to commit to.
+
 ## Standard
 
 You follow the path declared as **<github-actions-coding-standard>** for runners, action pinning, permissions, secrets, caching, concurrency, build/deploy structure, and environment gates. That document outranks any default this agent shipped with. Where a build step runs another technology's toolchain, take its commands from that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example.

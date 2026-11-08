@@ -10,7 +10,7 @@ last-reviewed: 2026-11-07
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0057-squad-and-docs-are-their-own-assemblies
-  - adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools
+  - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 code-refs:
   - CodeGraphFreshness
   - CodeGraphProvisioner
@@ -186,6 +186,16 @@ Because the kind travels on the entry, a mode property is also reserved: a host 
 declare one under `config-reg:`, because that would replace a setting with a path and break
 the promise the registry makes.
 
+**The run settings are the next three.** `stop-on-tool-failure` at the top level, and
+`run.base-branch` and `run.harness-names`, publish `<stop-on-tool-failure>`,
+`<run-base-branch>` and `<run-harness-names>` as mode properties. A key the operator never
+wrote publishes nothing at all: an agent already applies the documented default, only a value
+somebody chose can differ from it, and a published default would claim a choice the repository
+never made. `run.base-branch` carries a branch name rather than a mode word, and the kind still
+applies — the value names nothing on disk, so `KW-CONFIG-REG-001` must not look for it there
+while `KW-CONFIG-REG-002` still checks the line. See
+[Run controls](../configuration.md#run-controls).
+
 ## Provisioning the index
 
 The graph lives in `.codegraph/` at the git root, and `docs drift` is the gate that needs it.
@@ -223,7 +233,7 @@ MCP proof, and never writes.
 
 The docs server used to answer from whatever index happened to be on disk, which for a role
 with no shell was the only index it would ever see. It now refreshes the index itself
-([ADR 0061](../adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
+([ADR 0061](../adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
 
 - **The refresh.** On the first tool call of the process, then at most once every 60 seconds,
   the server runs the same `sync` (or `init`) the doctor runs, through

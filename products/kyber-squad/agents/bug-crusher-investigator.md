@@ -31,6 +31,8 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 
 **1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. If that command is the full suite, run only the failing classes it reported: never run the full test suite yourself. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
 
+The dispatch carries the run-start facts: the branch, where its checkout sits, and three versions — the failing binary's, `HEAD`, and the base the branch was started from. Read them before you reproduce anything and compare the three: the defect is a regression only when the failing build is the commit under review rather than the base, and that comparison is handed to you so you are not hunting for it.
+
 If you cannot reproduce it, say so plainly and name what you would need (branch, environment variable, database state, exact command). Do not paper over it by diagnosing from the code alone. An unreproduced defect gets no fix.
 
 **2. Find the cause, not the symptom.** Read the stack trace to its origin, not its outermost frame. Check `git log`/`git diff` on the implicated files — a defect that appeared recently usually has a commit attached to it, and that is the cheapest evidence available. Trace the specific symbol or call path involved. Prefer reading three targeted files over grepping the repo broadly; you have a small context and you should spend it on the code that matters.

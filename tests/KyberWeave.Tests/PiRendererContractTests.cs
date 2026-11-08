@@ -712,13 +712,19 @@ public sealed class PiRendererContractTests : IDisposable
 
                 Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
                 Assert.True(
-                    string.Equals(CollapseToSingleLine(agent.Description), RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
+                    string.Equals(
+                        CollapseToSingleLine(TestSquadCorpus.ExpectedRenderText(SquadTarget.Pi, agent.Description)),
+                        RequireScalar(frontmatter, "description", agent.Name),
+                        StringComparison.Ordinal),
                     $"Lowered primary agent '{agent.Name}' description mismatch.");
                 Assert.True(
                     string.Equals("MIT", RequireScalar(frontmatter, "license", agent.Name), StringComparison.Ordinal),
                     $"Lowered primary agent '{agent.Name}' license mismatch.");
 
-                Assert.Contains(NormalizeBody(agent.InstructionBody), body, StringComparison.Ordinal);
+                Assert.Contains(
+                    NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Pi, agent.InstructionBody)),
+                    body,
+                    StringComparison.Ordinal);
 
                 foreach (SquadResource resource in agent.Resources)
                 {

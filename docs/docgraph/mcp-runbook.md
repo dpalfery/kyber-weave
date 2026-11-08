@@ -10,8 +10,8 @@ last-reviewed: 2026-11-07
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
-  - adr/0060-code-editing-runs-stop-on-unusable-tools
-  - adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
+  - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 code-refs:
   - CodeGraphFreshness
   - CodeGraphProvisioner
@@ -1446,7 +1446,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 ## The server refreshes CodeGraph, and its tools fail when it cannot
 
 The server keeps the CodeGraph index its own answers depend on reasonably fresh, so an agent
-with no shell is not served a stale index. The rules ([ADR 0061](../adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
+with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
 
 - **On the first tool call, then at most once every 60 seconds.** The interval is a constant in
   `CodeGraphFreshness`, not a setting. The refresh runs `sync` on an existing index and `init`
@@ -1566,7 +1566,7 @@ kyber-weave doctor --ensure .
 
 `--ensure` is the one command a worker runs before it starts work, in the tree it will work
 in — the canonical checkout, or the worktree when the task runs in one. It leaves the tooling
-usable rather than only reporting on it ([ADR 0060](../adr/0060-code-editing-runs-stop-on-unusable-tools.md)):
+usable rather than only reporting on it ([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 1. `codegraph sync` when `.codegraph/` exists, `codegraph init .` when it does not.
 2. **Restore any tracked file the preparation just rewrote** — and never a file that was
@@ -1654,7 +1654,7 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on
 another branch can get answers about the wrong code. `branch=` in the provenance line is what
 makes that visible. This is the rule for each role
-([ADR 0060](../adr/0060-code-editing-runs-stop-on-unusable-tools.md)):
+([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 | Role | Code questions | Docs and standards | If the check fails |
 |---|---|---|---|

@@ -175,6 +175,15 @@ kyberdash dash settings show
 kyberdash dash settings set jobs.refresh_cadence_minutes 30
 ```
 
+**Start a run on its branch** ([`run start`](#run--run-start),
+[Run controls](configuration.md#run-controls)):
+
+```bash
+kyber-weave run start --harness claude --type fix --slug arbiter-global-block-identity
+kyber-weave run start --harness claude --type fix --slug arbiter-global-block-identity --json
+kyber-weave run start --harness claude --type feat --slug new-gate --resume <branch>
+```
+
 The sections that document these sequences in full are
 [Canonical flows](#canonical-flows), [`kyber-weave` reference](#kyber-weave-reference),
 [`kyberdash` reference](#kyberdash-reference), [Exit codes](#exit-codes), and
@@ -182,8 +191,9 @@ The sections that document these sequences in full are
 
 ## `kyber-weave` reference
 
-The CLI is a Spectre.Console.Cli application with seven branches — `skill`, `agent`, `docs`,
-`squad`, `arbiter`, `utilities`, and `review` — plus a top-level `update` verb. Unknown options are a
+The CLI is a Spectre.Console.Cli application with eight branches — `skill`, `agent`, `docs`,
+`squad`, `run`, `arbiter`, `utilities`, and `review` — plus the top-level `update` and `doctor`
+verbs. Unknown options are a
 hard error: strict parsing is on, so a mistyped flag fails rather than being silently
 dropped.
 
@@ -268,6 +278,105 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 | [`squad preset clear`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `-t\|--target <TARGETS>`, `-g\|--global` | Revert target harnesses to bundled model profiles. |
 | [`squad preset list`](kyber-squad/model-profiles.md#apply-switch-and-revert) | — | List available presets and their active deployments. |
 | [`squad preset show`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `<name>`, `--target <TARGET>` | Inspect resolved models for a preset and target harness. |
+
+### `run` — run start
+
+Owned by [Run start: fetch and branch first](kyber-squad/architecture.md#run-start-fetch-and-branch-first),
+with the settings it reads in [Configuration § Run controls](configuration.md#run-controls).
+
+| Verb | Flags | What it does |
+|---|---|---|
+| [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
+
+```bash
+kyber-weave run start --harness <token> --type <type> --slug <slug> \
+  [--resume <branch-or-pr>] [--failing-version <version>] [--json]
+```
+
+**What it does, in order.**
+
+1. Names the branch from the three arguments, refusing input it cannot act on before it touches git
+   (exit `2`).
+2. Requires the current directory to be inside a git repository.
+3. Loads the repository's configuration; a configuration failure is exit `1`, with the diagnostics
+   printed the way every other command prints them.
+4. Requires the `codegraph` binary to resolve on `PATH`; absent is exit `3`, whose remedy is an
+   install rather than a repair.
+5. Fetches with `git fetch origin --prune`.
+6. Resolves the base: `run.base-branch` when set, `origin/HEAD` otherwise. **`main` is never
+   assumed**, so a repository whose default branch is `develop` is compared against `develop`.
+7. Refuses `--resume` naming neither a local branch nor `origin/<branch>` (exit `2`).
+8. Reads the versions and the divergence *before* switching anything, so the report describes the
+   checkout as the operator left it. `--failing-version` is what makes "the defect is not the
+   commit you are looking at" visible.
+9. Creates the branch with `--no-track`, in the checkout when it is clean and carries no other
+   worktree, and in a worktree of its own otherwise.
+
+**The branch and title shapes.** Both name the harness, because the diff does not:
+
+| Part | Shape | Example |
+|---|---|---|
+| Branch | `[<owner>.<agent>.]<harness>/<type>/<slug>` | `claude/fix/arbiter-global-block-identity` |
+| Title | `<type>(<scope>): <summary> [<harness>]` | `fix(arbiter): qualify the global block identity [claude]` |
+
+`<type>` is a conventional-commit type (`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
+`refactor`, `revert`, `style`, `test`). `<slug>` is lowercase hyphen-separated words. `<harness>`
+is one of the thirteen catalogue tokens — `codex`, `cursor`, `claude`, `copilot`, `opencode`,
+`kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`, `commandcode` — or `manual` for
+work named after no harness. The branch and title shapes deliberately share one vocabulary with
+`scripts/check-pr-name.sh`, which CI runs as the `pr-naming` job:
+a branch the check rejects is a branch whose pull request cannot reach the default branch, so
+creating one only moves the discovery to the end of the work.
+
+**Where the branch lands.** A clean checkout with no other worktree attached is branched in place.
+A dirty one, or one a second worktree already shares, gets a worktree at
+`<repository parent>/<repo name>.worktrees/<branch with / replaced by ->` — for example
+`…/kyber-weave.worktrees/claude-fix-arbiter-global-block-identity` — so the operator's edits stay
+on the branch they were made for, and no branch moves under another worker. A resumed branch keeps
+its own branch and is never renamed.
+
+**`--json` keys.** One object on stdout, for a caller that dispatches the step and reads its result:
+
+| Key | Meaning |
+|---|---|
+| `base` | The base branch as reported, e.g. `develop` (resolved through `origin/HEAD` when unset). |
+| `baseRef` | The ref the branch was created from, e.g. `origin/develop`. |
+| `branch` | The branch now in place — the resumed one when `--resume` was given. |
+| `worktree` | The worktree path, or `null` when it branched in place. |
+| `location` | `in-place` or `worktree`. |
+| `revision` | The commit the base resolved to, or `null` when it did not resolve. |
+| `resumed` | Whether this run continued an existing branch. |
+| `versions.failing` | `--failing-version` as given, or `null`. |
+| `versions.head` | The nearest tag at `HEAD`, else its abbreviated commit. |
+| `versions.base` | The nearest tag at the base ref, else its abbreviated commit. |
+| `serverAlignment.remote` | The remote name every run starts from: `origin`. |
+| `serverAlignment.host` | The host `origin` names, or `null` for a remote that is a local path. |
+| `serverAlignment.remoteUrl` | What `git remote get-url origin` returned, or `null`. |
+| `serverAlignment.head` | The commit of the compared ref — `HEAD`, or the resumed branch. |
+| `serverAlignment.ahead` | Commits on the compared ref that the base lacks, or `null` when git cannot compare. |
+| `serverAlignment.behind` | Commits on the base the compared ref lacks, or `null` when git cannot compare. |
+| `serverAlignment.aligned` | Whether both counts are zero. |
+
+**Exit codes.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Ready: the branch, or the resumed branch, is in place. |
+| `1` | A tool failure while `stop-on-tool-failure` is on — the fetch, the base, or the branch creation. With the setting off, a failed fetch only warns and the run continues from the base this checkout last fetched. |
+| `2` | Refused input: an unknown harness token, a type that is not conventional, a slug that is not lowercase hyphen-separated words, a `--resume` naming neither a local nor an `origin` branch, or a `--resume` naming a pull request number. |
+| `3` | The `codegraph` binary is not on `PATH`. Its remedy is an install, so it is not reported as a failure (exit `1`). |
+
+**Known limit.** `--resume` accepts a local branch or `origin/<branch>`. A numeric pull request
+reference is **refused with exit `2`**, not resolved: no pull request is fetched or looked up.
+Pass the branch the pull request already owns.
+
+**The no-shell route.** A harness that gives the conductor no shell cannot run the command, so the
+conductor dispatches `github-devops` with the exact command and a `RUN-START: true` marker. The
+marker exists because `KW-ARB-PLAN-001` escalates a `delegate` dispatch carrying no `PLAN_FILE`,
+which would refuse the very route the marker exists for: the Arbiter's `TriggerClassifier`
+classifies `RUN-START: true` as `investigate`, never `delegate`, so the roster check and
+`KW-ARB-READONLY-001` still apply to the dispatch. See
+[the three-step decision gates](adr/0053-kyber-arbiter-three-step-decision-gates.md).
 
 ### `arbiter` — Kyber Arbiter decision gates
 
@@ -479,6 +588,7 @@ risk. The three rules below mirror the contract in
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
+| [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. The name is resolved before the configuration is loaded, and the configuration before the binary is probed, so `2` outranks `1` outranks `3`. |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 
 ### Repository scripts

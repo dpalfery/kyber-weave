@@ -1,5 +1,5 @@
 ---
-id: adr/0060-code-editing-runs-stop-on-unusable-tools
+id: adr/0061-code-editing-runs-stop-on-unusable-tools
 title: Code-editing runs stop on unusable tools
 doc-type: adr
 status: current
@@ -15,7 +15,7 @@ code-refs:
   - RepositoryDoctor
 ---
 
-# ADR 0060: Code-editing runs stop on unusable tools
+# ADR 0061: Code-editing runs stop on unusable tools
 
 ## Status
 
@@ -144,7 +144,7 @@ reason to expect it to try.
 
 ## Related
 
-- [ADR 0061: the docs server refreshes CodeGraph and fails its tools](0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md) — the server-side half of the same failure
+- [ADR 0062: the docs server refreshes CodeGraph and fails its tools](0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md) — the server-side half of the same failure
 - [ADR 0050: the kw-docs MCP server reaches every entitled agent](0050-universal-kyber-weave-mcp-grant.md) — amended in place: the code graph is granted through the shared predicate, and the orchestrator stays excluded
 - [ADR 0051: the .NET CLI spawns stdio children through one bounded session](0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) — the bound on the doctor's MCP proof
 - [Kyber-Squad architecture, run-start documentation check](../kyber-squad/architecture.md#run-start-documentation-check)

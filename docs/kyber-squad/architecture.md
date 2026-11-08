@@ -8,6 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-07
 status: current
 decided-by:
+  - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
@@ -26,7 +27,7 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
-  - adr/0060-code-editing-runs-stop-on-unusable-tools
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
 sections:
   "#":
     keywords:
@@ -1294,6 +1295,25 @@ report a leftover key they can prove is the old spelling of one of these three �
 `KW-MCP-WIRE-007` is `kyber-weave docs mcp-migrate`, which rewrites the key in the client
 configuration rather than requiring a hand edit.
 
+### The harness token is substituted once, in the render pipeline
+
+Canonical `conductor`, `bug-crusher` and `create-pull-request` text that has to name the harness
+running it writes `{{harness}}`. `SquadHarnessRenderer.SubstituteHarnessToken` replaces it once per
+render with the target's catalogue token, over every surface a harness's prose travels on: each
+agent's description, instruction body and resources, and each skill's description, instruction body
+and resources. The substitution sits in the shared pipeline rather than in each renderer, because a
+per-renderer replacement leaves an agent file carrying the token while its skill projection still
+carries the braces.
+
+**Nothing at run time works the harness out from its surroundings.** The folder a run happens to be
+in has been the wrong answer (a Command Code run inside a `Devin` checkout), and so has an
+environment variable (`OPENCODE_CONFIG` set in a Claude session). So the canonical text asks the
+question and the catalogue answers it at render time, and the token is the same one
+[`run start`](../cli-command-surface.md#run--run-start) takes as `--harness` and the `pr-naming`
+check accepts in a branch or a title — `SquadTargetCatalog.GetToken`, so Antigravity's `agy` is
+written `antigravity`. A text with no placeholder comes back as the same string instance, so a
+corpus that has not adopted it renders byte for byte as it did before.
+
 ### Render Source Loading and Preloaded Seams
 
 Rendering operations resolve source definitions and environment overrides through non-mutating seams on `SquadRenderRequest`:
@@ -1689,6 +1709,49 @@ reports `MAPPED:`, `IMPACT:`, and `DOCS_REVIEW:` rows; a plan or specification c
 ends in `STATUS: CLOSEOUT_COMPLETE`, or `STATUS: BLOCKED` naming what stopped the
 archive.
 
+### Run start: fetch and branch first
+
+A run does not investigate, plan, or write a file until it is on the branch its work belongs on.
+`kyber-weave run start` is that step, and both entry points `conductor` and `bug-crusher` run it
+before anything else. The verb's flags, `--json` keys and exit codes are in
+[`run start`](../cli-command-surface.md#run--run-start); the settings it reads are in
+[Run controls](../configuration.md#run-controls). What follows is why it is shaped that way
+([ADR 0060](../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md)).
+
+- **Fetch first, then branch from the remote base.** The step runs `git fetch origin --prune` and
+  starts the branch from `run.base-branch` when the repository set it, and from `origin/HEAD`
+  otherwise. `main` is never assumed, because a repository whose default branch is `develop`, or
+  whose operator named a release branch, would otherwise be compared against a branch that may not
+  exist while the answer looks authoritative. Checking out `main` and pulling is not the same
+  thing: it moves the operator's checkout, and it assumes the base's name.
+- **The harness is in the name.** The branch is `[<owner>.<agent>.]<harness>/<type>/<slug>` and the
+  pull request title is `<type>(<scope>): <summary> [<harness>]`. Nothing else in a change records
+  which harness wrote it — the diff does not — and the two shapes share one vocabulary with the
+  `pr-naming` check, so a branch this command creates is a branch whose pull request can merge.
+- **The checkout is taken only when it is free.** A clean checkout with no second worktree is
+  branched in place; a dirty one, or one another worktree shares, gets a worktree beside the
+  repository. Switching branches under uncommitted work either fails or carries those edits onto a
+  branch they were not made for, and taking a shared checkout moves the branch under whoever else
+  is standing in it.
+- **A tool that fails stops the run, unless the repository says otherwise.** `stop-on-tool-failure`
+  is `true` when absent, and the default lives in code rather than in instruction text because
+  absence is the common case and a run cannot rely on an agent having read a rule. With it off, a
+  failed fetch only warns and the run continues from the base the checkout last fetched.
+- **Reported, not assumed.** The versions the operator is working between — the failing build,
+  `HEAD`, and the base — and the divergence from the server are read *before* anything is switched,
+  because that is the state the defect was observed in. The run record carries them, and every later
+  dispatch of the run works in the location the step printed.
+- **The conductor runs it or dispatches it, never skips it.** Where the harness gives the conductor
+  a shell it runs the command itself. Where it gives none, it dispatches `github-devops` with the
+  exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
+  that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
+  `TriggerClassifier` classifies the marker as `investigate` and the roster check and
+  `KW-ARB-READONLY-001` still apply to the dispatch.
+
+Its two prerequisites are checked in the order that decides the exit code: the repository's
+configuration must load (a failure is exit `1`), and the `codegraph` binary must resolve on `PATH`
+(absent is exit `3`, whose remedy is an install rather than a repair).
+
 ### Delivery: draft first, ready on CI
 
 Delivery is the same in both modes. The conductor commits to a feature branch, pushes it, and opens
@@ -1715,10 +1778,13 @@ elsewhere keeps working.
 
 ### Run-start documentation check
 
+This check is the documentation half of a run's start; the branch half is
+[run start](#run-start-fetch-and-branch-first) above.
+
 `conductor` (under **Shared lifecycle invariants**) and `bug-crusher` (step 0 of **Workflow**)
 both run a tooling check before they do anything else. The check is an invariant of the squad,
 not a convenience, and **a failure stops the run**
-([ADR 0060](../adr/0060-code-editing-runs-stop-on-unusable-tools.md)):
+([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 - **Predicate.** The step runs only when the repository has governed docs: `.kyber-weave/kyber-weave.yml`
   exists at the git root, and the docs root it declares exists as a directory. A repository without
@@ -1752,7 +1818,7 @@ not a convenience, and **a failure stops the run**
 
 **This reverses the rule the squad carried before 2026-11-07**, which was "warn and continue; never
 block a run on it". It is the owner's explicit decision, recorded in
-[ADR 0060](../adr/0060-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
+[ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
 rejected. The cost is a repository that cannot repair its index stopping code-editing runs until it
 does; the alternative was a run that proceeds as if its code search worked.
 

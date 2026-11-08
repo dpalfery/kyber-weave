@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 ---
 
 # Wiring Kyber-Weave into CI
@@ -272,14 +272,48 @@ the required check pending. The comments on the `changes` job in `ci.yml` state 
 invariant; the `codeql` job's `if: needs.changes.outputs.codeql != '[]'` is one instance
 of it.
 
-Three jobs always run, even on docs-only pull requests: `build-test`, `gitleaks`, and
-`skill-docs-gate` (the skill and docs gate). The .NET tests read files under `docs/`,
+Four jobs always run, even on docs-only pull requests: `build-test`, `gitleaks`,
+`pr-naming` (the pull request naming check), and `skill-docs-gate` (the skill and docs gate).
+`pr-naming` is a pull-request job only, and it carries no path filter because every pull request
+has a name. The .NET tests read files under `docs/`,
 `products/`, `.kyber-weave/`, `.github/`, `scripts/`, and a few under `dash/`, so no path
 set can prove them irrelevant.
 
 Anything that is not a pull request — a push to `main`, the weekly Monday cron, a manual
 dispatch — runs everything. So does any edit to `.github/workflows/ci.yml` itself or to
 anything under `.github/codeql/`: a change to the filters is itself fully exercised.
+
+### The pull request naming check and its recheck
+
+`ci.yml` runs the check as the `pr-naming` job, displayed as **Pull request name**, gated on
+`if: github.event_name == 'pull_request'`. It is its own job so a name that cannot pass fails in
+seconds rather than after the build has spent a runner. It runs
+`scripts/check-pr-name.sh --title … --branch … --author …` against the branch
+`[<owner>.<agent>.]<harness>/<type>/<slug>` and the title `<type>(<scope>): <summary> [<harness>]`:
+`<type>` is a conventional-commit type, `<slug>` is lowercase hyphen-separated words, `<scope>` is
+one word, and `<harness>` is one of the thirteen catalogue tokens or `manual`. A pull request
+authored by `dependabot[bot]` is exempt, because GitHub generates its branch and title; the
+exemption follows the author, not the branch prefix. `kyber-weave run start` creates a branch in
+this shape, so a run taken with it starts with a name that can pass
+([`run start`](../cli-command-surface.md#run--run-start)).
+
+**`CI Summary` needs it.** The summary job lists `pr-naming` in `needs:` and fails on its result
+like any other job, so a pull request can never look green without having run the check. The job
+skips on every other event, and that is safe because a push to `main` and the schedule have no
+pull request to name and `CI Summary` is not a required check there.
+
+**The job reads the API, not the event payload.** That is why a corrected title can turn the
+required check green: `.github/workflows/pr-naming-recheck.yml` runs on
+`pull_request: edited` with `if: github.event.changes.title != null`, finds the latest completed
+CI run for the head commit, and re-runs that run's naming job and then `CI Summary`. CI itself
+deliberately does not listen to `edited`: adding it would cancel and restart every CI run whenever
+someone fixed a typo in a description, throwing away a full test cycle for an event that changes
+nothing but the pull request's text.
+
+The join between the two files is each job's display name — `Pull request name` and `CI Summary` —
+because the API identifies a job by its `name:`, never by its key in the workflow. **Renaming
+either job in `ci.yml` means editing `NAMING_JOB` or `SUMMARY_JOB` in `pr-naming-recheck.yml` in
+the same change**; a rename that misses there fails the recheck step rather than passing silently.
 
 ### The expected neutral "1 configuration not found" check
 

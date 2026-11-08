@@ -1,5 +1,5 @@
 ---
-id: adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools
+id: adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 title: The docs server refreshes CodeGraph and fails its tools
 doc-type: adr
 status: current
@@ -16,7 +16,7 @@ code-refs:
   - McpConfig
 ---
 
-# ADR 0061: The docs server refreshes CodeGraph and fails its tools
+# ADR 0062: The docs server refreshes CodeGraph and fails its tools
 
 ## Status
 
@@ -128,12 +128,12 @@ whatever the server does has to remain honest about both.
   value must compare fields. `McpLiveProbe` reads the new fields so `mcp.root` still catches a
   server answering from another checkout.
 - A worktree created after the server starts is not covered: the refresh belongs to the root the
-  server is bound to. [ADR 0060](0060-code-editing-runs-stop-on-unusable-tools.md) carries that
+  server is bound to. [ADR 0061](0061-code-editing-runs-stop-on-unusable-tools.md) carries that
   consequence into the per-role rules.
 
 ## Related
 
-- [ADR 0060: code-editing runs stop on unusable tools](0060-code-editing-runs-stop-on-unusable-tools.md) — the run-start half of the same failure, including `doctor --ensure`
+- [ADR 0061: code-editing runs stop on unusable tools](0061-code-editing-runs-stop-on-unusable-tools.md) — the run-start half of the same failure, including `doctor --ensure`
 - [ADR 0051: the .NET CLI spawns stdio children through one bounded session](0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) — the bound discipline the refresh follows
 - [ADR 0046: docs_answer_question_from_repo_documentation returns one section answer](0046-docs-explore-section-answer.md) — the response shape the note and failure blocks sit beside
 - [DocGraph architecture, the server keeps the index fresh](../docgraph/architecture.md#the-server-keeps-the-index-fresh-and-fails-its-tools-when-it-cannot)
