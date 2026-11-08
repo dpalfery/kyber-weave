@@ -258,7 +258,7 @@ public sealed partial class DocumentIndex
         string trimmedTopic = topic?.Trim() ?? string.Empty;
         Dictionary<string, double>? topicVector = trimmedTopic.Length == 0
             ? null
-            : _corpus.WeightByRarity(TextVectorizer.VectorizeFused(trimmedTopic));
+            : TopicVector(_corpus, matched, trimmedTopic);
 
         return matched
             .Select(doc => new DocumentHit(
@@ -271,6 +271,77 @@ public sealed partial class DocumentIndex
                 []))
             .ToList();
     }
+
+    /// <summary>
+    /// The vector a topic is scored against the candidate standards with: rarity-weighted, and
+    /// without the compounds the caller never wrote and no candidate states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The narrowing is what makes a two-word topic work. <see cref="TextVectorizer.VectorizeFused"/>
+    /// adds each adjacent pair of the topic's words as a term of its own, so a caller asking for
+    /// <c>error handling</c> also queries for the compound <c>errorhandling</c>. <c>VectorizeFused</c>
+    /// calls that pair a bridge for compound names rather than evidence in its own right, and a
+    /// pair no candidate section states bridges to nothing: it can add nothing to any section's
+    /// overlap, but it still counts towards the query vector's magnitude, which is the
+    /// denominator of every section's cosine. Rarity turns the dilution into a loss, because a
+    /// term no document states carries the highest inverse document frequency the corpus
+    /// offers. On this repository's own C# standard that compound alone held
+    /// <c>Errors and diagnostics</c> a ten-thousandth under <see cref="MinSectionScore"/>.
+    /// </para>
+    /// <para>
+    /// Only the synthesised pairs are dropped. The caller's own words stay in the query whether
+    /// or not a candidate states them, because a word the caller wrote is an ask the standard
+    /// either answers or does not: dropping it would rescale every section's score by the mass
+    /// that was removed, so a topic the standard covers in part would clear the relevance floor
+    /// on a denominator that had forgotten the part it does not cover — and a section sharing
+    /// only a generic word such as <c>time</c> would come back as an answer. Keeping every word
+    /// the caller wrote keeps each score on the scale <see cref="MinSectionScore"/> was set
+    /// against.
+    /// </para>
+    /// </remarks>
+    /// <param name="corpus">The corpus the rarity weights come from.</param>
+    /// <param name="candidates">The documents the topic will be scored against.</param>
+    /// <param name="topic">The caller's topic, already trimmed and known to be non-empty.</param>
+    private static Dictionary<string, double> TopicVector(
+        DocumentCorpus corpus,
+        IReadOnlyList<DocumentModel> candidates,
+        string topic)
+    {
+        HashSet<string> words = new(TextVectorizer.Vectorize(topic).Keys, StringComparer.Ordinal);
+
+        // The same text Excerpt scores, built by the same helper, so "stated" means stated to
+        // the scorer rather than to a second reading of the section.
+        HashSet<string> stated = new(StringComparer.Ordinal);
+        foreach (DocumentModel candidate in candidates)
+        {
+            foreach (DocumentSection section in candidate.Sections)
+            {
+                stated.UnionWith(SectionVector(section).Keys);
+            }
+        }
+
+        Dictionary<string, double> query = new(StringComparer.Ordinal);
+        foreach ((string term, double weight) in corpus.WeightByRarity(TextVectorizer.VectorizeFused(topic)))
+        {
+            // A compound the caller never wrote, and that no candidate states, is a bridge to
+            // nothing. A word the caller wrote stays whether or not it is stated here.
+            bool synthesised = !words.Contains(term);
+            if (synthesised && !stated.Contains(term)) continue;
+
+            query[term] = weight;
+        }
+
+        return query;
+    }
+
+    /// <summary>
+    /// The term vector of one section, as selection scores it. Shared with
+    /// <see cref="TopicVector"/>, so what counts as "stated" for a topic and what
+    /// <see cref="Excerpt"/> scores are the same reading of the same section.
+    /// </summary>
+    private static Dictionary<string, double> SectionVector(DocumentSection section) =>
+        TextVectorizer.VectorizeFused(section.Heading + "\n" + section.Body);
 
     /// <summary>
     /// Every technology this repository declares a coding standard for, so a caller that does
@@ -689,8 +760,7 @@ public sealed partial class DocumentIndex
         List<(DocumentSection Section, double Score)> ranked = doc.Sections
             .Select(section =>
             {
-                Dictionary<string, double>
-                    vector = TextVectorizer.VectorizeFused(section.Heading + "\n" + section.Body);
+                Dictionary<string, double> vector = SectionVector(section);
                 double length = vector.Values.Sum();
                 double score = TextVectorizer.CosineSimilarity(queryVector, vector)
                                * (length / (length + SectionSaturation));
