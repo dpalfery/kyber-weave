@@ -88,7 +88,7 @@ public sealed class PortableContentTests
                          "*",
                          new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
             {
-                if (entry.LinkTarget is not null)
+                if (entry.LinkTarget is not null && entry is DirectoryInfo)
                     continue;
 
                 if (entry is DirectoryInfo child)
@@ -115,12 +115,9 @@ public sealed class PortableContentTests
                 ? []
                 : content.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Assert.Fail($"Unreadable portable file '{path}': {ex.Message}");
             return [];
         }
     }

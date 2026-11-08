@@ -145,6 +145,6 @@ pytest <path>::<test_name>               # the tests covering your change
 
 Ruff is the formatter, and `ruff format --check` reports a file it would rewrite without writing
 it. `python -m build` is the build — it proves the package metadata and the module layout resolve
-from `pyproject.toml` alone, which an editable install does not. The `pytest` line is filtered to
-the tests covering your change; the unfiltered run is the gate the review council and CI run, and
-a dev agent never runs it.
+from `pyproject.toml` alone, which an editable install does not. The `pytest` line is the test command,
+filtered to the tests covering your change; the unfiltered run is the gate the review council and CI run,
+and a dev agent never runs it.

@@ -758,14 +758,14 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "README.md"));
         int namesAt = omission.IndexOf(':', StringComparison.Ordinal);
         string named = namesAt >= 0 ? omission[(namesAt + 1)..] : omission;
+        named = named.TrimEnd(']', '\r', '\n', ' ');
         string[] omitted = named
-            .Split(['·', ',', ';', '[', ']'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Where(part => !part.StartsWith("omitted", StringComparison.OrdinalIgnoreCase))
+            .Split(" · ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .ToArray();
         Assert.NotEmpty(omitted);
         Assert.All(
             omitted,
-            section => Assert.Contains(section, standard, StringComparison.Ordinal));
+            section => Assert.Contains($"## {section}", standard, StringComparison.Ordinal));
         Assert.DoesNotContain("not matching this topic", omission, StringComparison.Ordinal);
 
         AssertTheCutIsSaidToBeExpected(response);
