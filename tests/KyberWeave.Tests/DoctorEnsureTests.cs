@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using KyberWeave.Cli.Commands.Doctor;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console;
@@ -222,6 +223,175 @@ public sealed class DoctorEnsureTests : IDisposable
             + $"'{writtenByInit}' it wrote stays modified in the working tree.");
         Assert.Contains(rewinds, arguments => arguments.Contains(writtenByInit, StringComparison.Ordinal));
         Assert.DoesNotContain(rewinds, arguments => arguments.Contains(alreadyDirty, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// When reading baseline tracked changes fails (e.g. git error), ensure must not assume the tree
+    /// was clean and must skip restore so operator work is never wiped.
+    /// </summary>
+    [Fact]
+    public void EnsureDoesNotRestoreModifiedFilesWhenBaselineGitStatusFails()
+    {
+        const string alreadyDirty = "src/already-dirty.cs";
+        int statusCalls = 0;
+
+        ScriptedProcessExecutor executor = new(startInfo =>
+        {
+            if (startInfo.FileName == "git")
+            {
+                string arguments = string.Join(' ', startInfo.ArgumentList);
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+
+                if (arguments.Contains("status", StringComparison.Ordinal))
+                {
+                    statusCalls++;
+                    return statusCalls == 1
+                        ? new ProcessResult(1, string.Empty, "git error")
+                        : new ProcessResult(0, $" M {alreadyDirty}\n", string.Empty);
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            if (startInfo.FileName == "codegraph")
+                return DoctorHarness.Ok();
+
+            throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
+        });
+
+        RunEnsure(executor);
+
+        string[] rewinds = executor.CallsTo("git")
+            .Select(call => string.Join(' ', call.ArgumentList))
+            .Where(arguments => arguments.Contains("checkout", StringComparison.Ordinal)
+                                || arguments.Contains("restore", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.DoesNotContain(rewinds, arguments => arguments.Contains(alreadyDirty, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// When restore fails on a path with spaces, the printed remedy quotes the path so it is a valid
+    /// shell command.
+    /// </summary>
+    [Fact]
+    public void EnsureRemedyQuotesPathsWithSpacesWhenRestoreFails()
+    {
+        const string fileWithSpace = "src/My File.cs";
+        bool initialised = false;
+
+        ScriptedProcessExecutor executor = new(startInfo =>
+        {
+            if (startInfo.FileName == "git")
+            {
+                string arguments = string.Join(' ', startInfo.ArgumentList);
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+
+                if (arguments.Contains("status", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(
+                        0,
+                        initialised ? $" M {fileWithSpace}\n" : string.Empty,
+                        string.Empty);
+                }
+
+                if (arguments.Contains("restore", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(1, string.Empty, "cannot restore");
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            if (startInfo.FileName == "codegraph")
+            {
+                if (startInfo.ArgumentList.Contains("init", StringComparer.Ordinal))
+                    initialised = true;
+
+                return DoctorHarness.Ok();
+            }
+
+            throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
+        });
+
+        DoctorCommand command = new()
+        {
+            Executor = executor,
+            IsTerminal = () => false,
+            ReadEnvironment = _ => null,
+            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
+        };
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Ensure,
+            DoctorHarness.Options(command.McpExecutable),
+            executor,
+            _ => null);
+
+        DoctorCheck restoreCheck = Assert.Single(report.Checks, check => check.Id == "codegraph.restore");
+        Assert.False(restoreCheck.Passed);
+        Assert.NotNull(restoreCheck.Fix);
+        Assert.Contains($"\"{fileWithSpace}\"", restoreCheck.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Baseline tracked changes must be sampled AFTER lock acquisition so edits made while waiting
+    /// are not classified as newly written by the index preparation and restored.
+    /// </summary>
+    [Fact]
+    public void EnsureSamplesBaselineTrackedChangesAfterLockAcquisition()
+    {
+        string lockPath = CodeGraphProvisioner.LockPathFor(Root, Path.GetTempPath());
+        bool lockHeldDuringBaselineStatus = false;
+        int statusCalls = 0;
+
+        ScriptedProcessExecutor executor = new(startInfo =>
+        {
+            if (startInfo.FileName == "git")
+            {
+                string arguments = string.Join(' ', startInfo.ArgumentList);
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+
+                if (arguments.Contains("status", StringComparison.Ordinal))
+                {
+                    statusCalls++;
+                    if (statusCalls == 1)
+                    {
+                        if (File.Exists(lockPath))
+                        {
+                            try
+                            {
+                                using FileStream testOpen = new(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                                lockHeldDuringBaselineStatus = false;
+                            }
+                            catch (IOException)
+                            {
+                                lockHeldDuringBaselineStatus = true;
+                            }
+                        }
+                    }
+
+                    return new ProcessResult(0, string.Empty, string.Empty);
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            if (startInfo.FileName == "codegraph")
+                return DoctorHarness.Ok();
+
+            throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
+        });
+
+        RunEnsure(executor);
+
+        Assert.True(
+            lockHeldDuringBaselineStatus,
+            "Baseline tracked changes must be sampled AFTER lock acquisition so edits made while waiting are not lost.");
     }
 
     /// <summary>
