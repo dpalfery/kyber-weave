@@ -82,11 +82,17 @@ public sealed class RunStartRunner
             : null;
     }
 
-    /// <summary>Whether the checkout has no uncommitted change.</summary>
-    public bool CheckoutIsClean()
+    /// <summary>The git status outcome for the current checkout.</summary>
+    public GitOutcome CheckoutStatus()
     {
-        GitOutcome outcome = Git("status", "--porcelain");
-        return outcome.Succeeded && outcome.StandardOutput.Trim().Length == 0;
+        return Git("status", "--porcelain");
+    }
+
+    /// <summary>Whether the checkout has no uncommitted change, or null when the probe failed.</summary>
+    public bool? CheckoutIsClean()
+    {
+        GitOutcome outcome = CheckoutStatus();
+        return outcome.Succeeded ? outcome.StandardOutput.Trim().Length == 0 : null;
     }
 
     /// <summary>Whether a second worktree is attached to this repository.</summary>

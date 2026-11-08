@@ -146,6 +146,24 @@ public sealed class RunStartCommandTests : IDisposable
     }
 
     /// <summary>
+    ///     When the git status probe fails, the command fails and surfaces the status error rather than
+    ///     treating the failure as a dirty checkout and attempting worktree creation.
+    /// </summary>
+    [Fact]
+    public void FailsAndSurfacesErrorWhenCheckoutStatusProbeFails()
+    {
+        _probe.Git("config", "core.excludesfile", _probe.Root);
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("git status failed:", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A defect run compares the failing build's version with <c>HEAD</c> and with the remote base,
     ///     and prints all three, because the point of the comparison is to show an operator that the bug
     ///     they hit is not the commit they are looking at.

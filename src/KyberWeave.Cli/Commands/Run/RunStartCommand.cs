@@ -192,8 +192,14 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         (int? ahead, int? behind) = runner.Divergence(alignmentRef, startRef);
         string? originUrl = runner.OriginAddress();
 
+        GitOutcome status = runner.CheckoutStatus();
+        if (!status.Succeeded)
+        {
+            return Fail($"git status failed: {status.FirstErrorLine}");
+        }
+
         RunStartLocation location = RunStartPlanner.DecideLocation(
-            runner.CheckoutIsClean(),
+            status.StandardOutput.Trim().Length == 0,
             runner.AnotherWorktreeIsAttached());
 
         string target = resumeTarget ?? branch;
