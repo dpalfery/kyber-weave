@@ -134,6 +134,18 @@ public sealed class CorpusProvenanceTests : IDisposable
     }
 
     /// <summary>
+    /// When standard output from git is whitespace-only, FirstLine must return "unavailable"
+    /// rather than an empty string, so header regex parsing is not corrupted.
+    /// </summary>
+    [Fact]
+    public void FirstLine_ReturnsUnavailable_WhenWhitespaceOnly()
+    {
+        Assert.Equal("unavailable", CorpusProvenance.FirstLine("   \n"));
+        Assert.Equal("unavailable", CorpusProvenance.FirstLine("\r\n\t  \r\n"));
+        Assert.Equal("abc1234", CorpusProvenance.FirstLine("  abc1234  \n"));
+    }
+
+    /// <summary>
     /// A commondir pointer containing illegal path characters does not throw, but falls back to
     /// the checkout's git directory.
     /// </summary>

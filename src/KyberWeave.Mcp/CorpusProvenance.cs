@@ -235,8 +235,11 @@ internal static class CorpusProvenance
         return (revision is null ? Unavailable : FirstLine(revision), dirty);
     }
 
-    private static string FirstLine(string text) =>
-        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(Unavailable).Trim();
+    internal static string FirstLine(string text)
+    {
+        string trimmed = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(Unavailable).Trim();
+        return string.IsNullOrEmpty(trimmed) ? Unavailable : trimmed;
+    }
 
     private static string? RunGit(string root, params string[] arguments)
     {
