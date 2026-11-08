@@ -47,8 +47,8 @@ public sealed record TaskGateRun(GateReport Report, IReadOnlyList<GateResult> Fi
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the only place a <c>{changed}</c> or <c>{task}</c> token becomes a value. Both are
-/// substituted into argv elements, never into a command line, so a changed file name cannot
+/// This is the only place a <c>{changed}</c>, <c>{task}</c> or <c>{tests}</c> token becomes a value. All
+/// three are substituted into argv elements, never into a command line, so a changed file name cannot
 /// introduce an option or a second command. Paths are checked before expansion: an absolute
 /// path, a <c>..</c> escape, a leading <c>-</c>, or a symbolic link leading outside the root refuses the whole run.
 /// </para>
@@ -61,6 +61,7 @@ public static class TaskGateSelection
 {
     private const string ChangedToken = "{changed}";
     private const string TaskToken = "{task}";
+    private const string TestsToken = "{tests}";
 
     /// <summary>
     /// Refuses a <c>--task</c> value that is not a lookup name, because it is substituted into argv
@@ -122,6 +123,14 @@ public static class TaskGateSelection
     /// <param name="changed">The repository-relative changed paths, already validated with <see cref="ValidatePath"/>.</param>
     /// <param name="task">The validated <c>--task</c> slug, or <see langword="null"/> when none was given.</param>
     /// <param name="currentOs"><c>windows</c> or <c>unix</c>, for the gate's <c>os</c> filter.</param>
+    /// <param name="root">
+    /// The repository root the <c>{tests}</c> token resolves its class files under, or <see langword="null"/>
+    /// to use the nearest enclosing repository of this process.
+    /// </param>
+    /// <param name="testMap">
+    /// The host's <c>review.test-map</c>, as source glob to fully qualified class names, or
+    /// <see langword="null"/> when the host declares none.
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="currentOs"/> is neither <c>windows</c> nor <c>unix</c>. Any other host value would
     /// be read as unix, so it is refused rather than guessed at.
@@ -130,13 +139,19 @@ public static class TaskGateSelection
         IReadOnlyList<ReviewTaskGate> gates,
         IReadOnlyList<string> changed,
         string? task,
-        string currentOs)
+        string currentOs,
+        string? root = null,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? testMap = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(changed);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentOs);
         if (currentOs is not ("windows" or "unix"))
             throw new ArgumentException($"currentOs must be 'windows' or 'unix', not '{currentOs}'.", nameof(currentOs));
+
+        // Resolved once, and only when a gate names the token: resolution reads the source tree.
+        IReadOnlyList<string>? testClasses = null;
+        IReadOnlyList<string> TestClasses() => testClasses ??= TestClassMapping.Resolve(root, changed, testMap);
 
         // Matching uses the separator-normalized form. What reaches argv is the path as it was given,
         // because on unix a backslash is part of a file name and rewriting it would name another file.
@@ -170,6 +185,15 @@ public static class TaskGateSelection
                 continue;
             }
 
+            // The same for a class list where the program belongs: the source tree would then choose what runs.
+            if (NamesTestsInProgram(gate))
+            {
+                refusals.Add(
+                    $"Task gate '{gate.Id}' uses {{tests}} as its program. Name the command, and pass the " +
+                    "test classes as arguments.");
+                continue;
+            }
+
             if (gate.Os is not null && gate.Os != currentOs)
             {
                 skipped.Add(new SkippedTaskGate(gate.Id, $"it runs only on {gate.Os}, and this host is {currentOs}"));
@@ -186,10 +210,27 @@ public static class TaskGateSelection
                 continue;
             }
 
-            IReadOnlyList<string>? run = Expand(gate.Id, gate.Run, matches, task, refusals);
+            // Nothing mapped is a skip, not an empty filter: a class-less filter exits zero, and would be
+            // read afterwards as a suite that ran and passed.
+            string testsFilter = string.Empty;
+            if (NamesTests(gate))
+            {
+                IReadOnlyList<string> classes = TestClasses();
+                if (classes.Count == 0)
+                {
+                    skipped.Add(new SkippedTaskGate(
+                        gate.Id,
+                        "no test class covers the changed files, so its filter would select nothing"));
+                    continue;
+                }
+
+                testsFilter = TestsFilter(classes);
+            }
+
+            IReadOnlyList<string>? run = Expand(gate.Id, gate.Run, matches, task, testsFilter, refusals);
             IReadOnlyList<string>? fix = gate.Fix.Count == 0
                 ? []
-                : Expand(gate.Id, gate.Fix, matches, task, refusals);
+                : Expand(gate.Id, gate.Fix, matches, task, testsFilter, refusals);
 
             // A gate whose argv still names the {task} token is suppressed: the caller must
             // never start a process that writes to a literal {task} directory shared by
@@ -219,6 +260,7 @@ public static class TaskGateSelection
         IReadOnlyList<string> argv,
         IReadOnlyList<string> matches,
         string? task,
+        string testsFilter,
         List<string> refusals)
     {
         List<string> expanded = new(argv.Count + matches.Count);
@@ -244,10 +286,45 @@ public static class TaskGateSelection
                 continue;
             }
 
+            if (UsesTestsToken(element))
+            {
+                expanded.Add(element.Replace(TestsToken, testsFilter, StringComparison.Ordinal));
+                continue;
+            }
+
             expanded.Add(element);
         }
 
         return expanded;
+    }
+
+    /// <summary>
+    /// The filter that selects exactly the resolved classes: one <c>FullyQualifiedName~</c> clause per class,
+    /// joined by <c>|</c>, which is the form <c>dotnet test --filter</c> reads as "any of these".
+    /// </summary>
+    /// <remarks>
+    /// The name is fully qualified because a short one runs zero tests and exits zero, and the prefix is
+    /// spelled out on every clause because <c>|</c> binds to the whole expression: a bare name after it would
+    /// be a syntax error rather than a second selector.
+    /// </remarks>
+    private static string TestsFilter(IReadOnlyList<string> classes)
+    {
+        return string.Join('|', classes.Select(name => "FullyQualifiedName~" + name));
+    }
+
+    private static bool NamesTests(ReviewTaskGate gate)
+    {
+        return gate.Run.Any(UsesTestsToken) || gate.Fix.Any(UsesTestsToken);
+    }
+
+    private static bool NamesTestsInProgram(ReviewTaskGate gate)
+    {
+        return UsesTestsToken(gate.Run[0]) || (gate.Fix.Count > 0 && UsesTestsToken(gate.Fix[0]));
+    }
+
+    private static bool UsesTestsToken(string element)
+    {
+        return element.Contains(TestsToken, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -17,7 +17,7 @@
 //   Rejections are YamlException. Every message names the agent slug and, for gate-level faults,
 //   the gate id, plus the offending field or value. Unknown {tokens} also carry the nearest known
 //   token ("{changed}" or "{task}") in the message.
-//   Known tokens: changed, task.
+//   Known tokens: changed, task, tests.
 
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
