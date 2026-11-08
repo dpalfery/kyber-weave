@@ -265,6 +265,19 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 $"git could not put '{target}' in place: {created.FirstErrorLine}");
         }
 
+        // The branch is placed: record the base it was created from where a later dispatch
+        // hook can read it. The record is auxiliary — the run's own report below still names
+        // the base — so an unwritable home degrades to the hook's default base rather than
+        // failing a run that is otherwise ready.
+        try
+        {
+            RunBaseState.Write(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
         if (settings.Json)
         {
             Console.Out.WriteLine(JsonSerializer.Serialize(
