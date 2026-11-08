@@ -41,6 +41,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     /// an omitted key is not a withheld one: agent permissions merge with the global config,
     /// where most permissions default to <c>allow</c>, so any key the renderer fails to pin is
     /// granted ambiently.
+    /// <para>
+    /// <c>codegraph_*</c> is a per-server MCP entry rather than a member of OpenCode's own closed
+    /// permission list, exactly like <c>kw-docs_*</c>: the renderer pins a whole configured MCP
+    /// server under a <c>{server}_*</c> key. It is listed so the vocabulary check accepts the key
+    /// on the agents the code-graph predicate entitles, and so a key the renderer invents without
+    /// a configured server behind it still fails here.
+    /// </para>
     /// </remarks>
     private static readonly string[] DocumentedOpenCodePermissions =
     [
@@ -58,6 +65,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "websearch",
         "external_directory",
         "doom_loop",
+        "codegraph_*",
         "kw-docs_*",
         "task"
     ];
@@ -81,6 +89,12 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     /// <summary>
     /// Emission order of permissions in OpenCode agent frontmatter, strictly deterministic.
     /// </summary>
+    /// <remarks>
+    /// The code-graph key precedes <c>kw-docs_*</c> because the renderer emits the per-server MCP
+    /// keys beside the universal one, code graph first. The list is a total order over every key
+    /// the renderer may emit, not over the keys one agent receives: an agent the code-graph
+    /// predicate withholds simply has no entry, and the order it would occupy stays free.
+    /// </remarks>
     private static readonly string[] PermissionOrder =
     [
         "todowrite",
@@ -97,6 +111,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "websearch",
         "external_directory",
         "doom_loop",
+        "codegraph_*",
         "kw-docs_*",
         "task"
     ];
@@ -306,6 +321,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "allow",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
                 ["kw-docs_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
@@ -336,6 +352,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "deny",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
                 ["kw-docs_*"] = "allow",
                 ["task"] = "deny"
             });
@@ -361,6 +378,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["websearch"] = "allow",
                 ["external_directory"] = "deny",
                 ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
                 ["kw-docs_*"] = "allow",
                 ["task"] = "deny"
             });
