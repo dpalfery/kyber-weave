@@ -110,7 +110,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 
 Every digest records RED evidence on one line the Arbiter can parse. The in-flight ledger reads the `RED_EVIDENCE:` value from your returned output as its `ledger.red-evidence` fact, and rule `KW-ARB-MODE-001` uses it to gate test-first plans: an implementation dispatch with no RED evidence on record escalates. Record the line even when your RED run already unblocked an earlier GREEN task — the ledger, not your memory of the run, is what a later task is judged on.
 
-Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 7-field worker completion digest:
+Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit six-field worker completion digest (plus the `RED_EVIDENCE:` line, which is not one of the six fields):
 
 ```text
 STATUS: PASS | FAIL | ESCALATION

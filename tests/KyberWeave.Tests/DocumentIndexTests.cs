@@ -804,6 +804,41 @@ public sealed class CodingStandardsLookupTests : IDisposable
     }
 
     /// <summary>
+    /// When a topic matches a section (clears the 0.02 floor), that top clearing section is
+    /// always included even if it alone exceeds the budget.
+    /// </summary>
+    [Fact]
+    public void WithATopicTheTopClearingSectionSurvivesABudgetSmallerThanItself()
+    {
+        DocumentIndex index = OneStandard(CsharpSections());
+
+        // Naming section is 1000 words (>6000 chars), larger than the 1000 char budget
+        DocumentHit hit = index.CodingStandards("csharp", topic: "naming", charBudget: 1000).Single();
+
+        DocumentSection only = Assert.Single(hit.Excerpt.Sections);
+        Assert.Equal("Naming", only.Heading);
+        Assert.True(only.Body.Length >= 6000);
+        Assert.False(hit.Excerpt.BudgetExhausted);
+    }
+
+    /// <summary>
+    /// Question scaffolding words (like 'why') are removed by rarity weighting while informative
+    /// words (like 'naming') survive, so 'why naming' resolves to the 'Naming' section.
+    /// </summary>
+    [Fact]
+    public void TopicQueryDropsQuestionScaffoldingBeforeSectionScoring()
+    {
+        DocumentIndex index = OneStandard(CsharpSections());
+
+        DocumentHit hit = index.CodingStandards("csharp", topic: "why naming", charBudget: 1000).Single();
+
+        DocumentSection only = Assert.Single(hit.Excerpt.Sections);
+        Assert.Equal("Naming", only.Heading);
+    }
+
+
+
+    /// <summary>
     /// A topic no section answers returns no prose rather than the whole standard: the
     /// selection is relevance, and this is the outcome <c>Explore</c> gives a query that
     /// matches nothing.

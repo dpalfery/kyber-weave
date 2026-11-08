@@ -5,7 +5,7 @@ doc-type: todo
 status: draft
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 ---
 
 # Verify the Claude conductor entry point in a live session
@@ -17,7 +17,7 @@ invocation, reference loading, or coexistence with `@agent-conductor`.
 
 ## The shared execution skill raises the stakes
 
-The [conductor run-speed plan's](../plans/2026-11-07-conductor-run-speed-shared-execution.md)
+The [conductor run-speed plan's](../archive/plans/2026-11-07-conductor-run-speed-shared-execution.md)
 slice 4 moved the execution contract out of
 `products/kyber-squad/agents/conductor/references/execution-and-review.md` — deleted — into the
 canonical `delivery-execution` skill, which both the `conductor` and the `bug-crusher` workflow
@@ -61,6 +61,10 @@ retained subagent invocation, plus the automatic-loading observation and, if exe
 optional deny settings checks. Update [onboarding](../kyber-squad/onboarding.md) only for
 behaviour observed in the live session.
 
-This todo is complete when the evidence and onboarding claims agree. Until then, the live
-runtime behaviour remains unverified, and slice 4's child plan stays open in `docs/plans/`
-because `KW-DOC-LIFECYCLE-003` fails an open plan by design — the intended shape, not a failure.
+This todo is complete when the evidence and onboarding claims agree. Until a release
+carries slice 4 and the live session records its output, the live runtime behaviour
+remains unverified. Slice 4's child plan was archived 2026-11-08 with T23 postponed
+here by the owner directive of the same day (D55): the check validates a deployment,
+and a deployment only exists after merge, so holding the merge for it would deadlock
+the deployment it validates. This todo stays open in `docs/todo/` and the merge
+proceeds without it.

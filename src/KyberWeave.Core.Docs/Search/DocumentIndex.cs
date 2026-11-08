@@ -290,14 +290,15 @@ public sealed partial class DocumentIndex
     /// <c>Errors and diagnostics</c> a ten-thousandth under <see cref="MinSectionScore"/>.
     /// </para>
     /// <para>
-    /// Only the synthesised pairs are dropped. The caller's own words stay in the query whether
-    /// or not a candidate states them, because a word the caller wrote is an ask the standard
-    /// either answers or does not: dropping it would rescale every section's score by the mass
-    /// that was removed, so a topic the standard covers in part would clear the relevance floor
-    /// on a denominator that had forgotten the part it does not cover — and a section sharing
-    /// only a generic word such as <c>time</c> would come back as an answer. Keeping every word
-    /// the caller wrote keeps each score on the scale <see cref="MinSectionScore"/> was set
-    /// against.
+    /// Only the synthesised pairs are dropped by this filter; question scaffolding and
+    /// corpus-ubiquitous terms are already removed by rarity weighting. Informative words
+    /// the caller wrote stay in the query whether or not a candidate states them, because a
+    /// word the caller wrote is an ask the standard either answers or does not: dropping it
+    /// would rescale every section's score by the mass that was removed, so a topic the
+    /// standard covers in part would clear the relevance floor on a denominator that had
+    /// forgotten the part it does not cover — and a section sharing only a generic word such
+    /// as <c>time</c> would come back as an answer. Keeping those words keeps each score on the
+    /// scale <see cref="MinSectionScore"/> was set against.
     /// </para>
     /// </remarks>
     /// <param name="corpus">The corpus the rarity weights come from.</param>
@@ -325,7 +326,7 @@ public sealed partial class DocumentIndex
         foreach ((string term, double weight) in corpus.WeightByRarity(TextVectorizer.VectorizeFused(topic)))
         {
             // A compound the caller never wrote, and that no candidate states, is a bridge to
-            // nothing. A word the caller wrote stays whether or not it is stated here.
+            // nothing. An informative word the caller wrote stays whether or not it is stated here.
             bool synthesised = !words.Contains(term);
             if (synthesised && !stated.Contains(term)) continue;
 
@@ -778,7 +779,7 @@ public sealed partial class DocumentIndex
         {
             int cost = section.Heading.Length + section.Body.Length;
 
-            // The top section is always included even if it alone exceeds the budget —
+            // The top clearing section is always included even if it alone exceeds the budget —
             // it gets truncated at the transport edge. Returning nothing but a path would
             // make the tool a directory listing, which is what sent callers to Read.
             bool mustInclude = chosen.Count == 0 && score >= MinSectionScore;

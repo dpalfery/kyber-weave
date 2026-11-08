@@ -246,6 +246,71 @@ public sealed class DocumentIndexHostTests : IDisposable
         Assert.Equal(2, host.CorpusBuilds);
     }
 
+    [Fact]
+    public void DocumentCount_WhenCorpusStale_InvalidatesIndexSoCurrentRebuildsJoins()
+    {
+        DocumentIndexHost host = NewHost();
+        DocumentIndex index1 = host.Current();
+        Assert.Equal(1, host.JoinBuilds);
+
+        string doc = Path.Combine(_fixture.Root, "6-Docs", "thing.md");
+        File.WriteAllText(doc, File.ReadAllText(doc) + "\n\n## More\n\nExtra prose.\n");
+        File.SetLastWriteTimeUtc(doc, DateTime.UtcNow.AddMinutes(1));
+
+        int? count = host.DocumentCount;
+        Assert.Equal(2, count);
+
+        DocumentIndex index2 = host.Current();
+        Assert.NotSame(index1, index2);
+        Assert.Equal(2, host.JoinBuilds);
+    }
+
+    [Fact]
+    public void DocumentCount_WhenDocumentLoaderThrows_ReturnsNullWithoutThrowing()
+    {
+        DocumentIndexHost host = new(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () => throw new IOException("disk error / unreadable docs"));
+
+        int? count = host.DocumentCount;
+        Assert.Null(count);
+    }
+
+    [Fact]
+    public void DocumentCount_WhenNonIoExceptionThrown_Propagates()
+    {
+        DocumentIndexHost host = new(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () => throw new InvalidOperationException("unexpected non-IO failure"));
+
+        Assert.Throws<InvalidOperationException>(() => host.DocumentCount);
+    }
+
+    [Fact]
+    public void DocumentCount_WhenCorpusAlreadyBuilt_DoesNotCallLoaderAgain()
+    {
+        int loadCalls = 0;
+        NewHost(); // sets up fixture
+        DocumentIndexHost host = new(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () =>
+            {
+                loadCalls++;
+                return new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load();
+            });
+
+        _ = host.Current();
+        Assert.Equal(1, loadCalls);
+
+        // Subsequent DocumentCount calls when corpus exists must not invoke the loader
+        int? count = host.DocumentCount;
+        Assert.True(count > 0);
+        Assert.Equal(1, loadCalls);
+    }
+
     /// <summary>
     /// The stamp fingerprints the same set Load() produces. An overlapping root and a
     /// catalog that already lives inside a root must not inflate the count.

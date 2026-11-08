@@ -94,24 +94,33 @@ public sealed class DocumentIndexHost
     public DocumentSet LoadDocumentSet() => _documentSetFactory();
 
     /// <summary>
-    /// Current count of documents in the corpus, rebuilding only the document corpus if stale,
-    /// without calling the CodeGraph resolver factory.
+    /// Current count of documents in the corpus if available. Returns the cached count if
+    /// available; if the corpus has not yet been built, attempts to build it safely.
+    /// Returns null when the corpus is unavailable or cannot be loaded, avoiding conflating
+    /// missing or unreadable documents with an empty corpus (0).
     /// </summary>
-    public int DocumentCount
+    public int? DocumentCount
     {
         get
         {
-            long docsStamp = ComputeDocsStamp();
             lock (_gate)
             {
-                if (_corpus is null || docsStamp != _docsStamp)
+                if (_corpus is not null)
+                    return _corpus.Documents.Count;
+
+                try
                 {
+                    long docsStamp = ComputeDocsStamp();
                     _corpus = DocumentCorpus.Build(_documentSetFactory());
                     _docsStamp = docsStamp;
+                    _index = null;
                     CorpusBuilds++;
+                    return _corpus.Documents.Count;
                 }
-
-                return _corpus.Documents.Count;
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return null;
+                }
             }
         }
     }

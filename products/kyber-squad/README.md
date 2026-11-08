@@ -225,9 +225,9 @@ deployment without link rewriting.
 
 - **Generated-output boundary**: Generated APM trees, Agent Plugins packages (`plugin.json`),
   and target-rendered harness trees are deployment/build output, not canonical or package source.
-  The repository root `.github/agents/` and `.github/skills/` trees are an intentional tracked,
-  stale Copilot self-deployment; `.kyber-weave/squad.lock.yml` and
-  `.kyber-weave/squad.receipt.json` are its stale tracked state. This synchronization leaves all
-  four paths untouched. A human will refresh them after a fresh Kyber-Weave release candidate.
+  The repository root `.github/agents/` and `.github/skills/` trees and the tracked
+  `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state were removed (#349).
+  Generated `.github` trees are deployment output, never canonical source, and must not return
+  as tracked files.
 - **Immutable Role Digests**: Instruction digests are computed deterministically after UTF-8 and LF normalization; they are never hand-edited.
 - **Strict Validation**: All manifests and profiles are validated against their respective JSON schemas during build and packaging.
