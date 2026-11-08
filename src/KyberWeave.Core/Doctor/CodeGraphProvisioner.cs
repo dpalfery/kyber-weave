@@ -357,9 +357,7 @@ public static class CodeGraphProvisioner
     }
 
     private static string QuoteShellPath(string path) =>
-        path.Contains(' ', StringComparison.Ordinal) || path.Contains('"', StringComparison.Ordinal) || path.Contains('\'', StringComparison.Ordinal)
-            ? "\"" + path.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\""
-            : path;
+        "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 
     /// <summary>Restores one path from <c>HEAD</c>, in both the working tree and the index.</summary>
     private static bool RestoreOne(string root, string path, IProcessExecutor executor)

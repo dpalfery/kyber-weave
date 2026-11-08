@@ -334,7 +334,73 @@ public sealed class DoctorEnsureTests : IDisposable
         DoctorCheck restoreCheck = Assert.Single(report.Checks, check => check.Id == "codegraph.restore");
         Assert.False(restoreCheck.Passed);
         Assert.NotNull(restoreCheck.Fix);
-        Assert.Contains($"\"{fileWithSpace}\"", restoreCheck.Fix, StringComparison.Ordinal);
+        Assert.Contains($"'{fileWithSpace}'", restoreCheck.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When restore fails on a path with shell metacharacters like '$' or single quotes,
+    /// the remedy wraps the path in single quotes with escaped quotes to prevent shell expansion.
+    /// </summary>
+    [Fact]
+    public void EnsureRemedySingleQuotesShellMetacharactersWhenRestoreFails()
+    {
+        const string evilFile = "src/$evil'quote.cs";
+        bool initialised = false;
+
+        ScriptedProcessExecutor executor = new(startInfo =>
+        {
+            if (startInfo.FileName == "git")
+            {
+                string arguments = string.Join(' ', startInfo.ArgumentList);
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+
+                if (arguments.Contains("status", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(
+                        0,
+                        initialised ? $" M {evilFile}\n" : string.Empty,
+                        string.Empty);
+                }
+
+                if (arguments.Contains("restore", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(1, string.Empty, "cannot restore");
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            if (startInfo.FileName == "codegraph")
+            {
+                if (startInfo.ArgumentList.Contains("init", StringComparer.Ordinal))
+                    initialised = true;
+
+                return DoctorHarness.Ok();
+            }
+
+            throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
+        });
+
+        DoctorCommand command = new()
+        {
+            Executor = executor,
+            IsTerminal = () => false,
+            ReadEnvironment = _ => null,
+            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
+        };
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Ensure,
+            DoctorHarness.Options(command.McpExecutable),
+            executor,
+            _ => null);
+
+        DoctorCheck restoreCheck = Assert.Single(report.Checks, check => check.Id == "codegraph.restore");
+        Assert.False(restoreCheck.Passed);
+        Assert.NotNull(restoreCheck.Fix);
+        Assert.Contains("'src/$evil'\"'\"'quote.cs'", restoreCheck.Fix, StringComparison.Ordinal);
     }
 
     /// <summary>
