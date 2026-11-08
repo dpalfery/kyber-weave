@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-run-speed-review-finishes
 title: Review finishes - one gate pass, one verdict
 doc-type: plan
-status: current
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 created: 2026-11-07
@@ -10,12 +10,12 @@ last-reviewed: 2026-11-07
 development-mode: test-first
 autonomy: autonomous
 documentation-impact: extends-component
-impact-components: [ReviewCouncil, DocGraph, Distribution]
+impact-components: [ReviewCouncil, KyberSquad]
 ---
 
 # Review finishes: one gate pass, one verdict
 
-**Status: Ready and approved.** Approved for execution on the conductor's approve-and-execute gate (decision AP1, carried by the conductor's `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`). **Development mode:** `test-first` (packet input). **Autonomy:** `autonomous` (packet input; every open item decided by recommendation and recorded in Decisions). **Scale:** `extends-component`, components `ReviewCouncil`, `DocGraph`, `Distribution`.
+**Status: Archived.** Closed 2026-11-07; see [Closeout](#closeout) and [Closeout mapping](#closeout-mapping) at the end. Approved for execution on the conductor's approve-and-execute gate (decision AP1, carried by the conductor's `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`). **Development mode:** `test-first` (packet input). **Autonomy:** `autonomous` (packet input; every open item decided by recommendation and recorded in Decisions). **Scale:** `extends-component`, components `ReviewCouncil`, `KyberSquad`.
 
 This is a child plan of the approved parent design for the conductor run-speed review work, which lives on branch `claude/docs/conductor-bug-crusher-run-speed` and is deliberately not in this tree, so it is not linked here. Under that design's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only this slice's decision rows, design, harvest rows, ADR disposition and tasks. This is slice 6, "Review finishes", tasks T32 to T35.
 
@@ -81,10 +81,10 @@ On a harness where the reviewer cannot start agents, it stops after its gates wi
 
 ## Design harvest
 
-| Design item | Target component | Target doc type | Target location |
-|---|---|---|---|
-| `--gate`, `requires-paths`, fail-fast scope, `COUNCIL_SEATS_NEEDED` | ReviewCouncil | architecture | `docs/code-review/architecture.md`, `docs/configuration.md#review` |
-| `review gates --gate <id>` as a CLI option | Distribution | reference | `docs/cli-command-surface.md` |
+| ID | Design item | Target component | Target doc type | Target location |
+|---|---|---|---|---|
+| H1 | `--gate`, `requires-paths`, fail-fast scope, `COUNCIL_SEATS_NEEDED` | ReviewCouncil | architecture | `docs/code-review/architecture.md`, `docs/configuration.md#review` |
+| H2 | `review gates --gate <id>` as a CLI option | ReviewCouncil | reference | `docs/cli-command-surface.md` |
 
 ## ADR disposition
 
@@ -166,4 +166,25 @@ This slice's pull request goes through one `code-reviewer` council over its whol
 
 ## Closeout
 
-`docs-dev` closes this child plan in this slice's pull request: it harvests this slice's Design harvest rows, amends ADR 0059 in place with its rows already in `docs/adr/README.md`, archives this plan with `git mv` into `docs/archive/plans/`, moves its row to Archived Plans in `docs/plans/README.md`, and runs `docs validate . --merge-ready` and `docs drift .`.
+`docs-dev` closed this child plan in this slice's pull request on 2026-11-07: it harvested both Design harvest rows into the canonical pages named in the mapping below, amended ADR 0059 in place, archived this plan with `git mv` into `docs/archive/plans/`, moved its row to Archived Plans in `docs/plans/README.md` and left **Active Plans** in its empty state, filed the deferred work this slice found as four todos, and ran `docs validate . --merge-ready` and `docs drift .` to zero findings.
+
+## Closeout mapping
+
+Every decision D12, D13, D15, D16, D17, AP1, D18 and D19, and both Design harvest items H1 and H2, maps to a destination below. Documentation-impact for every row: `extends-component`. Last reviewed: 2026-11-07 for every mapped document. Status: archived. Two components were dropped from `impact-components` at closeout: `DocGraph` was named for this plan's own index rows, which are `index` documents that carry no `component`, and `Distribution` was named for the CLI reference, which is a repository-wide `reference` that carries no `component` either; neither was invented onto a document, so neither can satisfy the impact-component rule. `KyberSquad` is added because the two deferred items that live in its area are now KyberSquad todos.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D12 | [Plan inventory](../../plans/README.md) — a plan stays on its own branch until its slice's pull request archives it, and this plan's row now sits in Archived Plans | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D13 | Documentation waiver — the parent design's build order across the slices this plan does not carry; execution sequencing with no surviving architectural, operational or behavioural invariant | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D15 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) (layers B and decision 6); [Review council architecture, reaching a verdict in one pass](../../code-review/architecture.md#reaching-a-verdict-in-one-pass) | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D16 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) (decision 7); [CLI command surface, review](../../cli-command-surface.md#review--the-deterministic-review-half) | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D17 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) (decision 8); [Configuration, review](../../configuration.md#review) | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| AP1 | Documentation waiver — approval provenance for this slice's Test contract and execution; no lasting artefact cites the approval itself | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D18 | Documentation waiver — a task-scope deferral to slice 4, which creates the shared execution skill; it records what this slice did not do, not how the system behaves | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| D19 | Documentation waiver — the test files a RED task pinned beyond its task list; the shipped tests are the lasting record, not the correction to the list | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| H1 | [Review council architecture, reaching a verdict in one pass](../../code-review/architecture.md#reaching-a-verdict-in-one-pass) — the one-pass command, the `--all` stop, `--gate` and its refusals, `requires-paths` with its install hint and load-time validation, `COUNCIL_SEATS_NEEDED`, and the review running alone last in the foreground; [Configuration, review](../../configuration.md#review) — the `--all` stop and `requires-paths` as a gate key | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| H2 | [CLI command surface, review](../../cli-command-surface.md#review--the-deterministic-review-half) — `--gate <ID>` in the flags row, its exclusions, its refusal ids, and the exit-code row | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| RESIDUAL | [Task gates cannot declare a required path](../../todo/task-gates-cannot-require-a-path.md) — the `react-dev`, `typescript-dev` and `tauri-dev` task gates will need `dash/node_modules` once the task-gate record can carry the key | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| RESIDUAL | [A comma-separated `--paths` value keeps only its last element](../../todo/review-gates-paths-keeps-last-value.md) — a zero-gate report from one `--paths` value reads as a clean pass and voids the evidence | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| RESIDUAL | [A Factory droid's `mcpServers` allowlist is not honoured at runtime](../../todo/factory-droid-mcpservers-allowlist-not-honoured.md) — a droid that lists servers receives no MCP tools, while one that omits the key inherits the parent's | extends-component | KyberSquad | 2026-11-07 | archived |
+| RESIDUAL | [`run start --resume` refuses a pull request number](../../todo/run-start-resume-refuses-a-pull-request-number.md) — the approved `<branch-or-pr>` form refuses a number with exit `2` | extends-component | KyberSquad | 2026-11-07 | archived |

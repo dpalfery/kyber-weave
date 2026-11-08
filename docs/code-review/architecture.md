@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -487,8 +487,9 @@ on all of them.
 
 ### Council gates
 
-`review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and,
-since the shipped catalogue, `include`, `os`, `working-directory` and `fail-on-output`:
+`review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and, since the
+shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full-suite` and
+`requires-paths`:
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
@@ -501,10 +502,26 @@ since the shipped catalogue, `include`, `os`, `working-directory` and `fail-on-o
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 | `full-suite` | no | `false` | When `true`, the gate runs the full product suite. It runs only for the review council or CI (`--council`) or from a terminal; otherwise it is refused (`KW-REVIEW-033`) and not run |
+| `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022` |
 
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is
 skipped (`KW-REVIEW-026`), and a gate with no `include` runs on every change.
+
+`requires-paths` names what a gate needs installed before it can measure anything. The dash
+gates in this repository (`ts-typecheck`, `ts-test`, `ts-lint`, `ts-reachable`) declare
+`dash/node_modules`, so a review that runs in a worktree where the dependencies were never
+installed reports the missing dependency rather than a compiler error. The summary reads:
+
+```text
+required path 'dash/node_modules' is missing, so the gate did not start. Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again.
+```
+
+A path outside `dash/` gets the same first clause and a generic install sentence. The gate
+stays a blocking failure, because a check that never ran is not a check that passed; the
+reviewer installs what the hint names and re-runs that one gate with `--gate`. The loader
+refuses an empty list, an empty entry, an absolute path, and a `..` escape where the operator
+wrote them, so an entry that could never name something inside the repository never reaches a run.
 
 The changed set is `--paths` when given, else the diff from the merge base of `--base`
 to the working tree. `--base` and `--paths` scope the council gates too — they are
@@ -515,8 +532,64 @@ or name a base that exists with `--base`.
 
 For whole-repository audits and CI verification, `--all` executes all declared gates matching
 the host OS unconditionally (`changed = null`), bypassing `include:` path filtering. Combining
-`--all` with contradictory scoping options (`--agent`, `--base`, or `--paths`) is refused before
-any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
+`--all` with contradictory scoping options (`--agent`, `--base`, `--paths` or `--gate`) is refused
+before any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
+
+#### Reaching a verdict in one pass
+
+A review runs its gates **once**, then reports one verdict. The command that does it is
+`kyber-weave review gates . --base <ref> --council`: `--base` scopes the gates to the change
+under review, `--council` admits the gates marked `full-suite`, and `--out` writes the report
+the verdict reads. Three behaviours make a single run enough, and each is a rule rather than a
+timing accident.
+
+**A refused full-suite gate ends an `--all` run at once.** Under `--all` there is no per-gate
+scoping and no other evidence to collect, so a suite the caller may not have cannot be
+delivered at all: the command reports the refusal, writes an empty gate report, and exits `1`
+with no gate started. A scoped call without `--council` is the opposite case — the pre-push
+self-review reads the other gates as its evidence — so it keeps running them and reports the
+refusal beside their results. That is the whole of the distinction: `--all` stops, a scoped
+call does not.
+
+**`--gate <id>` re-runs exactly the gate named.** It repeats, so several ids can be named at
+once. The named list replaces the declared list *before* anything reads it, so include
+matching, applicability, the full-suite admission rule and the report all see the same set; a
+full-suite gate named without `--council` is refused exactly as it would be anywhere else. An id
+that names no declared gate is refused with `KW-REVIEW-028` and exit `1` instead of a report of
+zero gates, which a reader could take as a pass. `--gate` is exclusive with `--all` and with
+`--agent` — both combinations are refused with `KW-REVIEW-028` and exit `2` — and combines with
+`--paths`, `--base` and `--council`. A reviewer that reads `artifacts/gates.json`, fixes one
+thing and needs that one gate re-checked pays for one gate, not the suite.
+
+**A gate whose dependency is absent does not start.** `requires-paths` turns "the tool was
+never installed" into its own reported fact instead of a code failure the reviewer has to
+diagnose. The reviewer installs what the hint names and re-runs that gate with `--gate`.
+
+```mermaid
+flowchart TD
+    Start["review gates . --base REF --council"] --> Select{"--gate named?"}
+    Select -->|"yes, an id no gate declares"| Refuse["KW-REVIEW-028 · exit 1<br/>no gate started"]
+    Select -->|"no, or every id declared"| Paths{"a requires-paths entry absent?"}
+    Paths -->|"yes"| NotStarted["that gate notStarted<br/>KW-REVIEW-033 · exitCode -1<br/>never a pass"]
+    Paths -->|"no"| Suite{"a full-suite gate refused?"}
+    Suite -->|"no"| Run["every gate runs"]
+    Suite -->|"yes, with --all"| Stop["empty report · exit 1<br/>no gate started"]
+    Suite -->|"yes, scoped"| RunOthers["refused gate reported<br/>the other gates still run"]
+```
+
+Two facts about how the review is run complete the picture, and neither is enforced by the gate
+command:
+
+- **The reviewer runs its gates and stops when it cannot seat its own lenses.** Where the
+  harness cannot start subagents, `code-reviewer` reports `COUNCIL_SEATS_NEEDED` after its gates
+  finish: the status names the lenses it needs and the role each one takes, the scope, the gate
+  ids and results it already holds, and the findings whose refutation is outstanding. The
+  session above it starts those seats in parallel and re-invokes the reviewer, which still
+  adjudicates and still owns the verdict. Gates are not re-run to seat a lens.
+- **The review runs alone, last, and in the foreground.** No documentation work and no edits
+  land in the reviewed tree while it runs, and the documentation-impact review and any edit it
+  causes finish before the council starts. A review racing an edit reviews a tree that no longer
+  exists by the time its verdict is read.
 
 ### Repository gate scoping and caching in this repository
 

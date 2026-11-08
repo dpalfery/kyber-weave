@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 ---
 
 # Todos
@@ -101,6 +101,10 @@ last-reviewed: YYYY-MM-DD
 | [fast-loop-default-tray-cargo-test.md](fast-loop-default-tray-cargo-test.md) | ReviewCouncil | draft | The default `scripts/fast-loop.sh` path runs an unfiltered `cargo test` of the tray crate for a tray Rust change and bypasses proc-guard; decide whether to filter it, route it through proc-guard, or keep it as a documented exception. |
 | [docs-init-emit-full-suite-gate-key.md](docs-init-emit-full-suite-gate-key.md) | DocGraph | draft | `kyber-weave docs init` writes whole-suite test gates without the `full-suite: true` key, so a scaffolded host's test gate runs without the ADR 0059 refusal; the catalogue should emit the key. |
 | [task-gates-workflow-and-shell-edits.md](task-gates-workflow-and-shell-edits.md) | ReviewCouncil | draft | A task that edits only workflow YAML, `.kyber-weave/kyber-weave.yml` or `scripts/*.sh` runs no task gate (`NONE_APPLICABLE`); decide a workflow linter, a review-config check and task-level `shellcheck`. |
+| [task-gates-cannot-require-a-path.md](task-gates-cannot-require-a-path.md) | ReviewCouncil | draft | Only council gates accept `requires-paths`; the task-gate reader has no such key and the record the runner executes carries no field for it, so the `react-dev`, `typescript-dev` and `tauri-dev` dash gates report a missing `dash/node_modules` as a failing gate rather than a gate that never started. |
+| [review-gates-paths-keeps-last-value.md](review-gates-paths-keeps-last-value.md) | ReviewCouncil | draft | `review gates --paths` given one comma-separated value keeps only its last element, so a run whose last path matches no gate's `include` selects no gates and its zero-gate report reads as a clean pass. |
+| [factory-droid-mcpservers-allowlist-not-honoured.md](factory-droid-mcpservers-allowlist-not-honoured.md) | KyberSquad | draft | The Factory renderer's per-droid `mcpServers` allowlist grants nothing at runtime — a droid that lists servers gets no MCP tools, while one that omits the key inherits the parent's; only listing the exact tool ids under `tools:` works. |
+| [run-start-resume-refuses-a-pull-request-number.md](run-start-resume-refuses-a-pull-request-number.md) | KyberSquad | draft | `run start --resume` accepts a branch only: the `<branch-or-pr>` form the approved decision names refuses a number with exit `2`, because resolving one needs a network fetch of `pull/<n>/head`. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

@@ -77,7 +77,8 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
 Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
 are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, exit `1`) that means "not run
-here", not a code finding. Only the `code-reviewer` council and CI pass `--council`; the other gates still run.
+here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
+runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
 `dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
