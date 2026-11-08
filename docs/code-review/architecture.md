@@ -566,6 +566,14 @@ and never carries `{changed}`: the command reads the change against its base its
 list would scan those files twice and still miss a suppression added to a file the gate's `include` did
 not list.
 
+It is a task gate and not a `review.gates` entry, and that is deliberate rather than an omission. The
+command measures the working tree against a base, so in a worker's tree the default `HEAD` is exactly the
+change that worker made. A council gate runs inside a working tree the runner has already checked out and
+usually committed, where the same default would compare `HEAD` with itself, find an empty change and pass
+— a gate that always passes is worse than no gate, because it reads as a check that ran. Making it safe
+there would mean a gate carrying an explicit `--base` per pipeline, and the task gate already covers the
+author that adds the suppression.
+
 The `csharp` family ships the same gate in its catalogue entry, so `docs init` scaffolds it into any host
 that installs a .NET stack rather than leaving the check to this repository alone. That entry names the
 five developers the catalogue's developer-slug vocabulary admits; `sql-database-architect` is not one of
