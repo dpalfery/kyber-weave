@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-07-conductor-run-speed-review-finishes.md](2026-11-07-conductor-run-speed-review-finishes.md) | Ready | 2026-11-07 | Slice 6 of the conductor run-speed parent design: make a review council reach a verdict in one pass - the reviewer runs its gates once with `--base <ref> --council`, a refused full-suite gate stops the run at once under `--all`, a gate with a missing dependency reports `KW-REVIEW-033` with an install hint instead of reading as a code failure, and a new repeatable `review gates --gate <id>` re-checks exactly one gate. Amends ADR 0059 in place; no new ADR. |
 
 ## Archived Plans
 
