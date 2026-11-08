@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -51,6 +50,46 @@ public sealed class SquadCanonicalContentTests
     /// </remarks>
     private static readonly Regex NoFormatLabelRule = new(
         @"\b(?:never|must not|do not|does not)\b[^.!?\n]{0,60}\b(?:labels?|names?|mentions?|tags?|announces?|refers?)\b[^.!?\n]{0,30}\bformat\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>The surfaces that own the review run: the council's standing instructions and the skill's procedure.</summary>
+    private static readonly string[] ReviewerSurfacePaths =
+    [
+        "agents/code-reviewer.md",
+        "skills/code-review/SKILL.md"
+    ];
+
+    /// <summary>
+    /// The surfaces a plan is authored from. A plan is written before the run, so it must not carry a review command
+    /// that goes stale as the gate list and its flags move.
+    /// </summary>
+    private static readonly string[] PlanSurfacePaths =
+    [
+        "agents/architect/references/plan-authoring.md",
+        "agents/conductor/references/plan-path.md"
+    ];
+
+    /// <summary>Wording that says a single gate is checked again, rather than the whole suite being re-run.</summary>
+    private static readonly Regex RecheckWording = new(
+        @"re-?check|re-?run|single gate|one gate|only that gate",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The <c>--gate</c> option as a whole token. A plain substring search also matches <c>--gates</c>, which is a
+    /// different option on <c>review verdict</c>.
+    /// </summary>
+    private static readonly Regex GateOptionMention = new(
+        @"(?<![\w-])--gate(?![\w-])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Wording that says the review is the last thing to run and runs alone.</summary>
+    private static readonly Regex AloneWording = new(
+        @"\b(alone|last|nothing else)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Wording that says the waiting session takes the seats and comes back to the reviewer.</summary>
+    private static readonly Regex ReinvokeWording = new(
+        @"re-?invok|invoke (it|the reviewer) again|main session",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
@@ -1793,7 +1832,8 @@ public sealed class SquadCanonicalContentTests
     [InlineData("skills/bug-crusher/SKILL.md")]
     public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string text =
+            File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
         Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
         Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
@@ -1819,6 +1859,135 @@ public sealed class SquadCanonicalContentTests
             "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
     }
 
+    // -------------------------------------------------------------------------------------
+    // How the review runs: who owns its command, one gate at a time, alone and last, and
+    // what it does when it cannot start its seats.
+    // -------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The review command comes from the reviewer, not from a plan: every review command the skill names carries
+    /// <c>--base</c>, at least one carries <c>--council</c>, and no plan-authoring surface prescribes a review command.
+    /// </summary>
+    /// <remarks>
+    /// A plan is written before the run, so a command copied into it goes stale the moment the gate list or its flags
+    /// move, and the reviewer then runs a command nobody validated. <c>--base</c> measures the gates against the change
+    /// instead of the whole tree. <c>--council</c> is what admits the full-suite gates, which only the review council
+    /// and CI may run.
+    /// </remarks>
+    [Fact]
+    public void TheReviewSkillNamesItsOwnCommandWithBaseAndCouncilAndNoPlanPrescribesOne()
+    {
+        string[] prescribed = PlanSurfacePaths
+            .SelectMany(path => ReviewCommandLines(ReadProductFile(path)).Select(line => $"{path}: {line}"))
+            .ToArray();
+
+        Assert.True(
+            prescribed.Length == 0,
+            "A plan must not prescribe a review command; the reviewer owns it. Found:" +
+            Environment.NewLine + string.Join(Environment.NewLine, prescribed));
+
+        string[] commands = ReviewCommandLines(ReadProductFile("skills/code-review/SKILL.md"));
+
+        Assert.NotEmpty(commands);
+        Assert.All(commands, command => Assert.Contains("--base", command, StringComparison.Ordinal));
+        Assert.True(
+            commands.Any(command => command.Contains("--council", StringComparison.Ordinal)),
+            "'skills/code-review/SKILL.md' must name the review command with --council for the council's run. " +
+            $"Commands found:{Environment.NewLine}{string.Join(Environment.NewLine, commands)}");
+    }
+
+    /// <summary>
+    /// The reviewer re-checks one gate at a time through <c>--gate</c>, instead of running the whole declared suite
+    /// again to confirm a single fix.
+    /// </summary>
+    /// <remarks>
+    /// Re-running every declared gate pays the whole suite's cost for one answer, which is the cost this slice exists
+    /// to remove. The reviewer's own surfaces must name the option and say what it is for, or the next editor
+    /// re-derives the expensive shape.
+    /// </remarks>
+    [Fact]
+    public void TheReviewerRechecksASingleGateThroughTheGateOption()
+    {
+        string[] mentions = ReviewerSurfacePaths
+            .SelectMany(path => Paragraphs(ReadProductFile(path)).Select(block => $"{path}: {block}"))
+            .Where(block => GateOptionMention.IsMatch(block))
+            .ToArray();
+
+        Assert.True(
+            mentions.Length > 0,
+            "The reviewer's instructions must name 'review gates --gate <id>' for a single-gate re-check. " +
+            $"Read: {string.Join(", ", ReviewerSurfacePaths)}.");
+
+        Assert.True(
+            mentions.Any(RecheckWording.IsMatch),
+            "A paragraph naming --gate must say it re-checks one gate. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", mentions));
+    }
+
+    /// <summary>
+    /// The final council runs alone and last, in the foreground: no docs work and no edits happen in the reviewed tree
+    /// while it runs.
+    /// </summary>
+    /// <remarks>
+    /// A review that shares the tree with concurrent docs work or edits is reviewing something that keeps moving, and
+    /// a finding it raises may be against a line already changed. The reviewed tree is also the tree those other jobs
+    /// write to, so a review that runs in the foreground is what makes its evidence current.
+    /// </remarks>
+    [Fact]
+    public void TheFinalCouncilRunsAloneLastInTheForegroundWithNoDocsWorkOrEdits()
+    {
+        string contract = ReadProductFile("agents/conductor/references/execution-and-review.md");
+        string[] blocks = Paragraphs(contract)
+            .Where(block => block.Contains("foreground", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.True(
+            blocks.Length > 0,
+            "'agents/conductor/references/execution-and-review.md' must state that the review runs last, in the " +
+            "foreground.");
+
+        Assert.True(
+            blocks.Any(block => AloneWording.IsMatch(block)
+                                && block.Contains("docs", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("edit", StringComparison.OrdinalIgnoreCase)),
+            "The paragraph that says the review runs in the foreground must also say that no docs work and no edits " +
+            "happen in the reviewed tree while it runs. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", blocks));
+    }
+
+    /// <summary>
+    /// A reviewer that cannot start its seats stops after its gates with <c>STATUS: COUNCIL_SEATS_NEEDED</c>, listing
+    /// the lenses and the scope, and the waiting session runs the seats and re-invokes it.
+    /// </summary>
+    /// <remarks>
+    /// Harnesses differ in whether a subagent may start another one. Where it may not, silently applying every lens
+    /// in-process hides that the run had less independent judgement than a verdict implies; dropping the council
+    /// hides it entirely. Returning the routing facts lets the session that can start seats do so, and the reviewer
+    /// then judges what they returned.
+    /// </remarks>
+    [Fact]
+    public void ACouncilThatCannotStartItsSeatsStopsAfterTheGatesWithCouncilSeatsNeeded()
+    {
+        string reviewer = ReadProductFile("agents/code-reviewer.md");
+        string[] blocks = Paragraphs(reviewer)
+            .Where(block => block.Contains("STATUS: COUNCIL_SEATS_NEEDED", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            blocks.Length > 0,
+            "'agents/code-reviewer.md' must route a council that cannot start its seats with " +
+            "'STATUS: COUNCIL_SEATS_NEEDED'.");
+
+        Assert.True(
+            blocks.Any(block => block.Contains("lens", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("scope", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("gate", StringComparison.OrdinalIgnoreCase)
+                                && ReinvokeWording.IsMatch(block)),
+            "The COUNCIL_SEATS_NEEDED paragraph must list the lenses and the scope, say it stops after its gates, and " +
+            "say the session that can start the seats re-invokes the reviewer. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", blocks));
+    }
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
@@ -1842,11 +2011,13 @@ public sealed class SquadCanonicalContentTests
     /// Resolves an MSBuild item path relative to the project directory, expanding the
     /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
     /// </summary>
-    private static string ResolveProjectPath(string projectDirectory, string item) =>
-        Path.Combine(
+    private static string ResolveProjectPath(string projectDirectory, string item)
+    {
+        return Path.Combine(
             projectDirectory,
             item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
                 .Replace('\\', Path.DirectorySeparatorChar));
+    }
 
     private static bool IsVersionedIdentity(string name)
     {
@@ -1953,13 +2124,40 @@ public sealed class SquadCanonicalContentTests
                 .Select(File.ReadAllText));
     }
 
+    /// <summary>Reads one canonical product file by its repository-relative path.</summary>
+    private static string ReadProductFile(string relativePath)
+    {
+        return File.ReadAllText(
+            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+    }
+
+    /// <summary>The blank-line separated blocks of a document, so an assertion reads a whole instruction.</summary>
+    private static string[] Paragraphs(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    /// <summary>The trimmed lines that name a <c>kyber-weave review gates</c> command.</summary>
+    private static string[] ReviewCommandLines(string text)
+    {
+        return
+        [
+            .. text.Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => line.Contains("kyber-weave review gates", StringComparison.Ordinal))
+        ];
+    }
+
     /// <summary>
     /// The session-title bullet, including continuation lines, or null when the document carries
     /// none. Continuation lines belong to the bullet: the requirement is read from the instruction
     /// it governs, not from a neighbouring bullet.
     /// </summary>
-    private static string? SessionTitleBullet(string guidance) =>
-        ListItemStartingWith(guidance, SessionTitleBulletLead);
+    private static string? SessionTitleBullet(string guidance)
+    {
+        return ListItemStartingWith(guidance, SessionTitleBulletLead);
+    }
 
     /// <summary>
     /// True when the session-title bullet tells the agent to set the title and does not tell the
@@ -1978,8 +2176,10 @@ public sealed class SquadCanonicalContentTests
     /// The pull-request title list item, including its continuation lines, or null when the
     /// document has none.
     /// </summary>
-    private static string? PrTitleBullet(string guidance) =>
-        ListItemStartingWith(guidance, "- **PR Title.**");
+    private static string? PrTitleBullet(string guidance)
+    {
+        return ListItemStartingWith(guidance, "- **PR Title.**");
+    }
 
     /// <summary>
     /// True when the pull-request bullet sets the session title from the submitted pull request,
@@ -1997,7 +2197,8 @@ public sealed class SquadCanonicalContentTests
             return false;
         }
 
-        foreach (string sentence in bullet.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        foreach (string sentence in bullet.Split('.',
+                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             if (!sentence.Contains(PrTitleRetitleInstruction, StringComparison.Ordinal))
             {
@@ -2079,7 +2280,8 @@ public sealed class SquadCanonicalContentTests
     /// <summary>The sentence in <paramref name="text"/> that contains <paramref name="instruction"/>.</summary>
     private static string? SentenceContaining(string text, string instruction)
     {
-        foreach (string sentence in text.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        foreach (string sentence in text.Split('.',
+                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             if (sentence.Contains(instruction, StringComparison.Ordinal))
             {
@@ -2165,8 +2367,10 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
-    private static bool RestatesTheShape(string text) =>
-        RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+    private static bool RestatesTheShape(string text)
+    {
+        return RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+    }
 
     /// <summary>
     /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
@@ -2236,10 +2440,12 @@ public sealed class SquadCanonicalContentTests
     /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
     /// order, the case, and the closing full stop all still have to match.
     /// </summary>
-    private static string WithoutEmphasis(string text) =>
-        text.Replace("*", string.Empty, StringComparison.Ordinal)
+    private static string WithoutEmphasis(string text)
+    {
+        return text.Replace("*", string.Empty, StringComparison.Ordinal)
             .Replace("_", string.Empty, StringComparison.Ordinal)
             .Replace("`", string.Empty, StringComparison.Ordinal);
+    }
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
