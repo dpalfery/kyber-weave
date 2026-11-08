@@ -134,6 +134,21 @@ public sealed class SquadStandardsToolContractTests
     }
 
     /// <summary>
+    /// When github-devops runs another technology's toolchain (for example, dotnet via csharp-coding-standard),
+    /// its workflow routes that secondary standard through the tool as well rather than relying on built-in defaults.
+    /// </summary>
+    [Fact]
+    public void GithubDevopsWorkflowRoutesSecondaryToolchainStandardThroughTheTool()
+    {
+        string path = Path.Combine(ProductRoot, "agents", "github-devops.md");
+        string text = File.ReadAllText(path);
+
+        string step1 = Blocks(text).First(b => b.StartsWith("1. Fetch", StringComparison.Ordinal));
+        Assert.Contains("<csharp-coding-standard>", step1, StringComparison.Ordinal);
+        Assert.Contains(ToolName, step1, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The same contract for the developer skills, which carry the policy line the agent bodies
     /// defer to: a skill that tells a worker to read the path undoes the agent that does not.
     /// </summary>
