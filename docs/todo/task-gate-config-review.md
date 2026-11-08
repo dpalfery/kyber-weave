@@ -60,4 +60,5 @@ actually accepted and formatted per OS.
 question is answered above and needs no further work.
 
 Related: the [SQL, workflow and shell gate todo](../archive/todo/task-gates-workflow-and-shell-edits.md),
-closed 2026-11-08, and [mapping a task to its test project](task-gate-test-project-mapping.md).
+closed 2026-11-08, and [mapping a task to its test project](../archive/todo/task-gate-test-project-mapping.md),
+closed 2026-11-08.

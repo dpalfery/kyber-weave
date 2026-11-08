@@ -100,7 +100,7 @@ appends; the CLI only reads. Prompts and code are logged as digests, never in fu
 
 ## The rules
 
-Nineteen rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Twenty rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids.
 
 | Rule | Trigger | Step | Question |
@@ -115,6 +115,7 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0 | Does the dispatch send the worker into a plan, specification or todo path? |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Did the delegation change only its task's files? |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | Does the returned digest's `TASK_GATE` line agree with the gate report it names? |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Is this a recognised planner invocation? |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? |
@@ -137,6 +138,22 @@ authoring-time prompt check (`KW-DOC-TASKS-005`), so the two cannot drift apart,
 where dispatch hooks are unconfirmed: a harness with no hook runs no rule, and a decision claiming
 otherwise would report a check that never executed ([ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md),
 decision 23).
+
+**A claimed gate result is checked against the report it names (`KW-ARB-GATE-REPORT-001`).** A worker
+ends its task with a `TASK_GATE:` line naming the report its gate run wrote, and until this rule
+nothing read that path at task end: the fact existed and only the review council consumed it. On a
+`delegate.returned` trigger the rule reads the named report — an absolute path from a worktree
+worker, or one resolved against the event's working directory — and answers three ways. `verified`
+means the claim was `PASS` and the report corroborates it: at least one gate passed and none failed.
+`disagrees` means the report contradicts the claim, and it includes a claim no report can back — any
+status other than `PASS`, and a `PASS` over a run whose every gate was not applicable, because a
+skipped gate is evidence neither way (`KW-REVIEW-026`). `missing` means the claim names no readable
+report, or the return carries no claim at all. Only `verified` allows; the other two escalate, because
+a claim whose evidence cannot be found is exactly the case the rule exists for. The comparison spans
+two facts — the claim and the report — which the closed step-0 predicate set cannot express, so
+`GateReportFacts` makes it and the rule reads a single boolean. Where a harness cannot observe returns
+the post-dispatch hook never fires and the rule cannot run; the end-of-run gates catch that case
+instead, and no decision claims otherwise.
 
 **Changed paths are committed plus dirty, and an empty set is not Markdown-only.** `review.changed-paths`
 is the review base against the working tree — the committed diff plus the dirty tree, computed by

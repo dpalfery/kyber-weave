@@ -34,8 +34,9 @@ Two parts of this page have different lifetimes. The page itself is a permanent 
 is what stops the text growing back. The per-row inventory is a snapshot taken in the tree before
 the removals — the "current homes" column is expected to go stale, and each row's status is
 updated as the removal lands rather than the page being archived. The plan that instructs this
-work, [`2026-11-07-conductor-run-speed-shrink-reads.md`](../plans/2026-11-07-conductor-run-speed-shrink-reads.md),
-is archived at that slice's closeout; this page is not.
+work, [`2026-11-07-conductor-run-speed-shrink-reads.md`](../archive/plans/2026-11-07-conductor-run-speed-shrink-reads.md),
+was archived at that slice's closeout and is provenance for these rows, not current guidance;
+this page is not archived.
 
 ## How the rows were found
 

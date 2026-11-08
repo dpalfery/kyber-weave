@@ -228,7 +228,7 @@ failed gate.
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 | `KW-REVIEW-026` | Info | A gate does not apply to this change: no changed path matched its `applies-when.paths` or `include`, or its `os` does not match the host, so it was not executed |
 | `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
-| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}`, `{task}` or `{tests}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
@@ -240,6 +240,17 @@ failed gate.
 | `KW-REVIEW-030` | Warning | No CodeGraph index was read, so duplicate detection did not run |
 | `KW-REVIEW-031` | Warning | A set of symbols shares one normalized body |
 | `KW-REVIEW-032` | Warning | The CodeGraph index disagrees with the working tree, so its clusters are stale |
+
+### Suppressions — `review suppressions`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-036` | Error | A warning suppression the change added states no reason. The file, line and form are named, and `reason: <why>` on the same or the immediately preceding added line clears it |
+| `KW-REVIEW-037` | Error | The change against the base ref could not be read, so no line was scanned. A failure rather than a pass, because a gate that cannot see the change has no evidence either way |
+| `KW-REVIEW-028` | Error | The `--base` ref or the path was refused before anything was read (client-input error, exit `2`) |
+
+Only added lines are judged, so a committed suppression is never re-litigated. A suppression on a
+context line clears nothing, and an empty change passes.
 
 ## Arbiter — [Kyber Arbiter](../kyber-arbiter/architecture.md)
 
@@ -260,6 +271,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to` |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0 | Prompt names no planning path once the routing header is removed; a documentation-profile target is exempt |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Delegation changed only its task's files |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | The digest's `TASK_GATE` line agrees with the gate report it names: `verified` needs a `PASS` claim the report corroborates, `disagrees` and `missing` escalate |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Recognised planner invocation |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |

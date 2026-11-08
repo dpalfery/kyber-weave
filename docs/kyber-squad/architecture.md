@@ -1451,6 +1451,46 @@ the session title from the conversation's first message and has no setter.
 **No ADR — ADR waiver:** this reverses a skill-carrier choice inside the existing renderer and
 receipt architecture. It adds no boundary, schema, or dependency.
 
+### The shared worker baseline, injected once per dispatched worker
+
+Four rules apply to every worker on every task, whatever its role: discover before you read, do not
+open a plan or specification, never run the full test suite, and batch independent reads into one round
+trip. They used to be paraphrased in every agent body and in several skills, so each worker paid for
+them again on every round trip and two copies could drift. They now live in one file,
+`products/kyber-squad/shared/worker-baseline.md`, and `SquadWorkerBaselineInjector` appends that block
+to every dispatched worker's body exactly once.
+
+**What the block carries.** The Discovery order (`codegraph_explore` first, then the `kw-docs` tools,
+a direct read only for what an index does not cover, with that file and the reason named in the
+report); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
+insufficient packet returns a blocker); the full-suite ban (run the classes the task names, because the
+review council and CI run the full suite on the integrated head); and the batched-reads line. The four
+rules and the check that holds each one are tabulated in [the worker rule map](worker-rule-map.md).
+
+**Where it is injected, and where it is not.** The block is applied in the render pipeline beside the
+`{{harness}}` substitution — the one step all thirteen harnesses share — so it reaches agent files and
+lowered role skills alike with no second per-target path list. Only a dispatched worker
+(`SquadInvocation.Subagent`) carries it. An entry point does not: `conductor`, `bug-crusher` and the
+other primary agents run in a session whose own instructions and skills already carry their rules, and
+a worker-level ban an entry point can never be dispatched under is text it would pay for and never act
+on. A baseline file with no block, more than one block, or an empty one fails the render rather than
+shipping, and a body that already carries a block has it replaced in place so the count holds however
+the source was edited. A tree that carries no baseline file at all renders byte for byte as before and
+is caught by the canonical suite rather than by the renderer, so a test fixture may render without one
+and the shipped corpus still cannot go quiet.
+
+**One source, not one copy per audience.** The block is read from the source directory rather than
+embedded in the binary, so the shipped text and this repository's text cannot differ. The rendered
+body's digest is deliberately untouched by the injection, so a migration report still describes the
+authored body a host migrated from. A standard template keeps its own test-runner line: a standard
+ships into a host repository, is read on its own, and has no Squad render around it, so that line is
+the host's copy of the rule rather than a duplicate of this one.
+
+**What this buys, and what it does not.** A rule in one file cannot drift between six agent bodies, and
+a worker's render no longer restates one. It does not by itself reduce what a worker reads per round
+trip — the same four rules still arrive, once — and that limit is recorded rather than claimed: the
+harness behaviours the block depends on, and which of them this tree can establish, are in
+[the capability matrix](requirements.md#harness-behaviour-the-product-relies-on).
 
 ---
 

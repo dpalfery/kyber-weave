@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-run-speed-shrink-reads
 title: Shrink what workers read (conductor run-speed, slice 8)
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-07
@@ -18,11 +18,11 @@ impact-components:
 
 # Shrink what workers read (conductor run-speed, slice 8)
 
-**Status: Ready.** This plan is **Ready and approved for execution under AP1**, with resolved autonomy `autonomous`. It is carved from the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 8's decision rows, design, harvest rows, ADR disposition and tasks. This is the last slice, so this slice's pull request also archives the parent design with a mapping to every child; this plan itself is archived in this slice's own pull request. Every decision is answered below with its provenance; the parent's AP1 approval covers the Test contract this plan restates and carries to this child through `AUTONOMOUS_APPROVAL` per D12. The pair of documentation gates ran in this worktree — `docs validate .` and `docs drift .`, not `--merge-ready` while the plan is open — each at zero findings. The kw-docs server is bound to the canonical checkout and cannot see a file written only here, so a passing answer from it would describe the wrong tree.
+**Status: Archived.** Closed 2026-11-08; see [Closeout](#closeout) and [Closeout mapping](#closeout-mapping) at the end. It was approved for execution under AP1, with resolved autonomy `autonomous`. It is the child plan of the parent design for the conductor run-speed work, which lived on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and was deliberately never in this tree: this slice's pull request brought the parent in from that branch and archived it beside this file. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 8's decision rows, design, harvest rows, ADR disposition and tasks. Every decision is answered below with its provenance; the parent's AP1 approval covered the Test contract this plan restates and carried to this child through `AUTONOMOUS_APPROVAL` per D12. The pair of documentation gates ran in this worktree at carve and at closeout — `docs validate .` and `docs drift .`, not `--merge-ready` while the plan was open. The kw-docs server is bound to the canonical checkout and cannot see a file written only here, so a passing answer from it would have described the wrong tree.
 
 ## Problem and goal
 
-The parent design's measured run put the cost of worker text in plain numbers: the docs worker sent 13.1M tokens at about 158K per round trip — nearly all re-sent input — while making 4 successful docs tool calls, 12 direct source reads, and reading the 37 KB plan; `docs/kyber-squad/architecture.md` is 130 KB and `docs/cli-command-surface.md` is 48 KB. Agent-file text is re-sent on every round trip of every worker, while a skill loaded at the last step is re-sent only for the last few. Beside that, today's task gates give no executed test evidence per task: `review.task-gates` in `.kyber-weave/kyber-weave.yml` runs `csharp-dev` the two format checks and a Release build — no tests — because the one test project's full suite with coverage takes about 25 minutes, which is the open [test-project-mapping todo](../todo/task-gate-test-project-mapping.md) this slice completes. And the capability matrix still carries rows this program depends on but never confirmed on all 13 harnesses.
+The parent design's measured run put the cost of worker text in plain numbers: the docs worker sent 13.1M tokens at about 158K per round trip — nearly all re-sent input — while making 4 successful docs tool calls, 12 direct source reads, and reading the 37 KB plan; `docs/kyber-squad/architecture.md` is 130 KB and `docs/cli-command-surface.md` is 48 KB. Agent-file text is re-sent on every round trip of every worker, while a skill loaded at the last step is re-sent only for the last few. Beside that, today's task gates give no executed test evidence per task: `review.task-gates` in `.kyber-weave/kyber-weave.yml` runs `csharp-dev` the two format checks and a Release build — no tests — because the one test project's full suite with coverage takes about 25 minutes, which is the [test-project-mapping todo](../todo/task-gate-test-project-mapping.md) this slice completed, archived beside this file. And the capability matrix still carries rows this program depends on but never confirmed on all 13 harnesses.
 
 The goal of this slice (the parent's fix 7 and the harness check): cut worker text **only where a check already enforces it, and add a check where one is missing** — three new checks (a suppression gate, a verified gate report, targeted tests in the task gate), one injected always-on source for the Discovery order, the full-suite ban and batched reads, and the removal of duplicated rule text gated behind the rule map, the moved contract pins and a seeded-defect trial, so nothing is deleted until the proof passes. The estimated effect (the parent's, not re-measured): `test-dev` on C# from 72 KB of start-of-task text today to about 32 KB, about 9 KB loaded at the end; `csharp-dev` 46 KB to about 17, about 9 at the end; the first RED task's start text from about 1.5M to about 0.7M tokens, 6 to 7% of that task's 12.5M. This slice also confirms the harness behaviours the program relies on (T48) and, as the last slice, archives the parent design with its mapping to the eight children.
 
@@ -34,7 +34,7 @@ Rows D12, D13, D27, D28, D29, D30, D35, D36, D37, D41, D43 and AP1 are this slic
 |---|---|---|---|---|
 | D12 | Can one plan span several pull requests? | **No. Several plans, one per slice.** This file stays the single approved design and never merges while open. On approval it stays on its own branch. Each slice gets a child plan on the slice's branch, carved from its section here, and that plan is archived in the slice's pull request. The last slice's pull request brings this file in and archives it with a mapping to the children. | `OpenWorkValidator` raises `KW-DOC-LIFECYCLE-003`, and `ci.yml` runs `docs validate --merge-ready` on every pull request. A plan left open in `docs/plans/` fails CI, and the rule exists because a specification merged in stages never got its closeout. Its message says "keep it on its branch". Changing the rule was rejected for that reason. Child plans restate only their slice's decision rows, so each is complete on its own. Approval here carries to each child through `AUTONOMOUS_APPROVAL`. | user: confirmed 2026-11-07 — the owner confirmed the autonomous recommendation |
 | D13 | Does the requested build order hold against real dependencies? | **Five changes.** (a) Fix 5's one-line test repair moves to the very front, because a failed blocking gate forces `REQUEST_CHANGES`, so no slice's council can approve on the owner's machine until it lands. (b) The `stop-on-tool-failure` setting moves to the fix 8 slice, because fix 8's fetch failure reads it. (c) The `branch=` and `repo=` provenance fields move from fix 4 to fix 1, because the worktree rule needs them. (d) Fix 5's remaining work goes after fix 2, because it edits the shared execution skill fix 2 creates. (e) The `github-actions` standard is declared in the first slice, because `github-devops` refuses to write a workflow without it. Fixes 6 and 10 land with fix 3: fix 6 adds a field to the task file, and fix 10 shares fix 3's detector. Otherwise 8, then 1 to 5, then 11, then 7 stands. | Fix 7 depends on fix 11 (the `Completion` section) and on fix 3 (commands in the prompt). Fix 11 depends on fix 4's topic repair. | autonomous: recommendation accepted |
-| D27 | Where does the full-suite ban live? | One always-on line in each worker's instructions, from the single injected source. Not only in `task-gate`. | The source proposed `task-gate`, but that skill loads at the last step, and a raw `dotnet test` bypasses `proc-guard.sh` until the [shell hook todo](../todo/per-harness-shell-hook-for-full-run-guard.md) lands. A ban read after the mistake is no ban. The count is 27 files, not 14, so the rule map is rebuilt by search. | autonomous: recommendation accepted |
+| D27 | Where does the full-suite ban live? | One always-on line in each worker's instructions, from the single injected source. Not only in `task-gate`. | The source proposed `task-gate`, but that skill loads at the last step, and a raw `dotnet test` bypasses `proc-guard.sh` until the [shell hook todo](../../todo/per-harness-shell-hook-for-full-run-guard.md) lands. A ban read after the mistake is no ban. The count is 27 files, not 14, so the rule map is rebuilt by search. | autonomous: recommendation accepted |
 | D28 | What does the suppression gate allow? | `kyber-weave review suppressions` scans added lines only, for `#pragma warning disable`, `SuppressMessage` and `NoWarn`, and fails unless the same or previous added line carries `reason:`. | 21 files already hold `#pragma warning disable`, hence added lines only. `AGENTS.md` asks for "a reason you can state". | autonomous: low-confidence, no authoritative source |
 | D29 | How is `TASK_GATE: PASS` verified? | New Arbiter rule `KW-ARB-GATE-REPORT-001` on `delegate.returned` reads the `report=` file and escalates when it is absent or disagrees with the line. Worktree workers report an absolute path. | `GateReportFacts` serves the council and nothing reads `report=` at task end. Where the harness cannot observe returns the rule cannot fire, and the end-of-run gates still catch it. | autonomous: low-confidence, no authoritative source |
 | D30 | How does a task gate pick tests? | A `{tests}` token beside `{changed}`, resolved next to `TaskGateSelection`. Mapping: a declared `review.test-map` first, then the name convention `<Stem>Tests`, keeping only classes that exist. Nothing mapped means skipped with `KW-REVIEW-026`, never a pass. | `codegraph affected` is too unreliable on C# to select tests (recorded on issue 535). `-class` needs a fully qualified name, because a short name runs zero tests and exits 0. | autonomous: low-confidence, no authoritative source |
@@ -110,7 +110,7 @@ And the harness check, verbatim:
 
 > ### Other harnesses
 >
-> Behaviour this plan cannot confirm on all 13. T48 checks each and records the result in [the capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix). Anything not reached stays marked `[NOT LIVE-VERIFIED]`, with its fallback.
+> Behaviour this plan cannot confirm on all 13. T48 checks each and records the result in [the capability matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix). Anything not reached stays marked `[NOT LIVE-VERIFIED]`, with its fallback.
 >
 > | Behaviour | Depends on it | Known | Fallback |
 > |---|---|---|---|
@@ -152,7 +152,7 @@ Two shared rows of the parent's harvest are split the way slice 5 split one: H2 
 
 ## ADR disposition
 
-**No new ADR — ADR waiver.** The parent's own Design harvest assigns fix 7 a waiver: fix 7 applies the principle already in the C# standard — quality comes from checks that run, not from text a worker reads — and the durable record is the rule map (D36), a permanent reference, plus H1 to H4's targets. The three new checks refine enforcement surfaces earlier records already cover — the task-gate and review-gate architecture, the full-suite ban's context in [ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md), and the three-step gate pattern of [ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md) that the new rule id extends — and open no boundary, dependency, schema or contract of their own; the new rule id is added, never renumbered. The harness check records observed behaviour into an existing requirements matrix. Number check: `docs/adr/` holds 0001 to 0062; slice 5's open plan claims 0063 at its closeout, and this slice consumes no number.
+**No new ADR — ADR waiver.** The parent's own Design harvest assigns fix 7 a waiver: fix 7 applies the principle already in the C# standard — quality comes from checks that run, not from text a worker reads — and the durable record is the rule map (D36), a permanent reference, plus H1 to H4's targets. The three new checks refine enforcement surfaces earlier records already cover — the task-gate and review-gate architecture, the full-suite ban's context in [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md), and the three-step gate pattern of [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) that the new rule id extends — and open no boundary, dependency, schema or contract of their own; the new rule id is added, never renumbered. The harness check records observed behaviour into an existing requirements matrix. Number check: `docs/adr/` holds 0001 to 0062; slice 5's open plan claims 0063 at its closeout, and this slice consumes no number.
 
 ## Test contract
 
@@ -279,8 +279,139 @@ This slice's pull request goes through **one `code-reviewer` council over its wh
 
 ## Closeout
 
-**Not closed.** This section is written by this slice's closeout (`docs-dev`, T53): what was verified against the delivered tree, the gates run, the archive move of this plan to `docs/archive/plans/` in this slice's own pull request, and the parent design's archive with its mapping to the eight children. This plan carries no `<plan>.tasks.json` of its own: the task-file mechanism is slice 5's delivery and the architect finalizing this plan runs under the pre-change authoring text on this branch, so `KW-DOC-TASKS-006`'s warning is the expected state until slice 5 lands; if a task file exists at closeout, T53 removes it with `git rm` in the same commit that archives this plan.
+`docs-dev` closed this child plan in this slice's pull request on 2026-11-08. It verified each task
+against the delivered tree rather than against a task report, harvested the four Design harvest rows
+into the canonical pages named in the mapping below, archived this plan with `git mv` to
+`docs/archive/plans/`, moved its row to Archived Plans in the plan inventory, archived the
+test-mapping todo it completes, and filed the deferred work this slice found as five todos. It also
+brought the parent design in from `claude/docs/conductor-bug-crusher-run-speed` — copied with
+`git show`, never merged — and archived it beside this file with a mapping to all eight children.
+This plan carried no `<plan>.tasks.json`, so the closeout removed none: the mechanism arrived with
+slice 5 and this plan was finalized on a branch whose base predates it, which is why the
+`KW-DOC-TASKS-006` warning it carried retired with the archive rather than being fixed.
+
+**What was verified, task by task.**
+
+- **T44, the suppression gate — partly delivered.** `ReviewSuppressionsCommand` and
+  `SuppressionScan` exist and are wired into `Program.cs`; added lines are judged, a `reason:` on the
+  same or the immediately preceding added line clears a finding, history is never re-litigated, and an
+  unreadable change fails closed. The ids are `KW-REVIEW-036` and `KW-REVIEW-037`. **The other half of
+  T44's acceptance is not in the delivered tree:** no gate under `review.task-gates` runs the command
+  and `GateCatalogue` offers it to no host, so an unreasoned suppression an agent adds is caught only
+  by a reviewer reading the diff. Filed as [no task gate runs review
+  suppressions](../../todo/review-suppressions-gate-not-selected.md). The command and its ids are
+  documented as they are, not as the acceptance statement assumed.
+- **T45, the gate-report rule — delivered.** `KW-ARB-GATE-REPORT-001` sits on `delegate.returned` in
+  `default-rules.yml`, whose header now states 20 shipped rules; no id was renumbered.
+  `GateReportFacts.Agrees` makes the comparison the closed predicate set cannot express: `verified`
+  needs a `PASS` claim the named report corroborates, and `disagrees` and `missing` both escalate.
+- **T46, the `{tests}` token — delivered.** `TestClassMapping.Resolve` answers from a declared
+  `review.test-map` first and the `<Stem>Tests` convention second, keeps only classes a test file
+  exists for, and emits the namespace the class declares. This repository declares the map and a
+  `tests` gate under `csharp-dev` that `test-dev` aliases. A change no class covers skips the gate with
+  `KW-REVIEW-026` instead of running a filter over nothing. **The fast path was not re-timed here**,
+  and the archived todo says so rather than implying a measurement that was never taken.
+- **T47, the shared baseline — delivered.** `products/kyber-squad/shared/worker-baseline.md` holds the
+  Discovery order, the plan-read ban, the full-suite ban and the batched-reads line in one block, and
+  `SquadWorkerBaselineInjector` applies it once to every `SquadInvocation.Subagent` body in the render
+  pipeline beside the `{{harness}}` substitution. The carrier checks cover every shipped target, and an
+  entry point carries none. `BodyDigest` is deliberately untouched, so migration reports still describe
+  the authored body.
+- **T48, the harness matrix — delivered, with three rows live-unverified.** Every row of the design's
+  "Other harnesses" table is either confirmed from this tree or marked `[NOT LIVE-VERIFIED]` with its
+  fallback, in the capability matrix of the Kyber-Squad requirements. Three of the markers are harness
+  behaviours nothing here can settle, filed as [confirm the three harness behaviours only a live
+  session can settle](../../todo/worker-harness-assumptions-unverified.md).
+- **T49, the rule map — delivered.** `docs/kyber-squad/worker-rule-map.md` carries 35 rows, derived by
+  searching the tree, and it corrects three of this plan's own figures: the ban lives in 26 files
+  rather than 27, 9 standard templates carry a runner or ban line rather than 5, and 21 agent and skill
+  files carry a Discovery order heading rather than the 938 bytes the design estimated.
+- **T50, the moved pins — delivered.** Each pin that touched moved text points at its new home with
+  the string unchanged, and `WorkerRuleSingleHomeTests` fails when a moved rule appears in more than one
+  file. By D62 those classes were red between T50 and T52 by design; they are green in the delivered
+  tree.
+- **T51, the seeded-defect trial — did not run.** It needs two Squad deployments and real worker runs,
+  which this environment cannot produce. T52 therefore applied the rows the plan authorizes by name plus
+  the rows whose named home already carries the rule, and left everything else in place. This is
+  recorded, not claimed: [run the seeded-defect trial the worker-text trim is gated
+  on](../../todo/seeded-defect-trial-never-ran.md).
+- **T52, the removals — delivered.** 20,012 bytes left the 16 agent bodies; `skills/task-gate/SKILL.md`
+  grew by 1,973 bytes and `skills/task-gate/references/rework.md` was created at 4,795 bytes, so the
+  failure loop moved rather than vanished. 13 migration reports were updated for the bodies that
+  changed, and the three net-new agents were correctly given none. The rows that could not move are
+  recorded with their reasons in the rule map and scheduled as [move the worker-text rows the trim left
+  behind](../../todo/worker-text-rows-the-trim-could-not-move.md).
+- **T53, this closeout — delivered.** The harvest, the ADR waiver, the archived todo, the five new
+  todos, this plan's archive and the parent's archive with its mapping.
+
+**The ADR waiver is confirmed as recorded, not merely inherited.** Fix 7 applies a principle the C#
+standard already states — quality comes from checks that run, not from text a worker reads — and its
+durable record is the rule map, a permanent reference, plus the four harvest targets. The three new
+checks refine surfaces earlier records already cover: the task-gate and review-gate architecture for
+the suppression gate and the `{tests}` token, and the three-step gate pattern of
+[ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) for the new rule id, which
+extends that pattern rather than opening a boundary, dependency, schema or contract of its own. No ADR
+number was consumed; the highest in the corpus is 0064, written by slice 7.
+
+**Gates and evidence.** `docs validate .`, `docs drift .` and `docs validate . --merge-ready` ran after
+the corpus edits and after both archive moves, through `scripts/proc-guard.sh run --`. `docs drift .`
+reported **no findings**. `docs validate .` reported **one error and one warning**, and
+`--merge-ready` **three errors and one warning**; every one of them is inherited from another slice's
+branch, and none is caused by this closeout:
+
+- `KW-CONFIG-REG-002` — the Config Reg block in `AGENTS.md` no longer matches
+  `.kyber-weave/kyber-weave.yml`, because slice 7's `onboarding: done` publishes a property the block
+  predates. The fix is `kyber-weave docs init` (or `docs onboarding done`), which re-splices the
+  generated block; editing the block by hand is what `AGENTS.md` forbids, and neither command is
+  documentation work.
+- `KW-DOC-LIFECYCLE-003` for `2026-11-07-conductor-run-speed-shared-execution.md` — slice 4 is still
+  open here, as the parent design's closeout anticipated.
+- `KW-DOC-LIFECYCLE-003` for `2026-11-07-conductor-run-speed-project-knowledge.md`, with its
+  `KW-DOC-TASKS-006` warning beside it — slice 7 is open and marked Review required. Its row was
+  missing from the plan inventory, so `docs validate` also reported `KW-DOC-LIFECYCLE-001` for it until
+  this closeout added the row; the row is index maintenance, and archiving another slice's plan was not
+  and is not this closeout's to do.
+
+The product sweep — `dotnet test tests/KyberWeave.Tests --no-build` filtered to `Squad`, `Arbiter`,
+`Review`, `Render`, `Worker` and `Docs` — reported **4,895 total, 4,892 passed, 0 failed, 3 skipped**
+against an assembly confirmed current with `tests/**/*.cs`. That is 13 fewer tests than the 4,908 the
+previous run recorded, with no failure in either: the difference is the suite as this branch's source
+stands, and the archive records the number it measured rather than the one it expected. The migration
+reports were re-checked too: 18 reports, 0 stale.
+
 
 ## Closeout mapping
 
-**To be written at closeout.** Every durable decision (D12, D13, D27, D28, D29, D30, D35, D36, D37, D41, D43, AP1, D59 to D62) and all four harvest rows (H1 to H4) map to a destination; the mapping table is recorded when the slice closes, and the parent design's own mapping to the eight children is recorded in the archived parent and its `## Archived Plans` row.
+Every decision of this plan's ledger — D12, D13, D27, D28, D29, D30, D35, D36, D37, D41, D43, AP1 and
+D59 to D62 — and all four Design harvest rows map to a destination below. Documentation-impact for
+every row: `extends-component`. Last reviewed: 2026-11-08 for every mapped document. Status: archived.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D12 | [Plan inventory](../../plans/README.md) — one plan per slice, the slice's own pull request archives it, and the last slice's pull request archives the parent with its mapping; this plan's row now sits under Archived Plans, beside the parent's | extends-component | KyberSquad | 2026-11-08 | archived |
+| D13 | Documentation waiver — the parent design's build order across eight slices, which this plan carries only as context; it records sequencing, not behaviour, and every slice it orders has its own archived plan | extends-component | KyberSquad | 2026-11-08 | archived |
+| D27 | [Worker rule map, the full-suite ban](../../kyber-squad/worker-rule-map.md#the-full-suite-ban) and [Kyber-Squad architecture, the shared worker baseline](../../kyber-squad/architecture.md#the-shared-worker-baseline-injected-once-per-dispatched-worker) — one always-on line from the one injected source, in every dispatched worker's render, not only in `task-gate` | extends-component | KyberSquad | 2026-11-08 | archived |
+| D28 | [Review council architecture, the suppression gate](../../code-review/architecture.md#the-suppression-gate); [Rule reference, suppressions](../../ci-pipelines/rule-reference.md#suppressions--review-suppressions); [CLI command surface, review](../../cli-command-surface.md#review--the-deterministic-review-half) — added lines only, `reason:` on the same or preceding added line, fail-closed on an unreadable change; the missing task-gate and catalogue half is [a todo](../../todo/review-suppressions-gate-not-selected.md) | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| D29 | [Kyber Arbiter architecture, the rules](../../kyber-arbiter/architecture.md#the-rules); [Rule reference, shipped rules](../../ci-pipelines/rule-reference.md#shipped-rules--default-rulesyml); [Configuration, Arbiter](../../configuration.md#arbiter-configuration) — `KW-ARB-GATE-REPORT-001` on `delegate.returned`, its three answers, and the count at 20 | extends-component | KyberArbiter | 2026-11-08 | archived |
+| D30 | [Review council architecture, the tests a task gate runs](../../code-review/architecture.md#the-tests-a-task-gate-runs); [Configuration, review](../../configuration.md#review); [CLI command surface, review](../../cli-command-surface.md#review--the-deterministic-review-half); [Rule reference, gates](../../ci-pipelines/rule-reference.md#gates--review-gates) — `{tests}` resolved from `review.test-map` then the `<Stem>Tests` convention, kept only for classes that exist, and `KW-REVIEW-026` when nothing maps | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| D35 | Documentation waiver for the ADR plan itself — this plan records the disposition below rather than a decision; see the ADR row beneath it | extends-component | KyberSquad | 2026-11-08 | archived |
+| D36 | [Worker rule map](../../kyber-squad/worker-rule-map.md) — the permanent reference it decided on, carrying one row per removed sentence with its one home and the check that holds it | extends-component | KyberSquad | 2026-11-08 | archived |
+| D37 | [Run the seeded-defect trial the worker-text trim is gated on](../../todo/seeded-defect-trial-never-ran.md) — the trial's two-arm design, its nine defects and what to compare, because the trial itself has not run | extends-component | KyberSquad | 2026-11-08 | archived |
+| D41 | [Kyber-Squad architecture, the harness token](../../kyber-squad/architecture.md#the-harness-token-is-substituted-once-in-the-render-pipeline); [Kyber-Squad requirements, the harness behaviour matrix](../../kyber-squad/requirements.md#harness-behaviour-the-product-relies-on) — one substitution point for `{{harness}}`, and the co-deployment limit recorded as unverified rather than assumed | extends-component | KyberSquad | 2026-11-08 | archived |
+| D43 | [Worker rule map, the task-end fix pass](../../kyber-squad/worker-rule-map.md#the-task-end-fix-pass-and-build-isolation) — `cleanupcode` off by default in the task-end text, the skill kept for InspectCode review work, and the row naming which gate covers what it would have reported | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| AP1 | Documentation waiver — approval provenance for this slice's Test contract and execution; no lasting artefact cites the approval itself | extends-component | KyberSquad | 2026-11-08 | archived |
+| D59 | Documentation waiver — this branch's stacked delivery and the order the two sibling pull requests merged in; it is delivery mechanics with no surviving architectural or behavioural invariant, and the rule it applies is already in the plan inventory | extends-component | KyberSquad | 2026-11-08 | archived |
+| D60 | [Worker rule map, agent bodies this map names](../../kyber-squad/worker-rule-map.md#agent-bodies-this-map-names) — the migration-report set derived from the map, 13 reports updated and three net-new agents that may carry none | extends-component | KyberSquad | 2026-11-08 | archived |
+| D61 | [Plan inventory](../../plans/README.md#plan-decisions-and-closeout-policy) carries the archive mechanism this decision chose; the record it produced is the parent design archived beside this file, [Make conductor and bug-crusher runs faster and cheaper without losing a quality check](2026-11-07-conductor-bug-crusher-run-speed.md) — the copy-and-edit route, the link rewrite for the archive's depth, and the mapping from every parent decision to its child | extends-component | KyberSquad | 2026-11-08 | archived |
+| D62 | [Worker rule map, what T52 did with this page](../../kyber-squad/worker-rule-map.md#what-t52-did-with-this-page) — the strict T49 to T52 order and the intermediate red it requires, so the rework tally does not treat it as rework and no pin is weakened to shorten it | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| H1 | [Worker rule map](../../kyber-squad/worker-rule-map.md) — 35 rows, one per removed sentence, with its single home and its enforcing check, the rows that stayed with their reasons, the byte counts against the estimate, and the trial result recorded as not run | extends-component | KyberSquad | 2026-11-08 | archived |
+| H2 | [Kyber Arbiter architecture, the rules](../../kyber-arbiter/architecture.md#the-rules); [Rule reference, shipped rules](../../ci-pipelines/rule-reference.md#shipped-rules--default-rulesyml); [Configuration, Arbiter](../../configuration.md#arbiter-configuration) — `KW-ARB-GATE-REPORT-001`, its three answers and effects, the fact that makes the comparison, and the shipped count at 20 | extends-component | KyberArbiter | 2026-11-08 | archived |
+| H3 | [Review council architecture, the tests a task gate runs](../../code-review/architecture.md#the-tests-a-task-gate-runs) and [the suppression gate](../../code-review/architecture.md#the-suppression-gate); [Configuration, review](../../configuration.md#review); [CLI command surface, review](../../cli-command-surface.md#review--the-deterministic-review-half); [Review council overview](../../code-review/README.md#the-review-commands) — the new task gates, the third token, `review.test-map`, the suppression verb and its exit codes | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| H4 | [Kyber-Squad requirements, the harness behaviour matrix](../../kyber-squad/requirements.md#harness-behaviour-the-product-relies-on) — every row confirmed from this tree or marked `[NOT LIVE-VERIFIED]` with its fallback, with the three live-only rows scheduled as [a todo](../../todo/worker-harness-assumptions-unverified.md) | extends-component | KyberSquad | 2026-11-08 | archived |
+| ADR | **No new ADR — ADR waiver:** fix 7 applies the principle the C# standard already states — quality comes from checks that run, not from text a worker reads — and its durable record is the rule map plus the four harvest targets above. The three new checks refine enforcement surfaces [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) and [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) already cover, and the new rule id extends ADR 0053's three-step pattern rather than opening a boundary, dependency, schema or contract of its own. Confirmed at closeout: 0064 is the highest ADR in the corpus and this slice consumed no number | extends-component | KyberSquad | 2026-11-08 | archived |
+| RESIDUAL | [No task gate runs review suppressions](../../todo/review-suppressions-gate-not-selected.md) — the command and its two ids ship, the `review.task-gates` declaration and the catalogue entry T44's acceptance names do not | extends-component | ReviewCouncil | 2026-11-08 | archived |
+| RESIDUAL | [Run the seeded-defect trial the worker-text trim is gated on](../../todo/seeded-defect-trial-never-ran.md) — the trial that gates the removals needs real worker runs and has not run | extends-component | KyberSquad | 2026-11-08 | archived |
+| RESIDUAL | [Move the worker-text rows the trim left behind](../../todo/worker-text-rows-the-trim-could-not-move.md) — the Discovery order and header, the conductor's copy of the execution contract, and four baseline procedures whose named home does not state them | extends-component | KyberSquad | 2026-11-08 | archived |
+| RESIDUAL | [Confirm the three harness behaviours only a live session can settle](../../todo/worker-harness-assumptions-unverified.md) — the worker profile's shell grant, the co-deployed renderer root, and the MCP timeout against the refresh bound | extends-component | KyberSquad | 2026-11-08 | archived |
+| RESIDUAL | [Watch real runs for rework the worker-text trim caused](../../todo/watch-worker-text-trim-in-real-runs.md) — rework dispatches, InspectCode findings, task-gate failures and `TESTS: total=0` reports over the next few runs | extends-component | KyberSquad | 2026-11-08 | archived |
+
