@@ -151,8 +151,6 @@ Before closeout completes, run the documentation-impact review step:
 
 Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE in the execution artifact and carry the outcome in the PR description.
 
-Only a successful closeout completes the objective.
-
 ## Arbiter routing headers
 
 Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
