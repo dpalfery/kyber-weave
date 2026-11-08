@@ -238,6 +238,7 @@ public sealed class RunStartPlannerTests : IDisposable
         _probe.Git("push", "origin", Resumed);
         _probe.Git("switch", "main");
         _probe.Git("branch", "-D", Resumed);
+        _probe.Git("config", "branch.autoSetupMerge", "false");
 
         _probe.AddLinkedWorktree("linked-worker");
 
@@ -250,6 +251,7 @@ public sealed class RunStartPlannerTests : IDisposable
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming remote branch in worktree: {result.Output}");
         Assert.Contains(Resumed, _probe.WorktreeBranches(), StringComparison.Ordinal);
         Assert.True(_probe.BranchExists(Resumed), $"Local branch '{Resumed}' must be created.");
+        Assert.Equal("origin", _probe.GitOutput("config", $"branch.{Resumed}.remote").Trim());
     }
 
     /// <summary>

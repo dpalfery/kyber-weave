@@ -44,6 +44,7 @@ public sealed class RunStartRunner
     private const string GitExecutable = "git";
     private const string CodeGraphExecutable = "codegraph";
     private const string NoTrackOption = "--no-track";
+    private const string TrackOption = "--track";
 
     private readonly IProcessExecutor _executor;
     private readonly string _repositoryRoot;
@@ -301,7 +302,7 @@ public sealed class RunStartRunner
 
         if (!HasLocalBranch(branch) && !string.IsNullOrWhiteSpace(startRef))
         {
-            return AddWorktree(worktreePath, ["-b", branch], startRef);
+            return AddWorktree(worktreePath, ["-b", branch, TrackOption], startRef);
         }
 
         return AddWorktree(worktreePath, [], branch);
