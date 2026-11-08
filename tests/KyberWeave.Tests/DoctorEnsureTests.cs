@@ -472,6 +472,22 @@ public sealed class DoctorEnsureTests : IDisposable
     }
 
     /// <summary>
+    /// Clean paths without spaces or shell metacharacters are left unquoted across all platforms,
+    /// while paths with spaces or metacharacters use single-quote wrapping with escaped quotes.
+    /// </summary>
+    [Theory]
+    [InlineData("src/foo.cs", "src/foo.cs")]
+    [InlineData("src/dir/bar.cs", "src/dir/bar.cs")]
+    [InlineData("src/My File.cs", "'src/My File.cs'")]
+    [InlineData("src/$evil.cs", "'src/$evil.cs'")]
+    [InlineData("src/$evil'quote.cs", "'src/$evil'\"'\"'quote.cs'")]
+    [InlineData("src/`cmd`.cs", "'src/`cmd`.cs'")]
+    public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingSingleQuotes(string input, string expected)
+    {
+        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input));
+    }
+
+    /// <summary>
     /// Baseline tracked changes must be sampled AFTER lock acquisition so edits made while waiting
     /// are not classified as newly written by the index preparation and restored.
     /// </summary>
