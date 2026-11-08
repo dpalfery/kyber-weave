@@ -28,10 +28,7 @@ decided-by:
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0061-code-editing-runs-stop-on-unusable-tools
-<<<<<<< HEAD
   - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
-=======
->>>>>>> origin/main
 sections:
   "#":
     keywords:
