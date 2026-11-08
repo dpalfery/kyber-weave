@@ -257,6 +257,30 @@ public sealed class OpenWorkValidatorTests
             $"it reported: {run.Output}");
     }
 
+    /// <summary>
+    /// Leftover task files in secondary docs roots must also be caught by OpenWorkValidator.
+    /// </summary>
+    [Fact]
+    public void ATaskFileInASecondaryDocsRootIsCaught()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index("plans/index"))
+            .Write(
+                "secondary/plans/2026-09-14-kilo.tasks.json",
+                """{ "schema-version": 1, "plan": "secondary/plans/2026-09-14-kilo.md", "tasks": [] }""");
+
+        KyberWeaveConfig config = new()
+        {
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "secondary"])
+        };
+
+        DiagnosticReport report = new OpenWorkValidator(config, fixture.Root).Validate(fixture.Load());
+
+        Assert.True(
+            report.Items.Any(i => i.Code == LeftoverTaskFile && i.FilePath == "secondary/plans/2026-09-14-kilo.tasks.json"),
+            $"leftover task file in secondary docs root must be reported as {LeftoverTaskFile}; reported: {Describe(report)}");
+    }
+
     /// <summary>A task file left behind when the change merges (<c>KW-DOC-LIFECYCLE-005</c>).</summary>
     private const string LeftoverTaskFile = "KW-DOC-LIFECYCLE-005";
 
