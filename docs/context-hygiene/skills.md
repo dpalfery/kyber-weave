@@ -158,9 +158,9 @@ is registered here as the second shipped skill.
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
-unified multi-harness deployment control plane. Kyber-Squad maintains 28 canonical skills
+unified multi-harness deployment control plane. Kyber-Squad maintains the canonical skills
 (alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/`. It also
-deploys the six Kyber-Weave skills from `.apm/skills/` beside them, 34 skills in each release
+deploys the six Kyber-Weave skills from `.apm/skills/` beside them, in each release
 archive, and manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares thirteen
 harness targets. All thirteen renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`).
@@ -168,8 +168,8 @@ harness targets. All thirteen renderers are implemented and registered (`copilot
 Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) matches the canonical
 bytes; the retired `create-pull-request-github` skill is folded into `create-pull-request`.
-Canonical storage preserves 88 supplemental resources, for 116 skill-tree files. Each release archive
-adds the six `.apm/skills` skills and their three resource files, for 125 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
+Canonical storage preserves every supplemental resource beside each `SKILL.md`. Each release archive
+adds the six `.apm/skills` skills and their resource files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
 skill-UI metadata. The tracked root `.github/` self-deployment predates resource delivery. Every

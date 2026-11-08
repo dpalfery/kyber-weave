@@ -34,7 +34,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**29 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+the canonical skills, plus the six Kyber-Weave skills it ships beside them, with transactional
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
@@ -843,7 +843,7 @@ It reports these:
 
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+Kyber-Squad deploys six Kyber-Weave skills beside its Squad skills: `kyber-docs-authoring`,
 `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
 `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
@@ -1472,9 +1472,9 @@ gap, not introduced here: a symbolic link inside `products/kyber-squad/` that po
 is still packed when no loaded file references it. See the
 [architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
 
-Both archive formats recurse through each skill directory. They contain all 29 canonical `SKILL.md`
-files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
-`.apm/skills/` and their three resource files: 35 skills and 126 skill-tree files in each archive.
+Both archive formats recurse through each skill directory. They contain all canonical `SKILL.md`
+files plus their retained supplemental resources, together with the six Kyber-Weave skills from
+`.apm/skills/` and their resource files, in each archive.
 Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
