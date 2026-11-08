@@ -136,7 +136,7 @@ public static class KyberWeaveConfigLoader
     /// through the legacy root path would not overwrite that file, but would shadow it,
     /// which loses the operator's settings just as thoroughly.
     /// </remarks>
-    internal static string? FindConfigPath(string repoRoot)
+    public static string? FindConfigPath(string repoRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
 

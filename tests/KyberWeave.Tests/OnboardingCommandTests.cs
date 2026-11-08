@@ -43,7 +43,41 @@ public sealed class OnboardingCommandTests : IDisposable
         ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
 
         Assert.True(result.ExitCode == 0, $"docs onboarding done exited {result.ExitCode}. {result.Output}");
-        Assert.Contains("onboarding: done", SettingLines(), StringComparer.Ordinal);
+        Assert.Contains("onboarding: done", ReadConfig().Split('\n').Select(l => l.TrimEnd('\r')), StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void DocsOnboardingCanRepairInvalidOnboardingValue()
+    {
+        _probe.WriteHostConfig("ontology:\n  docs-root: docs\nonboarding: dnoe\n");
+
+        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+
+        Assert.True(result.ExitCode == 0, $"docs onboarding done exited {result.ExitCode}. {result.Output}");
+        Assert.Contains("onboarding: done", ReadConfig().Split('\n').Select(l => l.TrimEnd('\r')), StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void DocsOnboardingNonExistentDirectoryRefusesWithExitTwo()
+    {
+        ProbeResult result = _probe.RunCli("docs", "onboarding", "done", Path.Combine(_probe.Root, "non-existent-directory"));
+
+        Assert.True(result.ExitCode == 2, $"Expected exit code 2, got {result.ExitCode}. {result.Output}");
+    }
+
+    [Fact]
+    public void DocsOnboardingRefusesSymlinkedConfig()
+    {
+        _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
+        string configPath = Path.Combine(_probe.Root, ConfigRelativePath);
+        string realPath = Path.Combine(_probe.Root, "real-config.yml");
+        File.Move(configPath, realPath);
+        File.CreateSymbolicLink(configPath, realPath);
+
+        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+
+        Assert.True(result.ExitCode == 1, $"Expected exit code 1 for symlink, got {result.ExitCode}. {result.Output}");
+        Assert.Contains("symbolic link", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
