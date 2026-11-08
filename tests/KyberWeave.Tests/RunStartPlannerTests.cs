@@ -227,6 +227,25 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     Refuses --resume HEAD or --resume origin/HEAD with exit 2 because HEAD is a symbolic reference,
+    ///     not a branch.
+    /// </summary>
+    [Theory]
+    [InlineData("HEAD")]
+    [InlineData("origin/HEAD")]
+    public void RefusesToResumeHeadSymbolicReferenceWithExitTwo(string candidate)
+    {
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", candidate);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("symbolic reference", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     When the base is origin/HEAD and neither origin/HEAD nor an origin default branch can be resolved,
     ///     the command fails rather than guessing 'main'.
     /// </summary>
