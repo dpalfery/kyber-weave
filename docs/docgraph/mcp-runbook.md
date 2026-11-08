@@ -1271,7 +1271,7 @@ Dropping **every** term no section states was measured and rejected. Removing th
 rescales the scores that remain, and it turned `csharp` with `mocking time` — a topic nothing
 in the standard answers — from a correct miss into a confident wrong answer. The rule is
 therefore narrower than "keep only stated terms": a compound the vectorizer synthesised goes,
-a word the caller wrote stays.
+an informative word the caller wrote stays.
 
 **A topic that no section clears still returns the standard.** The reply states the topic in
 one line — `no section matches the topic '<topic>', so the standard follows without it.` — and
