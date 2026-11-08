@@ -245,7 +245,9 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                         head = alignmentRevision,
                         ahead,
                         behind,
-                        aligned = ahead == 0 && behind == 0
+                        aligned = ahead is not null && behind is not null
+                            ? ahead == 0 && behind == 0
+                            : (bool?)null
                     }
                 },
                 JsonOptions));

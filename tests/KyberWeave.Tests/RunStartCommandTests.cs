@@ -124,6 +124,28 @@ public sealed class RunStartCommandTests : IDisposable
     }
 
     /// <summary>
+    ///     When divergence between HEAD and the base cannot be determined, 'aligned' in JSON is null
+    ///     rather than false.
+    /// </summary>
+    [Fact]
+    public void JsonLeavesAlignedNullWhenDivergenceCannotBeDetermined()
+    {
+        _probe.Git("checkout", "--orphan", "unborn-branch");
+        _probe.Git("rm", "-rf", ".");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--json");
+
+        Assert.True(result.ExitCode == 0, $"Run must succeed: {result.Output}");
+        using JsonDocument document = ParseJson(result.StandardOutput);
+        JsonElement alignment = document.RootElement.GetProperty("serverAlignment");
+        Assert.Equal(JsonValueKind.Null, alignment.GetProperty("aligned").ValueKind);
+    }
+
+    /// <summary>
     ///     A defect run compares the failing build's version with <c>HEAD</c> and with the remote base,
     ///     and prints all three, because the point of the comparison is to show an operator that the bug
     ///     they hit is not the commit they are looking at.
