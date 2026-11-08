@@ -42,10 +42,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// agent the universal MCP predicate entitles to this server emits that wildcard with
 /// <c>allow</c>, the pure orchestrator included, because the server carries
 /// <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it
-/// is held to (ADR 0050). An agent the predicate does not entitle emits no entry at all: for a
-/// subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a server the operator
-/// may never have configured would assert more than canonical source does — the capability lattice
-/// declares no MCP capability to derive one from.
+/// is held to (ADR 0050). The code-graph server keeps the orchestrator carve-out, so its own
+/// wildcard is emitted with <c>allow</c> for the agents
+/// <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers"/> entitles and for no
+/// others; the server names come from the toolchain roster, so a roster declaring no code-graph
+/// server emits no key. A library-lookup server is not named here: the carve-out was widened for
+/// the code graph, not for library lookups. An agent the predicate does not entitle emits no entry
+/// at all: for a subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a
+/// server the operator may never have configured would assert more than canonical source does —
+/// the capability lattice declares no MCP capability to derive one from.
 /// </para>
 /// <para>
 /// <b>The server half of the wiring stays the operator's.</b> An agent file cannot add an MCP
@@ -141,10 +146,26 @@ public sealed class KiloRenderer : SquadHarnessRenderer
         // "deny" here would out-assert a canonical source that declares no MCP reach.
         if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, context.CapabilityProfiles))
         {
-            frontmatter["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            Dictionary<string, object?> permission = new(StringComparer.Ordinal)
             {
                 [KyberWeaveMcpPermission] = "allow"
             };
+
+            // The code graph keeps the orchestrator carve-out that kw-docs does not, so it is
+            // gated on its own predicate rather than folded into the entry above. The server
+            // names come from the roster, so a roster that declares no code-graph server emits
+            // no key at all instead of an approval that resolves against nothing.
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    context.CapabilityProfiles))
+            {
+                foreach (string serverName in context.GetOrCreateState(McpPlan.Create).CodeGraphServerNames)
+                {
+                    permission[$"{serverName}_*"] = "allow";
+                }
+            }
+
+            frontmatter["permission"] = permission;
         }
 
         context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
@@ -176,5 +197,19 @@ public sealed class KiloRenderer : SquadHarnessRenderer
             agent,
             context.CapabilityVocabulary.Where(profile.Permissions.ContainsKey).ToList(),
             "Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed");
+    }
+
+    /// <summary>
+    /// The server names this renderer's permission map grants from, resolved once per render.
+    /// </summary>
+    /// <remarks>
+    /// Read from the toolchain roster through the shared derivation rather than spelled in this
+    /// file, so the server is renamed in one place and this target cannot disagree with the other
+    /// single-server targets about which server the widening names (ADR 0050 decision 4).
+    /// </remarks>
+    private sealed record McpPlan(IReadOnlyList<string> CodeGraphServerNames)
+    {
+        public static McpPlan Create(SquadHarnessRenderContext context) => new(
+            CapabilityDegradations.CodeGraphMcpServerNames(context.Source.Toolchain.RequiredMcpTools));
     }
 }
