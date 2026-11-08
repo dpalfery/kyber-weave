@@ -5,14 +5,21 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 ///     Regression contract tests for Kyber-Squad performance and parallelization invariants across
-///     canonical agent instructions, conductor references, test-dev skills, and test coding standards.
+///     canonical agent instructions, the shared execution skill both entry points load, test-dev
+///     skills, and test coding standards.
 /// </summary>
 public sealed class SquadPerformanceContractTests
 {
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
-    private const string ConductorExecutionPath =
-        "products/kyber-squad/agents/conductor/references/execution-and-review.md";
+    /// <summary>
+    ///     The shared worker execution contract: one canonical skill that the conductor and the
+    ///     bug-crusher workflow both load. It used to be a conductor reference, so the conductor's
+    ///     surfaces below are pinned against the skill wherever the rule belongs to the contract
+    ///     rather than to the conductor's own body.
+    /// </summary>
+    private const string SharedExecutionSkillPath =
+        "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
     private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
     private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
@@ -157,7 +164,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyDirectAssemblyTestRunner(string relativePath)
     {
@@ -169,7 +176,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyBuildOnceTestMany(string relativePath)
     {
@@ -182,7 +189,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyZeroStashRedProofs(string relativePath)
     {
@@ -196,7 +203,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     public void ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -209,7 +216,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyInlinedTaskPacketContents(string relativePath)
     {
@@ -221,7 +228,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyWorktreeAndArtifactsParallelization(string relativePath)
     {
@@ -234,7 +241,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesPreserveAdversarialRedGreenBoundaryAndBundleSameRoleTasks(string relativePath)
     {
@@ -248,7 +255,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest(string relativePath)
     {
@@ -259,7 +266,7 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(ConductorAgentPath)]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(RequirementsDocPath)]
     public void ConductorAndRequirementsExemptCircuitBreakerEscalationFromSixFieldRejection(string relativePath)
     {
@@ -275,7 +282,7 @@ public sealed class SquadPerformanceContractTests
     [Fact]
     public void ConductorExecutionContractSpecifiesWorktreeCleanupAndConflictHandling()
     {
-        string content = ReadRepoFile(ConductorExecutionPath);
+        string content = ReadRepoFile(SharedExecutionSkillPath);
         Assert.Matches(@"(?i)\bgit\s+(?:cherry-pick|merge)\s+--abort\b", content);
         Assert.Contains("git worktree remove --force", content, StringComparison.Ordinal);
         Assert.Contains("git worktree prune", content, StringComparison.Ordinal);
@@ -288,10 +295,10 @@ public sealed class SquadPerformanceContractTests
     /// <summary>
     /// Conductor is a non-developer orchestrator; its frontmatter description and body must never define
     /// or emit a TASK_GATE digest. The canonical six-field worker completion digest and full 5-state TASK_GATE
-    /// enum are defined in the execution-and-review contract reference.
+    /// enum are defined in the shared execution skill the conductor loads.
     /// </summary>
     [Fact]
-    public void ExecutionAndReviewReference_DeclaresDeterministicTaskGate_AndConductorOffloadsIt()
+    public void SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt()
     {
         string content = ReadRepoFile(ConductorAgentPath);
         int firstMarker = content.IndexOf("---", StringComparison.Ordinal);
@@ -309,7 +316,7 @@ public sealed class SquadPerformanceContractTests
 
         Assert.DoesNotContain("TASK_GATE:", body, StringComparison.Ordinal);
 
-        string executionContent = ReadRepoFile(ConductorExecutionPath);
+        string executionContent = ReadRepoFile(SharedExecutionSkillPath);
         Assert.Matches(ContiguousSixFieldDigestRegex, executionContent);
         Assert.Contains("PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", executionContent,
             StringComparison.Ordinal);
@@ -317,7 +324,7 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(ConductorAgentPath)]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     public void ConductorSurfacesScopeSixFieldRejectionToMigratedSpecialistsDuringPhasedRollout(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -480,7 +487,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
@@ -513,7 +520,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesNeverDispatchAFullRun(string relativePath)
     {
@@ -601,7 +608,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     [InlineData(ArchitectureDocPath)]
     [InlineData(CSharpDevAgentPath)]
