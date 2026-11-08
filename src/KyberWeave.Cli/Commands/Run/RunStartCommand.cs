@@ -205,15 +205,23 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         string? completedWarning = null;
         if (resumeRef.Length > 0)
         {
-            GitOutcome log = runner.CommitMessages(startRef, resumeRef);
-            if (log.Succeeded)
+            try
             {
-                completed = RunStartResumeReader.Read(log.StandardOutput);
+                GitOutcome log = runner.CommitMessages(startRef, resumeRef);
+                if (log.Succeeded)
+                {
+                    completed = RunStartResumeReader.Read(log.StandardOutput);
+                }
+                else
+                {
+                    completedWarning =
+                        $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
+                }
             }
-            else
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 completedWarning =
-                    $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
+                    $"git log could not read the commits on '{resumeRef}': {ex.Message}";
             }
         }
 

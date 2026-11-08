@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -157,5 +158,28 @@ public sealed class RunStartResumeTests : IDisposable
         Assert.False(
             _probe.BranchExists("412"),
             "a refused resume target must create no branch.");
+    }
+
+    /// <summary>
+    /// A continuation line with no preceding trailer line is invalid and must not produce a task.
+    /// </summary>
+    [Fact]
+    public void ContinuationWithoutPrecedingTrailerYieldsNoTask()
+    {
+        string log = "hash123\nfeat: some subject\n\n  continuation without trailer\nTask: T1\n\0";
+        IReadOnlyList<RunStartCompletedTask> completed = RunStartResumeReader.Read(log);
+        Assert.Empty(completed);
+    }
+
+    /// <summary>
+    /// A commit message with no blank line between subject and Task: is a single prose paragraph
+    /// and must not be accepted as a trailer block.
+    /// </summary>
+    [Fact]
+    public void CommitWithNoBlankLineBetweenSubjectAndTaskYieldsNoTask()
+    {
+        string log = "hash123\nfeat: some subject\nTask: T1\n\0";
+        IReadOnlyList<RunStartCompletedTask> completed = RunStartResumeReader.Read(log);
+        Assert.Empty(completed);
     }
 }

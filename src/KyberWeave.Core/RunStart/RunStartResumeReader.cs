@@ -71,28 +71,30 @@ public static partial class RunStartResumeReader
         if (lines.Length < 2)
             return null;
 
-        List<string> body = [];
-        for (int index = 2; index < lines.Length; index++)
-            body.Add(lines[index].TrimEnd('\r'));
+        List<string> message = [];
+        for (int index = 1; index < lines.Length; index++)
+            message.Add(lines[index].TrimEnd('\r'));
 
-        int end = body.Count;
-        while (end > 0 && body[end - 1].Trim().Length == 0)
+        int end = message.Count;
+        while (end > 0 && message[end - 1].Trim().Length == 0)
             end--;
 
         int start = end;
-        while (start > 0 && body[start - 1].Trim().Length != 0)
+        while (start > 0 && message[start - 1].Trim().Length != 0)
             start--;
 
-        if (start >= end)
+        // The trailer block must be separated from the subject by an empty line: a paragraph
+        // reaching line 0 is the subject paragraph, which cannot be a trailer block in git.
+        if (start == 0 || start >= end)
             return null;
 
-        string? id = TaskIdIn(body, start, end);
+        string? id = TaskIdIn(message, start, end);
         if (id is null)
             return null;
 
         List<string> report = [];
-        for (int index = 0; index < start; index++)
-            report.Add(body[index]);
+        for (int index = 1; index < start; index++)
+            report.Add(message[index]);
 
         return new RunStartCompletedTask(id, string.Join(LineSeparator, report).Trim());
     }
@@ -103,15 +105,21 @@ public static partial class RunStartResumeReader
     private static string? TaskIdIn(List<string> body, int start, int end)
     {
         string? id = null;
+        bool seenTrailer = false;
         for (int index = start; index < end; index++)
         {
             string line = body[index];
             if (IsContinuation(line))
+            {
+                if (!seenTrailer)
+                    return null;
                 continue;
+            }
 
             if (!TrailerLine().IsMatch(line))
                 return null;
 
+            seenTrailer = true;
             Match task = TaskTrailer().Match(line);
             if (task.Success)
                 id = task.Groups["id"].Value;
