@@ -88,7 +88,10 @@ task-gates:
   # of them gets the gate.
   - id: suppressions
     role: lint
-    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, sql-database-architect, test-dev]
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, test-dev]
+    # `sql-database-architect` also adds suppressions, but the catalogue's developer-slug
+    # vocabulary does not list it, so naming it here fails the render. Recorded as a todo
+    # rather than worked around by widening the vocabulary.
     include: ["**/*.cs", "**/*.csproj"]
     # No {changed}: the command reads the change against its base itself, so naming the
     # changed files would scan them twice and, worse, scan nothing when a suppression
@@ -103,5 +106,5 @@ sources:
   test: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest
   workflow-lint: https://github.com/rhysd/actionlint#download
   shellcheck: https://github.com/koalaman/shellcheck#installing
-  suppressions: https://github.com/dpalfery/kyber-weave#readme
+  suppressions: https://github.com/dpalfery/kyber-weave/blob/main/docs/code-review/architecture.md#the-suppression-gate
   review-config: https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh

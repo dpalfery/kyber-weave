@@ -367,18 +367,23 @@ review:
         include: *net-paths
         run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
+    # Every .NET authoring role carries the suppression gate, not only csharp-dev: a `#pragma`
+    # or a SuppressMessage is the same defect wherever it is written.
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
     maui-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
     pulumi-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
     # The three file kinds no language gate selects. A task that edits only a workflow, a shell
     # script, or this file used to select zero gates and report NONE_APPLICABLE — a valid result
     # that is no evidence anything ran. `include` alone decides selection, so these are defined
@@ -407,6 +412,7 @@ review:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
       # The migration and schema edits this role makes are frequently the ones a `dotnet build`
       # never touches: a `.sql` file that is not a compiled resource still reaches production.
       - &sql-format

@@ -2,13 +2,25 @@
 id: todo/review-suppressions-gate-not-selected
 title: No task gate runs review suppressions
 doc-type: todo
-status: draft
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 last-reviewed: 2026-11-08
 ---
 
 # No task gate runs review suppressions
+
+**Status: Archived — closed 2026-11-08.** Both halves landed. `.kyber-weave/kyber-weave.yml` declares a
+`suppressions` task gate under `csharp-dev` and aliases it into `test-dev`; the catalogue family file
+`products/kyber-squad/standards/csharp/gates.yml` carries the same gate so an installing repository
+receives it from `docs init`, and its golden fixture was regenerated through the real code path — the
+diff is the five gate entries and nothing else. Verified by running the gate for real: it passes on a
+clean change and fails with one error on an added warning-disable pragma that states no reason.
+
+One residual, recorded rather than worked around: `sql-database-architect` also adds suppressions, but
+`GateCatalogue`'s developer-slug vocabulary does not list that agent, so naming it in the catalogue
+fails the render. It is tracked in
+[sql-database-architect is not a catalogue developer slug](sql-database-architect-is-not-a-catalogue-developer-slug.md).
 
 `kyber-weave review suppressions [path]` exists and works: it scans the added lines of a change for a
 `#pragma warning disable`, a `SuppressMessage` attribute or a `NoWarn` element and fails one that states
