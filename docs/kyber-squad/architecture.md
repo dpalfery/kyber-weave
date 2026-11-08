@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 status: current
 decided-by:
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
@@ -103,7 +103,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
         Agents["agents/*.md (24 Agents)"]
-        Skills["skills/*/SKILL.md (28 Skills)"]
+        Skills["skills/*/SKILL.md (29 Skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
     end
@@ -193,16 +193,16 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 29 top-level `SKILL.md`
   identities under `products/kyber-squad/skills/`. The canonical tree separately retains 88
-  supplemental files, giving 116 recursive skill-tree files; `SquadPacker` carries that complete
+  supplemental files, giving 117 recursive skill-tree files; `SquadPacker` carries that complete
   recursive tree into both package formats.
 - **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
   in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
-  skills, 91 supplemental resources, and 125 skill-tree files. `SquadCompanionSkills` is the one type
+  skills, 91 supplemental resources, and 126 skill-tree files. `SquadCompanionSkills` is the one type
   both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
   `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
-  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
+  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 29
   Squad skills.
 - **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
   `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
@@ -1203,8 +1203,8 @@ and validates.
   five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 88 skill resources (116 files under
-  `products/kyber-squad/skills/`, 28 of them `SKILL.md`) and resolve the retained references. The
+  recursive package formats retain all 88 skill resources (117 files under
+  `products/kyber-squad/skills/`, 29 of them `SKILL.md`) and resolve the retained references. The
   `response-format` skill is retired (see [response preferences](#response-preferences-injected-at-deploy)). Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -1461,7 +1461,7 @@ The contract itself lives in one place, the `delivery-execution` skill: the read
 session continuity, test-first and standard mode, the developer exit gate, the breaker, the
 findings drain and the final council. Both entry points load it — `conductor` for plan- and
 spec-backed work, and the `bug-crusher` workflow for a single escalated defect — and neither
-restates it, so a harness that can reach a canonical skill cannot run an ungoverned dispatch.
+restates it, so a harness that can reach a canonical skill runs only the governed dispatch — while a half-updated deployment can still silently lose the link, as the live-verification todo records.
 It is a skill rather than a conductor reference because a canonical skill is emitted for every
 target where a conductor-only reference is not, and a portable file may not link out of its own
 directory ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The
