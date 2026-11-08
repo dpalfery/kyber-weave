@@ -81,6 +81,31 @@ public sealed class ConfigRegConfig
     public const string AutonomousAutonomy = "autonomous";
 
     /// <summary>
+    /// Registry property carrying this repository's answer to the onboarding question. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from the top-level
+    /// <c>onboarding:</c> setting and reserved: a host may not declare it under
+    /// <c>config-reg:</c>.
+    /// </summary>
+    public const string OnboardingProperty = "onboarding";
+
+    /// <summary>
+    /// The value <see cref="OnboardingProperty"/> carries when the repository has answered and
+    /// accepted the onboarding step. Absence of the property is the unanswered state, so there
+    /// is no word for it.
+    /// </summary>
+    public const string OnboardingDone = "done";
+
+    /// <summary>
+    /// The value <see cref="OnboardingProperty"/> carries when the repository was offered the
+    /// onboarding step and chose not to take it. It behaves as <see cref="OnboardingDone"/>
+    /// does for every reader: the question has been asked and answered, so it is never repeated.
+    /// </summary>
+    public const string OnboardingDeclined = "declined";
+
+    /// <summary>Every value <c>onboarding:</c> accepts, in the order a refusal names them.</summary>
+    public static IReadOnlyList<string> OnboardingAnswers { get; } = [OnboardingDone, OnboardingDeclined];
+
+    /// <summary>
     /// Registry property reporting whether this repository opted in to the intake assessment.
     /// A <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>ontology.intake:</c>
     /// and reserved: a host may not declare it under <c>config-reg:</c>.
@@ -153,6 +178,19 @@ public sealed class ConfigRegConfig
     /// resolved as a path.
     /// </summary>
     public string? Autonomy { get; init; }
+
+    /// <summary>
+    /// The top-level <c>onboarding:</c> setting — <see cref="OnboardingDone"/> or
+    /// <see cref="OnboardingDeclined"/> — or null when the repository never answered, which
+    /// <c>run start</c> reads as "stop and offer the onboarding skill". Rendered into the
+    /// Config Reg block only when set, and never resolved as a path.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than a default word, because the three states are not two: unanswered is
+    /// what makes a run stop, and a default would erase the difference between a repository
+    /// that declined and one nobody ever asked.
+    /// </remarks>
+    public string? Onboarding { get; init; }
 
     /// <summary>
     /// The top-level <c>stop-on-tool-failure:</c> setting as the operator wrote it, or null when
@@ -269,6 +307,17 @@ public sealed class ConfigRegConfig
             entries.Add(new ConfigRegEntry(
                 RunHarnessNamesProperty,
                 ModeWord(RunHarnessNames.Value),
+                ConfigRegEntryKind.Mode));
+        }
+
+        // The onboarding answer is published for the same reason autonomy is: a run-start
+        // check a worker cannot read from its instructions is one it cannot honour. An
+        // unanswered repository publishes nothing, so no reader mistakes silence for 'done'.
+        if (!string.IsNullOrWhiteSpace(Onboarding))
+        {
+            entries.Add(new ConfigRegEntry(
+                OnboardingProperty,
+                Onboarding,
                 ConfigRegEntryKind.Mode));
         }
 

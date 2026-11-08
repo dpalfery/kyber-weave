@@ -367,7 +367,7 @@ public sealed class RunStartPlannerTests : IDisposable
     [Fact]
     public void ContinuesPastAFetchFailureWhenStopOnToolFailureIsFalse()
     {
-        _probe.WriteHostConfig("stop-on-tool-failure: false\n");
+        _probe.WriteHostConfig("stop-on-tool-failure: false\nonboarding: done\n");
         _probe.BreakOrigin();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
@@ -389,7 +389,7 @@ public sealed class RunStartPlannerTests : IDisposable
     public void BranchesFromTheConfiguredBaseBranchRatherThanAssumingMain()
     {
         const string Branch = "claude/fix/tighten-the-gate";
-        _probe.WriteHostConfig("run:\n  base-branch: develop\n");
+        _probe.WriteHostConfig("run:\n  base-branch: develop\nonboarding: done\n");
         string developTip = _probe.GitOutput("rev-parse", "origin/develop").Trim();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");

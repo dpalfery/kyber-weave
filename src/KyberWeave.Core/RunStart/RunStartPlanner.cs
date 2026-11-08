@@ -47,6 +47,12 @@ public static partial class RunStartPlanner
     public const string RemoteHead = Remote + "/HEAD";
 
     /// <summary>
+    ///     The skill that answers the onboarding question: it walks the repository's technologies and their
+    ///     default gates and standards, so a run never plans against checks nobody chose.
+    /// </summary>
+    public const string OnboardingSkill = "kyber-docs-onboarding-and-assessment";
+
+    /// <summary>
     ///     The conventional-commit types a branch may name, in the order the naming check lists them.
     /// </summary>
     public static IReadOnlyList<string> ConventionalTypes { get; } =
@@ -225,6 +231,42 @@ public static partial class RunStartPlanner
         return resolved.StartsWith(Remote + "/", StringComparison.Ordinal)
             ? resolved[(Remote.Length + 1)..]
             : resolved;
+    }
+
+    /// <summary>
+    ///     Whether a run must stop before any other check because the onboarding question is unanswered.
+    /// </summary>
+    /// <param name="config">The configuration the run loaded for the repository.</param>
+    /// <param name="repositoryIsConfigured">
+    ///     Whether the repository has a host configuration file at all, which is what makes the question
+    ///     meaningful: an operator who never ran <c>docs init</c> has not been offered it.
+    /// </param>
+    /// <remarks>
+    ///     <para>
+    ///         An unresolved setting stops the run rather than warning, because the gates and standards the
+    ///         run will be held to are exactly what onboarding chooses: proceeding would run work against
+    ///         defaults nobody reviewed, and the report of that would arrive at the end of the run instead of
+    ///         before it.
+    ///     </para>
+    ///     <para>
+    ///         Absence is the only state that stops. Both recorded answers — <c>done</c> and <c>declined</c> —
+    ///         end the question, so a run in a repository that answered never sees this twice.
+    ///     </para>
+    ///     <para>
+    ///         Autonomous mode changes nothing here. The run stops, asks nothing, and leaves the setting as it
+    ///         found it: writing an answer on the user's behalf would record a decision nobody made.
+    ///     </para>
+    ///     <para>
+    ///         A repository with no host configuration is not stopped: nobody there has opted into configuring
+    ///         this repository, so there is no gates-and-standards choice for onboarding to record yet. That is
+    ///         the shape the conductor uses when it checks the project's tooling only where the repository has
+    ///         opted in — the check speaks where the repository has, and stays quiet where it has not.
+    ///     </para>
+    /// </remarks>
+    public static bool NeedsOnboarding(KyberWeaveConfig config, bool repositoryIsConfigured)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return repositoryIsConfigured && string.IsNullOrWhiteSpace(config.ConfigReg.Onboarding);
     }
 
     [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
