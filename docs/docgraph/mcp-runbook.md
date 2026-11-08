@@ -1252,8 +1252,9 @@ fused compound per adjacent pair — `error handling` becomes `error`, `handling
 `errorhandling` — and rarity weighting then multiplies each term by its inverse document
 frequency, so the fused pair, which almost no document states, dominates the query. A
 synthesised compound that no candidate section states is therefore dropped from the topic
-vector before scoring: a bridge to a compound nobody writes bridges to nothing, and the
-caller's own words always stay in the query whether or not a section states them.
+vector before scoring: a bridge to a compound nobody writes bridges to nothing, while
+question scaffolding and corpus-ubiquitous terms are already removed by rarity weighting;
+informative words the caller wrote stay in the query whether or not a section states them.
 
 Measured on this corpus against the 0.02 section floor the ranking uses, the fused pair was
 what held the tool's own documented example one ten-thousandth below the floor:
@@ -1270,7 +1271,7 @@ Dropping **every** term no section states was measured and rejected. Removing th
 rescales the scores that remain, and it turned `csharp` with `mocking time` — a topic nothing
 in the standard answers — from a correct miss into a confident wrong answer. The rule is
 therefore narrower than "keep only stated terms": a compound the vectorizer synthesised goes,
-a word the caller wrote stays.
+an informative word the caller wrote stays.
 
 **A topic that no section clears still returns the standard.** The reply states the topic in
 one line — `no section matches the topic '<topic>', so the standard follows without it.` — and

@@ -109,8 +109,11 @@ last-reviewed: YYYY-MM-DD
 | [pi-grants-no-code-graph.md](pi-grants-no-code-graph.md) | KyberSquad | draft | The code graph is granted on Command Code, OpenCode, Kilo, Claude, ZCode and Devin but not on Pi, whose grant vehicle is a per-server adapter overlay whose second-server namespace mapping is identity by inference rather than by probe. |
 | [repo-provenance-second-worktree-unpinned.md](repo-provenance-second-worktree-unpinned.md) | DocGraph | draft | `repo=` exists to tell a second worktree of this repository apart from a foreign one, and no test creates a linked worktree to prove the different-`root=`/same-`repo=` pair. |
 | [run-start-command-undocumented.md](run-start-command-undocumented.md) | KyberSquad | draft | `kyber-weave run start` is described by two conductor run-speed decisions and appears in no canonical page, because the surface lands with a pull request that is still open. |
+<<<<<<< HEAD
 | [mcp-docs-gate-unpinned-for-task-files.md](mcp-docs-gate-unpinned-for-task-files.md) | DocGraph | draft | The six `KW-DOC-TASKS-*` rules are pinned only at the validator; no test drives the docs MCP validate tool over a Ready plan with no task file, so the route the shell-less conductor actually uses rests on the shared call chain rather than on a run. |
 | [arbiter-gate-select-empty-changed-set.md](arbiter-gate-select-empty-changed-set.md) | KyberArbiter | draft | `KW-ARB-GATE-001` answers `not-applicable` whenever `review.changed-paths` exists, so an empty changed set marks every path-scoped gate not applicable — the vacuous shape slice 5 repaired for the two lenses but left in gate selection. |
+=======
+>>>>>>> origin/main
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.
