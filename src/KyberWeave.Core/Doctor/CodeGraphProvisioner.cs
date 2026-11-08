@@ -499,6 +499,25 @@ public static class CodeGraphProvisioner
         return Math.Min(seconds * 2L, int.MaxValue);
     }
 
+    /// <summary>Whether a doctor check reports that the CodeGraph index was busy provisioning.</summary>
+    public static bool IsBusy(DoctorCheck check) =>
+        check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
+
+    /// <summary>
+    ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
+    /// </summary>
+    public static bool IsSharingViolation(IOException ex)
+    {
+        int hr = ex.HResult;
+        if (hr is unchecked((int)0x80070020) or unchecked((int)0x80070021) || (hr & 0xFFFF) is 32 or 33)
+            return true;
+
+        string msg = ex.Message;
+        return msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("sharing violation", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("locked", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>The check a run reports when another doctor holds the lock, or when the lock path is unusable.</summary>
     private static DoctorCheck LockRefused(string? failure, string flag) =>
         failure is { } reason
@@ -540,12 +559,22 @@ public static class CodeGraphProvisioner
                 failure = $"the index lock directory for '{path}' does not exist";
                 return null;
             }
-            catch (IOException) when (DateTime.UtcNow < deadline)
+            catch (PathTooLongException)
+            {
+                failure = $"the index lock path '{path}' is too long";
+                return null;
+            }
+            catch (IOException ex) when (IsSharingViolation(ex) && DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(LockPollInterval);
             }
-            catch (IOException)
+            catch (IOException ex) when (IsSharingViolation(ex))
             {
+                return null;
+            }
+            catch (IOException ex)
+            {
+                failure = $"the index lock '{path}' could not be opened: {ex.Message}";
                 return null;
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException or ArgumentException)

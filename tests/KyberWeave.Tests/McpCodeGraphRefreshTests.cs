@@ -110,6 +110,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         string response = tools.Explore("anything");
         elapsed.Stop();
 
+        TimeSpan waitBudget = TimeSpan.FromSeconds(2);
+        Assert.True(
+            elapsed.Elapsed < waitBudget,
+            $"The tool call spent {elapsed.Elapsed.TotalSeconds:0.0}s with the refresh lock held by another "
+            + $"process; a busy lock must not wait (tight budget {waitBudget.TotalSeconds:0}s).");
         Assert.True(
             elapsed.Elapsed < RefreshBound,
             $"The tool call spent {elapsed.Elapsed.TotalSeconds:0.0}s with the refresh lock held by another "
@@ -119,6 +124,49 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             BusyNote.IsMatch(response),
             $"With another process holding the refresh lock the response carries no note naming the index "
             + $"work already under way. It was:{Environment.NewLine}{response}");
+    }
+
+    /// <summary>
+    /// When the refresh throws an exception (e.g. resolver construction failure), the failure is
+    /// converted to STATUS: TOOL_FAILURE rather than escaping, and the throttle does not bypass the gate.
+    /// </summary>
+    [Fact]
+    public void WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
+    {
+        DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
+
+        int resolverCalls = 0;
+        DocsTools tools = ScaffoldedTools(
+            Root,
+            () =>
+            {
+                resolverCalls++;
+                throw new InvalidOperationException("boom resolver failed");
+            });
+
+        string first = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", first, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", first, StringComparison.Ordinal);
+
+        // Subsequent call must not answer Clear as if healthy
+        string second = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", second, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", second, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only genuine sharing violations are classified as contention; non-lock IO exceptions
+    /// (such as PathTooLongException or disk errors) are not treated as busy contention.
+    /// </summary>
+    [Fact]
+    public void NonSharingViolationIOException_IsNotTreatedAsBusyLock()
+    {
+        Assert.False(CodeGraphProvisioner.IsSharingViolation(new PathTooLongException("path too long")));
+        Assert.False(CodeGraphProvisioner.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
+
+        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
+        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
     }
 
     /// <summary>

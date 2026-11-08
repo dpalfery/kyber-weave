@@ -106,8 +106,19 @@ public sealed class CodeGraphFreshness
             if (_lastAttemptUtc != DateTime.MinValue && now - _lastAttemptUtc < RefreshInterval)
                 return _last;
 
-            _lastAttemptUtc = now;
-            _last = Refresh(resolverFactory);
+            try
+            {
+                _last = Refresh(resolverFactory);
+                _lastAttemptUtc = now;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
+                bool stops = loaded is { Success: true, Config: not null } && loaded.Config.StopsOnToolFailure;
+                _last = Failure(stops, exception.Message, null);
+                _lastAttemptUtc = now;
+            }
+
             return _last;
         }
         finally
@@ -132,9 +143,6 @@ public sealed class CodeGraphFreshness
 
         bool stops = loaded.Config.StopsOnToolFailure;
         string lockDirectory = Path.GetTempPath();
-        string lockPath = CodeGraphProvisioner.LockPathFor(_repositoryRoot, lockDirectory);
-
-        if (IsLocked(lockPath)) return CodeGraphGate.Advisory(BusyNote);
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
         DoctorCheck provisioned = CodeGraphProvisioner.Provision(
@@ -146,9 +154,7 @@ public sealed class CodeGraphFreshness
 
         if (!provisioned.Passed)
         {
-            // A refresh that failed while another process holds the lock is still contention
-            // rather than a broken index; the lock is the one honest witness of that.
-            return IsLocked(lockPath)
+            return CodeGraphProvisioner.IsBusy(provisioned)
                 ? CodeGraphGate.Advisory(BusyNote)
                 : Failure(stops, provisioned.Reason, provisioned.Fix);
         }
@@ -164,10 +170,8 @@ public sealed class CodeGraphFreshness
     /// opening the file with no sharing. A lock file nothing holds is opened and released here.
     /// </summary>
     /// <remarks>
-    /// A lock that cannot be opened for any other reason — a missing lock directory, a permission
-    /// — is not contention, and is left for <see cref="CodeGraphProvisioner.Provision"/> to
-    /// report with the reason it has. The directory case is caught first because .NET derives
-    /// <see cref="DirectoryNotFoundException"/> from <see cref="IOException"/>.
+    /// A lock that cannot be opened for any other reason — a missing lock directory, a permission,
+    /// a path error — is not contention, and only sharing violations report as busy.
     /// </remarks>
     private static bool IsLocked(string lockPath)
     {
@@ -180,13 +184,15 @@ public sealed class CodeGraphFreshness
         {
             return false;
         }
-        catch (IOException)
+        catch (PathTooLongException)
+        {
+            return false;
+        }
+        catch (IOException ex) when (CodeGraphProvisioner.IsSharingViolation(ex))
         {
             return true;
         }
-        catch (Exception exception) when (exception is UnauthorizedAccessException
-            or NotSupportedException
-            or ArgumentException)
+        catch (Exception)
         {
             return false;
         }
