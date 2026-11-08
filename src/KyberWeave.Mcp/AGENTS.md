@@ -101,10 +101,14 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
   lock and reports nothing. Settings are read at each refresh, so an edit needs no restart.
 - **`--no-codegraph-refresh` disables it.** `doctor --check` starts the server with that flag,
   because `--check` promises it never runs `init` or `index` and its probe makes a real docs call.
+- **The schedule is opt-in at the tools level.** A `DocsTools` constructed without one answers
+  from the documents on disk and consults no CodeGraph. The schedule is a gate as much as a
+  refresh, and a CI runner has no index to satisfy one, so a test that builds the tools directly
+  must not inherit it. The composition roots pass it explicitly.
 - **Nothing reaches stdout.** The refresh runs through `ProcessRunner`, which captures both
   streams. A log or a child's output on stdout corrupts the transport.
 
-The rule and its alternatives are [ADR 0061](../../docs/adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md).
+The rule and its alternatives are [ADR 0062](../../docs/adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md).
 
 ## Documented behaviour
 

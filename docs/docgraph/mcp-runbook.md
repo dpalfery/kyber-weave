@@ -1474,6 +1474,13 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
   wants nothing to do with CodeGraph working.
 - **Settings are read at each refresh**, so a change to `stop-on-tool-failure` or to the
   declaration takes effect without restarting the server.
+- **The schedule is opt-in at the tools level too.** A `DocsTools` built without an explicit
+  refresh schedule answers from the documents on disk and consults no CodeGraph at all: the
+  schedule is a gate as much as a refresh, and a caller that passes nothing is asking a
+  document question rather than asking to be told the index is unusable. A CI runner has no
+  index to satisfy such a gate, so a test that builds the tools directly would otherwise lose
+  every answer. Keeping an index fresh is a decision the process makes once, at the
+  composition roots, which pass the schedule explicitly.
 - **`--no-codegraph-refresh` turns it off.** `kyber-weave doctor --check` starts the server with
   that flag, because `--check` promises it never runs `init`, `sync` or `index`, and its live
   probe makes a real docs call.

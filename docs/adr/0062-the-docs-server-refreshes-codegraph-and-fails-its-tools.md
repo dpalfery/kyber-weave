@@ -83,6 +83,13 @@ whatever the server does has to remain honest about both.
 10. **`--no-codegraph-refresh` disables it.** `kyber-weave doctor --check` starts the server with
     that flag, which is how its promise that it never runs `init` or `index` keeps holding through a
     probe that makes a real docs call.
+10a. **At the tools level the schedule is opt-in.** A `DocsTools` built without an explicit
+    refresh schedule answers from the documents on disk and consults no CodeGraph at all. The
+    schedule is a gate as much as a refresh, so a caller that passes nothing is asking a document
+    question rather than asking to be told the index is unusable — and a CI runner, which has no
+    index to satisfy such a gate, would otherwise lose every answer. Keeping an index fresh is a
+    decision the process makes once, at the composition roots, which pass the schedule
+    explicitly.
 11. **Every response's provenance names the branch and the repository.** The header is
     `provenance: root=… branch=… repo=… rev=… dirty=… documents=N`, where `repo=` is the git
     directory every worktree of the repository shares. The pair exists for one distinction

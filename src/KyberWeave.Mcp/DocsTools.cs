@@ -85,18 +85,27 @@ public sealed partial class DocsTools
     {
     }
 
-    /// <summary>Tools over <paramref name="host"/>, with the given CodeGraph refresh schedule.</summary>
+    /// <summary>Tools over <paramref name="host"/>, with the given CodeGraph refresh schedule, if any.</summary>
     /// <param name="host">The corpus this server answers from.</param>
     /// <param name="analysisReader">The analysis port, or null when this host has no analysis surface.</param>
     /// <param name="freshness">
-    /// The process's refresh schedule, from the composition root. Null refreshes on the server's
-    /// own default cadence, which is what a test that asks the tools directly gets.
+    /// The refresh schedule the composition root built, or null to answer from the documents on disk
+    /// with no CodeGraph check at all.
     /// </param>
+    /// <remarks>
+    /// The schedule is opt-in, and null means no schedule, because it is a gate as much as a refresh:
+    /// where the repository declares CodeGraph and the index is unreadable, a scheduled tool returns
+    /// <c>STATUS: TOOL_FAILURE</c> in place of its answer. A caller that passes nothing is asking a
+    /// document question and has not asked for a tool-availability gate — a CI runner has no index to
+    /// satisfy one — so a default schedule would withhold answers those callers can have. Keeping an
+    /// index fresh is a decision for the process, made once at the composition root, which passes the
+    /// schedule explicitly.
+    /// </remarks>
     public DocsTools(DocumentIndexHost host, IDocsAnalysisReader? analysisReader, CodeGraphFreshness? freshness)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _analysisReader = analysisReader;
-        _freshness = freshness ?? new CodeGraphFreshness(_host.RepositoryRoot, refreshEnabled: true);
+        _freshness = freshness ?? new CodeGraphFreshness(_host.RepositoryRoot, refreshEnabled: false);
     }
 
     [McpServerTool(Name = "docs_answer_question_from_repo_documentation", ReadOnly = true, OpenWorld = false)]

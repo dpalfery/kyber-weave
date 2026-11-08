@@ -234,6 +234,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     }
 
     /// <summary>Tools over the corpus already scaffolded at <paramref name="root"/>.</summary>
+    /// <remarks>
+    /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
+    /// from the documents on disk, so a test that observes the refresh has to be the caller that
+    /// requests it.
+    /// </remarks>
     private static DocsTools ScaffoldedTools(string root, Func<ICodeGraphResolver> resolverFactory)
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
@@ -244,6 +249,6 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host);
+        return new DocsTools(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
     }
 }

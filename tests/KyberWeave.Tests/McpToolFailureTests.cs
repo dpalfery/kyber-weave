@@ -121,6 +121,10 @@ public sealed class McpToolFailureTests : IDisposable
     /// A tools instance over the scaffolded corpus whose CodeGraph resolver reports the index as
     /// unreadable, which is the failure the run used to continue past.
     /// </summary>
+    /// <remarks>
+    /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
+    /// from the documents on disk, so a test that pins the gate has to be the caller that requests it.
+    /// </remarks>
     private static DocsTools Tools(string root)
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
@@ -131,7 +135,7 @@ public sealed class McpToolFailureTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host);
+        return new DocsTools(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
     }
 
     /// <summary>A CodeGraph port that reports no readable index, as a missing or unreadable database does.</summary>
