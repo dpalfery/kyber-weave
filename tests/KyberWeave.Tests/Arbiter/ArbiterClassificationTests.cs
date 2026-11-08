@@ -441,4 +441,31 @@ public sealed class ArbiterClassificationTests
         Assert.Null(plan.Caller);
         Assert.DoesNotContain("PLAN_FILE", plan.Headers.Keys);
     }
+
+    /// <summary>
+    /// A <c>RUN-START: true</c> dispatch is an investigate, never a delegate.
+    /// </summary>
+    /// <remarks>
+    /// The marker exists because the conductor may have no shell: it hands the run-start step to a
+    /// worker instead of running the tool itself. That worker gets no <c>PLAN_FILE</c>, and
+    /// <c>KW-ARB-PLAN-001</c> escalates a <c>delegate</c> carrying no plan, so classifying this
+    /// dispatch as <c>delegate</c> would refuse the very route the marker was created for. Classifying
+    /// it as <c>investigate</c> keeps the roster check and <c>KW-ARB-READONLY-001</c> doing their work
+    /// over it.
+    /// </remarks>
+    [Fact]
+    public void Classification_RunStartMarkerIsInvestigateNotDelegate()
+    {
+        // csharp-dev is an implementation-class target, so conductor-to-implementation is otherwise
+        // the textbook delegate row. Only the marker separates the two.
+        string prompt = Marked("RUN-START: true\n\nRun the run-start step and report the facts.");
+
+        TriggerClassification runStart = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: "csharp-dev", harness: "antigravity", harnessCaller: "conductor"),
+            "csharp-dev",
+            prompt);
+
+        Assert.NotEqual("delegate", runStart.Trigger);
+        Assert.Equal("investigate", runStart.Trigger);
+    }
 }

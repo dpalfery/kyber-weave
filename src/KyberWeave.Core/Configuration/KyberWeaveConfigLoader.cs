@@ -24,7 +24,7 @@ public static class KyberWeaveConfigLoader
     {
         ArgumentNullException.ThrowIfNull(yaml);
         KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
-        return FromDocument(document, yaml, repositoryRoot: null);
+        return FromDocument(document, yaml, null);
     }
 
     /// <summary>
@@ -192,14 +192,19 @@ public static class KyberWeaveConfigLoader
                 document.DocsAnalysis,
                 ontology),
             Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
-            ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg, document.Autonomy),
+            ConfigReg = ConfigRegConfigLoader.Merge(
+                ConfigRegConfig.ProductDefaults,
+                document.ConfigReg,
+                document.Autonomy,
+                document.Run,
+                document.StopOnToolFailure),
             Review = ReviewConfigLoader.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
                 null,
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
-            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp)
         };
     }
 
@@ -230,7 +235,12 @@ public static class KyberWeaveConfigLoader
                 document.DocsAnalysis,
                 ontology),
             Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
-            ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg, document.Autonomy),
+            ConfigReg = ConfigRegConfigLoader.Merge(
+                ConfigRegConfig.ProductDefaults,
+                document.ConfigReg,
+                document.Autonomy,
+                document.Run,
+                document.StopOnToolFailure),
             Review = ReviewConfigLoader.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,

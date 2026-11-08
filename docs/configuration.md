@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -250,12 +250,57 @@ It is a value, not a path, so `docs validate` never resolves it as one
 (`KW-CONFIG-REG-002`). The name is reserved: declaring `intake-assessment` under `config-reg:`
 is rejected.
 
-The rule both mode properties rest on — why a registry entry carries a kind, and why a mode
+The rule the mode properties rest on — why a registry entry carries a kind, and why a mode
 word is exempt from the path check without any other check being relaxed — is documented in
 [mode properties](docgraph/architecture.md#mode-properties-are-not-paths). What the assessment
 asks, and what the conductor does with the property it resolves, is documented in the
 [requirements](kyber-squad/requirements.md#intake-assessment) and the
 [adoption guide](kyber-squad/onboarding.md#intake-assessment-opt-in-per-repository).
+
+### Run controls
+
+Three settings govern how a run starts. `stop-on-tool-failure` sits at the top level, beside
+`autonomy`; the other two sit under a `run:` key:
+
+```yaml
+stop-on-tool-failure: false
+run:
+  base-branch: develop
+  harness-names: true
+```
+
+| Setting | Default | Effect |
+|---|---|---|
+| `stop-on-tool-failure` | `true` | Whether a tool that fails during the run stops it. An absent key means **stop**. |
+| `run.base-branch` | `origin/HEAD` | The branch a run branches from and is compared against. `main` is never assumed: a repository whose default branch is `develop`, or whose operator named a release branch, is compared against the branch that was actually named. A value already carrying the `origin/` prefix is used as written. |
+| `run.harness-names` | `true` | Whether a rendered artifact publishes the harness name. An absent key publishes it. |
+
+`stop-on-tool-failure` and `run.harness-names` take `true` or `false`; any other value is a
+configuration error, because a free-form read would let `sometimes` arrive as a later `false`.
+`run.base-branch` is a branch name, and a blank value is treated as absent so that a property
+publishing an empty branch cannot look configured while resolving to nothing a run can compare
+against.
+
+**A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
+renders `<stop-on-tool-failure>`, `<run-base-branch>` and `<run-harness-names>` into the
+generated block of the repository root `AGENTS.md` only when the key was actually written:
+
+```markdown
+- **<stop-on-tool-failure>**: `false`
+- **<run-base-branch>**: `develop`
+- **<run-harness-names>**: `true`
+```
+
+An absent key publishes no line, because an agent already applies the documented default and
+only a value somebody chose can differ from it. The three names are reserved: declaring any of
+them under `config-reg:` is rejected with the setting that owns it named in the refusal. They
+are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
+but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`).
+
+The run that reads them is [`run start`](cli-command-surface.md#run--run-start), which exits `1`
+on a tool failure while `stop-on-tool-failure` is on — and warns instead of stopping when it is
+off. An absent setting stops, and that default is applied in code rather than in instruction
+text, because absence is the common case and a run cannot rely on an agent having read a rule.
 
 ### Several documentation roots
 

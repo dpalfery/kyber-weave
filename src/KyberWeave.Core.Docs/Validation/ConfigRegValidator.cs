@@ -51,12 +51,15 @@ public sealed class ConfigRegValidator
     /// </remarks>
     public DiagnosticReport Validate()
     {
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
         string agentsFile = Path.Combine(_repoRoot, AgentsFilePath);
         bool adopted = _config.ConfigReg.Additions.Count > 0
-            || _config.ConfigReg.Autonomy is not null
-            || _config.Ontology.Intake
-            || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
+                       || _config.ConfigReg.Autonomy is not null
+                       || _config.ConfigReg.StopOnToolFailure is not null
+                       || _config.ConfigReg.RunBaseBranch is not null
+                       || _config.ConfigReg.RunHarnessNames is not null
+                       || _config.Ontology.Intake
+                       || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
 
         if (!adopted)
             return report;
@@ -110,7 +113,8 @@ public sealed class ConfigRegValidator
         string expected;
         try
         {
-            expected = ConfigRegMarkdown.Splice(existing, ConfigRegMarkdown.Render(entries, _config.ConfigReg.Autonomy));
+            expected = ConfigRegMarkdown.Splice(existing,
+                ConfigRegMarkdown.Render(entries, _config.ConfigReg.Autonomy));
         }
         catch (InvalidDataException ex)
         {

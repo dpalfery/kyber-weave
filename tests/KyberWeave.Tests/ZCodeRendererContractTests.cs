@@ -634,7 +634,9 @@ public sealed class ZCodeRendererContractTests : IDisposable
             {
                 SquadDeploymentFile projected = Assert.Single(
                     result.Files, f => f.RelativePath == $".zcode/skills/{resource.RelativePath}");
-                Assert.Equal(resource.Content, Encoding.UTF8.GetString(projected.Content.Span));
+                Assert.Equal(
+                    TestSquadCorpus.ExpectedRenderText(SquadTarget.ZCode, resource.Content),
+                    Encoding.UTF8.GetString(projected.Content.Span));
 
                 // The authored link is relative to the owner's own directory; after the move it
                 // has to climb out of agents/ or commands/ and into skills/.

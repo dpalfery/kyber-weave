@@ -68,7 +68,9 @@ public sealed class SquadRenderingContractTests
 
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(agent.Description, RequireScalar(frontmatter, "description"));
+            Assert.Equal(
+                TestSquadCorpus.ExpectedRenderText(SquadTarget.Copilot, agent.Description),
+                RequireScalar(frontmatter, "description"));
 
             if (agent.Invocation == SquadInvocation.Subagent)
             {
@@ -85,7 +87,10 @@ public sealed class SquadRenderingContractTests
 
             string body = ReadBody(file);
             Assert.True(body.Length <= 30_000, $"'{agent.Name}' body is {body.Length} characters; Copilot caps agent files at 30,000.");
-            Assert.Contains(agent.InstructionBody.Trim(), body, StringComparison.Ordinal);
+            Assert.Contains(
+                TestSquadCorpus.ExpectedRenderText(SquadTarget.Copilot, agent.InstructionBody).Trim(),
+                body,
+                StringComparison.Ordinal);
         }
 
         foreach (string sharedIdentity in sharedIdentities)
@@ -116,7 +121,9 @@ public sealed class SquadRenderingContractTests
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(skill.Description, RequireScalar(frontmatter, "description"));
+            Assert.Equal(
+                TestSquadCorpus.ExpectedRenderText(SquadTarget.Copilot, skill.Description),
+                RequireScalar(frontmatter, "description"));
             Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
         }
 

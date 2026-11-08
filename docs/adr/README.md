@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-07
 ---
 
 # Architecture decision records
@@ -78,6 +78,7 @@ existing record.
 | [0057](0057-squad-and-docs-are-their-own-assemblies.md) | [Squad and Docs are their own assemblies](0057-squad-and-docs-are-their-own-assemblies.md) | Accepted | 2026-11-05 | Squad and Docs build as `KyberWeave.Core.Squad` and `KyberWeave.Core.Docs` over Core, with namespaces unchanged; Core keeps only the few of their types it reads. |
 | [0058](0058-mcp-servers-and-tools-are-named-by-purpose.md) | [MCP servers and tools are named by purpose](0058-mcp-servers-and-tools-are-named-by-purpose.md) | Accepted | 2026-11-05 | MCP server keys are `kw-<area>` (`kw-docs`, `kw-dash`, `kw-arbiter`) and tool names are `<area>_<verb>_<object…>` that state what the tool does; there are no aliases, so an old name is an unknown tool and every first-party caller changes in the same change; the names are held inside the tightest client limit (`^[a-zA-Z0-9_-]{1,64}$` with no `__`, qualified `mcp__<server>__<tool>` at most 64, server and tool at most 60) by a contract test; executables and CLI commands are out of scope. |
 | [0059](0059-full-test-runs-are-reserved-for-the-council-and-ci.md) | [Full test runs are reserved for the review council and CI](0059-full-test-runs-are-reserved-for-the-council-and-ci.md) | Accepted | 2026-11-06 | A full test run (whole .NET suite, whole `dash` npm suite, bare `cargo test`) is refused for developer agents by one shared definition in three layers: `proc-guard.sh` exit 89, `review gates --council` with `full-suite: true` (KW-REVIEW-033), and `fast-loop.sh --full`/`--scoped`/`--regenerate` exit 89; caller identity is the `--council` flag or an interactive terminal. |
+| [0060](0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md) | [Runs start from the fetched remote and carry the harness name](0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md) | Accepted | 2026-11-07 | Every run fetches `origin` and branches from the remote base (`run.base-branch`, else `origin/HEAD`, never an assumed `main`); the harness name is carried in the branch `[<owner>.<agent>.]<harness>/<type>/<slug>` and the title suffix `[<harness>]`, with Dependabot exempt and `manual` for hand-made work; a title edit is rechecked by a `pr-naming` job that `CI Summary` needs plus `pr-naming-recheck.yml` on `pull_request: edited`, with no `edited` event on CI and no branch-protection change; and one command, `kyber-weave run start` (exit `0` ready / `1` tool failure / `2` refused input / `3` missing `codegraph`), reaches it, dispatching `github-devops` with a `RUN-START: true` marker where the conductor has no shell. |
 
 ## Writing one
 

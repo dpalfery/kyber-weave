@@ -860,6 +860,12 @@
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
     },
     {
+      "file": "src/KyberWeave.Core/RunStart/RunStartRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(executable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Every child runs through the injected IProcessExecutor, which kyber-weave run start binds to ProcessExecutor.WithTimeout(120 s) (RunStartCommand.ToolTimeout); ProcessRunner.Run kills the child tree on expiry. argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
+    },
+    {
       "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
@@ -1236,6 +1242,36 @@
       "text": "return ProcessRunner.Run(startInfo, string.Empty, LoopTimeout);",
       "count": 1,
       "bound": "LoopTimeout (30 s) kills the tree. The child is fast-loop.sh in a temporary repository with stub toolchain executables first on PATH; the stubs exit at once."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/PrNamingScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run below with its 30 s timeout, which kills the child tree. The child is bash running scripts/check-pr-name.sh with argv only (--title, --branch, --author), in the repository root, and the script reads its arguments and prints a verdict, so it exits at once."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/PrNamingScriptTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. One invocation of scripts/check-pr-name.sh per test with a fixed argv and no stdin; the script self-exits with its verdict."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/RunStartPlannerTests.cs",
+      "text": "ProcessStartInfo startInfo = new(CliHostPath())",
+      "count": 1,
+      "bound": "Started by the single ProcessRunner.Run in RunStartProbe with its 60 s timeout, which kills the child tree. The child is the kyber-weave host running 'run start' in a temp git repository; it makes one local git call chain and exits with its verdict, and PATH holds a stub codegraph so nothing reaches the network or a real index."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/RunStartPlannerTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the single ProcessRunner.Run in RunStartProbe with its 60 s timeout, which kills the child tree. argv only (init, clone, commit, push, switch, worktree, remote, rev-parse, for-each-ref) against repositories under a TempDirectory, with GIT_TERMINAL_PROMPT=0, and every clone's origin is a local bare path, so no git command prompts or reaches the network."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/RunStartPlannerTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "60 s timeout kills the child tree on expiry. Receives stdin then EOF immediately, drains both redirected streams through ProcessRunner, and is the only start site in the run-start suites; every child is the local kyber-weave host or a local git repository under a TempDirectory."
     }
   ]
 }
