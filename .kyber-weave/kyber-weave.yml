@@ -434,12 +434,12 @@ mcp:
       provenance: first-party
       level: required
     # A third-party server is declared the same way; its binary is never installed by
-    # Kyber-Weave. Uncomment when the repository's instructions require it:
-    # codegraph:
-    #   command: [codegraph, serve, --mcp]
-    #   provenance: third-party
-    #   level: recommended
-    #   install: codegraph init .   # printed verbatim when the binary is absent
+    # Kyber-Weave. Declared here because this repository's instructions require it.
+    codegraph:
+      command: [codegraph, serve, --mcp]
+      provenance: third-party
+      level: recommended
+      install: codegraph init .   # printed verbatim when the binary is absent
 
 arbiter:
   enabled: true
