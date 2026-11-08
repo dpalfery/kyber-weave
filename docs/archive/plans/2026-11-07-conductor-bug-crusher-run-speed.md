@@ -366,7 +366,7 @@ Each slice lands as its own pull request, on its own child plan (D12). Land in t
 | 4 | Bug-crusher on the shared rules | Fix 2 | T21 to T24 | [claude-conductor-live-verification](../../todo/claude-conductor-live-verification.md) |
 | 5 | Ready-to-paste tasks | Fixes 3, 6, 10, D44 | T25 to T31 | none |
 | 6 | Review finishes | Rest of fix 5 | T32 to T35 | none |
-| 7 | Project knowledge and onboarding | Fix 11 | T36 to T42 | [docs-init-emit-full-suite-gate-key](../todo/docs-init-emit-full-suite-gate-key.md), [task-gates-workflow-and-shell-edits](../todo/task-gates-workflow-and-shell-edits.md), [task-gate-config-review](../../todo/task-gate-config-review.md) |
+| 7 | Project knowledge and onboarding | Fix 11 | T36 to T42 | [docs-init-emit-full-suite-gate-key](../todo/docs-init-emit-full-suite-gate-key.md), [task-gates-workflow-and-shell-edits](../todo/task-gates-workflow-and-shell-edits.md), [task-gate-config-review](../todo/task-gate-config-review.md) |
 | 8 | Shrink what workers read | Fix 7, the harness check | T43 to T53 | [task-gate-test-project-mapping](../todo/task-gate-test-project-mapping.md) |
 
 `task-gate-config-review` closes only with T41's Linux and Windows evidence. Without it, `docs-dev` narrows the todo to that one question and leaves it open.

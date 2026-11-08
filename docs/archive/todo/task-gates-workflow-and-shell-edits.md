@@ -37,7 +37,7 @@ The only checks were the tests that read those files (for example `CiLeftoverSte
 `ProcGuardScriptTests`, the review-config pin tests) and `shellcheck` at the whole-change level.
 
 The question this todo asked — which deterministic gates the task gate should run for these file
-kinds — is answered above. Related: [after the .NET gate set](../../todo/task-gate-config-review.md)
+kinds — is answered above. Related: [after the .NET gate set](task-gate-config-review.md)
 and [mapping a task to its test project](../../todo/task-gate-test-project-mapping.md).
 
 ## Acceptance criteria
