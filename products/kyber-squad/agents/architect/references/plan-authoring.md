@@ -22,13 +22,53 @@ Every plan contains:
 - the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
 - the mode-specific Test contract or verification contract;
-- dispatchable tasks with objective, exact files or symbols, acceptance criteria, dependencies, and required skills;
+- dispatchable tasks with objective, acceptance criteria, dependencies, required skills, and its `session` group, naming every file it touches by path plus symbol, the full test class names its runner must match, and exact commands (the rules are below);
 - a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
 Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. DAL, React, C#, and DevOps tasks can run at the same time. When C# changes span multiple projects, split them across `csharp-dev` workers only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
+
+## Task granularity
+
+A task row is also the source of one worker's prompt, and that worker reads nothing else. So the
+plan carries what the prompt needs:
+
+- **A path plus a symbol** for every file a task names: the file's repository-relative path together
+  with the type, method or setting inside it. A line number is a hint at most, because it goes stale
+  the moment an earlier task edits the same file, and a worker that trusts it edits the wrong place.
+- **Full test class names**, fully qualified, because a runner filter that matches no class runs
+  zero tests and exits success.
+- **The exact commands** the task runs, complete enough to paste into a shell.
+
+## Session groups
+
+Every task declares a `session` group, and the group is the unit of worker continuity: tasks in one
+group run in one worker session, so the worker that made a change makes the follow-on fix to it
+rather than paying again to rebuild context it already had.
+
+The boundary is exact:
+
+- A session group may continue follow-on fixes and later same-role tasks on the same change.
+- It may merge RED tasks when a later one does not need an earlier GREEN.
+- It may never merge a RED task into its GREEN. Those stay two workers, because the implementation
+  specialist's passing run only proves the contract while someone else wrote it.
+
+## Task file
+
+At finalization the architect saves the task file beside the plan, `<plan>.tasks.json` in the
+directory named by **<plan-index>**, returns its path, and the file is committed with the plan at
+once.
+
+It carries a schema version, the plan's path, the execution digest, and one entry per task: id,
+role, dependencies, file scope, `session` group and the full prompt. The execution digest covers the
+parsed tasks, file scopes, dependencies, skills, test rows and mode, so flipping a task's status or
+editing a decisions row leaves it valid while editing a task makes it stale.
+
+Two slots stay unfilled — `{worktree}` and `{prior_results}` — because no plan can know the worktree
+the run picks or what an earlier worker reported. Everything else in a prompt is final when the file
+is written.
 
 ## Decisions
 
@@ -72,11 +112,12 @@ DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```
 
-The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, rerun both documentation checks, and return:
+The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, save the task file beside the plan and return its path, rerun both documentation checks, and return:
 
 ```text
 STATUS: PLAN_FINALIZED
 PLAN_FILE: <saved path>
+TASK_FILE: <saved tasks.json path>
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```

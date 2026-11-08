@@ -38,6 +38,7 @@ public static class DocsSchemaGate
         report.AddRange(new ConfigRegValidator(repoRoot, config).Validate().Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(set).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(set).Items);
+        report.AddRange(new PlanTaskFileValidator(repoRoot, config).Validate(set).Items);
 
         try
         {
@@ -58,7 +59,7 @@ public static class DocsSchemaGate
 
         if (mergeReady)
         {
-            report.AddRange(new OpenWorkValidator(config).Validate(set).Items);
+            report.AddRange(new OpenWorkValidator(config, repoRoot).Validate(set).Items);
             report.AddRange(ValidateCloseout(repoRoot, config, set, closeoutLoaderFactory, gitBase).Items);
         }
 

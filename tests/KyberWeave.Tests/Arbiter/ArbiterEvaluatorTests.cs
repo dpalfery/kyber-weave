@@ -104,8 +104,17 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             throw new InvalidOperationException("git facts exploded");
     }
 
+    /// <remarks>
+    /// The docs root is <c>docs</c>, matching the planning paths the plan-read cases name:
+    /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, where a prompt
+    /// naming <c>docs/plans/…</c> would name no configured planning directory.
+    /// </remarks>
     private static KyberWeaveConfig ConfigWith(IReadOnlyList<ArbiterRule> rules) =>
-        new() { Arbiter = new ArbiterConfig { Enabled = true, Rules = rules } };
+        new()
+        {
+            Arbiter = new ArbiterConfig { Enabled = true, Rules = rules },
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
 
     private static ArbiterEvent DelegateEvent(string prompt) =>
         new()

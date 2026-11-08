@@ -144,6 +144,10 @@ public static class TriggerFactBuilder
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
                 "delegation.paths" => paths,
+                // The plan-read rule's question, asked by the one detector the docs
+                // validator also uses, so a spelling the rule accepts is a spelling
+                // KW-DOC-TASKS-005 accepts.
+                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(stripped, planningDirs),
                 "delegation.plan-file" => planFile,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
