@@ -36,6 +36,11 @@ public sealed class CommandCodeRendererContractTests
     /// <summary>Names Command Code reserves for its bundled agents.</summary>
     private static readonly string[] ReservedAgentNames = ["explore", "plan", "review", "general"];
 
+    /// <summary>The server whose tools this target now names, and the one it must not start naming.</summary>
+    private const string CodeGraphServer = "codegraph";
+
+    private const string Context7Server = "context7";
+
     /// <summary>
     /// The capability→tool lowering this suite pins. Declared independently of the renderer so a
     /// change to either side has to be made deliberately in both. <c>network.publish</c> and
@@ -95,8 +100,49 @@ public sealed class CommandCodeRendererContractTests
         return
         [
             .. BuiltInToolOrder.Where(granted.Contains),
+            .. SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, SquadTarget.CommandCode)
+                ? SquadMcpGrantProjection.QualifiedToolNames(
+                    source,
+                    server => string.Equals(server, CodeGraphServer, StringComparison.Ordinal))
+                : [],
             .. SquadMcpGrantProjection.EntitledKyberWeaveToolNames(source, agent, SquadTarget.CommandCode)
         ];
+    }
+
+    /// <summary>
+    /// Command Code names the <c>codegraph</c> tools for every agent the shared predicate entitles, and
+    /// keeps the orchestrator out.
+    /// </summary>
+    /// <remarks>
+    /// D26: Command Code reaches an MCP tool only when the subagent's own <c>tools</c> list names it, so a
+    /// server this renderer stays silent about is a server the agent cannot use. The grant goes through
+    /// <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers" /> and the expectation here
+    /// is computed from the same predicate rather than from a roster of agent names, so a profile change
+    /// moves both sides together. <c>context7</c> is asserted absent beside it: the carve-out widening is
+    /// for the code graph alone, and a target that started naming library lookups would be a second,
+    /// unintended grant.
+    /// </remarks>
+    [Fact]
+    public async Task CommandCodeNamesTheCodeGraphToolsForEveryEntitledAgentAndWithholdsContext7()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
+            bool entitled =
+                SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, SquadTarget.CommandCode);
+
+            Assert.Equal(
+                entitled,
+                tools.Any(tool => tool.StartsWith($"mcp__{CodeGraphServer}__", StringComparison.Ordinal)));
+
+            Assert.DoesNotContain(
+                tools,
+                tool => tool.StartsWith($"mcp__{Context7Server}__", StringComparison.Ordinal));
+        }
     }
 
     private static IReadOnlyList<string> RenderedTools(

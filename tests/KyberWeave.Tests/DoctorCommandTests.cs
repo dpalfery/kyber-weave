@@ -205,6 +205,64 @@ public sealed class DoctorCommandTests : IDisposable
 
         Assert.Equal(2, execution.Result);
     }
+
+    /// <summary>
+    ///     Provisioning an existing index refreshes it with <c>codegraph sync</c> and never re-initialises it.
+    /// </summary>
+    /// <remarks>
+    ///     <c>init</c> over a live index throws the work away and every later run pays to rebuild it. <c>sync</c>
+    ///     keeps the index current at a fraction of the cost, and <c>index</c> is reserved for the repair step a
+    ///     failed ensure performs once.
+    /// </remarks>
+    [Fact]
+    public void DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
+    {
+        Directory.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
+
+        DoctorReport report = RepositoryDoctor.Run(
+            CanonicalPath,
+            DoctorMode.Provision,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath)),
+            executor,
+            _ => null);
+
+        Assert.Contains(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("sync", StringComparer.Ordinal));
+        DoctorHarness.AssertNoCall(executor, "init");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    ///     An ensure run on a machine with no CodeGraph binary exits 3, the code that means "a human has to
+    ///     install this" rather than "something broke".
+    /// </summary>
+    /// <remarks>
+    ///     The worker that runs ensure branches on this code: exit 3 is the one failure a repository-local
+    ///     command cannot repair, because Kyber-Weave never installs external software as a side effect.
+    /// </remarks>
+    [Fact]
+    public void DoctorCommand_EnsureWithNoCodeGraphBinary_Exits3()
+    {
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            CanonicalPath,
+            _ => throw DoctorHarness.BinaryNotFound());
+
+        int exitCode = DoctorAppHarness.Run(
+            new DoctorCommand
+            {
+                Executor = executor,
+                IsTerminal = () => false,
+                ReadEnvironment = _ => null,
+                McpExecutable = "kyber-weave-mcp-absent"
+            },
+            "doctor",
+            "--ensure",
+            CanonicalPath);
+
+        Assert.Equal(3, exitCode);
+    }
 }
 
 /// <summary>

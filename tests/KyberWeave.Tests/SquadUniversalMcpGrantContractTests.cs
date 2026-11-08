@@ -282,6 +282,73 @@ public sealed class SquadUniversalMcpGrantContractTests
     }
 
     /// <summary>
+    /// Every target that can name the code graph grants it to exactly the agents the shared predicate
+    /// entitles, the orchestrator excluded — including the three targets that named no MCP server of
+    /// their own before this change.
+    /// </summary>
+    /// <remarks>
+    /// D26: the widening of <c>codegraph</c> reaches Command Code, OpenCode and Kilo, and it reaches them
+    /// through <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers" /> rather than
+    /// through a third, renderer-local copy of the rule. The token test is spelling-agnostic on purpose:
+    /// a whitelist, a wildcard, a qualified tool name and a permission key are all "names the code
+    /// graph", and the point of the assertion is which agents get it, not how each harness writes it.
+    /// <c>context7</c> is asserted absent on the three newly widened targets, because the carve-out was
+    /// widened for the code graph alone.
+    /// </remarks>
+    [Fact]
+    public async Task EveryTargetGrantsTheCodeGraphServerThroughTheSharedPredicate()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+
+        SquadTarget[] targets =
+        [
+            .. OrchestratorExcludedServerTargets,
+            SquadTarget.CommandCode,
+            SquadTarget.OpenCode,
+            SquadTarget.Kilo
+        ];
+
+        SquadTarget[] codeGraphOnlyTargets = [SquadTarget.CommandCode, SquadTarget.OpenCode, SquadTarget.Kilo];
+
+        foreach (SquadTarget target in targets)
+        {
+            SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+            Assert.True(result.Success, string.Join("; ", result.Errors));
+
+            foreach (SquadAgent agent in source.Agents)
+            {
+                IReadOnlyList<string>? tokens = RenderedGrantTokens(target, result, agent.Name);
+                if (tokens is null)
+                {
+                    continue;
+                }
+
+                bool expected = SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, target);
+                bool granted = tokens.Any(token =>
+                    token.Contains(CodeGraphServerName, StringComparison.OrdinalIgnoreCase));
+
+                Assert.True(
+                    expected == granted,
+                    $"Target '{SquadTargetCatalog.GetToken(target)}' renders agent '{agent.Name}' with the "
+                    + $"code graph {(granted ? "granted" : "withheld")}, but the shared predicate requires it "
+                    + $"{(expected ? "granted" : "withheld")}.");
+
+                if (codeGraphOnlyTargets.Contains(target))
+                {
+                    Assert.DoesNotContain(
+                        tokens,
+                        token => token.Contains(Context7ServerName, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+        }
+    }
+
+    /// <summary>The two server names this guard reads, spelled once so a misspelling cannot pass as either.</summary>
+    private const string CodeGraphServerName = "codegraph";
+
+    private const string Context7ServerName = "context7";
+
+    /// <summary>
     /// The three new grant vehicles each spell the server name one character away from a value
     /// that would parse cleanly and resolve nothing, so the wrong spelling is asserted absent
     /// beside the right one.

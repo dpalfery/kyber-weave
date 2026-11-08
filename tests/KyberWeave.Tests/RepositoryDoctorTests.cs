@@ -492,4 +492,68 @@ public sealed class RepositoryDoctorTests : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// The ensure run spends exactly one <c>codegraph explore</c> call and exactly one docs tool call,
+    /// so the command proves both tools work without becoming a second retrieval loop.
+    /// </summary>
+    /// <remarks>
+    /// D22: one <c>codegraph explore</c>, one <c>kw-docs</c> call. A probe that queried repeatedly
+    /// would make every worker start cost several index and corpus reads, which is the run-speed
+    /// problem this slice exists to fix rather than to move.
+    /// </remarks>
+    [Fact]
+    public void Doctor_Ensure_MakesOneExploreCallAndOneDocsCall()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        string callLog = Path.Combine(_stubs.Path, "calls.log");
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
+
+        int exitCode = DoctorAppHarness.Run(
+            new KyberWeave.Cli.Commands.Doctor.DoctorCommand
+            {
+                Executor = executor,
+                IsTerminal = () => false,
+                ReadEnvironment = _ => null,
+                McpExecutable = AppendingStub(callLog)
+            },
+            "doctor",
+            "--ensure",
+            Root);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("explore", StringComparer.Ordinal));
+        Assert.Single(File.ReadAllLines(callLog));
+    }
+
+    /// <summary>
+    /// A docs stub that records one line per <c>tools/call</c> it receives, so a second probe is
+    /// visible rather than overwritten.
+    /// </summary>
+    private string AppendingStub(string callLog)
+    {
+        string path = Path.Combine(_stubs.Path, "kyber-weave-mcp-counting");
+        File.WriteAllText(
+            path,
+            "#!/bin/sh\n"
+            + "read _initialize\n"
+            + $"printf '%s\\n' '{DoctorHarness.InitializeReply}'\n"
+            + "read _initialized\n"
+            + "read _call\n"
+            + $"printf '%s\\n' \"$_call\" >> \"{callLog}\"\n"
+            + "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root="
+            + Root
+            + "\"}]}}'\n"
+            + "cat > /dev/null\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
+    }
 }

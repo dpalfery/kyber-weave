@@ -92,6 +92,44 @@ public sealed class SquadWorktreeMcpContractTests
     }
 
     /// <summary>
+    ///     The execution contract states that a new worktree indexes itself, because a worktree does not see
+    ///     the canonical checkout's index.
+    /// </summary>
+    /// <remarks>
+    ///     A git worktree has its own working tree and its own <c>.codegraph/</c>; the canonical index is not
+    ///     visible from it. A worker that assumed otherwise queried an index describing files it was not
+    ///     editing and got confident answers about the wrong tree. <c>doctor --ensure</c> is the step that
+    ///     gives the worktree an index of its own, and it is the one command every worker runs first.
+    /// </remarks>
+    [Fact]
+    public void ExecutionContractStatesThatAWorktreeIndexesItself()
+    {
+        string content = ReadRepoFile(ConductorExecutionPath);
+
+        Assert.Contains("doctor --ensure", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bworktree\b[^\r\n]*\b(?:index\w*|own)\b", content);
+    }
+
+    /// <summary>
+    ///     The execution contract sends shell roles to <c>codegraph explore</c> in the worktree's own shell,
+    ///     rather than to the MCP query bound to the canonical checkout.
+    /// </summary>
+    /// <remarks>
+    ///     D24/D25: the MCP servers stay bound to the canonical checkout on purpose, so their answers
+    ///     describe that tree. A role with a shell asks its own worktree instead; a role without one is given
+    ///     the worktree's absolute path in its packet and reads it directly. This is the rule that keeps a
+    ///     worker from believing a branch it is not on.
+    /// </remarks>
+    [Fact]
+    public void ExecutionContractSendsShellRolesToTheWorktreeIndex()
+    {
+        string content = ReadRepoFile(ConductorExecutionPath);
+
+        Assert.Contains("codegraph explore", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bcanonical\b[^\r\n]*(?:bound|checkout|path)\b", content);
+    }
+
+    /// <summary>
     ///     Verifies that worktree configuration helpers produce absolute paths for <c>--repo-root</c>
     ///     and <c>--path</c>.
     /// </summary>
