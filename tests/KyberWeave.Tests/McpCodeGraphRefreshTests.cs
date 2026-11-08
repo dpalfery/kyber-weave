@@ -148,6 +148,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         string first = tools.Explore("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", first, StringComparison.Ordinal);
         Assert.Contains("boom resolver failed", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=0", first, StringComparison.Ordinal);
 
         // Subsequent call must not answer Clear as if healthy
         string second = tools.Explore("anything");

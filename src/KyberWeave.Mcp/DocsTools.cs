@@ -683,7 +683,7 @@ public sealed partial class DocsTools
     /// user-visible return leads with this so a caller can tell which corpus answered.
     /// </summary>
     private string Provenance(DocumentIndex? index = null) =>
-        CorpusProvenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? 0, _host.CorpusBuilds);
+        CorpusProvenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? _host.DocumentCount, _host.CorpusBuilds);
 
     /// <summary>
     /// Puts the provenance line first, then the gate's one-line note when it has one, then the
