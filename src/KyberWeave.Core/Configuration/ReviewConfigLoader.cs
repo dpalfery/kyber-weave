@@ -18,7 +18,10 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
-        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output", "applies-when", "full-suite"];
+    [
+        "id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output",
+        "applies-when", "full-suite", "requires-paths"
+    ];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] TaskGateKeys =
@@ -114,7 +117,8 @@ public static class ReviewConfigLoader
             {
                 Include = include,
                 FailOnOutput = gate.FailOnOutput ?? false,
-                FullSuite = gate.FullSuite ?? false
+                FullSuite = gate.FullSuite ?? false,
+                RequiresPaths = ParseRequiresPaths(gate.RequiresPaths, gateWhere)
             });
         }
 
@@ -247,6 +251,79 @@ public static class ReviewConfigLoader
         return [.. include];
     }
 
+    /// <summary>
+    /// Validates a gate's <c>requires-paths</c> and returns them with '/' separators.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>working-directory</c>, a declared path is not required to exist here: its absence is the very
+    /// fact the gate reports at run time, and a host whose dependencies are not installed must still load its
+    /// configuration. A path that could never name something inside the repository is refused here, where the
+    /// operator wrote it.
+    /// </remarks>
+    private static IReadOnlyList<string> ParseRequiresPaths(List<string>? declared, string gateWhere)
+    {
+        if (declared is null)
+            return [];
+
+        string where = $"{gateWhere} requires-paths";
+        if (declared.Count == 0)
+            throw new YamlException(
+                $"{where} is an empty list. Name a path such as 'dash/node_modules', or remove the key.");
+
+        List<string> parsed = new(declared.Count);
+        foreach (string? path in declared)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new YamlException($"{where} has an empty entry. Name a path such as 'dash/node_modules'.");
+
+            string trimmed = path.Trim();
+            // Both separators are accepted on every host; the stored form uses '/' only.
+            string spelled = trimmed.Replace('\\', '/');
+            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
+            {
+                throw new YamlException(
+                    $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
+            }
+
+            List<string> segments = [];
+            foreach (string segment in spelled.Split('/'))
+            {
+                string clean = segment.Trim();
+                if (clean is "" or ".")
+                    continue;
+
+                if (clean == "..")
+                {
+                    throw new YamlException(
+                        $"{where} '{path}' contains '..' and would leave the repository root. Name a path inside it.");
+                }
+
+                segments.Add(clean);
+            }
+
+            if (segments.Count == 0)
+            {
+                throw new YamlException(
+                    $"{where} '{path}' names the repository root. Name a path inside it, such as 'dash/node_modules'.");
+            }
+
+            if (segments[0] == "~")
+            {
+                throw new YamlException(
+                    $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
+            }
+
+            parsed.Add(string.Join('/', segments));
+        }
+
+        return parsed;
+    }
+
+    private static bool LooksLikeWindowsDriveAbsolute(string path) =>
+        path.Length >= 2
+        && char.IsAsciiLetter(path[0])
+        && path[1] == ':';
+
     /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
     private static string? ParseOs(string? os, string gateWhere)
     {
@@ -288,9 +365,10 @@ public static class ReviewConfigLoader
                 $"{where} is empty. Name a directory relative to the repository root, or remove the key.");
         }
 
+        string trimmed = declared.Trim();
         // Both separators are accepted on every host; the stored form uses '/' only.
-        string spelled = declared.Replace('\\', '/');
-        if (spelled.StartsWith('/') || Path.IsPathRooted(declared))
+        string spelled = trimmed.Replace('\\', '/');
+        if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
         {
             throw new YamlException(
                 $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
@@ -299,21 +377,28 @@ public static class ReviewConfigLoader
         List<string> segments = [];
         foreach (string segment in spelled.Split('/'))
         {
-            if (segment is "" or ".")
+            string clean = segment.Trim();
+            if (clean is "" or ".")
                 continue;
 
-            if (segment == "..")
+            if (clean == "..")
             {
                 throw new YamlException(
                     $"{where} '{declared}' contains '..' and would leave the repository root. Name a directory inside it.");
             }
 
-            segments.Add(segment);
+            segments.Add(clean);
         }
 
         // Nothing left means the repository root itself, which is what an absent key already means.
         if (segments.Count == 0)
             return null;
+
+        if (segments[0] == "~")
+        {
+            throw new YamlException(
+                $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
+        }
 
         if (commands.Any(argv => argv.Any(element => element.Contains("{changed}", StringComparison.Ordinal))))
         {

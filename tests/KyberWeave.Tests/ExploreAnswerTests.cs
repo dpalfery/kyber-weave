@@ -24,6 +24,11 @@ public sealed class ExploreAnswerTests : IDisposable
     private const string IncompletePrefix =
         "This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor";
 
+    private const string RunStartTodoDocumentId = "todo/run-start-resume-refuses-a-pull-request-number";
+
+    private const string RunStartTodoDocumentPath =
+        "6-Docs/todo/run-start-resume-refuses-a-pull-request-number.md";
+
     private static readonly Regex ConfidenceLine = new(
         @"^confidence: (?<value>0\.\d{2}|1\.00)$",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
@@ -225,6 +230,59 @@ public sealed class ExploreAnswerTests : IDisposable
         Assert.Empty(SourceLines(response).ToList());
     }
 
+    /// <summary>
+    /// A question the corpus cannot answer must not be answered by a document whose id merely
+    /// shares a token prefix with it. The id of the run-resume todo ends in "start", which
+    /// carries the same prefix as "starter", so partial identity coverage scored the document
+    /// for "recipe for sourdough starter" and returned it with confidence 0.23 to anyone
+    /// asking about baking. The corpus is built here rather than read from the repository: a
+    /// regression test over the live corpus records the symptom but cannot pin which document
+    /// the rule has to refuse, and it moves whenever somebody edits a document.
+    /// </summary>
+    [Fact]
+    public void AQuestionTheCorpusDoesNotAnswerIsNotAnsweredByAPartialIdMatch()
+    {
+        DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
+
+        string response = Explore(tools, "recipe for sourdough starter");
+
+        Assert.True(response.Contains("No document", StringComparison.Ordinal),
+            $"an unanswerable question must report a miss; response was:\n{response}");
+        Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
+        Assert.Empty(SourceLines(response).ToList());
+    }
+
+    /// <summary>
+    /// The mirror of the test above. Refusing the hijack by never answering from a document id
+    /// would lose the question the document does answer, so this is what says the fix kept the
+    /// question-to-document path intact.
+    /// </summary>
+    [Fact]
+    public void AQuestionThatNamesWhatTheDocumentSaysStillFindsIt()
+    {
+        DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
+
+        string response = Explore(tools, "run start resume");
+
+        string source = Assert.Single(SourceLines(response).ToList());
+        Assert.Contains(RunStartTodoDocumentPath, source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An exact id is an exact claim, not an inference from a shared prefix, so the rule that
+    /// stops a partial identity from introducing a document must not touch it.
+    /// </summary>
+    [Fact]
+    public void AnExactIdQuestionStillReachesTheDocumentItNames()
+    {
+        DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
+
+        string response = Explore(tools, RunStartTodoDocumentId);
+
+        string source = Assert.Single(SourceLines(response).ToList());
+        Assert.Contains(RunStartTodoDocumentPath, source, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TheReplyIsAtMost8000CharactersAndContainsNoLegacyBudgetJargon()
     {
@@ -301,6 +359,76 @@ public sealed class ExploreAnswerTests : IDisposable
         }
 
         Assert.Equal(body, assembled.ToString());
+    }
+
+    /// <summary>
+    /// One document whose id shares a token prefix with a question it does not answer, plus
+    /// three documents on unrelated subjects so corpus statistics are not degenerate. Nothing
+    /// in the run-resume document — id excepted — says "recipe", "sourdough" or "starter".
+    /// </summary>
+    private DocsTools BuildCorpusWithOnePartiallyMatchingId()
+    {
+        _fixture.WithCatalog().WithSourceRoot("src/KyberWeave.Core.Squad");
+        _fixture.Write(RunStartTodoDocumentPath, $$"""
+            ---
+            id: {{RunStartTodoDocumentId}}
+            title: run start --resume refuses a pull request number, though the approved decision accepts one
+            doc-type: todo
+            component: KyberSquad
+            status: draft
+            owner: run maintainers
+            last-reviewed: 2026-11-07
+            ---
+
+            # run start --resume refuses a pull request number, though the approved decision accepts one
+
+            The approved decision names `--resume <branch-or-pr>`, so a caller may resume a run from a
+            branch name or from a pull request. The command implements the branch form only: a bare
+            number is refused with exit `2`, so a caller who follows the decision reads the refusal as
+            "resume is unavailable" rather than "this spelling is not implemented".
+
+            **Work.** Either implement the pull request form, or narrow the decision in place so it reads
+            `--resume <branch>` and the refusal names the form that is accepted.
+            """);
+
+        WriteUnrelatedDocument(
+            "guide/backup",
+            "Guide: backup and restore",
+            "6-Docs/guide/backup.md",
+            "An archive of the datastore is written to a local file and read back after a failure.");
+        WriteUnrelatedDocument(
+            "cli/exit-codes",
+            "Cli: exit code contract",
+            "6-Docs/cli/exit-codes.md",
+            "Each verb returns zero on success and a documented non-zero code on every refusal.");
+        WriteUnrelatedDocument(
+            "indexing/two-clocks",
+            "Indexing: two clocks",
+            "6-Docs/indexing/two-clocks.md",
+            "The corpus is rebuilt when documentation changes, and the joins when the graph does.");
+
+        return new DocsTools(CreateHost(_fixture.Root), new RepositoryDocsAnalysisReader(_fixture.Root));
+    }
+
+    private void WriteUnrelatedDocument(string id, string title, string relativePath, string prose)
+    {
+        _fixture.Write(relativePath, $$"""
+            ---
+            id: {{id}}
+            title: {{title}}
+            doc-type: architecture
+            component: MotorcycleRAG API
+            status: current
+            owner: API maintainers
+            last-reviewed: 2026-07-21
+            ---
+
+            # {{title}}
+
+            ## Detail
+
+            {{prose}}
+            """);
     }
 
     private DocsTools BuildTools(

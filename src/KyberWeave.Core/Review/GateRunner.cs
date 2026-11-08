@@ -59,7 +59,7 @@ public static class GateRunner
         {
             GateResult result = AppliesWhenReason(gate, changedPaths) is string reason
                 ? NotApplicable(gate, reason)
-                : RunOne(gate, workingDirectory);
+                : MissingRequirement(gate, workingDirectory) ?? RunOne(gate, workingDirectory);
             results.Add(result);
 
             if (stopOnBlockingFailure
@@ -162,6 +162,55 @@ public static class GateRunner
 
         return new TaskGateRun(report, fixFailures);
     }
+
+    /// <summary>
+    /// The result for a gate whose declared prerequisite path is absent, or null when the gate may start.
+    /// </summary>
+    /// <remarks>
+    /// A missing dependency is the same class of fact as a program that could not start: the check never ran,
+    /// so it is reported as not started rather than as a code failure, and it is never a pass. The summary names
+    /// the path and how to provide it, because the install is the action that unblocks the run.
+    /// </remarks>
+    private static GateResult? MissingRequirement(ReviewGate gate, string root)
+    {
+        foreach (string path in gate.RequiresPaths)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return new GateResult(
+                    gate.Id,
+                    gate.Blocking,
+                    -1,
+                    $"required path '{path}' could not be resolved ({ex.Message}), so the gate did not start.",
+                    0,
+                    Outcome: GateOutcome.NotStarted);
+            }
+
+            if (Path.Exists(full))
+                continue;
+
+            return new GateResult(
+                gate.Id,
+                gate.Blocking,
+                -1,
+                MissingRequirementSummary(path),
+                0,
+                Outcome: GateOutcome.NotStarted);
+        }
+
+        return null;
+    }
+
+    private static string MissingRequirementSummary(string path) =>
+        $"required path '{path}' is missing, so the gate did not start. " +
+        (path.StartsWith("dash/", StringComparison.Ordinal)
+            ? "Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again."
+            : "Install whatever provides it, then run the gate again.");
 
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)
     {

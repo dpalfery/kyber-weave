@@ -10,7 +10,8 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 ///     Pins how <c>kyber-weave review gates</c> without <c>--agent</c> selects the repository-wide council gates
-///     by their <c>include</c> and <c>os</c> keys, and how it reports a changed set it cannot determine. Driven
+///     by their <c>include</c> and <c>os</c> keys, how <c>--all</c> and <c>--gate</c> select which gates a run
+///     executes, and how it reports a changed set it cannot determine. Driven
 ///     through a real <see cref="CommandApp" /> against a temporary git repository with its own
 ///     <c>.kyber-weave/kyber-weave.yml</c>.
 /// </summary>
@@ -29,6 +30,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     private const string ChangedSetUnknown = "KW-REVIEW-034";
     private const int ClientInputExitCode = 2;
     private const string StartedMarkerKey = "council.started";
+    private const string OtherStartedMarkerKey = "council.other-started";
     private const string MissingProgram = "kw-task3-no-such-program";
     private readonly string _repo;
     private readonly TempDirectory _temp = new();
@@ -382,6 +384,170 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertRendered(run, InvalidInput);
     }
 
+    // -----------------------------------------------------------------------------------------
+    // --all stops the run at a refused full-suite gate; a scoped run keeps the other gates.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Under <c>--all</c>, a refused full-suite gate stops the run before any gate starts, and the command exits 1.
+    /// </summary>
+    /// <remarks>
+    /// <c>--all</c> is the shape a caller uses to run the whole declared suite at once. Refusing one gate and then
+    /// running the other fifteen would spend the run on a suite the caller was just told it may not have, and the
+    /// report would read as a review that ran. Both probe gates only write a marker into the repository's git
+    /// configuration, so "did not start" is a fact the test reads back rather than an absent log line.
+    /// </remarks>
+    [Fact]
+    public void ReviewGates_WithAllAndARefusedFullSuiteGate_StopsBeforeAnyGateStarts()
+    {
+        if (!Console.IsInputRedirected)
+            throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
+
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: test
+                                  full-suite: true
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                                - id: repository-wide
+                                  run: [git, config, --local, {OtherStartedMarkerKey}, yes]
+                            """);
+
+        CliRun run = Cli(GatesCommand("--all", "--format", "json"));
+
+        AssertExitCode(1, run);
+        AssertRendered(run, "test: refused");
+        AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
+        Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        Assert.NotEqual(
+            0,
+            Git("config", "--local", "--get", OtherStartedMarkerKey).ExitCode);
+    }
+
+    /// <summary>
+    /// A scoped run without <c>--council</c> keeps today's behaviour: the refused gate is reported and the other
+    /// gates still run.
+    /// </summary>
+    /// <remarks>
+    /// The pre-push self-review depends on the other gates running: it runs the declared suite without
+    /// <c>--council</c>, and the refusal of the full-suite gate is one line in its report, not the end of its evidence.
+    /// Scoping by <c>--paths</c> is the shape a task gate and the self-review use.
+    /// </remarks>
+    [Fact]
+    public void ReviewGates_ScopedWithoutCouncil_StillRunsTheOtherGatesAfterARefusal()
+    {
+        if (!Console.IsInputRedirected)
+            throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
+
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: test
+                                  full-suite: true
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                                - id: csharp-lint
+                                  include: ["**/*.cs"]
+                                  run: [git, --version]
+                            """);
+        ChangeTracked("src/a.cs");
+
+        CliRun run = Cli(GatesCommand("--paths", "src/a.cs", "--format", "json"));
+
+        AssertExitCode(1, run);
+        AssertRendered(run, "test: refused");
+        AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+        using JsonDocument report = ReadReport();
+        Assert.True(
+            GatePassed(report, "csharp-lint"),
+            $"The scoped run must still execute the gates it may run; the report holds '{string.Join(", ", GateIds(report))}'.");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // --gate runs exactly the gate or gates it names.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>--gate</c> runs the one gate it names and no other, so a reviewer re-checks a single gate without
+    /// paying for the whole suite again.
+    /// </summary>
+    /// <remarks>
+    /// The gate named is the first, and the second gate is a marker write, so a run that quietly executes the whole
+    /// list is caught by the marker rather than only by the report.
+    /// </remarks>
+    [Fact]
+    public void ReviewGates_WithGateOption_RunsOnlyTheNamedGate()
+    {
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: first-gate
+                                  run: [git, --version]
+                                - id: second-gate
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                            """);
+
+        CliRun run = Cli(GatesCommand("--gate", "first-gate", "--format", "json"));
+
+        AssertExitCode(0, run);
+        using JsonDocument report = ReadReport();
+        Assert.Equal(["first-gate"], GateIds(report));
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+    }
+
+    /// <summary>
+    /// <c>--gate</c> is repeatable: each named gate runs, in declaration order, and the gate nobody named does not.
+    /// </summary>
+    [Fact]
+    public void ReviewGates_WithRepeatedGateOption_RunsEachNamedGateAndNoOther()
+    {
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: first-gate
+                                  run: [git, --version]
+                                - id: unnamed-gate
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                                - id: last-gate
+                                  run: [git, --version]
+                            """);
+
+        CliRun run = Cli(GatesCommand("--gate", "first-gate", "--gate", "last-gate", "--format", "json"));
+
+        AssertExitCode(0, run);
+        using JsonDocument report = ReadReport();
+        Assert.Equal(["first-gate", "last-gate"], GateIds(report));
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+    }
+
+    /// <summary>
+    /// Naming a full-suite gate with <c>--gate</c> and no <c>--council</c> is refused exactly as it is anywhere
+    /// else: the gate never starts, the refusal is <c>KW-REVIEW-033</c> at Error, and the run exits 1.
+    /// </summary>
+    [Fact]
+    public void ReviewGates_WithGateNamingAFullSuiteGateWithoutCouncil_IsRefusedTheSameWay()
+    {
+        if (!Console.IsInputRedirected)
+            throw SkipException.ForSkip("stdin is an interactive terminal, so a full-suite gate is not refused here.");
+
+        WriteConfiguration($"""
+                            review:
+                              gates:
+                                - id: test
+                                  full-suite: true
+                                  run: [git, config, --local, {StartedMarkerKey}, yes]
+                            """);
+
+        CliRun run = Cli(GatesCommand("--gate", "test", "--format", "json"));
+
+        AssertExitCode(1, run);
+        AssertRendered(run, "test: refused");
+        AssertDiagnostic(run.Output, GateNotStarted, "ERROR");
+        Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, Git("config", "--local", "--get", StartedMarkerKey).ExitCode);
+    }
+
     /// <summary>
     ///     The <c>review gates</c> invocation without <c>--agent</c>, always writing the report to a path
     ///     inside the temporary root so the test can read it back.
@@ -400,8 +566,8 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// </summary>
     private static CliRun Cli(string[] arguments)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CommandAppFixture.ReviewGates().Run(arguments));
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run(arguments));
         return new CliRun(execution.Result, execution.Output);
     }
 

@@ -369,6 +369,19 @@ public sealed partial class DocumentIndex
         return leaf.SignalScore > 0;
     }
 
+    /// <summary>
+    /// How much a document scores for a question, and that score discounted by its authority.
+    /// </summary>
+    /// <remarks>
+    /// Partial identity ranks the documents the question already touches; it never introduces
+    /// one. <see cref="Coverage"/> prefix-matches tokens, so the term "starter" counts as
+    /// covering an id token "start" — enough on its own to float a document about resuming a
+    /// run above the relevance floor for a question about sourdough. So the partial
+    /// contribution only stands when the question reaches the document another way: an exact
+    /// id, path, component, keyword, code-ref or endpoint match, a term it shares with the
+    /// title, or an informative term its prose contains. With none of those, the partial
+    /// score is dropped and the document cannot clear <see cref="MinRelevanceScore"/>.
+    /// </remarks>
     private (double Identity, double DocumentScore) ScoreDocumentStage(
         DocumentModel doc,
         string trimmed,
@@ -376,10 +389,15 @@ public sealed partial class DocumentIndex
         IReadOnlyList<string> coverageTerms,
         IReadOnlyDictionary<string, double> titleQuery)
     {
-        double identity = ScoreExact(doc, trimmed)
-                          + ScorePartialIdentity(doc, queryVector)
-                          + TitleWeight * ScoreTitle(doc, titleQuery)
-                          + BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
+        double exact = ScoreExact(doc, trimmed);
+        double title = TitleWeight * ScoreTitle(doc, titleQuery);
+        double body = BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
+
+        double partial = exact > 0 || title > 0 || body > 0
+            ? ScorePartialIdentity(doc, queryVector)
+            : 0;
+
+        double identity = exact + partial + title + body;
         return (identity, Authority(doc) * identity);
     }
 

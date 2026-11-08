@@ -325,7 +325,9 @@ public sealed class SquadDocsHarvestContractTests
             .FirstOrDefault(line => line.StartsWith("agents:", StringComparison.Ordinal))
             ?.Trim();
 
-        Assert.Equal("agents: ['bug-crusher-investigator', 'docs-dev']", actual);
+        Assert.Equal(
+            "agents: ['bug-crusher-investigator', 'docs-dev', 'review-lens', 'review-triage']",
+            actual);
     }
 
     /// <summary>
