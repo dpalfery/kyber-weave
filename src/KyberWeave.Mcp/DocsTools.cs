@@ -601,7 +601,9 @@ public sealed partial class DocsTools
         Pass the technology ('csharp', 'test') or the property name the repository instructions
         use for it ('csharp-coding-standard'). A technology this repository declares no standard
         for is an explicit miss that names the ones it does declare, and a standard whose status
-        is not current still answers and says so.
+        is not current still answers and says so. A topic that matches no section still returns
+        the standard, with a one-line note that the topic selected nothing, so the prose is
+        there rather than a list of headings to go and read.
         """)]
     public string AgentCodingStandards(
         [Description("""
@@ -631,13 +633,14 @@ public sealed partial class DocsTools
             return Lead(gate, provenance, StandardUsage);
 
         string requested = technology.Trim().ReplaceLineEndings(" ");
-        IReadOnlyList<DocumentHit> hits = index.CodingStandards(
-            requested,
-            topic,
-            Math.Clamp(charBudget, MinCharBudget, MaxCharBudget));
+        int budget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
+        IReadOnlyList<DocumentHit> hits = index.CodingStandards(requested, topic, budget);
 
         if (hits.Count == 0)
             return Lead(gate, provenance, StandardMiss(index, requested));
+        // A topic that matched nothing still returns the standard, which means the same call
+        // made without a topic — built once, and only when a standard's topic actually missed.
+        IReadOnlyDictionary<string, DocumentExcerpt>? withoutTopic = null;
 
         StringBuilder sb = new();
         AppendStandardCount(sb, requested, hits);
@@ -655,7 +658,28 @@ public sealed partial class DocsTools
 
             if (hit.Excerpt.Sections.Count == 0)
             {
-                AppendEmptyExcerpt(sb, hit, topic, withheld);
+                if (hit.Document.Sections.Count == 0)
+                {
+                    AppendBodyWithNoSections(sb);
+                    continue;
+                }
+
+                withoutTopic ??= index
+                    .CodingStandards(requested, charBudget: budget)
+                    .ToDictionary(
+                        whole => whole.Document.RelativePath,
+                        whole => whole.Excerpt,
+                        StringComparer.Ordinal);
+
+                // A blank topic cannot reach here — it selects the whole standard rather than
+                // ranking sections — but the note names a topic, so it is only written for one.
+                if (!string.IsNullOrWhiteSpace(topic)) AppendTopicMiss(sb, topic);
+
+                DocumentExcerpt standard = withoutTopic.TryGetValue(
+                    hit.Document.RelativePath, out DocumentExcerpt? wholeExcerpt)
+                    ? wholeExcerpt
+                    : DocumentExcerpt.Empty;
+                AppendExcerpt(sb, withheld.Elide(standard), "topic");
                 continue;
             }
 
@@ -1193,54 +1217,44 @@ public sealed partial class DocsTools
     };
 
     /// <summary>
-    /// Why a standard contributed no prose, said in the terms of what actually happened.
+    /// Why a standard contributed no prose when its body has no <c>##</c> headings at all:
+    /// there was nothing to excerpt.
     /// </summary>
     /// <remarks>
-    /// Two different things leave an empty excerpt, and the excerpt cannot tell them apart —
-    /// the document's own section count can. A body of prose with no <c>##</c> headings has
-    /// nothing to excerpt and is said to be exactly that. A body that <em>does</em> carry
-    /// headings and returns none cleared the relevance gate is a topic that matched nothing,
-    /// and blaming the document for it would send a caller away from a standard sitting right
-    /// there — while returning the sections instead would answer a narrower question with
-    /// everything. Naming the headings that did not match says what the document holds without
-    /// giving up the topic as the question being answered.
+    /// Saying so beats an identity block followed by nothing, which reads as an empty document.
+    /// The other reason an excerpt comes back empty — a topic no section matched — is not a
+    /// statement about the document and is answered by <see cref="AppendTopicMiss"/>.
     /// </remarks>
     /// <param name="sb">The response being built; the explanation is appended to it.</param>
-    /// <param name="hit">The standard that returned no prose.</param>
-    /// <param name="topic">The topic the caller named, when it named one.</param>
-    /// <param name="withheld">
-    /// The ids this response may not print, applied to the headings it names. They are read
-    /// straight from the document here rather than from the excerpt — an excerpt with no
-    /// sections carries no headings to elide — so this is the one echo site the excerpt's own
-    /// elision would never reach.
-    /// </param>
-    private static void AppendEmptyExcerpt(
-        StringBuilder sb,
-        DocumentHit hit,
-        string? topic,
-        WithheldRuleIds withheld)
-    {
-        if (hit.Document.Sections.Count == 0)
-        {
-            // A standard that is prose and no ## headings: saying so beats an identity
-            // block followed by nothing, which reads as an empty document.
-            sb.AppendLine(
-                "no sections: this standard's body carries no ## headings, so there is "
-                + "nothing to excerpt from it.");
-            return;
-        }
+    private static void AppendBodyWithNoSections(StringBuilder sb) =>
+        sb.AppendLine(
+            "no sections: this standard's body carries no ## headings, so there is "
+            + "nothing to excerpt from it.");
 
+    /// <summary>
+    /// The one line that says the topic matched nothing in this standard, printed before the
+    /// prose it introduces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The note stands on its own and says the standard follows without it, because that is
+    /// what happens: the caller gets the standard's prose up to its budget rather than an
+    /// identity block and a list of headings to go and read. A caller with no shell cannot act
+    /// on that list, so withholding the prose made the miss expensive only for the callers the
+    /// tool exists for.
+    /// </para>
+    /// <para>
+    /// It is stated before the prose rather than after, because a reader who meets the sections
+    /// first reads the miss note as a contradiction.
+    /// </para>
+    /// </remarks>
+    /// <param name="sb">The response being built; the note is appended to it.</param>
+    /// <param name="topic">The topic the caller named, when it named one.</param>
+    private static void AppendTopicMiss(StringBuilder sb, string? topic)
+    {
         string requested = topic?.Trim().ReplaceLineEndings(" ") ?? string.Empty;
         sb.Append("no section matches the topic '").Append(requested)
-          .AppendLine("', so nothing is excerpted for it.");
-
-        List<string> headings = hit.Document.Sections
-            .OrderBy(section => section.LineNumber)
-            .Select(section => withheld.Elide(section.Heading))
-            .Where(heading => heading.Length > 0)
-            .ToList();
-
-        if (headings.Count > 0) AppendOmittedHeadingsMarker(sb, headings, "topic");
+          .AppendLine("', so the standard follows without it.");
     }
 
     /// <summary>
@@ -1250,8 +1264,8 @@ public sealed partial class DocsTools
     /// <param name="sb">The response being built; the marker line is appended to it.</param>
     /// <param name="headings">
     /// The heading names to list, in document order. Eliding them is the caller's job: a heading
-    /// is document text, and two of the three places this response echoes a heading — the
-    /// excerpt's omitted list and the no-matching-topic path — do not pass through a section.
+    /// is document text, and the place this response echoes a heading — the excerpt's omitted
+    /// list — does not pass through a section.
     /// </param>
     /// <param name="requestLabel">
     /// What the caller asked with — <c>query</c> from <see cref="Explore"/>, <c>topic</c> from
@@ -1313,6 +1327,14 @@ public sealed partial class DocsTools
                 sb.Append("[omitted for space, ask again with a larger charBudget: ")
                   .Append(string.Join(" · ", excerpt.OmittedHeadings))
                   .AppendLine("]");
+
+                // Naming what is missing tells a reader that something exists; it does not tell
+                // them the omission is a size cut rather than a gap in the answer. Without this a
+                // reader who has not been told opens the file to see what is missing, which is
+                // the cost this whole response exists to avoid.
+                sb.AppendLine(
+                    "[this cut is expected: the document is longer than the charBudget, so what "
+                    + "did not fit is left out rather than missing]");
             }
             else
             {

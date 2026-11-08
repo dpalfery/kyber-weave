@@ -24,7 +24,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 - Write testable, maintainable code
 
 ## Workflow
-1. Read the path declared as **<react-coding-standard>** before writing any UI code
+1. Fetch **<react-coding-standard>** before writing any UI code through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one; read the file only when the tool is missing
 2. Analyze UI/UX requirements and design specifications
 3. Structure components and folders as the standard lays them out
 4. Implement markup, styling, and interactivity

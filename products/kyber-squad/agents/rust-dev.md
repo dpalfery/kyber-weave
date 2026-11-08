@@ -42,7 +42,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Workflow
 
-1. Read the path declared as **<rust-coding-standard>** before writing any Rust.
+1. Fetch **<rust-coding-standard>** before writing any Rust through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Confirm the change is not in a Tauri app. If the crate sits under `src-tauri` or depends on `tauri`, return a blocker naming `tauri-dev` instead of proceeding.
 3. Identify the sub-task and read **only** the matching `rust-dev` skill reference. Do not pre-load every reference.
 4. Use Context7 or `docs.rs` to confirm the current API of any crate you are configuring — do not wait to be asked. Use the standard for which crates this repository actually takes.

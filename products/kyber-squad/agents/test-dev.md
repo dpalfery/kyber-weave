@@ -47,7 +47,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Workflow
 
-1. Read the path declared as **<test-coding-standard>** before writing any test. When the test is C#, also read **<csharp-coding-standard>**. When the host has declared another language for the files under test, apply that language's coding-standard property the same way.
+1. Fetch **<test-coding-standard>** before writing any test through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. When the test is C#, fetch **<csharp-coding-standard>** the same way. Read a file only when the tool is missing. When the host has declared another language for the files under test, apply that language's coding-standard property the same way.
 2. Identify the sub-task and read **only** the matching `test-dev` skill reference. Do not pre-load every reference.
 3. Read the relevant implementation and its acceptance criteria from the packet. Identify the test boundaries: unit, integration, E2E.
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.

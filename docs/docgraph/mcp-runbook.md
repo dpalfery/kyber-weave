@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -1246,7 +1246,41 @@ review`). Omitted, the whole standard comes back in document order under budget.
 the sections that answer it are chosen by the same rarity-weighted section ranking
 [`Excerpt`](retrieval.md#excerpt-budgeting-docs_get_coding_standard_for_technology) uses inside
 one standard.
-A topic no section clears returns no prose — it does not fall back to the whole standard.
+
+**A topic matches on its words.** Vectorising a topic produces its individual words plus one
+fused compound per adjacent pair — `error handling` becomes `error`, `handling` and
+`errorhandling` — and rarity weighting then multiplies each term by its inverse document
+frequency, so the fused pair, which almost no document states, dominates the query. A
+synthesised compound that no candidate section states is therefore dropped from the topic
+vector before scoring: a bridge to a compound nobody writes bridges to nothing, while
+question scaffolding and corpus-ubiquitous terms are already removed by rarity weighting;
+informative words the caller wrote stay in the query whether or not a section states them.
+
+Measured on this corpus against the 0.02 section floor the ranking uses, the fused pair was
+what held the tool's own documented example one ten-thousandth below the floor:
+
+| Call | Section that answers it | Before: fused pair kept | After: synthesised compound dropped |
+|---|---|---|---|
+| `csharp` + `error handling` | Errors and diagnostics | 0.0199 — a miss | 0.0239 — returned |
+| `rust` + `error handling` | Errors | 0.0828 | 0.0996 |
+| `typescript` + `error handling` | Async work, resources, and errors | 0.0575 | 0.0692 |
+| `test` + `start processes` (the compound IS stated) | Tests that start processes | 0.0764 | 0.0764 — unchanged |
+| `csharp` + `mocking time` (nothing answers) | — | 0.0092 — a miss | 0.0093 — still a miss |
+
+Dropping **every** term no section states was measured and rejected. Removing that mass
+rescales the scores that remain, and it turned `csharp` with `mocking time` — a topic nothing
+in the standard answers — from a correct miss into a confident wrong answer. The rule is
+therefore narrower than "keep only stated terms": a compound the vectorizer synthesised goes,
+an informative word the caller wrote stays.
+
+**A topic that no section clears still returns the standard.** The reply states the topic in
+one line — `no section matches the topic '<topic>', so the standard follows without it.` — and
+then returns the standard's sections in document order inside the same `charBudget`, with the
+budget marker below when the cut bit. The fallback is the tool's decision, not the index's:
+`DocumentIndex.CodingStandards` still returns no prose for a topic nothing answers, so a
+caller of the index itself sees a genuine miss. The tool turns that miss into the prose the
+caller came for, because withholding it made the miss expensive exactly for the callers with
+no shell to go and read the file with.
 
 `charBudget` is total characters of prose across the standards returned, clamped to
 1000–120000 and defaulting to 12000. One technology can be answered by more than one
@@ -1254,10 +1288,19 @@ standard — a README and an appendix beside it — and they share that one budg
 path so the same request answers the same way twice.
 
 The provenance line is emitted whole and the budget applies to the body, so what did not fit
-is named instead of silently dropped: `[omitted for space, ask again with a larger
-charBudget: …]` when the budget was what bit, and `[also in this document, not matching this
-topic: …]` when the section was dropped for irrelevance and no larger budget will bring it
-back.
+is named instead of silently dropped, and the reply says which of the two kinds of omission it
+was — only one of them is recoverable:
+
+- `[omitted for space, ask again with a larger charBudget: …]` when the budget was what bit,
+  followed by a second line, `[this cut is expected: the document is longer than the
+  charBudget, so what did not fit is left out rather than missing]`, so a reader never reads
+  a size cut as a gap in the answer and opens the file to find out what is missing.
+- `[also in this document, not matching this topic: …]` when the section was dropped for
+  irrelevance and no larger budget will bring it back. This marker never suggests one.
+
+A budget cut is normal rather than a defect — this repository's standards are longer than the
+12,000-character default — so the expected-cut line is stated beside the marker, not deduced
+by the caller from two numbers.
 
 The response reads, in order:
 
@@ -1319,12 +1362,12 @@ Four replies are not a standard at all:
   block followed by nothing: `no sections: this standard's body carries no ## headings, so
   there is nothing to excerpt from it.`
 - A standard that **has** headings but none of them matching the caller's `topic` is the other
-  case, and must not be read as the one above. It reports
-  `no section matches the topic '<topic>'` and then names the headings the standard does carry,
-  with the relevance marker a partially returned excerpt uses —
-  `[also in this document, not matching this topic: <headings>]`. The body does carry sections,
-  so this reply never claims otherwise, and no prose comes back: the topic selected nothing, and
-  a larger `charBudget` cannot fit a section the topic did not select.
+  case, and must not be read as the one above. It states the miss in one line —
+  `no section matches the topic '<topic>', so the standard follows without it.` — and then
+  returns the standard's sections in document order under the same `charBudget`, carrying the
+  omission marker above when the budget cut something. The body does carry sections, so this
+  reply never claims otherwise, and the prose is the point: a caller that receives no prose
+  opens the file, which is the cost this tool exists to prevent.
 
 ### `docs_find_documents_citing_code_symbol(symbol)`
 

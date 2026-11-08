@@ -42,7 +42,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Workflow
 
-1. Read the path declared as **<typescript-coding-standard>** before writing any TypeScript.
+1. Fetch **<typescript-coding-standard>** before writing any TypeScript through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `typescript-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 or the package's own documentation to confirm the current API of any library you are configuring — do not wait to be asked. Use the standard for which dependencies this repository actually takes.
 4. Implement the change. Match the host repository's existing module layout and naming unless the standard says otherwise.
