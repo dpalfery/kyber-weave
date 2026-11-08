@@ -351,6 +351,12 @@ review:
         # nothing and exits 0.
         include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
         run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
+      - &suppressions
+        id: suppressions
+        include: *net-paths
+        # No {changed}: the command reads the change against its base itself, so naming the changed
+        # files would scan them twice and still miss a suppression added to an unlisted file.
+        run: [kyber-weave, review, suppressions, "."]
       - &dotnet-tests
         id: tests
         # The classes this change covers, resolved by `review gates` from `review.test-map` and the
@@ -462,6 +468,7 @@ review:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
       - *dotnet-tests
       - *dash-typecheck
       - *dash-lint

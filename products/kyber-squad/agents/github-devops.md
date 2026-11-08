@@ -77,7 +77,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 
 ## Workflow
 
-1. Fetch **<github-actions-coding-standard>** before writing any workflow through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
+1. Fetch **<github-actions-coding-standard>** before writing any workflow through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Where a build step runs another technology's toolchain, fetch that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example — the same way. Read a file only when the tool is missing.
 2. Read the existing `.github/workflows/` to understand the current pipeline shape before proposing changes.
 3. Identify which environments exist and which Pulumi stacks map to them.
 4. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.

@@ -120,6 +120,18 @@ kyber-weave docs init .                       # scaffold config, catalog, ontolo
 kyber-weave docs init . --docs-root docs --target agent-skills
 ```
 
+Then answer the onboarding question once, so `run start` stops asking it. The skill walks each
+declared technology's default gates and `## Completion` text and records what you accept or change;
+the verb below records only the answer.
+
+```bash
+kyber-weave docs onboarding done      # the skill was applied
+kyber-weave docs onboarding declined  # this repository chose not to onboard
+```
+
+The setting, its two values and what the stop is for are in
+[Configuration § Onboarding](configuration.md#onboarding).
+
 KyberDash shares one settings store across the CLI, the web dashboard, and the tray; read and
 write it with `kyberdash dash settings`. The values are `folder_import.scheduled`,
 `jobs.paused`, `jobs.refresh_cadence_minutes`, `receiver.hosted`, and `dashboard.port`. The
@@ -249,6 +261,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 | [`docs mcp-wire`](docgraph/mcp-runbook.md#docs-mcp-wire) | `-t\|--target <TARGETS>` (comma list of harness slugs: `factory`, `claude-code`, `cursor`, `vscode`, `opencode`), `--dry-run` | Write the declared `mcp.required-servers` entries into the named harnesses' repository-scope configuration. A declared command that names a path is resolved against the repository under inspection, not the working directory. No `--target` previews and writes nothing; `--dry-run` prints the per-file change — file, harness, and the servers it would add — and writes nothing including the receipt. A named target already holding every declared server is reported as `nothing to write` at exit 0. A configuration that is a symbolic link, one this process may not inspect, and a run whose receipt cannot be persisted are refused rather than followed or half-written. |
 | [`docs mcp-unwire`](docgraph/mcp-runbook.md#docs-mcp-unwire) | `-t\|--target <TARGETS>` | Restore the files a receipt records as `inserted` and delete the ones it records as `created`. No `--target` lists the recorded files and removes nothing. Refuses when the file changed since the write, when it is a symbolic link, and when it may not be read. A record for a write that never landed is recognised from the bytes on disk and dropped instead of being refused or restored. |
 | [`docs mcp-migrate`](docgraph/mcp-runbook.md#docs-mcp-migrate) | `-t\|--target <TARGETS>` (harness slugs, plus `declaration` for a host with no harness files), `--dry-run` | Rename a proven old MCP server key to its new name — `kyber-weave` to `kw-docs`, `kyberdash` to `kw-dash`, `kyber-weave-arbiter` to `kw-arbiter` — in the named harnesses' repository-scope configuration, and migrate the host declaration's `mcp:` section with them. No `--target` previews every old key found with its proof result and the writable targets that would take it, and writes nothing. A key is renamed only where the entry also proves the launch: `argv[0]`'s file name equals the shipped binary, with the next argument `serve` for the arbiter and `mcp` for the dash. An unproven entry is reported with the manual edit and never touched; Codex, ZCode, and the Copilot repository settings are reported with the snippet and never written. `--dry-run` prints the same report and writes nothing, not even the receipt. |
+| [`docs onboarding`](configuration.md#onboarding) | `<done\|declined>` (required), `[path]` | Record that this repository has answered the onboarding question, in `.kyber-weave/kyber-weave.yml`, and re-splice the Config Reg block in `AGENTS.md` that publishes it. The value is written in place, so the operator's comments and every other key survive; the block is re-spliced because an answer no agent instruction file carries is one no run can honour. `done` means the onboarding skill was applied; `declined` means the repository chose not to onboard, and it ends the question exactly as `done` does. Exit `0` recorded (an existing identical answer is a no-op at `0`), `2` an answer that is not one of the two — nothing is written, the refusal names both — `1` an operational failure: no configuration to edit, or a file that could not be read or written. |
 | [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs drift`](docgraph/governance.md#entity-drift--docs-drift) | validate flags + `--docs-root` | Resolve documented symbols against the CodeGraph index (`KW-DOC-DRIFT-*`). |
 | [`docs export-graph`](docgraph/architecture.md) | validate flags + `--docs-root`, `-o\|--out <DIR>` (default `./build/doc-graph`) | Export the documentation graph as `nodes.jsonl` and `edges.jsonl`. |
@@ -282,7 +295,8 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 ### `run` — run start
 
 Owned by [Run start: fetch and branch first](kyber-squad/architecture.md#run-start-fetch-and-branch-first),
-with the settings it reads in [Configuration § Run controls](configuration.md#run-controls).
+with the settings it reads in [Configuration § Onboarding](configuration.md#onboarding) and
+[§ Run controls](configuration.md#run-controls).
 
 | Verb | Flags | What it does |
 |---|---|---|
@@ -300,17 +314,24 @@ kyber-weave run start --harness <token> --type <type> --slug <slug> \
 2. Requires the current directory to be inside a git repository.
 3. Loads the repository's configuration; a configuration failure is exit `1`, with the diagnostics
    printed the way every other command prints them.
-4. Requires the `codegraph` binary to resolve on `PATH`; absent is exit `3`, whose remedy is an
+4. **Stops if the onboarding question is unanswered** (exit `1`). A repository whose configuration
+   sets no `onboarding:` value has never been asked which technologies, gates and standards it
+   wants, so the run names the `kyber-docs-onboarding-and-assessment` skill and
+   [`docs onboarding`](configuration.md#onboarding), and creates no branch. This is the first check
+   after the configuration, ahead of the tool checks and the fetch, because the gates the run will
+   be held to are exactly what onboarding chooses; an autonomous run stops here too, asking nothing
+   and writing nothing. See [Configuration § Onboarding](configuration.md#onboarding).
+5. Requires the `codegraph` binary to resolve on `PATH`; absent is exit `3`, whose remedy is an
    install rather than a repair.
-5. Fetches with `git fetch origin --prune`.
-6. Resolves the base: `run.base-branch` when set, `origin/HEAD` otherwise. **`main` is never
+6. Fetches with `git fetch origin --prune`.
+7. Resolves the base: `run.base-branch` when set, `origin/HEAD` otherwise. **`main` is never
    assumed**, so a repository whose default branch is `develop` is compared against `develop`.
-7. Refuses `--resume` naming neither a local branch nor `origin/<branch>` (exit `2`).
-8. Reads the versions and the divergence *before* switching anything, so the report describes the
+8. Refuses `--resume` naming neither a local branch nor `origin/<branch>` (exit `2`).
+9. Reads the versions and the divergence *before* switching anything, so the report describes the
    checkout as the operator left it. `--failing-version` is what makes "the defect is not the
    commit you are looking at" visible.
-9. Creates the branch with `--no-track`, in the checkout when it is clean and carries no other
-   worktree, and in a worktree of its own otherwise.
+10. Creates the branch with `--no-track`, in the checkout when it is clean and carries no other
+    worktree, and in a worktree of its own otherwise.
 
 **The branch and title shapes.** Both name the harness, because the diff does not:
 
@@ -603,7 +624,8 @@ risk. The three rules below mirror the contract in
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
-| [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. The name is resolved before the configuration is loaded, and the configuration before the binary is probed, so `2` outranks `1` outranks `3`. |
+| [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure, an unanswered onboarding setting, or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. The name is resolved before the configuration is loaded, the configuration before the onboarding check, and onboarding before the binary is probed, so `2` outranks `1` outranks `3`. |
+| `docs onboarding` | `0` the answer is recorded (an answer already holding that value is a no-op at `0`); `2` an answer that is neither `done` nor `declined`, with nothing written; `1` no configuration to edit, or a file that could not be read or written |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 
 ### Repository scripts
