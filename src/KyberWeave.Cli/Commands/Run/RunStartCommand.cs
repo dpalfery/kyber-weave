@@ -351,6 +351,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         out IReadOnlyList<RunStartCompletedTask> completed,
         out string? completedWarning)
     {
+        ArgumentNullException.ThrowIfNull(readLog);
+
         GitOutcome log;
         try
         {

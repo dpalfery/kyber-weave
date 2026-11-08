@@ -36,6 +36,36 @@ public sealed class RunStartResumeLogTests
     }
 
     /// <summary>
+    /// A cancelled wait while reading the resume log escapes instead of becoming a warning:
+    /// cancellation is the caller's signal, not a log that cannot be read.
+    /// </summary>
+    [Fact]
+    public void ACancelledWaitWhileReadingTheResumeLogEscapes()
+    {
+        Assert.Throws<OperationCanceledException>(() =>
+            RunStartCommand.TryReadResumeLog(
+                () => throw new OperationCanceledException(),
+                "origin/claude/fix/tighten-the-gate",
+                out _,
+                out _));
+    }
+
+    /// <summary>
+    /// A missing log reader is a programming error, not an unreadable log: a null delegate
+    /// throws instead of passing as a soft warning.
+    /// </summary>
+    [Fact]
+    public void AMissingLogReaderWhileReadingTheResumeLogThrows()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            RunStartCommand.TryReadResumeLog(
+                null!,
+                "origin/claude/fix/tighten-the-gate",
+                out _,
+                out _));
+    }
+
+    /// <summary>
     /// A git log that exits non-zero warns and continues with no finished tasks: a branch
     /// carrying none is a normal beginning, not a failure.
     /// </summary>
