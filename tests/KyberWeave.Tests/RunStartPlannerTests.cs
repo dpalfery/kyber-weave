@@ -195,6 +195,25 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     When the base is origin/HEAD and neither origin/HEAD nor an origin default branch can be resolved,
+    ///     the command fails rather than guessing 'main'.
+    /// </summary>
+    [Fact]
+    public void FailsWhenOriginHeadCannotBeResolvedInsteadOfGuessingMain()
+    {
+        _probe.GitRemote("symbolic-ref", "HEAD", "refs/heads/nonexistent");
+        _probe.Git("remote", "set-head", "origin", "-d");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("no ref for the base origin/HEAD resolves", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A fetch that fails stops the run when <c>stop-on-tool-failure</c> is unset, because absence is
     ///     the stop setting and a run that continues from a base it could not refresh plans against stale
     ///     history.
@@ -374,6 +393,12 @@ internal sealed class RunStartProbe : IDisposable
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed with exit {result.ExitCode}: {result.Output}");
+    }
+
+    /// <summary>Runs git on the bare origin repository.</summary>
+    public void GitRemote(params string[] arguments)
+    {
+        GitAt(Remote, arguments);
     }
 
     /// <summary>Runs git in the working clone and returns its standard output, asserting success.</summary>

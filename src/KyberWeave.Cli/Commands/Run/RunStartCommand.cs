@@ -306,11 +306,12 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         if (!string.IsNullOrWhiteSpace(originHead))
+        {
             candidates.Add(originHead);
+            candidates.Add(RunStartPlanner.BaseBranchName(originHead, null));
+        }
 
         candidates.Add(RunStartPlanner.RemoteHead);
-        candidates.Add(RunStartPlanner.Remote + "/main");
-        candidates.Add("main");
         return candidates;
     }
 
