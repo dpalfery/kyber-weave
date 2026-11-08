@@ -19,6 +19,7 @@ public static class ArbiterTriggerCatalog
         "delegation.target-profile",
         "delegation.prompt",
         "delegation.paths",
+        "delegation.planning-paths",
         "delegation.plan-file",
         "delegation.task",
         "plan.exists",
