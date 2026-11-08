@@ -276,25 +276,46 @@ public static class ReviewConfigLoader
             if (string.IsNullOrWhiteSpace(path))
                 throw new YamlException($"{where} has an empty entry. Name a path such as 'dash/node_modules'.");
 
+            string trimmed = path.Trim();
             // Both separators are accepted on every host; the stored form uses '/' only.
-            string spelled = path.Replace('\\', '/');
-            if (spelled.StartsWith('/') || Path.IsPathRooted(path))
+            string spelled = trimmed.Replace('\\', '/');
+            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || spelled.StartsWith('~') || LooksLikeWindowsDriveAbsolute(spelled))
             {
                 throw new YamlException(
                     $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
             }
 
-            if (spelled.Split('/').Any(segment => segment == ".."))
+            List<string> segments = [];
+            foreach (string segment in spelled.Split('/'))
             {
-                throw new YamlException(
-                    $"{where} '{path}' contains '..' and would leave the repository root. Name a path inside it.");
+                if (segment is "" or ".")
+                    continue;
+
+                if (segment == "..")
+                {
+                    throw new YamlException(
+                        $"{where} '{path}' contains '..' and would leave the repository root. Name a path inside it.");
+                }
+
+                segments.Add(segment);
             }
 
-            parsed.Add(spelled);
+            if (segments.Count == 0)
+            {
+                throw new YamlException(
+                    $"{where} '{path}' names the repository root. Name a path inside it, such as 'dash/node_modules'.");
+            }
+
+            parsed.Add(string.Join('/', segments));
         }
 
         return parsed;
     }
+
+    private static bool LooksLikeWindowsDriveAbsolute(string path) =>
+        path.Length >= 2
+        && char.IsAsciiLetter(path[0])
+        && path[1] == ':';
 
     /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
     private static string? ParseOs(string? os, string gateWhere)

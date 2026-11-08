@@ -175,7 +175,22 @@ public static class GateRunner
     {
         foreach (string path in gate.RequiresPaths)
         {
-            string full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+            string full;
+            try
+            {
+                full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return new GateResult(
+                    gate.Id,
+                    gate.Blocking,
+                    -1,
+                    MissingRequirementSummary(path),
+                    0,
+                    Outcome: GateOutcome.NotStarted);
+            }
+
             if (Path.Exists(full))
                 continue;
 

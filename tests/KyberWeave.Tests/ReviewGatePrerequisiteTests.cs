@@ -1,7 +1,9 @@
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -138,6 +140,57 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
         Assert.DoesNotContain(
             warnings,
             warning => warning.Contains("requires-paths", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CouncilGateRequiresPaths_NormalizesWhitespaceAndDotAndTrailingSlashes()
+    {
+        const string yaml = """
+                            review:
+                              gates:
+                                - id: dash-typecheck
+                                  requires-paths: ["  ./dash/node_modules/  "]
+                                  run: [npm, run, --prefix, dash, typecheck]
+                            """;
+
+        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
+        ReviewGate gate = Assert.Single(config.Gates);
+        Assert.Equal(["dash/node_modules"], gate.RequiresPaths);
+    }
+
+    [Theory]
+    [InlineData("/dash/node_modules")]
+    [InlineData("~/dash/node_modules")]
+    [InlineData("C:/dash/node_modules")]
+    [InlineData("c:dash/node_modules")]
+    [InlineData("dash/../../node_modules")]
+    [InlineData(".")]
+    [InlineData("./")]
+    public void CouncilGateRequiresPaths_RefusesAbsoluteEscapingOrRootPaths(string invalidPath)
+    {
+        string yaml = $"""
+                      review:
+                        gates:
+                          - id: dash-typecheck
+                            requires-paths: ["{invalidPath}"]
+                            run: [npm, run, --prefix, dash, typecheck]
+                      """;
+
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+    }
+
+    [Fact]
+    public void AGateWithMalformedRequiresPathSafelyReportsNotStarted()
+    {
+        ReviewGate gate = new("dash-typecheck", ["git", "status"], true, 900)
+        {
+            RequiresPaths = ["invalid\0path"]
+        };
+
+        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [gate] }, _repo);
+        GateResult result = Assert.Single(report.Gates);
+        Assert.Equal(GateOutcome.NotStarted, result.Outcome);
+        Assert.False(result.Passed);
     }
 
     /// <summary>
