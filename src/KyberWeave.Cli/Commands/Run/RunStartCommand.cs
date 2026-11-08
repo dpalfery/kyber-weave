@@ -205,24 +205,11 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         string? completedWarning = null;
         if (resumeRef.Length > 0)
         {
-            try
-            {
-                GitOutcome log = runner.CommitMessages(startRef, resumeRef);
-                if (log.Succeeded)
-                {
-                    completed = RunStartResumeReader.Read(log.StandardOutput);
-                }
-                else
-                {
-                    completedWarning =
-                        $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                completedWarning =
-                    $"git log could not read the commits on '{resumeRef}': {ex.Message}";
-            }
+            TryReadResumeLog(
+                () => runner.CommitMessages(startRef, resumeRef),
+                resumeRef,
+                out completed,
+                out completedWarning);
         }
 
         // Read before anything is switched: the versions and the divergence describe the checkout as the
@@ -341,6 +328,53 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     public int Execute(CommandContext context, RunStartSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reads the resumed branch's finished tasks from its commit log. A log that cannot be read
+    /// is a warning on a resume that can still continue the work; anything else is reported
+    /// through <paramref name="completedWarning" /> with no finished tasks.
+    /// </summary>
+    /// <remarks>
+    /// The catch stays narrow on purpose: a cancelled wait escapes, and an
+    /// <c>ArgumentException</c> — the guards on <c>RunStartRunner.CommitMessages</c> throw it for
+    /// an empty ref — is a programming error, not a log that cannot be read, so it escapes too
+    /// instead of passing as a soft warning.
+    /// </remarks>
+    /// <param name="readLog">Reads the commit log between the base and the resumed ref.</param>
+    /// <param name="resumeRef">The resumed ref, named in the warning when the log cannot be read.</param>
+    /// <param name="completed">The finished tasks the log names, or empty when it cannot be read.</param>
+    /// <param name="completedWarning">Null when the log read cleanly.</param>
+    internal static void TryReadResumeLog(
+        Func<GitOutcome> readLog,
+        string resumeRef,
+        out IReadOnlyList<RunStartCompletedTask> completed,
+        out string? completedWarning)
+    {
+        GitOutcome log;
+        try
+        {
+            log = readLog();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not ArgumentException)
+        {
+            completed = [];
+            completedWarning =
+                $"git log could not read the commits on '{resumeRef}': {ex.Message}";
+            return;
+        }
+
+        if (log.Succeeded)
+        {
+            completed = RunStartResumeReader.Read(log.StandardOutput);
+            completedWarning = null;
+        }
+        else
+        {
+            completed = [];
+            completedWarning =
+                $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
+        }
     }
 
     /// <summary>
