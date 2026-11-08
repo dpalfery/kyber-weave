@@ -1784,7 +1784,7 @@ This check is the documentation half of a run's start; the branch half is
 `conductor` (under **Shared lifecycle invariants**) and `bug-crusher` (step 0 of **Workflow**)
 both run a tooling check before they do anything else. The check is an invariant of the squad,
 not a convenience, and **a failure stops the run**
-([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 - **Predicate.** The step runs only when the repository has governed docs: `.kyber-weave/kyber-weave.yml`
   exists at the git root, and the docs root it declares exists as a directory. A repository without
@@ -1818,7 +1818,7 @@ not a convenience, and **a failure stops the run**
 
 **This reverses the rule the squad carried before 2026-11-07**, which was "warn and continue; never
 block a run on it". It is the owner's explicit decision, recorded in
-[ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
+[ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
 rejected. The cost is a repository that cannot repair its index stopping code-editing runs until it
 does; the alternative was a run that proceeds as if its code search worked.
 

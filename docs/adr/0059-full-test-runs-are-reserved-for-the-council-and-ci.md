@@ -4,18 +4,22 @@ title: Full test runs are reserved for the review council and CI
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-07
 code-refs:
   - FullSuiteGate
   - FullSuiteSelection
   - FullSuiteRefusal
+  - GateRunner
+  - ReviewGate
 ---
 
 # ADR 0059: Full test runs are reserved for the review council and CI
 
 ## Status
 
-Accepted, 2026-11-06.
+Accepted, 2026-11-06. Amended 2026-11-07: a review reaches its verdict in one pass, so a refused
+gate stops an `--all` run, one gate can be re-run on demand, and a gate with a missing dependency
+reports that fact rather than a failure (decisions 6 to 8).
 
 ## Context
 
@@ -37,8 +41,9 @@ cannot stop a run, so the rule is enforced in code.
    - **B. `kyber-weave review gates --council`.** A gate that declares `full-suite: true` in
      `.kyber-weave/kyber-weave.yml` is refused unless `--council` is given or stdin is an
      interactive terminal. A refused gate is a blocking failure: diagnostic `KW-REVIEW-033`
-     (Error, a gate that never started), the command exits 1, and the other gates still run. The `--agent` task gates are
-     not affected. The rule lives in `FullSuiteGate`
+     (Error, a gate that never started) and exit 1. What happens to the rest of the run depends
+     on how it was asked for — see decision 6. The `--agent` task gates are not affected. The rule
+     lives in `FullSuiteGate`
      (`src/KyberWeave.Core/Configuration/FullSuiteGate.cs`), and the command applies it in
      `src/KyberWeave.Cli/Commands/Review/ReviewGatesCommand.cs`.
    - **C. `scripts/fast-loop.sh`.** `--full`, `--scoped` and `--regenerate` exit 89 before any
@@ -70,6 +75,17 @@ cannot stop a run, so the rule is enforced in code.
 5. **The shipped gates carry the key.** The `test`, `ts-test` and `cargo-test` gates in
    `.kyber-weave/kyber-weave.yml` set `full-suite: true`. The CI review gate template passes
    `--council`. A whole-suite gate without the key runs unrefused, so a new one must set it.
+6. **Only an `--all` run stops when a full-suite gate is refused.** Under `--all` the run exits
+   at once with no gate started. A scoped call without `--council` keeps the existing behaviour
+   and still runs the other gates, because the pre-push self-review relies on their evidence and
+   an unconditional stop would leave it none.
+7. **One gate can be re-run on demand.** A new repeatable `review gates --gate <id>` runs exactly
+   the gate named, with `--council` when that gate is a full-suite gate, so a reviewer confirming
+   one fix does not pay for the whole suite again.
+8. **A gate whose dependency is absent does not start.** A new optional gate key
+   `requires-paths` names the paths a gate needs. When one is absent the gate does not start,
+   reports `KW-REVIEW-033` with the install hint, and stays a blocking failure, so it never reads
+   as a code failure and never silently passes. The dash gates declare `dash/node_modules`.
 
 ## Alternatives Considered
 
@@ -109,7 +125,9 @@ cannot stop a run, so the rule is enforced in code.
 The CLI, `scripts/proc-guard.sh`, the `full-suite` configuration key and
 `templates/github-actions/kyber-weave-review-gate.yml` ship together. An older CLI, such as
 `0.1.8-rc.19`, warns `KW-CONFIG-002` on the `full-suite` key and does not know `--council`. A host
-that pins an older CLI must update it before its council can run the guarded gates.
+that pins an older CLI must update it before its council can run the guarded gates. The same holds
+for `requires-paths` and `--gate`: a CLI older than the key warns `KW-CONFIG-002` on it, so a host
+whose dash gates declare it sees one warning per gate until the CLI is updated.
 
 ## Consequences
 

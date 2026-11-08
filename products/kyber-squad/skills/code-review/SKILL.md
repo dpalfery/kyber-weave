@@ -53,14 +53,18 @@ declared, the report says so in one line rather than reviewing without notice.
 
 They are independent. Neither waits on the other.
 
-**Gates.** Two commands, and they are the only things this skill executes:
+**Gates.** Two commands, and they are the only things this skill executes. This section is the only place the review command is written down: the reviewer derives its command from here, and no plan, index entry or task packet restates it, because a copy goes stale the moment the gate list or one of its flags moves.
 
 ```bash
 kyber-weave review gates . --base <ref> --out artifacts/gates.json
+kyber-weave review gates . --base <ref> --out artifacts/gates.json --council
+kyber-weave review gates . --base <ref> --gate <gate-id> --out artifacts/gates.json --council
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
-The end-of-run council (`code-reviewer`) appends `--council` to the gates command, because only the council and CI may run the full-suite gates. Anyone else running this procedure, including the pre-push self-review gate, never adds it.
+The end-of-run council (`code-reviewer`) runs the second form: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds it.
+
+The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
 Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
 denied write tool on the reviewer does not block the run. If the files cannot be persisted,

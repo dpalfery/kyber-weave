@@ -256,7 +256,7 @@ stop-on-tool-failure: false
 It is not published in the `AGENTS.md` Config Reg block, so a portable instruction file cannot read
 it directly; the CLI and the MCP server are the readers. See
 [the run-start rule](kyber-squad/architecture.md#run-start-documentation-check) and
-[ADR 0060](adr/0060-code-editing-runs-stop-on-unusable-tools.md).
+[ADR 0061](adr/0061-code-editing-runs-stop-on-unusable-tools.md).
 
 ### Intake assessment
 
@@ -550,7 +550,17 @@ review:
 A gate may set `full-suite: true` (a boolean, default `false`). It marks a gate that runs the full product
 suite; the shipped `test`, `ts-test` and `cargo-test` gates set it. Such a gate runs only when the caller
 declares itself the review council or CI with `--council`, or when stdin is a terminal. Otherwise the gate is
-reported as a refused blocking failure (`KW-REVIEW-033`, a gate that never started) and not run. The other gates still run.
+reported as a refused blocking failure (`KW-REVIEW-033`, a gate that never started) and not run. The other gates still run,
+unless the caller asked for the whole suite with `--all`: under `--all` a refused gate ends the run at once,
+with no gate started and exit `1`, because the declared suite cannot be delivered.
+
+A gate may set `requires-paths`: a list of repository-relative paths the gate needs before it can start. The
+dash gates here declare `dash/node_modules`. When a listed path is absent the gate does not start — it reports
+`exitCode: -1` and `outcome: "notStarted"` under `KW-REVIEW-033`, at Error when the gate is blocking and at
+Warning otherwise, with a summary that names the path and the install that unblocks it. It never passes, and it
+never reads as a code failure. An empty list, an empty entry, an absolute path, or a path containing `..` is
+refused when the configuration loads, so an entry that could never name something inside the repository never
+reaches a run.
 
 ## Harness profiles
 

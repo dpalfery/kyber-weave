@@ -60,7 +60,7 @@ degraded to grep. The carve-out is unchanged and is now **applied**: `codegraph`
 agent `GrantsOrchestratorExcludedMcpServers` entitles, `context7` is not widened, and the names come
 from the toolchain roster rather than from a list inside a renderer. Decision 2 states the boundary
 and the per-target table below states each vehicle; the run rule that made the gap expensive is
-[ADR 0060](0060-code-editing-runs-stop-on-unusable-tools.md).
+[ADR 0061](0061-code-editing-runs-stop-on-unusable-tools.md).
 
 ## Decision
 

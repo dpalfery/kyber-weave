@@ -220,9 +220,15 @@ review:
     # only: the gate bodies are dash/package.json scripts whose names are
     # fixed (`typecheck`, `test`, `lint`, `check:reachable`), so a script
     # rename is a gate-name collision that surfaces on the very next review.
+    #
+    # Each declares dash/node_modules in requires-paths. Without it a
+    # contributor on a fresh clone is handed module-not-found output from a
+    # tool that never had what it needed; with it the gate does not start and
+    # the review names the install that unblocks it.
     - id: ts-typecheck
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -241,6 +247,7 @@ review:
     - id: ts-test
       include: ["dash/**"]
       run: [scripts/proc-guard.sh, run, --council, --, npm, run, --prefix, dash, test, --, --coverage]
+      requires-paths: ["dash/node_modules"]
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
       blocking: true
@@ -254,6 +261,7 @@ review:
     - id: ts-lint
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -262,6 +270,7 @@ review:
     - id: ts-reachable
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, "check:reachable"]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]

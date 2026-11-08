@@ -109,6 +109,18 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     }
 
     [Theory]
+    [InlineData(" \" /web\"")]
+    [InlineData(" \" /\"")]
+    [InlineData(" \" C:/web\"")]
+    public void WorkingDirectoryWithLeadingWhitespaceAbsoluteIsRefused(string workingDirectory)
+    {
+        Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
+        WriteConfig(CouncilYaml(workingDirectory));
+
+        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), CouncilGateId);
+    }
+
+    [Theory]
     [InlineData("/etc")]
     [InlineData("../outside")]
     [InlineData("missing")]

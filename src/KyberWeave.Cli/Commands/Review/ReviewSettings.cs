@@ -44,6 +44,13 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run all declared repository gates on the host OS without include path filtering.")]
     public bool All { get; set; }
 
+    [CommandOption("--gate <ID>")]
+    [Description("Run only the repository gate with this id, in declaration order. Repeat to name several.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Gate { get; set; } = [];
+
     [CommandOption("--council")]
     [Description("Declare this run as the review council or CI, which alone may run gates marked full-suite. " +
                  "Without it, full-suite gates are refused when stdin is not a terminal.")]

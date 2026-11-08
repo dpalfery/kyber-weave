@@ -1573,7 +1573,7 @@ kyber-weave doctor --ensure .
 
 `--ensure` is the one command a worker runs before it starts work, in the tree it will work
 in — the canonical checkout, or the worktree when the task runs in one. It leaves the tooling
-usable rather than only reporting on it ([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+usable rather than only reporting on it ([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 1. `codegraph sync` when `.codegraph/` exists, `codegraph init .` when it does not.
 2. **Restore any tracked file the preparation just rewrote** — and never a file that was
@@ -1661,7 +1661,7 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on
 another branch can get answers about the wrong code. `branch=` in the provenance line is what
 makes that visible. This is the rule for each role
-([ADR 0060](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 | Role | Code questions | Docs and standards | If the check fails |
 |---|---|---|---|

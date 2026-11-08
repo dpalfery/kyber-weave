@@ -46,6 +46,8 @@ internal sealed class ReviewGateYaml
     public bool? FailOnOutput { get; init; }
 
     public bool? FullSuite { get; init; }
+
+    public List<string>? RequiresPaths { get; init; }
 }
 
 /// <summary>One entry's <c>applies-when</c> mapping: the paths the gate applies to.</summary>
