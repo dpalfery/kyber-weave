@@ -108,7 +108,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // operator to repair a remote that was never the thing standing in the way.
         if (RunStartPlanner.NeedsOnboarding(config, configPath is not null))
         {
-            return StopForOnboarding(config);
+            return StopForOnboarding(config, configPath, repositoryRoot);
         }
 
         if (!RunStartRunner.CodeGraphBinaryIsAvailable())
@@ -525,11 +525,15 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// "onboarding is unset" leaves the operator to find both. In autonomous mode it also says that this run
     /// will neither ask nor record an answer, because the setting stays exactly as it was found.
     /// </remarks>
-    private static int StopForOnboarding(KyberWeaveConfig config)
+    private static int StopForOnboarding(KyberWeaveConfig config, string? configPath, string repoRoot)
     {
+        string location = configPath is not null
+            ? Path.GetRelativePath(repoRoot, configPath).Replace('\\', '/')
+            : ".kyber-weave/kyber-weave.yml";
+
         AnsiConsole.MarkupLine(
             $"[red]{Markup.Escape(CommandName)}: error:[/] this repository has not completed onboarding: " +
-            ".kyber-weave/kyber-weave.yml sets no 'onboarding:' value, so a run would plan against " +
+            $"{Markup.Escape(location)} sets no 'onboarding:' value, so a run would plan against " +
             "gates and standards that nobody chose for it.");
         AnsiConsole.MarkupLine(
             $"[grey]→ run the {Markup.Escape(RunStartPlanner.OnboardingSkill)} skill to choose this " +
