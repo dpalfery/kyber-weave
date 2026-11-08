@@ -316,20 +316,21 @@ publishing an empty branch cannot look configured while resolving to nothing a r
 against.
 
 **A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
-renders `<stop-on-tool-failure>`, `<run-base-branch>` and `<run-harness-names>` into the
-generated block of the repository root `AGENTS.md` only when the key was actually written:
+renders `<run-base-branch>` and `<run-harness-names>` into the generated block of the repository
+root `AGENTS.md` only when the key was actually written:
 
 ```markdown
-- **<stop-on-tool-failure>**: `false`
 - **<run-base-branch>**: `develop`
 - **<run-harness-names>**: `true`
 ```
 
 An absent key publishes no line, because an agent already applies the documented default and
-only a value somebody chose can differ from it. The three names are reserved: declaring any of
-them under `config-reg:` is rejected with the setting that owns it named in the refusal. They
+only a value somebody chose can differ from it. Declaring either name (or `stop-on-tool-failure`)
+under `config-reg:` is rejected with the setting that owns it named in the refusal. They
 are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
-but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`).
+but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`). As noted above, `stop-on-tool-failure`
+is deliberately not published in the block: the CLI and the MCP server are the readers, not an
+agent instruction file (ADR 0061).
 
 The run that reads them is [`run start`](cli-command-surface.md#run--run-start), which exits `1`
 on a tool failure while `stop-on-tool-failure` is on — and warns instead of stopping when it is
