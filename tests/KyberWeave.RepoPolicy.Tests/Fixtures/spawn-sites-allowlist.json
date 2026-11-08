@@ -908,6 +908,12 @@
       "bound": "ProcessRunner.Run with GitTimeout = 5 s (CorpusProvenance.cs:31); the process tree is killed on expiry."
     },
     {
+      "file": "src/KyberWeave.Mcp/CodeGraphFreshness.cs",
+      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
+      "count": 1,
+      "bound": "The docs server's only spawn: one CodeGraph child through the repository's deadlock-safe runner, whose timeout is CodeGraphFreshness.RefreshBound (30 s) and kills the process tree on expiry. It exists because the provisioner takes an IProcessExecutor and the CLI's implementation is not reachable from this assembly, so this is the same three-line shape rather than a second way to start a process; the cross-process lock and the doctor's own executor are reused."
+    },
+    {
       "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, ApmInstallTimeout);",
       "count": 1,
