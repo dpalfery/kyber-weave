@@ -234,11 +234,12 @@ individual words plus one fused compound per adjacent pair — `error handling` 
 `errorhandling` — and rarity weighting multiplies each term by its inverse document
 frequency, so a fused pair that almost no document states outweighs the words the caller
 actually wrote. `TopicVector` therefore drops a synthesised compound that no candidate section
-states, and keeps every word the caller wrote whether or not a section states it. Both the
-refused and the accepted variant of this rule were measured on this corpus: dropping *every*
-term no section states was rejected because removing that mass rescales the remaining scores,
-and a topic nothing answers (`csharp` with `mocking time`) came back a confident wrong answer
-instead of a miss.
+states, while question scaffolding and corpus-ubiquitous terms are already removed by rarity
+weighting; informative words the caller wrote stay in the query whether or not a section
+states them. Both the refused and the accepted variant of this rule were measured on this
+corpus: dropping *every* term no section states was rejected because removing that mass
+rescales the remaining scores, and a topic nothing answers (`csharp` with `mocking time`)
+came back a confident wrong answer instead of a miss.
 
 **A section dropped for irrelevance and a section dropped for lack of budget are reported
 differently.** Anything that did not fit is named in the response by heading, so the caller

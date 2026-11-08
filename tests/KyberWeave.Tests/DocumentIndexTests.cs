@@ -821,6 +821,21 @@ public sealed class CodingStandardsLookupTests : IDisposable
         Assert.False(hit.Excerpt.BudgetExhausted);
     }
 
+    /// <summary>
+    /// Question scaffolding words (like 'why') are removed by rarity weighting while informative
+    /// words (like 'naming') survive, so 'why naming' resolves to the 'Naming' section.
+    /// </summary>
+    [Fact]
+    public void TopicQueryDropsQuestionScaffoldingBeforeSectionScoring()
+    {
+        DocumentIndex index = OneStandard(CsharpSections());
+
+        DocumentHit hit = index.CodingStandards("csharp", topic: "why naming", charBudget: 1000).Single();
+
+        DocumentSection only = Assert.Single(hit.Excerpt.Sections);
+        Assert.Equal("Naming", only.Heading);
+    }
+
 
 
     /// <summary>
