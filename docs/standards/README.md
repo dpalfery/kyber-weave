@@ -4,7 +4,7 @@ title: Coding standards
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-08
 ---
 
 # Coding standards
@@ -36,6 +36,35 @@ To bootstrap a repository with the full suite of 14 Kyber Squad coding standards
 Do not run that on this repository: it would declare the technologies this repository does not use.
 
 A technology name is a slug: lowercase letters, digits and single hyphens.
+
+## A standard is read through the tool, not as a file
+
+Every code-writing worker — the thirteen development agents and their skills — reaches the
+standard for its stack with the **`docs_get_coding_standard_for_technology`** MCP tool, naming
+the technology and, when it helps, the topic it is about to work on:
+
+```
+docs_get_coding_standard_for_technology(technology: "csharp", topic: "error handling")
+```
+
+The tool returns this repository's standard for that technology — its rule ids first, then the
+sections that answer the topic, inside a character budget. Reading
+`docs/standards/<technology>/README.md` directly is allowed **only when the tool is missing**.
+It is not the fallback for a cut answer: an excerpt trimmed to fit the budget says so and says
+the cut is expected, and asking again with a larger `charBudget` or a narrower topic is the
+move. Opening the file instead re-creates the whole cost the size limit and the tool exist to
+prevent, which is why the instruction sits in the same workflow step that names the tool, in
+the skill beside the agent as well as in the agent itself.
+
+**The registry property names stay in the instruction.** A worker asks for
+`<csharp-coding-standard>`, not a bare technology name, because the tool accepts either form and
+the property is what the root `AGENTS.md` declares. Two behaviours depend on the name being
+there: an undeclared technology, and a technology declared with no standard scaffolded yet,
+both return the worker's own question to put to the human rather than a confident answer from
+somewhere else. The property name is how a worker knows which question to ask.
+
+The tool's own contract, including its topic match and its budget, is in the
+[DocGraph MCP runbook](../docgraph/mcp-runbook.md#docs_get_coding_standard_for_technologytechnology-topic--null-charbudget--12000).
 
 ## What belongs in a standard
 

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0046-docs-explore-section-answer
@@ -225,12 +225,33 @@ standard returned** for the technology, split with a 1500-character floor each.
 Within a standard, `##` sections are ranked by rarity-weighted similarity, selected until
 the budget runs out, then **emitted in document order** so the prose still reads. Short
 sections are damped, because a three-word stub can overlap a query almost perfectly while
-saying nothing.
+saying nothing. A section is selected only when its score clears the 0.02 section floor, with
+the top-ranked section always returned so the answer is never a path and a list of headings.
 
-Anything that did not fit is named in the response by heading. The caller learns what else
-the document holds without opening it, and can ask again deliberately — and is told
-whether a section was dropped for lack of budget or lack of relevance, since only the
-former makes asking again with a larger `charBudget` worthwhile.
+**A topic is scored on its words, not its phrase.** Vectorising the topic yields its
+individual words plus one fused compound per adjacent pair — `error handling` also produces
+`errorhandling` — and rarity weighting multiplies each term by its inverse document
+frequency, so a fused pair that almost no document states outweighs the words the caller
+actually wrote. `TopicVector` therefore drops a synthesised compound that no candidate section
+states, and keeps every word the caller wrote whether or not a section states it. Both the
+refused and the accepted variant of this rule were measured on this corpus: dropping *every*
+term no section states was rejected because removing that mass rescales the remaining scores,
+and a topic nothing answers (`csharp` with `mocking time`) came back a confident wrong answer
+instead of a miss.
+
+**A section dropped for irrelevance and a section dropped for lack of budget are reported
+differently.** Anything that did not fit is named in the response by heading, so the caller
+learns what else the document holds without opening it and can ask again deliberately. The
+budget marker is followed by a statement that the cut is expected — the document is longer
+than the `charBudget`, so what did not fit is left out rather than missing — while the
+relevance marker never suggests a larger budget, because no larger budget brings back a
+section the topic did not select.
+
+**The index and the tool part company on an unanswerable topic.** `DocumentIndex.CodingStandards`
+returns no prose when a topic selects no section, and a test pins that. The fallback is the
+tool's decision: `docs_get_coding_standard_for_technology` says the topic matched nothing in
+one line and then returns the standard in document order inside the same budget, because a
+caller that receives prose-lessness opens the file — the cost the budget exists to prevent.
 
 ## Retrieval is not analysis
 
