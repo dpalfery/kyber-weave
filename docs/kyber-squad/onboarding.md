@@ -1235,6 +1235,29 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
 and standardized completion digests to minimize token consumption and eliminate validation churn:
 
+### One execution contract, two entry points
+
+The rules below live in the canonical `delivery-execution` skill, not in an agent body and not in
+a conductor reference. `conductor` loads it for plan- and spec-backed work; the `bug-crusher`
+workflow loads the same skill when one escalated defect becomes a plan. A canonical skill is
+emitted for every target, where a conductor-only reference is not, so the one-defect path on a
+narrower harness obeys the same queue, exit gate, breaker and council instead of a paraphrase.
+Neither entry point restates the rules; if you are editing one of them, the contract change
+belongs in the skill.
+
+**What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
+`architect` (planning the escalated defect), `test-dev` (establishing RED), `code-reviewer` (the
+finished fix), and the twelve developer agents a task routes to, alongside the investigator,
+`docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
+is the architect's own delegation and the owner is the human, so `research-agent`,
+`product-owner` and `azure-reader` stay off the roster. The roster is what scopes the
+`root-fixer` capability profile's `delegate` grant.
+
+**Bug-crusher does not write the plan.** `architect` owns every write to a plan artifact,
+including its status line and its index row. The bug-crusher session asks for the write and
+relays the result; recording a decision in the plan, or advancing its status, is one re-invocation
+of `architect` with the gate id, not an edit by the orchestrating session.
+
 ### Inlined task packets (zero plan context hunting)
 
 Conductor task packets are self-contained. Rather than pointing workers to large plan or

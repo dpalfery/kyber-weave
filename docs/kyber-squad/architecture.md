@@ -1457,10 +1457,18 @@ receipt architecture. It adds no boundary, schema, or dependency.
 
 The deployment engine in §1–§8 ships canonical agent bodies. Those bodies include a
 two-level iteration circuit-breaker that stops thrashing test-fix loops during delivery.
-The contract lives in `conductor`, `csharp-dev`, `test-dev`, and `github-devops`. No ADR
-records it: the caps, tripwires, and escalation key constrain those four instruction
-bodies, not the C# render or transaction engine, and they remain cheap to revise in the
-agent specs. The durable product claim is here.
+The contract itself lives in one place, the `delivery-execution` skill: the ready queue,
+session continuity, test-first and standard mode, the developer exit gate, the breaker, the
+findings drain and the final council. Both entry points load it — `conductor` for plan- and
+spec-backed work, and the `bug-crusher` workflow for a single escalated defect — and neither
+restates it, so a harness that can reach a canonical skill cannot run an ungoverned dispatch.
+It is a skill rather than a conductor reference because a canonical skill is emitted for every
+target where a conductor-only reference is not, and a portable file may not link out of its own
+directory ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The
+developer bodies keep their own exit obligations — the field lists a digest owes — and no ADR
+records the caps: the tripwires and escalation key constrain instruction bodies, not the C#
+render or transaction engine, and they remain cheap to revise in the skill. The durable
+product claim is here.
 
 ```mermaid
 flowchart TD
@@ -1683,7 +1691,7 @@ component's existing docs. The bar is high confidence with human approval before
 anything is written; the review never adds ontology vocabulary (the best existing home
 wins when nothing fits) and files a todo only if the owner accepts it.
 
-The execution-and-review contract records the run record, the `DOCS_REVIEW` rows, the Q2
+The `delivery-execution` skill records the run record, the `DOCS_REVIEW` rows, the Q2
 `CLOSEOUT_COMPLETE` marker, and carries the outcome in the PR description. Autonomous
 delivery requires `DOCS_REVIEW` rows and, for plan/spec-backed work, `CLOSEOUT_COMPLETE`
 evidence, and the draft PR carries both. The one-defect path is not exempt: `bug-crusher`
