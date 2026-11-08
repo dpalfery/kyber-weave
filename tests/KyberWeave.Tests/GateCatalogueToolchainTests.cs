@@ -371,9 +371,16 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         return Path.Combine(_temp.Path, label + "-" + Guid.NewGuid().ToString("N") + ".json");
     }
 
+    /// <summary>
+    /// The council run's arguments. <c>--council</c> is not optional here: a catalogue gate whose
+    /// <c>role</c> is <c>test</c> is rendered <c>full-suite: true</c>, and a run that does not declare
+    /// itself the council is refused that gate with <c>KW-REVIEW-033</c> rather than running it. The
+    /// refusal is the pass rule working, but it makes the run no evidence that the gate itself works,
+    /// which is what this fixture exists to check.
+    /// </summary>
     private static string[] CouncilArguments(string repo, string reportPath)
     {
-        return ["review", "gates", repo, "--format", "json", "--out", reportPath];
+        return ["review", "gates", repo, "--council", "--format", "json", "--out", reportPath];
     }
 
     private static string[] AgentArguments(string repo, string agent, string sourcePath, string reportPath)
