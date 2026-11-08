@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-08
 ---
 
 # Adopting DocGraph in an existing repository
@@ -273,6 +273,46 @@ binary.
 Add the [docs gate workflow](../ci-pipelines/workflows-runbook.md) so the corpus cannot
 regress. Start with `docs validate` alone — it needs no index — and add `docs drift` once
 you have a CodeGraph index in CI.
+
+## 8. Answer the onboarding question
+
+The steps above chose a technology list, a gate suite and a set of standards. The last thing to
+record is that somebody chose them, because `kyber-weave run start` will not begin work in a
+configured repository that never answered.
+
+```bash
+kyber-weave docs onboarding done      # the choices below were made
+kyber-weave docs onboarding declined  # this repository chose not to have project gates
+```
+
+The verb writes the value into `.kyber-weave/kyber-weave.yml` in place — your comments and every
+other key survive — and re-splices the Config Reg block that publishes `<onboarding>`, because an
+answer no agent instruction file carries is one no run can honour. Exit `0` recorded, `2` an answer
+that is neither value with nothing written, `1` no configuration to edit or a file it could not
+read or write.
+
+**What the choices are, and where they belong.** Read them with the
+`kyber-docs-onboarding-and-assessment` skill, which runs the step the stop sends you to:
+
+| Kind | Where it lives | How to see the default |
+|---|---|---|
+| Runnable checks — build, test, format | `review.gates` and `review.task-gates` in `.kyber-weave/kyber-weave.yml` | `kyber-weave review catalogue . --technology <slug>` prints the block a scaffold would write, and writes nothing |
+| Finish commands — what runs when, and why | one `## Completion` section per coding standard under the standards folder | the standard itself, through `docs_get_coding_standard_for_technology(technology, topic: "completion")` |
+| A technology with no standard yet | — | `kyber-weave docs init . --kyber-standards` scaffolds the templates; a technology declared with no standard is a gap, not a default |
+
+A standard has exactly one `## Completion` section and no separate `## Commands` section beside it:
+two sections answering "how do I finish" drift apart the moment one is edited and the other is not.
+
+**Record `declined` honestly.** It ends the question exactly as `done` does, and a repository that
+declines is a valid repository: its workers report `TASK_GATE: NONE_DECLARED` and run the
+technology's ordinary build and tests, which says the repository has fewer machine checks rather
+than that anything failed. What it must not do is record `done` without making the choices.
+
+**The stop happens once.** Both answers end it, so a technology added later does not stop every
+run; the worker that needs a standard the repository has not written returns its own question, and
+the fix is to declare the technology and answer for it. See
+[Configuration § Onboarding](../configuration.md#onboarding) for the setting itself, and
+[`run start`](../cli-command-surface.md#run--run-start) for where the check sits in the step.
 
 ## What not to do
 

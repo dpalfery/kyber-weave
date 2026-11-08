@@ -60,6 +60,7 @@ config-reg:
   auth-design: docs/reference/auth-design.md
 
 autonomy: supervised
+onboarding: done
 stop-on-tool-failure: true
 
 squad:
@@ -291,10 +292,70 @@ asks, and what the conductor does with the property it resolves, is documented i
 [requirements](kyber-squad/requirements.md#intake-assessment) and the
 [adoption guide](kyber-squad/onboarding.md#intake-assessment-opt-in-per-repository).
 
+### Onboarding
+
+`onboarding` records whether this repository has answered the question every run depends on: which
+technologies, gates and coding standards it wants. It sits at the top level, beside `autonomy`:
+
+```yaml
+onboarding: done
+```
+
+| Value | Meaning |
+|---|---|
+| `done` | The onboarding skill was applied: the technologies were chosen and their gates and standards written. |
+| `declined` | The repository was offered onboarding and chose not to take it. It behaves exactly as `done` does where the run is concerned. |
+| absent | The question is **unanswered**. This is the only state that stops a run. |
+
+**Absent is not a third answer.** A repository whose configuration never wrote the key has not been
+asked, so `kyber-weave run start` stops before it checks anything else and names the
+`kyber-docs-onboarding-and-assessment` skill and the verb that records the answer. Both recorded
+values end the question, which is why `declined` exists: without it the only answers a repository
+could record would be "done" and "never asked", so a user who said no would be asked again on every
+start.
+
+**The stop comes first, ahead of the tool checks and the fetch.** The gates and standards a run
+will be held to are exactly what onboarding chooses, so a run that proceeded would plan work against
+defaults nobody reviewed and report that at the end instead of before it. Reporting a failing fetch
+first would send the operator to repair a remote that was never what stood in the way.
+
+**Autonomous runs stop too, asking nothing.** Under `autonomy: autonomous` the run stops and leaves
+the setting exactly as it found it: a run that asked would break "ask the user nothing", and one
+that wrote an answer would record a decision nobody made.
+
+**A repository with no `kyber-weave.yml` is never stopped.** Nothing there has opted into being
+configured, so there is no gates-and-standards choice for onboarding to record; the stop speaks
+where the repository has opted in and stays quiet where it has not.
+
+**Written through the CLI, not by hand.** `kyber-weave docs onboarding <done|declined>` records the
+value in place — keeping the operator's comments and every other key — and then re-splices the
+Config Reg block that publishes it. A key holding anything other than the two values is a
+configuration error naming both, refused before any run reads it.
+
+**A chosen value publishes a mode property; an absent one publishes nothing.** The answer renders
+into the generated block of the repository root `AGENTS.md`:
+
+```markdown
+- **<onboarding>**: `done`
+```
+
+An absent answer publishes no line, so no reader mistakes silence for `done`. Like `autonomy` and
+the `run:` properties, `onboarding` is a value rather than a path, so `docs validate` never resolves
+it as one (`KW-CONFIG-REG-001`); a missing or wrong line in the block is a stale block
+(`KW-CONFIG-REG-002`). Declaring the name under `config-reg:` is rejected with the setting that owns
+it named in the refusal.
+
+**The stop happens once, because both answers end it.** Onboarding is a one-time answer, not a
+recurring check: a technology added later is not a reason to stop, and no command warns about it
+today. What covers it is the worker that needs the missing standard, which returns its own question
+rather than a confident answer from somewhere else (see
+[coding standards](standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file)).
+
 ### Run controls
 
-Three settings govern how a run starts. `stop-on-tool-failure` sits at the top level, beside
-`autonomy`; the other two sit under a `run:` key:
+Three settings govern how a run starts, once the onboarding question above is answered.
+`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other two sit under a `run:`
+key:
 
 ```yaml
 stop-on-tool-failure: false

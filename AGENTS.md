@@ -208,6 +208,7 @@ references that belong to this repository.
 - **<rules-index>**: `docs/rules/README.md`
 - **<reference-index>**: `docs/reference/README.md`
 - **<review-guidance>**: `REVIEW.md`
+- **<onboarding>**: `done`
 - **<autonomy>**: `autonomous`
 
 Skills and other portable instruction files SHALL reference these paths by the

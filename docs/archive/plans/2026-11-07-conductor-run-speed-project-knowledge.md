@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-run-speed-project-knowledge
 title: Project knowledge and onboarding (conductor run-speed, slice 7)
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-08
@@ -18,28 +18,24 @@ impact-components:
 
 # Project knowledge and onboarding (conductor run-speed, slice 7)
 
-**Status: Review required.** This plan is **not closeable as delivered**, and it has not been
-archived. Three acceptance criteria are unmet in this tree, and the closeout below records what was
-verified rather than claiming the rest. **T38 is not implemented here**: there is no `onboarding`
-setting reader, no `docs onboarding <done|declined>` verb (`src/KyberWeave.Cli/Commands/Docs/`
-holds no command for it and `Program.cs` registers none), and `RunStartPlanner` evaluates no
-onboarding check, so `OnboardingCommandTests`, `RunStartOnboardingTests` and the `ConfigReg` cases
-that name the setting — the RED classes T36 wrote — are failing. The only trace of D6 is
-`onboarding: done` in `.kyber-weave/kyber-weave.yml`, which nothing reads. **T39's onboarding step
-is not written**: the `kyber-docs-onboarding-and-assessment` skill carries none (D7). **T41's
-evidence is absent**: no `.agent_scratchpad/T41/format-include-check.md` exists in this tree and no
-run on `ubuntu-latest` or `windows-latest` is cited anywhere in it. T37, the rest of T39, and T40
-are delivered and harvested; see [Closeout](#closeout).
+**Status: Archived, 2026-11-08.** Slice 7 is delivered and its durable content is harvested; the
+verification, the gates and every decision's destination are in [Closeout](#closeout) and
+[Closeout mapping](#closeout-mapping) below. Two things are recorded there rather than hidden:
+T41's `dotnet format --include` check on Linux and Windows has not run, so
+[task-gate-config-review](../../todo/task-gate-config-review.md) stays open for that one question; and
+the `docs-dev` documentation check stays open in
+[its own todo](../../todo/docs-dev-task-gate-entry.md), which this slice narrowed and did not close.
+Every other decision is mapped to a live document.
 
-It was approved for execution under AP1 with resolved autonomy `autonomous`, and that approval is what the decision rows below carry. It is carved from the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 7's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children; this plan is archived in this slice's own pull request, which has not happened. Every decision is answered below with its provenance; the parent's AP1 approval covers the Test contract this plan restates and carries to this child through `AUTONOMOUS_APPROVAL` per D12.
+It was approved for execution under AP1 with resolved autonomy `autonomous`, and that approval is what the decision rows below carry. It is carved from the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 7's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children. Every decision is answered below with its provenance; the parent's AP1 approval covers the Test contract this plan restates and carries to this child through `AUTONOMOUS_APPROVAL` per D12.
 
 ## Problem and goal
 
-The parent design's measured runs showed project knowledge living where it is re-sent on every round trip and drifts per project: portable agent and skill files carry repository-specific paths and commands — in this tree, `KyberWeave.Tests` and `src/KyberWeave` appear on 12 lines under `products/kyber-squad` (11 instruction lines in this slice's file list plus one roster comment, D62) — while the parent design's D5 rule ("project content goes in `review.gates`, `review.task-gates`, and a `## Completion` section in each coding standard") has no home for the third kind yet, because no standard has a `## Completion` section (verified: none of the 14 templates or this repository's 7 standards carries one). A repository's machine checks live only in its configuration: a task whose files select no gate reports `TASK_GATE: NONE_DECLARED`, which is a valid result but no executed evidence, and in this repository `docs-dev` — the role every completed change passes through — declares no task gates at all, so its gate reports `KW-REVIEW-027` and runs zero gates (verified, D60). A host scaffolded by `kyber-weave docs init` gets whole-suite test gates from the shipped catalogue without the `full-suite: true` key, so its developer agents can run the full suite that [ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) reserves for the council and CI (verified: the catalogue and block writer emit no `full-suite`). And there is no setup flow: nothing asks a new repository which gates and standards it wants, so the defaults go unreviewed.
+The parent design's measured runs showed project knowledge living where it is re-sent on every round trip and drifts per project: portable agent and skill files carry repository-specific paths and commands — in this tree, `KyberWeave.Tests` and `src/KyberWeave` appear on 12 lines under `products/kyber-squad` (11 instruction lines in this slice's file list plus one roster comment, D62) — while the parent design's D5 rule ("project content goes in `review.gates`, `review.task-gates`, and a `## Completion` section in each coding standard") has no home for the third kind yet, because no standard has a `## Completion` section (verified: none of the 14 templates or this repository's 7 standards carries one). A repository's machine checks live only in its configuration: a task whose files select no gate reports `TASK_GATE: NONE_DECLARED`, which is a valid result but no executed evidence, and in this repository `docs-dev` — the role every completed change passes through — declares no task gates at all, so its gate reports `KW-REVIEW-027` and runs zero gates (verified, D60). A host scaffolded by `kyber-weave docs init` gets whole-suite test gates from the shipped catalogue without the `full-suite: true` key, so its developer agents can run the full suite that [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) reserves for the council and CI (verified: the catalogue and block writer emit no `full-suite`). And there is no setup flow: nothing asks a new repository which gates and standards it wants, so the defaults go unreviewed.
 
 The goal of this slice (the parent's fix 11): **project knowledge out of portable files** — runnable checks into `review.gates` and `review.task-gates`, and how-to-finish knowledge into a `## Completion` section in every coding standard, fetched by topic only when a worker is finishing (D4, D5, D31); **an `onboarding` setting and flow** — `run start` checks it before anything else and stops when unset, `kyber-docs-onboarding-and-assessment` walks each technology's defaults and `kyber-weave docs onboarding <done|declined>` writes the value (D6, D7, D33, D34, D40); **catalogue repair** — whole-suite gates carry `full-suite: true`, targeted gates do not, and the generated command is never wrapped in `proc-guard.sh` (D32); **this repository's own gate choices settled** — `sql-database-architect` and `github-devops` get gate sets that match the files they edit, workflow, shell and config edits select at least one gate, `onboarding: done` is set, and `docs-dev` gains its first task-gates entry (D60); and **the `dotnet format --include` leniency confirmed on Linux and Windows** (T41), because it was only ever checked on macOS.
 
-The slice completes three open todos: [docs-init-emit-full-suite-gate-key](../archive/todo/docs-init-emit-full-suite-gate-key.md) (T37), [task-gates-workflow-and-shell-edits](../archive/todo/task-gates-workflow-and-shell-edits.md) (T37 plus T40), and [task-gate-config-review](../todo/task-gate-config-review.md) (T40, plus T41's Linux and Windows evidence — the parent's own condition: without that evidence the todo is narrowed to that one question and left open, never archived).
+The slice completes three open todos: [docs-init-emit-full-suite-gate-key](../../archive/todo/docs-init-emit-full-suite-gate-key.md) (T37), [task-gates-workflow-and-shell-edits](../../archive/todo/task-gates-workflow-and-shell-edits.md) (T37 plus T40), and [task-gate-config-review](../../todo/task-gate-config-review.md) (T40, plus T41's Linux and Windows evidence — the parent's own condition: without that evidence the todo is narrowed to that one question and left open, never archived).
 
 ## Decisions
 
@@ -48,7 +44,7 @@ Rows D4, D5, D6, D7, D12, D13, D31, D32, D33, D34, D35, D40 and AP1 are this sli
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
 | D4 | How do workers get coding standards? | Only through `docs_get_coding_standard_for_technology`. Workers do not read plan files. | A file read is allowed only when the tool is missing. | user: explicit decision 2026-11-07 |
-| D5 | Where does project-specific knowledge live? | Out of portable agents and skills. There are no technology reference files in portable skills. Project content goes in `review.gates`, `review.task-gates`, and a new `## Completion` section in each coding standard. | [docs/standards/README.md](../standards/README.md) already states the rule. | user: explicit decision 2026-11-07 |
+| D5 | Where does project-specific knowledge live? | Out of portable agents and skills. There are no technology reference files in portable skills. Project content goes in `review.gates`, `review.task-gates`, and a new `## Completion` section in each coding standard. | [docs/standards/README.md](../../standards/README.md) already states the rule. | user: explicit decision 2026-11-07 |
 | D6 | How does the onboarding setting behave? | New `onboarding` setting. At run start, if unset, the run stops and suggests `kyber-docs-onboarding-and-assessment`. If the user says no, ask whether to ask again. If yes, write nothing and continue. If no, set the value and continue. Autonomous runs stop as well, asking nothing and leaving the setting unchanged. This repository gets the done value in the same change. | The owner asked for `done`. D40 records `declined` as the value for a user who says no. | user: explicit decision 2026-11-07 |
 | D7 | What does onboarding ask? | It asks about each technology, showing a default suggestion taken from the existing gate catalogue and standard templates. | `kyber-weave review catalogue . --technology <name>` and `docs init --kyber-standards` already hold the defaults. | user: explicit decision 2026-11-07 |
 | D12 | Can one plan span several pull requests? | **No. Several plans, one per slice.** This file stays the single approved design and never merges while open. On approval it stays on its own branch. Each slice gets a child plan on the slice's branch, carved from its section here, and that plan is archived in the slice's pull request. The last slice's pull request brings this file in and archives it with a mapping to the children. | `OpenWorkValidator` raises `KW-DOC-LIFECYCLE-003`, and the pull request CI runs `docs validate --merge-ready`. A plan left open in `docs/plans/` fails CI, and the rule exists because a specification merged in stages never got its closeout. Its message says "keep it on its branch". Changing the rule was rejected for that reason. Child plans restate only their slice's decision rows, so each is complete on its own. Approval here carries to each child through `AUTONOMOUS_APPROVAL`. | user: confirmed 2026-11-07 — the owner confirmed the autonomous recommendation |
@@ -61,7 +57,7 @@ Rows D4, D5, D6, D7, D12, D13, D31, D32, D33, D34, D35, D40 and AP1 are this sli
 | D40 | Which value records a user who says no to onboarding? | `declined`. It behaves as `done` does: neither asks again. | It shows why a repository has no project checks and lets the doctor mention it. A recommendation that the owner may overturn. | autonomous: recommendation accepted |
 | AP1 | Is the Test contract approved, and may this plan execute? | Approved as written, as recommended. Execution follows D12. The owner confirmed on 2026-11-07 that all eight slices run in one continuous run. | Not a planning decision. Resolved by the conductor carrying `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`, and then confirmed by the owner. | user: confirmed 2026-11-07 — the owner confirmed the autonomous recommendation |
 | D59 | Why does this slice branch from slice 5's unmerged branch? | Because slice 7 edits files slices 4 and 5 rewrote: T39 edits `products/kyber-squad/skills/delivery-execution/SKILL.md` (slice 4 created it; slice 5's T29 edits it) and `products/kyber-squad/agents/docs-dev.md` (slice 5's T29 edits it and its migration report), beside `conductor.md`, `csharp-dev.md` and `test-dev.md`, whose bodies and migration reports the slice 4 delivery touched. Branching from `main` would conflict on the first push, and GitHub runs no `pull_request` workflow on a conflicted pull request, so CI would never report. This branch is cut from slice 5's branch at `66f6ff86`. | Measured twice on slice 2 and recorded by slice 4's D51 and slice 5's D55: a conflicted pull request produced no run at all; the only way to a verdict was merging the base first. The slice's pull request targets slice 5's branch and is retargeted to `main` as slice 5 merges. Do not merge slice 5 into this branch and do not rebase onto `main`. | autonomous: recommendation accepted |
-| D60 | Where does T40's review-config gate land, and what happens to the docs-dev task-gate todo? | `docs-dev` gains its first `task-gates` entry, holding the review-config load check T37 adds to the catalogue; `github-devops` gains the workflow-linter and `shellcheck` entries for its kinds. Verified in this tree: `review.task-gates` (`.kyber-weave/kyber-weave.yml:314`) declares 11 agent keys and no `docs-dev` entry, so `--agent docs-dev` reports `KW-REVIEW-027` ("No task gates are declared for the named agent", `ReviewGatesCommand.cs:19`, a Warning per [the rule reference](../ci-pipelines/rule-reference.md)) and executes zero gates. A config-only edit in this repository is a `docs-dev` edit — this plan's own T40 edits only `.kyber-weave/kyber-weave.yml`, `AGENTS.md` and `docs/code-review/architecture.md` — so the parent's T40 acceptance ("a task editing only workflow, shell or config files selects at least one gate") cannot hold unless `docs-dev` selects one. The open todo [docs-dev-task-gate-entry.md](../todo/docs-dev-task-gate-entry.md) (filed by slice 2) asks for more than that — a task gate that runs the documentation checks over `{changed}` documents — which this slice does not build: it stays open, and T42 records the narrowing in it rather than archiving it. | The todo's own text separates the two asks ("Decide whether a task gate should run them over `{changed}` documents, and what a docs change that touches nothing but `docs/archive/` should do"). A config load check covers a config change, not a documentation change. `KW-REVIEW-027`'s warning and `TASK_GATE: NONE_DECLARED` remain valid results for a repository with fewer machine checks (fix 11's own last bullet). | autonomous: recommendation accepted |
+| D60 | Where does T40's review-config gate land, and what happens to the docs-dev task-gate todo? | `docs-dev` gains its first `task-gates` entry, holding the review-config load check T37 adds to the catalogue; `github-devops` gains the workflow-linter and `shellcheck` entries for its kinds. Verified in this tree: `review.task-gates` (`.kyber-weave/kyber-weave.yml:314`) declares 11 agent keys and no `docs-dev` entry, so `--agent docs-dev` reports `KW-REVIEW-027` ("No task gates are declared for the named agent", `ReviewGatesCommand.cs:19`, a Warning per [the rule reference](../../ci-pipelines/rule-reference.md)) and executes zero gates. A config-only edit in this repository is a `docs-dev` edit — this plan's own T40 edits only `.kyber-weave/kyber-weave.yml`, `AGENTS.md` and `docs/code-review/architecture.md` — so the parent's T40 acceptance ("a task editing only workflow, shell or config files selects at least one gate") cannot hold unless `docs-dev` selects one. The open todo [docs-dev-task-gate-entry.md](../../todo/docs-dev-task-gate-entry.md) (filed by slice 2) asks for more than that — a task gate that runs the documentation checks over `{changed}` documents — which this slice does not build: it stays open, and T42 records the narrowing in it rather than archiving it. | The todo's own text separates the two asks ("Decide whether a task gate should run them over `{changed}` documents, and what a docs change that touches nothing but `docs/archive/` should do"). A config load check covers a config change, not a documentation change. `KW-REVIEW-027`'s warning and `TASK_GATE: NONE_DECLARED` remain valid results for a repository with fewer machine checks (fix 11's own last bullet). | autonomous: recommendation accepted |
 | D61 | Which migration reports does T39's edit invalidate? | Four: `products/kyber-squad/migration/conductor.md`, `migration/csharp-dev.md`, `migration/test-dev.md` and `migration/docs-dev.md`. T39 edits those four agent bodies (`conductor.md`, `csharp-dev.md`, `test-dev.md`, `docs-dev.md`), and each report's `final-body-sha256` covers the evolved LF-normalized instruction body, so the canonical suite fails until each report carries its body's new digest. The four reports join T39's file list. | The slice 4 D52 trap, verified against this tree the way slice 5's D58 did: the migration directory holds reports for all four agents (listed), and slices 4 and 5 each had to update a report for the same reason. The references and skills T39 edits hold no migration digest. | autonomous: recommendation accepted |
 | D62 | The parent's T39 count and its file list disagree about one roster comment — what happens to it? | T39 adds `products/kyber-squad/toolchain.yml` to its file list and rewords the comment at `toolchain.yml:17` to name `SquadToolchainRosterGuardTests` without the repository path, so the parent's GREEN assertion — "`products/kyber-squad` holds no `KyberWeave.Tests` or `src/KyberWeave`" — holds with an unscoped scan. Verified: T39's named files hold exactly the 11 instruction lines enumerated in Investigation findings, and the roster comment is a 12th match the parent's own count included ("9 lines across 5 portable files") while its T39 file list omits the file. | A YAML comment is invisible to the parse that backs the guard — `SquadToolchainRosterGuardTests` reads the exposed `[McpServerTool]` names off `DocsTools` and the roster's YAML data, which a comment cannot enter — and no test pins the comment text (searched). The guard stays reachable by name, and `PortableContentTests`' assertion stays simple and absolute. | autonomous: recommendation accepted |
 
@@ -87,7 +83,7 @@ Verified against this tree — the worktree at `/tmp/kw-slice7`, branch `factory
 
 **The naming job gates this branch.** `pr-naming` is declared at `ci.yml:115` with `pr-naming-recheck.yml` beside it (verified by slices 4 and 5 on this branch chain). The delivery branch `factory/feat/conductor-run-speed-project-knowledge` follows `<harness>/<type>/<slug>`; the pull request title follows `<type>(<scope>): <summary> [factory]` or the naming job fails it, and the pull request targets slice 5's branch per D59.
 
-**Two tree states this slice does not fix.** (a) The task-file mechanism slice 5 delivers is not live at this branch's base (`PlanTaskFileValidator` exists nowhere in `src/`, searched; no `docs/plans/*.tasks.json` exists), so this plan carries no task file of its own (see Closeout). (b) The fast-loop tray todo the parent's T39 acceptance defers to ([fast-loop-default-tray-cargo-test.md](../todo/fast-loop-default-tray-cargo-test.md)) exists and stays open.
+**Two tree states this slice does not fix.** (a) The task-file mechanism slice 5 delivers is not live at this branch's base (`PlanTaskFileValidator` exists nowhere in `src/`, searched; no `docs/plans/*.tasks.json` exists), so this plan carries no task file of its own (see Closeout). (b) The fast-loop tray todo the parent's T39 acceptance defers to ([fast-loop-default-tray-cargo-test.md](../../todo/fast-loop-default-tray-cargo-test.md)) exists and stays open.
 
 ## Design
 
@@ -109,7 +105,7 @@ This slice's design, in the parent's voice. Fix 11 verbatim:
 > - **A technology added later** gets a doctor warning, not a stop. Workers already return a question when a standard is missing.
 > - **This repository** gets `onboarding: done`, and settles its gate choices (`sql-database-architect` and `github-devops` get their own gate sets) and the shell and workflow task gates.
 
-**What `## Completion` holds (T39).** Every coding standard gains a `## Completion` section carrying what a finishing worker needs: the inner-loop commands (build, targeted test, format), what runs when, and why — the knowledge that today sits in the 11 portable lines enumerated above. The test standard's `## Commands` section (`docs/standards/test/README.md:187`) becomes `## Completion` per D31, with `AGENTS.md:49`'s and every other `#commands` link moving to the new anchor (the link checker catches a missed one). All 11 project-path lines leave the portable files (`csharp-dev.md`, `test-dev.md`, `docs-dev.md`, `conductor.md`, the `delivery-execution`, `test-dev` and `task-gate` skills), and the 12th match — the `toolchain.yml` roster comment — is reworded in the same change (D62). The four agent bodies carry migration-report digests, so the four reports update with them (D61). The onboarding skill's step (D7) is written in the same change, and it passes `skill validate`, `lint` and `scan` — its three `review.gates` gates already exist. `autonomy.md:17` and `:54` carry D6's exception: the onboarding stop is a hard stop in autonomous mode too. The test standard does not cite the default fast loop for the tray until the [fast-loop todo](../todo/fast-loop-default-tray-cargo-test.md) is decided.
+**What `## Completion` holds (T39).** Every coding standard gains a `## Completion` section carrying what a finishing worker needs: the inner-loop commands (build, targeted test, format), what runs when, and why — the knowledge that today sits in the 11 portable lines enumerated above. The test standard's `## Commands` section (`docs/standards/test/README.md:187`) becomes `## Completion` per D31, with `AGENTS.md:49`'s and every other `#commands` link moving to the new anchor (the link checker catches a missed one). All 11 project-path lines leave the portable files (`csharp-dev.md`, `test-dev.md`, `docs-dev.md`, `conductor.md`, the `delivery-execution`, `test-dev` and `task-gate` skills), and the 12th match — the `toolchain.yml` roster comment — is reworded in the same change (D62). The four agent bodies carry migration-report digests, so the four reports update with them (D61). The onboarding skill's step (D7) is written in the same change, and it passes `skill validate`, `lint` and `scan` — its three `review.gates` gates already exist. `autonomy.md:17` and `:54` carry D6's exception: the onboarding stop is a hard stop in autonomous mode too. The test standard does not cite the default fast loop for the tray until the [fast-loop todo](../../todo/fast-loop-default-tray-cargo-test.md) is decided.
 
 **What the setting and its flow do (T38, T40).** The `onboarding` setting (`done` or `declined`, absent means not done) publishes in the Config Reg block the way `autonomy` does, only when set (D33). `run start` checks it before anything else: unset stops the run and suggests `kyber-docs-onboarding-and-assessment`; autonomous runs stop as well, asking nothing and leaving the setting unchanged (D6). `kyber-weave docs onboarding <done|declined>` writes the value through `HostConfigYaml`, preserving comments and re-splicing the Config Reg block (D34); the conductor dispatches `docs-dev` to run it and bug-crusher runs it itself. A technology added later is a doctor warning, not a stop. This repository takes `onboarding: done` in T40, so this program's own runs never see the stop once slice 7 lands.
 
@@ -177,7 +173,7 @@ Every class this contract names is fully qualified as `KyberWeave.Tests.<Class>`
   - **Files:** `products/kyber-squad/standards/*/README.md`, `docs/standards/*/README.md`, `AGENTS.md`, `.apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md`, `products/kyber-squad/agents/conductor.md`, `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, `products/kyber-squad/agents/docs-dev.md`, `products/kyber-squad/skills/delivery-execution/SKILL.md`, `products/kyber-squad/skills/test-dev/SKILL.md`, `products/kyber-squad/skills/task-gate/SKILL.md`, `products/kyber-squad/skills/bug-crusher/SKILL.md`, `products/kyber-squad/agents/conductor/references/autonomy.md`, and in the same change: the migration reports D61 adds (`products/kyber-squad/migration/conductor.md`, `migration/csharp-dev.md`, `migration/test-dev.md`, `migration/docs-dev.md`) and the roster comment D62 adds (`products/kyber-squad/toolchain.yml`)
   - **Required skills:** `docs-dev`
   - **Depends on:** T37, T38
-  - **Acceptance:** D5, D6, D7, D31. All 11 project-path lines leave portable files, and their meaning moves to a `Completion` section; the 12th match, the `toolchain.yml` roster comment, is reworded in the same change (D62). The test standard does not cite the default fast loop for the tray until the [fast-loop todo](../todo/fast-loop-default-tray-cargo-test.md) is decided. `docs-dev`'s list gains the onboarding command. `autonomy.md:17` and `:54` carry the exception. The onboarding skill passes `skill validate`, `lint` and `scan`. The four migration reports carry their bodies' new digests (D61). T39's row holds.
+  - **Acceptance:** D5, D6, D7, D31. All 11 project-path lines leave portable files, and their meaning moves to a `Completion` section; the 12th match, the `toolchain.yml` roster comment, is reworded in the same change (D62). The test standard does not cite the default fast loop for the tray until the [fast-loop todo](../../todo/fast-loop-default-tray-cargo-test.md) is decided. `docs-dev`'s list gains the onboarding command. `autonomy.md:17` and `:54` carry the exception. The onboarding skill passes `skill validate`, `lint` and `scan`. The four migration reports carry their bodies' new digests (D61). T39's row holds.
 - **T40: This repository's gate choices**
   - **Files:** `.kyber-weave/kyber-weave.yml`, `AGENTS.md`, `docs/code-review/architecture.md`
   - **Required skills:** `docs-dev`
@@ -209,10 +205,10 @@ From the parent: T36 unlocks T37 and T38. T37 and T38 together unlock T39, then 
 
 ## Out of scope
 
-- The parent's other slices — each has its own child plan on its own branch and its own pull request. Slice 8 owns the `{tests}` token, the suppression gate, `KW-ARB-GATE-REPORT-001` and the [task-gate-test-project-mapping](../todo/task-gate-test-project-mapping.md) todo.
-- The docs-dev documentation-check task gate: [docs-dev-task-gate-entry.md](../todo/docs-dev-task-gate-entry.md) stays open (D60). This slice gives `docs-dev` the review-config load check only; the documentation checks over `{changed}` documents that todo asks for are not fix 11's work.
+- The parent's other slices — each has its own child plan on its own branch and its own pull request. Slice 8 owns the `{tests}` token, the suppression gate, `KW-ARB-GATE-REPORT-001` and the [task-gate-test-project-mapping](../../todo/task-gate-test-project-mapping.md) todo.
+- The docs-dev documentation-check task gate: [docs-dev-task-gate-entry.md](../../todo/docs-dev-task-gate-entry.md) stays open (D60). This slice gives `docs-dev` the review-config load check only; the documentation checks over `{changed}` documents that todo asks for are not fix 11's work.
 - Wrapping catalogue-generated commands in `proc-guard.sh` (D32): the key is what refuses, and the guard does not ship to other repositories.
-- The fast-loop tray default: [fast-loop-default-tray-cargo-test.md](../todo/fast-loop-default-tray-cargo-test.md) stays open, and the test standard does not cite the default fast loop for the tray until it is decided.
+- The fast-loop tray default: [fast-loop-default-tray-cargo-test.md](../../todo/fast-loop-default-tray-cargo-test.md) stays open, and the test standard does not cite the default fast loop for the tray until it is decided.
 - Fix 9, routing each request with the decision model: [issue 535](https://github.com/dpalfery/kyber-weave/issues/535).
 - A shell for the architect, and the fact-finder agent ([issue 221](https://github.com/dpalfery/kyber-weave/issues/221) stays open).
 - The per-harness shell hook for the full-run guard: that todo stays open.
@@ -221,7 +217,7 @@ From the parent: T36 unlocks T37 and T38. T37 and T38 together unlock T39, then 
 ## Verification gates
 
 - Every task's row in the Test contract runs a named class set with a **non-zero test count**; a filter that matches nothing exits 8 and is treated as a wrong class name, not a pass. **No task or gate runs the full suite** — `scripts/proc-guard.sh run` refuses an unfiltered run from a dev agent with exit 89, and the full suite belongs to the review council's `test` gate and CI.
-- `docs validate .` and `docs drift .` run after every plan save and after the docs task (T42), each at zero findings, in the tree the work runs in (the worktree protocol; the kw-docs server is bound to the canonical checkout and cannot see a file written in this worktree). They are **pending the conductor's run** for this plan; on zero findings each, the plan's status line and its index row flip to Ready. `docs validate . --merge-ready` is **not** the check while this plan is open: `KW-DOC-LIFECYCLE-003` fails an open plan by design, and the pull request CI runs it, which is what archives this plan in this slice's pull request at closeout. `docs drift` needs a CodeGraph index in the tree it runs in: `doctor --ensure .` runs first in a fresh worktree.
+- `docs validate .` and `docs drift .` run after every plan save and after the docs task (T42), each at zero findings, in the tree the work runs in (the worktree protocol; the kw-docs server is bound to the canonical checkout and cannot see a file written in this worktree). What those runs returned at closeout is recorded in [Closeout](#closeout). `docs validate . --merge-ready` was **not** the check while this plan was open: `KW-DOC-LIFECYCLE-003` fails an open plan by design, and the pull request CI runs it. `docs drift` needs a CodeGraph index in the tree it runs in: `doctor --ensure .` runs first in a fresh worktree.
 - **Branch and title.** The `pr-naming` CI job gates this slice's pull request (`ci.yml:115`, with `pr-naming-recheck.yml` beside it). The delivery branch `factory/feat/conductor-run-speed-project-knowledge` already follows `<harness>/<type>/<slug>`; the pull request title follows `<type>(<scope>): <summary> [factory]` or the naming job fails it, and the pull request targets slice 5's branch, retargeted to `main` when slice 5 merges (D59).
 
 ## Review
@@ -230,12 +226,34 @@ This slice's pull request goes through **one `code-reviewer` council over its wh
 
 ## Closeout
 
-**Partially closed 2026-11-08. The plan stays open at `Review required` and was not archived.**
-This section records what was read back in the delivered tree, what was written, and the two
-criteria that block the archive.
+**Closed and archived 2026-11-08.** This section records what was read back in the delivered tree,
+what was written at closeout, the gates and tests that ran, and the two questions the slice
+deliberately left to their own todos.
+
+**A note on how this closeout was produced.** An earlier closeout pass on this branch reported T38
+as missing. It was correct at the time: the onboarding work was on `factory/feat/s7-catalogue`, which
+had not been merged into the branch being closed. After that branch merged, the behaviour was
+re-verified from the tree rather than from the merge commit's message, and the claims below name the
+files read.
 
 ### Verified in the tree
 
+- **T38 — the `onboarding` setting.** `ConfigRegConfig.Onboarding` holds the answer,
+  `ConfigRegConfig.OnboardingAnswers` is `done` and `declined`, `ParseOnboarding` refuses anything
+  else by naming both, and `ConfigRegEntryKind.Mode` publishes `<onboarding>` into the Config Reg
+  block. `RunStartPlanner.NeedsOnboarding` returns true only for a configured repository whose value
+  is absent.
+- **T38 — the stop comes first.**
+  `src/KyberWeave.Cli/Commands/Run/RunStartCommand.cs` evaluates the onboarding check after loading
+  the configuration and before the CodeGraph probe and the fetch, and `StopForOnboarding` names the
+  `kyber-docs-onboarding-and-assessment` skill and both verbs, adding a line under
+  `autonomy: autonomous` saying the run asked nothing and wrote nothing.
+- **T38 — the writing verb.** `DocsOnboardingCommand` is registered on the `docs` branch, takes
+  `<done|declined>` and an optional root, writes through `HostConfigYaml.WithOnboarding` so the
+  operator's comments survive, then re-splices the block; exit `0` recorded, `2` an answer outside
+  the two with nothing written, `1` no configuration or an unreadable file.
+- **T38 — this repository answers.** `.kyber-weave/kyber-weave.yml` sets `onboarding: done`, and the
+  Config Reg block in `AGENTS.md` publishes `- **<onboarding>**: done` (D33).
 - **T39 — `## Completion` everywhere.** All 7 of this repository's standards
   (`docs/standards/*/README.md`) and all 14 shipped templates
   (`products/kyber-squad/standards/*/README.md`) carry exactly one `## Completion` section, and none
@@ -255,86 +273,106 @@ criteria that block the archive.
 - **T40 — this repository's choices.** `onboarding: done` is recorded; `sql-database-architect` gains
   `sql-format` and `review-config`; `github-devops` gains `workflow-lint`, `shellcheck` and
   `review-config`; `docs-dev` gains `review-config` (D60).
-- **Documentation written at this closeout:** ADR 0064 (project knowledge lives in gates and
-  standards, reached through tools), ADR 0059 amended in place (decision 5: the catalogue writes the
-  key), `docs/code-review/architecture.md` (the `full-suite` rule, the three plumbing gates, the two
-  agents that receive them, and every file kind now selecting a gate), and the todo changes: two
-  archived with their closeout evidence, one narrowed and left open, and one narrowed with its
-  boundary recorded.
-  No new `KW-*` rule id was introduced by this slice, so `docs/ci-pipelines/rule-reference.md` is
-  unchanged.
 
-### Blocking gaps
+### Written at this closeout
 
-- **T38 was not implemented in this tree (D6, D7, D33, D34, D40).** No `onboarding` setting reader,
-  no `docs onboarding` command, no `run start` check, no Config Reg `<onboarding>` property, and no
-  onboarding step in the `kyber-docs-onboarding-and-assessment` skill. Five tests fail on exactly
-  that absence: `ConfigRegLoadingTests.OnboardingIsAReservedNameInTheConfigRegPathMap`,
-  `ConfigRegLoadingTests.RejectsAnOnboardingValueThatIsNotOneOfTheTwo` (three rows) and
-  `ConfigRegValidatorTests.AnOnboardingSettingPublishesAModePropertyTheValidatorAccepts`, with
-  `OnboardingCommandTests` and `RunStartOnboardingTests` failing beside them for the same reason.
-  `onboarding: done` in `.kyber-weave/kyber-weave.yml` and the comment above it describe behaviour
-  the product does not have; that comment is the implementation's to correct when T38 lands, not
-  this closeout's to reword.
-- **H2 is therefore not harvested.** `docs/configuration.md` and `docs/cli-command-surface.md` are
-  deliberately unchanged: there is no setting value to document, no verb to document, and no
-  run-start step order to describe. Writing them now would document intent as current guidance.
-- **T41's evidence is absent.** No `.agent_scratchpad/T41/format-include-check.md`, and no
-  `ubuntu-latest` or `windows-latest` run is cited in this tree. `task-gate-config-review.md` is
-  therefore narrowed to that one question and left open, exactly as the plan's own condition
-  required; it is not archived.
+- **[ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md)**
+  — project knowledge lives in gates and standards, reached through tools (D4, D5, D31), with the
+  four rejected alternatives the design named.
+- **[ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md)** amended in place
+  — decision 5: the shipped catalogue writes the key from the gate's role, and the generated command
+  is not wrapped in the guard (D32).
+- **[Review council architecture](../../code-review/architecture.md#the-shipped-gate-catalogue)** — the
+  role-derived `full-suite` rule, the three plumbing gates, the two agents that receive them, and
+  that every file kind now selects a gate (H3).
+- **[Configuration § Onboarding](../../configuration.md#onboarding)** — the setting, its two values,
+  absent as the unanswered state, what the stop is for, how it publishes, and that a later technology
+  is not a stop (D6, D33, D40, H2).
+- **[CLI command surface](../../cli-command-surface.md#run--run-start)** — `docs onboarding <done|declined>`
+  with its argument and exit codes, and the run-start order with onboarding ahead of the CodeGraph
+  probe and the fetch (D34, H2).
+- **[Adopting DocGraph § 8: answer the onboarding question](../../docgraph/onboarding.md#8-answer-the-onboarding-question)**
+  — the operator's page for the choice: which of the three kinds of project knowledge is chosen,
+  where each answer lives, how to see the default before changing it, and why `declined` is an
+  honest answer rather than a gap (D7, H2).
+- **The onboarding step in
+  [`kyber-docs-onboarding-and-assessment`](../../../.apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md#onboarding-mode-the-choice-a-run-stops-for)**
+  — what the stop sends an operator to: detect the declared technologies, show each one's catalogue
+  gates and `## Completion` text, ask whether to accept or change them, write the answers to
+  `review:`/`review.task-gates` and the standards, and record the answer (D7, H1).
+- **[Kyber-Squad architecture, run start](../../kyber-squad/architecture.md#run-start-fetch-and-branch-first)**
+  — the durable *why* of the onboarding stop: it is the first check, it creates no branch, an
+  autonomous run stops silently, and a repository with no configuration is never stopped (D6).
+- **Two todos archived, two narrowed and left open.** See [Out of scope](#out-of-scope) and the
+  mapping below.
 
-### Gates run at this closeout
+### Gates and tests at this closeout
 
-- `dotnet run --project src/KyberWeave.Cli -c Release -- docs validate .` — 0 errors, 0 critical,
-  0 warnings on this plan's files. The only finding is `KW-DOC-TASKS-006` on slice 4's plan, which
-  is open on the stacked base and carries no task file. This plan's own warning retired when its
-  status left `Ready`.
-- `dotnet run --project src/KyberWeave.Cli -c Release -- docs drift .` — 0 findings.
-- `docs validate . --merge-ready` — 2 `KW-DOC-LIFECYCLE-003` errors, one for this plan and one for
-  slice 4's plan. Neither can pass while its plan is open; that is the rule working, and it is
-  exactly why this plan is not archived while its criteria are unmet.
-- `dotnet test tests/KyberWeave.Tests -c Release --no-build --filter "…Squad|…Standards|…ConfigReg"`
-  — total 2932, passed 2924, failed 5, skipped 3. All five failures are the T38 absence above; no
-  failure is on a document or a gate this closeout changed.
+- `docs validate .` — 0 errors; the one warning left is `KW-DOC-TASKS-006` on slice 4's plan, which
+  is open on this branch and owned by slice 4's pull request.
+- `docs drift .` — 0 findings.
+- `docs validate . --merge-ready` — 0 findings on this plan's files; what remains is slice 4's plan
+  still being open here (`KW-DOC-LIFECYCLE-003`). Its archive commit exists on
+  `factory/feat/conductor-run-speed-shared-execution` and is not in this branch, so that is not this
+  slice's work to archive.
+- `dotnet test tests/KyberWeave.Tests -c Release --no-build --filter "…Onboarding|…ConfigReg"` — 60
+  total, 60 passed, 0 failed. This is the evidence for D6, D33, D34 and D40.
 - `dotnet test tests/KyberWeave.RepoPolicy.Tests -c Release --no-build --filter
-  "…Standards|…TaskGates|…ReviewGate"` — total 55, passed 55, failed 0. This is the evidence for
+  "…Standards|…TaskGates|…ReviewGate"` — 55 total, 55 passed, 0 failed. This is the evidence for
   H1's standards rule, for D60, and for the two archived todos.
-- `dotnet test tests/KyberWeave.Tests -c Release --no-build --filter "…GateCatalogue"` — total 81,
-  passed 57, failed 0, skipped 24 (the toolchain-gated rows, which run in CI's
-  `gate-catalogue-toolchains` job). This is the evidence for the `full-suite` key.
-- The task gate, run for real rather than assumed: `review gates . --agent docs-dev` reported
-  `KW-REVIEW-026` and executed **0 gates of 1**, because `review-config`'s `include` is the review
-  configuration and no changed file of this task matches it. That is D60's boundary, observed.
-- Every rewritten relative link in the files this closeout touched was checked with a script, not by
-  eye: each resolves to a file that exists.
+- `dotnet test tests/KyberWeave.Tests -c Release --no-build --filter "…GateCatalogue"` — 81 total,
+  57 passed, 24 skipped (the toolchain-gated rows, which run in CI's `gate-catalogue-toolchains`
+  job), 0 failed. This is the evidence for the `full-suite` key.
+- `skill validate`, `skill lint` and `skill scan` over the onboarding skill — 0 errors and 0
+  criticals after the step was written.
+- The task gate, run for real: `review gates . --agent docs-dev` reports `KW-REVIEW-026` and
+  executes **0 of 1 gates**, because `review-config`'s `include` is the review configuration and no
+  changed file of a documentation-only task matches it. That is D60's boundary, observed rather
+  than assumed.
+
+### Recorded, not closed
+
+- **T41's Linux and Windows evidence does not exist.**
+  [task-gate-config-review](../../todo/task-gate-config-review.md) stays open for that one question,
+  narrowed to it: the first question is answered in the configuration. No
+  `.agent_scratchpad/T41/format-include-check.md` and no `ubuntu-latest` or `windows-latest` run is
+  cited anywhere in this tree, so nothing is claimed.
+- **The `docs-dev` documentation check is not built.**
+  [docs-dev-task-gate-entry](../../todo/docs-dev-task-gate-entry.md) stays open, narrowed to its
+  boundary: `docs-dev` now declares `review-config`, which checks the configuration and not a
+  governed document.
+- **One inherited finding, fixed here.** The merged tree reported `KW-CONFIG-REG-002` because
+  `onboarding: done` was written without re-splicing the block. It was re-spliced with
+  `kyber-weave docs onboarding done .`, which is the verb this slice built for exactly that, and the
+  diff is the single `<onboarding>` line.
+
 
 ## Closeout mapping
 
-Rows marked **Documented** name the live governed document that carries the item now. Rows marked
-**Blocked** are the T38/T41 gap above and must be filled before this plan is archived; a row marked
-**Waived** records why nothing survives.
+Rows marked **Documented** name the live governed document that carries the item now. A row marked
+**Waived** records why nothing survives, and says which waiver it is. Every id in the Decisions table
+and every row of the Design harvest has a row here.
 
 | ID | Destination | Documentation impact | Status |
 |---|---|---|---|
-| D4 | [docs/standards/README.md](../standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file); [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decision 4 | The tool is the only route to a standard, and a file read is the exception | Documented |
-| D5 | [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decisions 1 to 3; [docs/standards/README.md](../standards/README.md#what-belongs-in-a-standard) | The three homes of project knowledge, and the `## Completion` rule | Documented |
-| D6 | Blocked — T38 is not implemented; destination when it lands: `docs/configuration.md` (the setting and its values) and `docs/cli-command-surface.md` (the run-start step order) | The onboarding stop | Blocked |
-| D7 | Blocked — the `kyber-docs-onboarding-and-assessment` skill carries no onboarding step | What onboarding asks | Blocked |
-| D12 | [docs/plans/README.md](../plans/README.md#plan-decisions-and-closeout-policy) | One plan never spans several pull requests; each slice is its own plan | Documented |
+| D4 | [docs/standards/README.md](../../standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file); [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decision 4 | The tool is the only route to a standard, and a file read is the exception | Documented |
+| D5 | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decisions 1 to 3; [docs/standards/README.md](../../standards/README.md#what-belongs-in-a-standard) | The three homes of project knowledge, and the `## Completion` rule | Documented |
+| D6 | [Kyber-Squad architecture, run start](../../kyber-squad/architecture.md#run-start-fetch-and-branch-first) (why the onboarding stop is the first check, ahead of the CodeGraph probe and the fetch, and why an autonomous run stops without writing an answer); [Configuration § Onboarding](../../configuration.md#onboarding) (the two values, absent as unanswered, and what the stop is for); [CLI command surface](../../cli-command-surface.md#run--run-start) step 4 (the stop in the step's order) | The onboarding stop and where it sits in run start | Documented |
+| D7 | [Adopting DocGraph § 8: answer the onboarding question](../../docgraph/onboarding.md#8-answer-the-onboarding-question) (what is chosen, where each answer lives, and how to see a default), and the [onboarding step in the skill](../../../.apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md#onboarding-mode-the-choice-a-run-stops-for) for the procedure | What onboarding asks, and what it does not | Documented |
+| D12 | [docs/plans/README.md](../../plans/README.md#plan-decisions-and-closeout-policy) | One plan never spans several pull requests; each slice is its own plan | Documented |
 | D13 | Documentation waiver — cross-slice build order: how the eight slices of this program sequence against each other is scheduling, with no surviving behaviour for a future engineer to consult | None | Waived |
-| D31 | [docs/standards/README.md](../standards/README.md#what-belongs-in-a-standard); [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decision 3 | `## Commands` became `## Completion`, one per standard, and the anchor moved | Documented |
-| D32 | [ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) decision 5 and Consequences, amended in place; [docs/code-review/architecture.md](../code-review/architecture.md#the-shipped-gate-catalogue) | The catalogue writes `full-suite` from the gate's role; the generated command is not wrapped in the guard | Documented |
-| D33 | Partially: `stop-on-tool-failure` and the `run:` block are in [docs/configuration.md](../configuration.md#run-controls) from slices 1 and 2; the `onboarding` value and its Config Reg property are blocked with D6 | Setting names and how a value publishes | Blocked |
-| D34 | Blocked with D6 — the writing command does not exist | `docs onboarding <done\|declined>` | Blocked |
-| D35 | [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and its [index row](../adr/README.md); the onboarding half of this disposition is blocked with D6 | One new ADR at 0064 | Documented |
-| D40 | Blocked with D6 — `declined` is recorded nowhere the product reads | The value that records a refusal | Blocked |
+| D31 | [docs/standards/README.md](../../standards/README.md#what-belongs-in-a-standard); [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) decision 3 | `## Commands` became `## Completion`, one per standard, and the anchor moved | Documented |
+| D32 | [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) decision 5 and Consequences, amended in place; [docs/code-review/architecture.md](../../code-review/architecture.md#the-shipped-gate-catalogue) | The catalogue writes `full-suite` from the gate's role; the generated command is not wrapped in the guard | Documented |
+| D33 | [Configuration § Onboarding](../../configuration.md#onboarding) (the `onboarding` name, its two values, and the `<onboarding>` mode property it publishes); [§ Run controls](../../configuration.md#run-controls) (the `stop-on-tool-failure` and `run:` half, from slices 1 and 2) | Setting names and how a chosen value publishes while an absent one publishes nothing | Documented |
+| D34 | [CLI command surface: the `docs` branch](../../cli-command-surface.md#docs--docgraph-governance) (the verb, its argument, exit codes, and that the answer is written in place with the block re-spliced) and the [Configure](../../cli-command-surface.md#configure) flow | How the answer is recorded | Documented |
+| D35 | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and its [index row](../../adr/README.md); the onboarding half of the disposition lands there as decisions 4 and 5 | One new ADR at 0064 | Documented |
+| D40 | [Configuration § Onboarding](../../configuration.md#onboarding) (`declined` behaves as `done`, and why the value exists) | The value that records a refusal | Documented |
 | AP1 | Documentation waiver — execution approval: the owner's approval of the Test contract is provenance, held in this plan's Decisions table and in the slices' commits, not behaviour a future reader consults | None | Waived |
-| D59 | Documentation waiver — stacked-branch delivery: which unmerged branch this slice was cut from is history; the rule that survives (branch from the unmerged slice, target its branch, never rebase) is already in [docs/plans/README.md](../plans/README.md#plan-decisions-and-closeout-policy) from slice 3 | None | Waived |
-| D60 | [docs/todo/docs-dev-task-gate-entry.md](../todo/docs-dev-task-gate-entry.md) (narrowed, left open); [docs/code-review/architecture.md](../code-review/architecture.md#task-gates) | `docs-dev`'s first task gate is a configuration check, not a documentation check | Documented |
+| D59 | Documentation waiver — stacked-branch delivery: which unmerged branch this slice was cut from is history; the rule that survives (branch from the unmerged slice, target its branch, never rebase) is already in [docs/plans/README.md](../../plans/README.md#plan-decisions-and-closeout-policy) from slice 3 | None | Waived |
+| D60 | [docs/todo/docs-dev-task-gate-entry.md](../../todo/docs-dev-task-gate-entry.md) (narrowed, left open); [docs/code-review/architecture.md](../../code-review/architecture.md#task-gates) | `docs-dev`'s first task gate is a configuration check, not a documentation check | Documented |
 | D61 | Documentation waiver — migration-report bookkeeping: the rule is the bodies' digest check itself, which the reports and the Squad canonical tests carry; no canonical page holds it, as slices 2 and 5 also recorded | None | Waived |
-| D62 | [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) Consequences | The roster comment left the portable tree with the instruction lines | Documented |
-| H1 | [docs/standards/README.md](../standards/README.md#what-belongs-in-a-standard); the 7 standards under [docs/standards/](../standards/README.md); the 14 templates under `products/kyber-squad/standards/` — the onboarding step the row pairs with the section is blocked with D7 | Every standard ends at one `## Completion` | Documented, except the onboarding half (blocked) |
-| H2 | Blocked with D6, D33, D34 and D40 — `docs/configuration.md` and `docs/cli-command-surface.md` are unchanged because the behaviour they would describe does not exist in this tree | The onboarding setting, its values, and the command | Blocked |
-| H3 | [docs/code-review/architecture.md](../code-review/architecture.md#the-shipped-gate-catalogue) and [#task-gates](../code-review/architecture.md#task-gates) | The `full-suite` key, the three plumbing gates, and every file kind selecting a gate | Documented |
+| D62 | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) Consequences | The roster comment left the portable tree with the instruction lines | Documented |
+| H1 | [docs/standards/README.md](../../standards/README.md#what-belongs-in-a-standard); the 7 standards under [docs/standards/](../../standards/README.md); the 14 templates under `products/kyber-squad/standards/`; [Adopting DocGraph § 8](../../docgraph/onboarding.md#8-answer-the-onboarding-question) and the [onboarding step](../../../.apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md#onboarding-mode-the-choice-a-run-stops-for) that configure them | Every standard ends at one `## Completion`, and onboarding is where its content is chosen | Documented |
+| H2 | [Configuration § Onboarding](../../configuration.md#onboarding); [CLI command surface](../../cli-command-surface.md#run--run-start) and its [`docs onboarding` row](../../cli-command-surface.md#docs--docgraph-governance); [Adopting DocGraph § 8](../../docgraph/onboarding.md#8-answer-the-onboarding-question) | The onboarding setting, its values, the command, and the run-start step order | Documented |
+| H3 | [docs/code-review/architecture.md](../../code-review/architecture.md#the-shipped-gate-catalogue) and [#task-gates](../../code-review/architecture.md#task-gates) | The `full-suite` key, the three plumbing gates, and every file kind selecting a gate | Documented |
 
