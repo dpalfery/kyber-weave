@@ -175,7 +175,44 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
-    /// A digest that matches the plan means the file was written from this plan. A stale one
+    /// A blank element inside depends-on reports KW-DOC-TASKS-002 even when the plan task
+    /// declares no dependencies: normalization must not make <c>[null]</c> compare equal to
+    /// <c>[]</c>, or junk passes as a matching scope.
+    /// </summary>
+    [Fact]
+    public void ABlankDependencyElementAgainstAnEmptyPlanScopeIsKWDOCTASKS002()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string taskFile = $$"""
+            {
+              "schema-version": 1,
+              "plan": "{{PlanTaskFileProbe.PlanPath}}",
+              "execution-digest": "{{PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown())}}",
+              "tasks": [
+                {
+                  "id": "{{PlanTaskFileProbe.FirstTask}}",
+                  "role": "csharp-dev",
+                  "depends-on": [null],
+                  "files": ["src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs", "src/KyberWeave.Core.Docs/Validation/PlanTaskFile.cs"],
+                  "session": "{{PlanTaskFileProbe.FirstTask}}",
+                  "prompt": "run `dotnet test`\n\nAcceptance criteria:\n- passes"
+                },
+                {
+                  "id": "{{PlanTaskFileProbe.SecondTask}}",
+                  "role": "test-dev",
+                  "depends-on": ["{{PlanTaskFileProbe.FirstTask}}"],
+                  "files": ["tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs"],
+                  "session": "{{PlanTaskFileProbe.SecondTask}}",
+                  "prompt": "run `dotnet test`\n\nAcceptance criteria:\n- passes"
+                }
+              ]
+            }
+            """;
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, taskFile);
+
+        ReportedFindings run = Validate(fixture);
+        AssertReports(run, DiffersFromPlan);
+    }
     /// means the plan moved afterwards, so the conductor refuses the file until the architect
     /// regenerates it rather than pasting prompts the plan no longer describes.
     /// </summary>

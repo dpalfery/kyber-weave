@@ -330,6 +330,18 @@ public sealed partial class PlanTaskFileValidator
                 continue;
             }
 
+            if (HasBlankElement(entry.Files) || HasBlankElement(entry.DependsOn))
+            {
+                report.Add(new Diagnostic(
+                    DiffersFromPlan,
+                    Severity.Error,
+                    $"Task '{id}' carries an empty file or dependency entry in task file '{taskFile}': " +
+                    "every entry must name a file or a task.",
+                    id,
+                    taskFile,
+                    Hint: "Remove the empty entry, or copy the plan's file scope and dependencies."));
+            }
+
             if (!SameSet(task.Files, entry.Files ?? []))
             {
                 report.Add(new Diagnostic(
@@ -547,6 +559,15 @@ public sealed partial class PlanTaskFileValidator
 
     private static bool SameSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
         string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether a file scope or dependency list carries an entry that names nothing: a null or
+    /// blank element the JSON shape allows but no plan task declares. Normalization drops such
+    /// entries, so without this check <c>files:[null]</c> compares equal to <c>files:[]</c> and
+    /// junk passes as a matching scope.
+    /// </summary>
+    private static bool HasBlankElement(IReadOnlyList<string>? values) =>
+        values is not null && values.Any(string.IsNullOrWhiteSpace);
 
     private static string Normalize(IReadOnlyList<string> values) =>
         string.Join(
