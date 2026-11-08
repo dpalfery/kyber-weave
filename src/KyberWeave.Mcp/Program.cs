@@ -18,6 +18,13 @@ if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contain
     return 0;
 }
 
+// The server refreshes the CodeGraph index the docs tools answer from on its first tool call.
+// --no-codegraph-refresh turns that off, and exists for one caller: `kyber-weave doctor --check`
+// promises it never runs `init` or `index`, and its live probe makes a real docs call. With the
+// flag in the probe's argv, the promise holds through the server rather than by luck.
+const string NoCodeGraphRefreshFlag = "--no-codegraph-refresh";
+bool codeGraphRefreshEnabled = !args.Contains(NoCodeGraphRefreshFlag, StringComparer.Ordinal);
+
 // Kyber-Weave's MCP surface is a separate executable rather than a `kyber-weave mcp`
 // subcommand. Stdio JSON-RPC owns stdout, and the CLI is built on Spectre.Console, which
 // writes there. A separate entry point makes stream corruption structurally impossible
@@ -94,6 +101,10 @@ builder.Services.AddSingleton(new DocumentIndexHost(
     ontology.DocsRoots,
     ontology.ResolvedCatalogPath));
 builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisReader(repoRoot));
+
+// The refresh schedule is a process-wide decision, made once from this process's own argv. The
+// tools receive it by injection so a test that asks them directly gets the default cadence.
+builder.Services.AddSingleton(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
 
 builder.Services
     .AddMcpServer(DocsServerInstructions.Configure)

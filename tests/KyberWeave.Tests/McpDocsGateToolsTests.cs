@@ -29,8 +29,18 @@ public sealed class McpDocsGateToolsTests : IDisposable
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    /// <summary>
+    /// The header contract a gate tool leads with: root, the branch and git directory it was read
+    /// from, a short revision or <c>unavailable</c>, a dirty marker or <c>unknown</c>, and the live
+    /// document count.
+    /// </summary>
+    /// <remarks>
+    /// The tokens are named rather than assumed adjacent to the root: <c>branch=</c> and
+    /// <c>repo=</c> sit between the root and <c>rev=</c>, and a pattern that expected them next to
+    /// each other swallowed both into the root capture.
+    /// </remarks>
     private static readonly Regex ProvenancePattern = new(
-        @"^provenance: root=(?<root>.+?) rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
+        @"^provenance: root=(?<root>.+?) branch=\S+ repo=.+? rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
         + @"dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\d+)$",
         RegexOptions.CultureInvariant);
 
