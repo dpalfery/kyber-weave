@@ -21,8 +21,14 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// to a path that moved fails in a way that looks like the repository is wrong. Everything
 /// outside the markers is returned byte for byte.
 /// </para>
+/// <para>
+/// Public because a command that edits the configuration has to leave the block describing it
+/// current: <c>docs onboarding</c> changes a value this class renders, and a repository that
+/// recorded an answer would otherwise fail its own <c>docs validate</c> for a block no
+/// operator is meant to edit by hand.
+/// </para>
 /// </remarks>
-internal static class ConfigRegMarkdown
+public static class ConfigRegMarkdown
 {
     public const string StartMarker = "<!-- KYBER_WEAVE_CONFIG_REG_START -->";
     public const string EndMarker = "<!-- KYBER_WEAVE_CONFIG_REG_END -->";
