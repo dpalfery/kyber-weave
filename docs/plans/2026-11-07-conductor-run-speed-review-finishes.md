@@ -27,7 +27,7 @@ This is a child plan of the approved parent design for the conductor run-speed r
 
 ## Decisions
 
-Rows D12, D13, D15, D16 and D17 are this slice's rows from the parent design's decision ledger, copied verbatim per the parent's own D12 carve rule. In D12, "this file" means the parent design file on its branch, not this child plan. AP1 records the conductor's approval of this plan's Test contract and execution; D18 records the one scope adjustment this slice carries.
+Rows D12, D13, D15, D16 and D17 are this slice's rows from the parent design's decision ledger, copied verbatim per the parent's own D12 carve rule. In D12, "this file" means the parent design file on its branch, not this child plan. AP1 records the conductor's approval of this plan's Test contract and execution; D18 and D19 record the scope adjustments this slice carries.
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
@@ -38,6 +38,7 @@ Rows D12, D13, D15, D16 and D17 are this slice's rows from the parent design's d
 | D17 | How is a gate with a missing dependency reported? | New optional gate key `requires-paths`. When a listed path is absent the gate does not start and reports `KW-REVIEW-033` with the install hint, and stays a blocking failure. | It must not read as a code failure, and must not silently pass. Set on the dash gates (`dash/node_modules`). The reviewer installs the dependency and re-runs that gate with `--gate`. | autonomous: low-confidence, no authoritative source |
 | AP1 | Is the Test contract approved, and may this slice execute? | Approved as written, as recommended. Execution follows the parent design's D12. | Not a planning decision. Resolved by the conductor carrying `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`. | autonomous: recommendation accepted |
 | D18 | Which part of T34's file scope is deferred, and why? | `products/kyber-squad/skills/delivery-execution/SKILL.md` is deferred to slice 4, which creates that file when it moves the shared execution contract out of the conductor's references. T34 covers every other file in its list, and the review instructions land in `products/kyber-squad/skills/code-review/SKILL.md`, `products/kyber-squad/agents/code-reviewer.md`, `products/kyber-squad/agents/conductor.md`, `products/kyber-squad/agents/bug-crusher.md` and `products/kyber-squad/skills/bug-crusher/SKILL.md`. When slice 4 creates the shared skill, it carries the review instructions into it. | The parent's decision D13(d) orders fix 5's remaining work after fix 2, because it edits the shared execution skill fix 2 creates. The owner prioritised this slice ahead of slice 4, so the file that does not yet exist is deferred rather than the slice. The council fixes this slice carries - the `--all` stop, the single `--gate` re-check and the missing-dependency report - do not depend on that file. | autonomous: recommendation accepted |
+| D19 | Which files did T34's RED tests pin that the task's file list did not name? | `products/kyber-squad/agents/conductor/references/execution-and-review.md` and `products/kyber-squad/agents/conductor/references/plan-path.md` are named by the RED tests, and the two migration reports for the reviewer and the conductor must carry the new body digests. All four are in T34's scope. | The parent design's T34 file list named the two agent bodies and the two skills, but not the two canonical references the tests read, and not the migration reports whose digests the same tests pin. The test author found the gap while writing the RED proofs, before any implementation, and the implementation worker is authorised against the corrected list. | autonomous: recommendation accepted |
 
 ## Investigation findings
 
@@ -129,10 +130,10 @@ Two facts about the runner commands, so the implementation worker is not surpris
 
 ### T34: Reviewer and plan instructions
 
-- **Files:** `products/kyber-squad/agents/code-reviewer.md`, `products/kyber-squad/skills/code-review/SKILL.md`, `products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/agents/conductor.md`, `products/kyber-squad/agents/bug-crusher.md`, `products/kyber-squad/skills/bug-crusher/SKILL.md`
+- **Files:** `products/kyber-squad/agents/code-reviewer.md`, `products/kyber-squad/skills/code-review/SKILL.md`, `products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/agents/conductor.md`, `products/kyber-squad/agents/conductor/references/execution-and-review.md`, `products/kyber-squad/agents/conductor/references/plan-path.md`, `products/kyber-squad/agents/bug-crusher.md`, `products/kyber-squad/skills/bug-crusher/SKILL.md`, `products/kyber-squad/migration/code-reviewer.md`, `products/kyber-squad/migration/conductor.md`
 - **Required skills:** `docs-dev`
 - **Depends on:** T33
-- **Acceptance:** fix 5's list. `delegates-to` on conductor and bug-crusher gains `review-lens` and `review-triage`, used only on `COUNCIL_SEATS_NEEDED`. The docs-impact review and any edit finish before the council starts. T34's row holds. The shared execution skill is slice 4's file and does not exist yet; the review instructions land in the files that do, and slice 4 carries them into the skill when it creates it.
+- **Acceptance:** fix 5's list. `delegates-to` on conductor and bug-crusher gains `review-lens` and `review-triage`, used only on `COUNCIL_SEATS_NEEDED`. The docs-impact review and any edit finish before the council starts. T34's row holds. Editing the reviewer's and the conductor's agent bodies invalidates the `final-body-sha256` their migration reports record, so both reports are updated in this task. The shared execution skill is slice 4's file and does not exist yet; the review instructions land in the files that do, and slice 4 carries them into the skill when it creates it.
 
 ### T35: Docs and closeout for slice 6
 

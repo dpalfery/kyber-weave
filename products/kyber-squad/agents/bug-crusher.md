@@ -6,10 +6,13 @@ invocation: primary
 model-profile: fast
 capability-profile: root-fixer
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
-# The skill dispatches bug-crusher-investigator as its first act on every defect, so the
-# roster has to permit it. `root-fixer` grants `delegate` for exactly this; the roster is
-# what keeps the grant scoped to the one agent the skill names.
-delegates-to: [bug-crusher-investigator, docs-dev]
+# The skill dispatches bug-crusher-investigator as its first act on every defect and
+# docs-dev for the documentation-impact review, so the roster has to permit both.
+# `review-lens` and `review-triage` are for one situation only: `code-reviewer` returns
+# `STATUS: COUNCIL_SEATS_NEEDED` because its harness gave it no way to start its own
+# seats, and this session starts them and re-invokes it. `root-fixer` grants `delegate`
+# for exactly this; the roster is what keeps the grant scoped to those four agents.
+delegates-to: [bug-crusher-investigator, docs-dev, review-lens, review-triage]
 fallback: role-skill
 aliases: []
 ---
