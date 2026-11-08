@@ -822,6 +822,7 @@ public sealed class AnalysisPersistenceTests
         process.StandardInput.Dispose();
 
         Assert.False(IsStandardInputOpen(process));
+        Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
     }
 
     [Fact]

@@ -21,9 +21,21 @@
     },
     {
       "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\", [\"version\"])",
+      "count": 2,
+      "bound": "Self-exiting command (git version); child process exits immediately after reporting version and is waited on with WaitForExit(5000)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
       "text": "return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 -batch -bail reads SQL on stdin and exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "using Process process = Process.Start(startInfo)!;",
+      "count": 2,
+      "bound": "Self-exiting command (git version); bounded by WaitForExit(5000) and using disposal in IsStandardInputOpen tests."
     },
     {
       "file": "tests/KyberWeave.Tests/ArchiveCloseoutScopeTests.cs",
