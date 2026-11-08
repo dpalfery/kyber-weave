@@ -10,9 +10,10 @@ ontology:
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
 
-  # This repository writes C#, TypeScript, and the tests that pin them. The list creates
-  # docs/standards/<technology>/, publishes <technology-coding-standard> in the registry,
-  # and legalizes the technology value in that standard's frontmatter.
+  # This repository writes C#, TypeScript, the tests that pin them, and the GitHub Actions
+  # workflows under .github/workflows/. The list creates docs/standards/<technology>/,
+  # publishes <technology-coding-standard> in the registry, and legalizes the technology
+  # value in that standard's frontmatter.
   technologies:
     - csharp
     - test
@@ -20,6 +21,7 @@ ontology:
     - rust
     - tauri
     - go
+    - github-actions
 
 # The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
 # cites their output as evidence rather than restating a claim that they passed.

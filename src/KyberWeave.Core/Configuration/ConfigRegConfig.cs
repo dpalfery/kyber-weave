@@ -53,6 +53,12 @@ public sealed record ConfigRegEntry(
 /// than allowed to replace the derived entry with a path. The registry's promise survives —
 /// every path value resolves — because only the entry kind that is not a path is exempt.
 /// </para>
+/// <para>
+/// A setting that publishes a mode property is held here rather than on a type of its own,
+/// because this is what renders the line: the value an agent reads and the value the code
+/// applies then come from one place and cannot disagree. <c>autonomy:</c> was the first, the
+/// run settings are the rest.
+/// </para>
 /// </remarks>
 public sealed class ConfigRegConfig
 {
@@ -88,6 +94,35 @@ public sealed class ConfigRegConfig
     /// </summary>
     public const string IntakeAssessmentEnabled = "enabled";
 
+    /// <summary>
+    /// Registry property carrying whether a failed tool stops a run. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from the top-level
+    /// <c>stop-on-tool-failure:</c> setting and reserved: a host may not declare it under
+    /// <c>config-reg:</c>.
+    /// </summary>
+    public const string StopOnToolFailureProperty = "stop-on-tool-failure";
+
+    /// <summary>
+    /// Registry property carrying the branch a run is compared against. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>run.base-branch</c> and
+    /// reserved: a host may not declare it under <c>config-reg:</c>.
+    /// </summary>
+    public const string RunBaseBranchProperty = "run-base-branch";
+
+    /// <summary>
+    /// Registry property carrying whether a harness name is published at all. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>run.harness-names</c> and
+    /// reserved: a host may not declare it under <c>config-reg:</c>.
+    /// </summary>
+    public const string RunHarnessNamesProperty = "run-harness-names";
+
+    /// <summary>
+    /// The branch a run is compared against when the operator named none. <c>origin/HEAD</c>
+    /// rather than <c>main</c>: the default branch differs per repository, and a hard-coded
+    /// <c>main</c> compares against a branch that may not exist while looking authoritative.
+    /// </summary>
+    public const string DefaultBaseBranch = "origin/HEAD";
+
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
 
@@ -119,6 +154,43 @@ public sealed class ConfigRegConfig
     /// </summary>
     public string? Autonomy { get; init; }
 
+    /// <summary>
+    /// The top-level <c>stop-on-tool-failure:</c> setting as the operator wrote it, or null when
+    /// the repository did not set one. Read <see cref="StopsOnToolFailure"/> for the decision a
+    /// run makes; this member only reports what the file said.
+    /// </summary>
+    public bool? StopOnToolFailure { get; init; }
+
+    /// <summary>
+    /// Whether a failed tool stops a run. An absent setting stops, and that default is applied
+    /// here in code: absence is the common case, and instruction text an agent may or may not
+    /// have read is not something a run can rely on for it.
+    /// </summary>
+    public bool StopsOnToolFailure => StopOnToolFailure ?? true;
+
+    /// <summary>
+    /// The <c>run.base-branch</c> setting as the operator wrote it, or null when the repository
+    /// did not set one. Read <see cref="BaseBranch"/> for the branch a run actually uses.
+    /// </summary>
+    public string? RunBaseBranch { get; init; }
+
+    /// <summary>
+    /// The branch a run is compared against: the configured one, or
+    /// <see cref="DefaultBaseBranch"/> when the operator never set one.
+    /// </summary>
+    public string BaseBranch =>
+        string.IsNullOrWhiteSpace(RunBaseBranch) ? DefaultBaseBranch : RunBaseBranch;
+
+    /// <summary>
+    /// The <c>run.harness-names</c> setting as the operator wrote it, or null when the
+    /// repository did not set one. Read <see cref="PublishesHarnessNames"/> for the effective
+    /// setting.
+    /// </summary>
+    public bool? RunHarnessNames { get; init; }
+
+    /// <summary>Whether a harness name is published in a rendered artifact; absent means yes.</summary>
+    public bool PublishesHarnessNames => RunHarnessNames ?? true;
+
     public static ConfigRegConfig ProductDefaults { get; } = new();
 
     /// <summary>
@@ -140,11 +212,11 @@ public sealed class ConfigRegConfig
         string root = ontology.DocsRoot;
         List<ConfigRegEntry> entries =
         [
-            new ConfigRegEntry(DocsRootProperty, root),
-            new ConfigRegEntry(DocumentationIndexProperty, DocsLayout.Index(root)),
-            new ConfigRegEntry(DocumentationOntologyProperty, DocsLayout.Ontology(root)),
-            new ConfigRegEntry(ComponentCatalogProperty, ontology.ResolvedCatalogPath),
-            new ConfigRegEntry(StandardsRootProperty, DocsLayout.Folder(root, DocsLayout.Standards))
+            new(DocsRootProperty, root),
+            new(DocumentationIndexProperty, DocsLayout.Index(root)),
+            new(DocumentationOntologyProperty, DocsLayout.Ontology(root)),
+            new(ComponentCatalogProperty, ontology.ResolvedCatalogPath),
+            new(StandardsRootProperty, DocsLayout.Folder(root, DocsLayout.Standards))
         ];
 
         foreach (string technology in ontology.Technologies)
@@ -179,6 +251,43 @@ public sealed class ConfigRegConfig
                 ConfigRegEntryKind.Mode));
         }
 
+        // Same rule for the run settings: a property an operator did not write publishes
+        // nothing, because an agent already applies the documented default. Only a value that
+        // was actually chosen is worth a line, and only a chosen value can differ from it.
+        if (StopOnToolFailure is not null)
+        {
+            entries.Add(new ConfigRegEntry(
+                StopOnToolFailureProperty,
+                ModeWord(StopOnToolFailure.Value),
+                ConfigRegEntryKind.Mode));
+        }
+
+        if (!string.IsNullOrWhiteSpace(RunBaseBranch))
+        {
+            entries.Add(new ConfigRegEntry(
+                RunBaseBranchProperty,
+                RunBaseBranch,
+                ConfigRegEntryKind.Mode));
+        }
+
+        if (RunHarnessNames is not null)
+        {
+            entries.Add(new ConfigRegEntry(
+                RunHarnessNamesProperty,
+                ModeWord(RunHarnessNames.Value),
+                ConfigRegEntryKind.Mode));
+        }
+
         return entries;
+    }
+
+    /// <summary>
+    /// A boolean as the registry spells it. Deliberately not <c>bool.ToString()</c>, which
+    /// capitalises: the rendered block is read by agents comparing against <c>true</c> and
+    /// <c>false</c>, not against the framework's formatting.
+    /// </summary>
+    private static string ModeWord(bool value)
+    {
+        return value ? "true" : "false";
     }
 }

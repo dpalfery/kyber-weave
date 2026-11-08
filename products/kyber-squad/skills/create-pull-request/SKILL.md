@@ -94,6 +94,37 @@ Never assume the default branch is the target, and never assume a branch such as
 `main` exists or is the integration branch. The branching model is host policy, and a pull
 request into the wrong base merges silently into the wrong place.
 
+A run that started with `kyber-weave run start` already knows its base: the command branched
+from the branch the `run.base-branch` setting names, or from `origin/HEAD` when the repository
+names none. That branch is the target, and the run record carries its name. Where the source
+branch was created another way, resolve the target as above rather than assuming the branch this
+skill would have picked.
+
+## Branch and title shape when the host names its harness
+
+A host that tracks which harness produced a change states the shape in a naming check, a
+contributing guide, or a rule under **<rules-index>**. When it does, the branch and the title both
+carry it, and a pull request that fails the check cannot reach the default branch however good the
+change is:
+
+| Part | Shape |
+|---|---|
+| Source branch | `[<owner>.<agent>.]<harness>/<type>/<slug>` |
+| Title | `<type>(<scope>): <summary> [<harness>]` |
+
+- `<harness>` is the token of the harness that produced the change, written in square brackets at
+  the end of the title and as the branch's first segment — `[{{harness}}]` where this file names
+  it. A run may also carry `codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`,
+  `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin` or `commandcode`, and `manual` for work
+  named after no harness. Take the token the branch already carries; do not invent one.
+- `<type>` is the conventional-commit type and `<slug>` is the work in lowercase hyphen-separated
+  words. The run's branch carries both, so read them off the branch instead of composing a second
+  name.
+- The harness appears once, in square brackets, at the end of the title. A second bracketed group
+  states a second harness and is refused.
+- Where the host has no such convention, use the plain title and the branch you were given: a
+  suffix the host does not ask for is noise.
+
 ## Title
 
 1. The explicit title the user gave.

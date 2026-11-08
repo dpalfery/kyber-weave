@@ -53,6 +53,12 @@ public static partial class TriggerClassifier
         "finalization",
     };
 
+    /// <summary>
+    /// The marker the conductor writes when it hands the run-start step to a worker, because it has no
+    /// shell of its own to run the tool with.
+    /// </summary>
+    private const string RunStartMarker = "RUN-START";
+
     /// <summary>Whether <paramref name="harness"/> hooks project-wide rather than per agent.</summary>
     public static bool IsProjectWideHarness(string harness)
     {
@@ -79,6 +85,9 @@ public static partial class TriggerClassifier
     /// line after the header block. Returns the marker label, or null.
     /// </summary>
     /// <remarks>
+    /// <c>RUN-START</c> is the one marker that is not a planner dispatch: it is the conductor handing the
+    /// run-start step to a worker, and the classifier reads it so that dispatch is not mistaken for a
+    /// delegation.
     /// The plans-directory check on a <c>PLAN_FILE</c> marker is a rule-level path
     /// check against <c>config.planning-dirs</c>, not a classification check: the
     /// classifier reports the header marker and never loads configuration for it.
@@ -101,6 +110,8 @@ public static partial class TriggerClassifier
         {
             if (first.StartsWith("INTAKE:", StringComparison.Ordinal))
                 return "INTAKE";
+            if (IsRunStartMarker(first))
+                return RunStartMarker;
             if (first.StartsWith("FINDINGS:", StringComparison.Ordinal))
                 return "FINDINGS";
             if (first.StartsWith("STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
@@ -115,6 +126,18 @@ public static partial class TriggerClassifier
             return "PLAN_FILE";
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="line"/> is the <c>RUN-START: true</c> marker. Only the true
+    /// value marks a dispatch: a line that carries the name and any other value is not the
+    /// conductor asking for the step, and reading it as one would route it as an investigate.
+    /// </summary>
+    private static bool IsRunStartMarker(string line)
+    {
+        string prefix = RunStartMarker + ":";
+        return line.StartsWith(prefix, StringComparison.Ordinal)
+               && string.Equals(line[prefix.Length..].Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -178,7 +201,7 @@ public static partial class TriggerClassifier
         if (!marked && unidentified && IsProjectWideHarness(ev.Harness))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
-        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers);
+        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker);
         if (trigger is not null && IsReturnPhase(ev.Phase))
             trigger = ToReturned(trigger);
 
@@ -229,8 +252,16 @@ public static partial class TriggerClassifier
         string? caller,
         string? target,
         string targetClass,
-        IReadOnlyDictionary<string, string> headers)
+        IReadOnlyDictionary<string, string> headers,
+        string? marker)
     {
+        // RUN-START: true is the conductor handing the run-start step to a worker because it has no shell
+        // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 escalates a delegate with no
+        // plan, which would refuse the very route the marker exists for; investigate keeps the roster check
+        // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
+        if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
+            return "investigate";
+
         if (string.Equals(caller, "conductor", StringComparison.Ordinal))
         {
             if (string.Equals(targetClass, "implementation", StringComparison.Ordinal))

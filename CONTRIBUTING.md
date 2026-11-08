@@ -14,16 +14,21 @@ Security vulnerabilities: see [SECURITY.md](SECURITY.md) — do not file a publi
 ## Workflow
 
 1. Fork the repository (or use a branch if you have write access)
-2. Create a feature branch from `develop` (or `main` for a hotfix)
+2. Create your branch with
+   `kyber-weave run start --harness <token> --type <type> --slug <slug>`. It fetches `origin`,
+   starts from the branch the repository's `run.base-branch` setting names or from `origin/HEAD`
+   when that setting is absent, and names the branch `[<owner>.<agent>.]<harness>/<type>/<slug>`.
 3. Make focused commits with clear messages
-4. Open a pull request against `develop` (or `main` for hotfixes)
+4. Open a pull request against the base your branch was started from — the `run.base-branch`
+   setting, or `origin/HEAD` when no setting names one — and end its title with the harness token
+   in square brackets (`[<harness>]`), the one the branch already carries.
 5. Ensure the required `CI Summary` check passes. It aggregates build and test, publish smoke, CodeQL, Trivy, Semgrep, gitleaks, and the skill/docs gate.
 6. Address review feedback
 
 Pull requests require at least one approving review, and that approval must include a
 code-owner review. New commits dismiss stale approvals, and all review conversations
 must be resolved before merging. Protected branches require a pull request, so ordinary
-contributors cannot push directly to `main` or `develop`; the branch must also be
+contributors cannot push directly to `main`; the branch must also be
 up to date with its base before merging.
 
 This repository currently has one maintainer and the repository-wide owner in

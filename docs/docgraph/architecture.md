@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-07
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0057-squad-and-docs-are-their-own-assemblies
@@ -181,6 +181,16 @@ to run an intake assessment. See the
 Because the kind travels on the entry, a mode property is also reserved: a host may not
 declare one under `config-reg:`, because that would replace a setting with a path and break
 the promise the registry makes.
+
+**The run settings are the next three.** `stop-on-tool-failure` at the top level, and
+`run.base-branch` and `run.harness-names`, publish `<stop-on-tool-failure>`,
+`<run-base-branch>` and `<run-harness-names>` as mode properties. A key the operator never
+wrote publishes nothing at all: an agent already applies the documented default, only a value
+somebody chose can differ from it, and a published default would claim a choice the repository
+never made. `run.base-branch` carries a branch name rather than a mode word, and the kind still
+applies — the value names nothing on disk, so `KW-CONFIG-REG-001` must not look for it there
+while `KW-CONFIG-REG-002` still checks the line. See
+[Run controls](../configuration.md#run-controls).
 
 ## Provisioning the index
 

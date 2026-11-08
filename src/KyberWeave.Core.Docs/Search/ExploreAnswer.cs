@@ -319,6 +319,7 @@ public sealed partial class DocumentIndex
                         docWinner,
                         leaf,
                         leafScore,
+                        claim + body + lead,
                         topicScores[topicKey],
                         assignment.IsPreamble,
                         assignment.TopicHeading,
@@ -329,7 +330,7 @@ public sealed partial class DocumentIndex
             }
         }
 
-        if (globalWinner is null)
+        if (globalWinner is null || !CarriesOwnSignal(globalWinner))
         {
             return new RankExploreResult(null, 0);
         }
@@ -348,6 +349,24 @@ public sealed partial class DocumentIndex
         }
 
         return new RankExploreResult(globalWinner, runnerTopic);
+    }
+
+    /// <summary>
+    /// True when the leaf scores on something of its own — its heading labels, its body, or
+    /// an exact document id the caller typed — rather than only on the identity of the
+    /// document it sits in.
+    /// </summary>
+    /// <remarks>
+    /// The relevance floor guards the document, and nothing guarded the answer. A single
+    /// identity token shared by prefix is enough to carry a document over the floor, so a
+    /// question the corpus cannot answer came back naming a document, quoting a leaf that
+    /// shared no word with the question, and reporting <c>confidence: 0.00</c>. That is the
+    /// best-effort answer the floor exists to prevent, so a leaf with no signal of its own
+    /// is not an answer and the query is an explicit miss.
+    /// </remarks>
+    private static bool CarriesOwnSignal(ScoredLeaf leaf)
+    {
+        return leaf.SignalScore > 0;
     }
 
     /// <summary>
@@ -413,7 +432,14 @@ public sealed partial class DocumentIndex
             return null;
         }
 
-        return RankBestLeafInDocument(target, trimmed, queryVector, coverageTerms, titleQuery, row.TargetFragment);
+        ScoredLeaf? redirect = RankBestLeafInDocument(
+            target, trimmed, queryVector, coverageTerms, titleQuery, row.TargetFragment);
+
+        // The row matched the question, but the leaf it points at still has to answer it.
+        // A target section sharing nothing with the question would be named on the
+        // strength of its document's identity alone — the empty answer the floor rejects —
+        // so the caller keeps the document the question actually reached.
+        return redirect is not null && CarriesOwnSignal(redirect) ? redirect : null;
     }
 
     private ScoredLeaf? RankBestLeafInDocument(
@@ -461,6 +487,7 @@ public sealed partial class DocumentIndex
                     document,
                     leaf,
                     leafScore,
+                    claim + body + lead,
                     leafScore,
                     assignment.IsPreamble,
                     assignment.TopicHeading,
@@ -837,6 +864,7 @@ public sealed partial class DocumentIndex
         DocumentModel Document,
         DocumentLeaf Leaf,
         double LeafScore,
+        double SignalScore,
         double TopicScore,
         bool IsPreamble,
         string? TopicHeading,

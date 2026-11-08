@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
@@ -290,6 +291,26 @@ app.Configure(config =>
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
+    });
+
+    // Run Lifecycle Command Branch — the step before anyone investigates or plans: fetch, pick the base,
+    // and put the work on the branch it belongs on. Its own branch because a run is a workflow over a
+    // repository, not a governed artifact class.
+    config.AddBranch("run", run =>
+    {
+        run.SetDescription("Start a run: fetch, resolve the base, and create the branch the work belongs on.");
+
+        run.AddCommand<RunStartCommand>("start")
+            .WithDescription(
+                "Fetch origin, resolve the base branch, compare the failing build's version, and create the " +
+                "run's branch from the right remote base.")
+            .WithExample("run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate")
+            .WithExample(
+                "run", "start", "--harness", "commandcode", "--type", "fix", "--slug",
+                "arbiter-global-block-identity", "--failing-version", "0.1.2")
+            .WithExample(
+                "run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+                "--resume", "claude/fix/existing-fix", "--json");
     });
 
     // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,

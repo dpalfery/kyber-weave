@@ -236,7 +236,9 @@ public sealed class FactoryRendererContractTests : IDisposable
                     $"Agent '{agent.Name}' should omit 'reasoningEffort' (profile default is inherit).");
             }
 
-            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            string expectedBody = TestSquadCorpus
+                .ExpectedRenderText(SquadTarget.Factory, agent.InstructionBody)
+                .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedBody.EndsWith('\n')) expectedBody += "\n";
 
             Assert.Equal(expectedBody, body);
@@ -808,13 +810,17 @@ public sealed class FactoryRendererContractTests : IDisposable
                 .Select(n => n.Value)
                 .ToArray());
         Assert.Equal(primaryAgent.Name, RequireScalar(skillFrontmatter, "name", primaryAgent.Name));
-        string expectedDescription = string.Join(" ", primaryAgent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        string expectedDescription = string.Join(" ", TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Factory, primaryAgent.Description)
+            .Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         Assert.Equal(expectedDescription, RequireScalar(skillFrontmatter, "description", primaryAgent.Name));
 
-        // Body matches the canonical agent body.
-        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        // Body matches the canonical agent body, with the harness token resolved.
+        string expectedAgentBody = TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Factory, primaryAgent.InstructionBody)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         if (!expectedAgentBody.EndsWith('\n')) expectedAgentBody += "\n";
         Assert.Equal(expectedAgentBody, skillBody);
 
@@ -824,7 +830,8 @@ public sealed class FactoryRendererContractTests : IDisposable
             SquadDeploymentFile resourceFile = Assert.Single(
                 result.Files,
                 f => f.RelativePath == $".factory/skills/{primaryAgent.Name}/{resource.RelativePath}");
-            ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
+            ReadOnlySpan<byte> expectedBytes =
+                Encoding.UTF8.GetBytes(TestSquadCorpus.ExpectedRenderText(SquadTarget.Factory, resource.Content));
             Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
         }
 

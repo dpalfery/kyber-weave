@@ -193,6 +193,7 @@ references that belong to this repository.
 - **<rust-coding-standard>**: `docs/standards/rust/README.md`
 - **<tauri-coding-standard>**: `docs/standards/tauri/README.md`
 - **<go-coding-standard>**: `docs/standards/go/README.md`
+- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`
