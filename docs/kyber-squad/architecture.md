@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 status: current
 decided-by:
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
@@ -28,6 +28,7 @@ decided-by:
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0061-code-editing-runs-stop-on-unusable-tools
+  - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
 sections:
   "#":
     keywords:
@@ -1523,6 +1524,16 @@ when continuation is unsupported, the session cannot be recovered, or its contex
 unreliable. A busy owner waits in the queue. Unrelated tasks use separate sessions,
 and retained sessions stay available until task gates and run-level findings settle.
 
+**The architect declares the session group, not the conductor.** Each task in a plan's task file
+carries a `session` group, and tasks sharing one continue a single worker session where the harness
+allows it; the conductor does not invent one at dispatch. **RED and GREEN never share a group**,
+because the adversarial split is the reason the two are separate dispatches at all, and the
+separation is what decides whether a task is bundled. A follow-up fix and a later same-role task on
+one change do share a group: changing one assertion took a fresh worker 11 minutes, because the
+fresh worker re-derived context the previous one already had. The architect may therefore merge two
+RED tasks into one group when the later one needs no earlier GREEN, and never merges a RED with its
+GREEN.
+
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned
 session handle. Retaining context can reduce repeated investigation and support
@@ -1655,6 +1666,66 @@ Operational contracts remain in
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
+### The tracked task file and the paste-and-fill dispatch
+
+The conductor no longer derives its own prompts from the plan. The architect writes one prompt per
+task into a tracked task file at finalization — `docs/plans/<plan>.tasks.json` beside a plan,
+`<spec-folder>/tasks.json` inside a specification — and commits it with the plan
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
+rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
+what makes resuming a run somewhere else possible at all.
+
+- **What a prompt carries.** Files as path plus symbol, full test class names, the exact commands
+  to run, the acceptance criteria, and the standards to fetch. Line numbers are hints at most,
+  because an earlier task on the same file moves them. The measured run's prompts carried none of
+  this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
+  could not name the class that proved its change and reported a green suite it never ran.
+- **Two slots, and nothing else.** The conductor pastes each prompt **unchanged** and fills only
+  `{worktree}` and `{prior_results}`, pasting earlier worker reports as they were written. No plan
+  can know either: the second GREEN prompt in that run needed a cause an earlier worker had found.
+- **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
+  and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
+  items from it. Only the conductor stops reading it — 68 KB in the measured run.
+- **The duplication is checked, not trusted.** A file that disagrees with its plan, a stale digest, a
+  prompt with no command or acceptance criteria, and a prompt that sends a worker into a plan each
+  fail validation; a Ready plan with no file warns. The ids are `KW-DOC-TASKS-001` to `-006`, and
+  `KW-DOC-LIFECYCLE-005` fails the merge when a file is left behind
+  ([rule reference](../ci-pipelines/rule-reference.md)). The check runs in `docs validate` and in the
+  docs MCP validate tool, because the orchestrator holds the docs tools and no shell.
+- **The execution digest covers the execution, not the prose.** It hashes the parsed tasks (id,
+  title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
+  development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
+  edit is. Stale means the conductor refuses the file until the architect regenerates it.
+- **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
+  `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
+  task, so `run start --resume` can read the completed tasks and their results from the commits
+  rather than re-investigating the run. Before this, worker prompts said "Do not commit", so a
+  mid-run push carried nothing and a resumed run opened with an architect pass to assess progress
+  (225 seconds and 64 tool calls in the measured run).
+- **The session group is the architect's.** See [task session continuity](#task-session-continuity)
+  above: tasks sharing a `session` group continue one worker session, and RED and GREEN never do.
+
+```mermaid
+flowchart TD
+    Architect["architect at finalization\nwrites plan + tasks.json"]
+    Validate["conductor validates the file\nthrough the docs tools"]
+    Paste["conductor pastes each prompt\nfills {worktree} and {prior_results}"]
+    Worker["worker dispatches, commits\nTask: id + report"]
+    Resume["run start --resume\nreads the Task: lines"]
+    Archive["docs-dev archives the plan\nand removes the file with git rm"]
+
+    Architect --> Validate
+    Validate --> Paste
+    Paste --> Worker
+    Worker --> Resume
+    Worker --> Archive
+```
+
+The file has a shelf life of exactly one plan. `docs-dev` removes it with `git rm` in the same commit
+that archives the plan, so it never reaches `main` — this repository squash merges, and nothing
+durable is lost because the archived plan keeps the decisions, tasks and test contract. A file left
+behind fails `docs validate --merge-ready`.
+
 ## 10. Plan and specification lifecycle: documentation impact, design harvest, every-change review, closeout
 
 Plans and specifications declare their documentation footprint at authoring time, every
@@ -1710,7 +1781,9 @@ Documentation waiver) and gains the harvest: every `Design harvest` requirement-
 its declared scale migrates into canonical documentation alongside the decisions, each
 item recorded with its documentation-impact, impact-components, last-reviewed date, and
 a status-archived row; the artifact header reads `Status: Archived` only when the
-mapping is complete. Specification closeout migrates durable architecture, behavior,
+mapping is complete. Plan closeout also removes the plan's task file with `git rm` in that same
+commit, so the file never reaches `main`; a file left behind fails `docs validate --merge-ready` as
+`KW-DOC-LIFECYCLE-005`. Specification closeout migrates durable architecture, behavior,
 operations, configuration, interfaces, and consequential decisions — including the
 declared `Design harvest` — into the component's detailed documentation, runbooks,
 references, ADRs, and catalog entries, then moves the specification to the archive
