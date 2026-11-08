@@ -723,6 +723,34 @@ internal sealed class RunStartProbe : IDisposable
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
     }
 
+    /// <summary>
+    ///     Writes a wrapper for git into PATH that fails whenever <paramref name="subcommand" /> is called.
+    /// </summary>
+    public void WriteGitFailOn(string subcommand, string errorMessage)
+    {
+        string gitPath = ResolveOnPath("git", _pathWithoutCodegraph) ?? "/usr/bin/git";
+        string script =
+            "#!/bin/sh\n" +
+            "for arg in \"$@\"; do\n" +
+            $"  if [ \"$arg\" = \"{subcommand}\" ]; then\n" +
+            $"    echo \"{errorMessage}\" >&2\n" +
+            "    exit 128\n" +
+            "  fi\n" +
+            "done\n" +
+            $"exec \"{gitPath}\" \"$@\"\n";
+
+        string path = Path.Combine(_stubBin, OperatingSystem.IsWindows() ? "git.cmd" : "git");
+        File.WriteAllBytes(path, Encoding.ASCII.GetBytes(script));
+
+        if (OperatingSystem.IsWindows()) return;
+
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+
     private static string CliHostPath()
     {
         string hostName = OperatingSystem.IsWindows() ? CliHostName + ".exe" : CliHostName;

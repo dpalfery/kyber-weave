@@ -216,9 +216,19 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Fail($"git status failed: {status.FirstErrorLine}");
         }
 
+        GitOutcome worktrees = runner.WorktreeList();
+        if (!worktrees.Succeeded)
+        {
+            return Fail($"git worktree list failed: {worktrees.FirstErrorLine}");
+        }
+
+        bool anotherWorktreeIsAttached = worktrees.StandardOutput
+            .Split('\n')
+            .Count(line => line.StartsWith("worktree ", StringComparison.Ordinal)) > 1;
+
         RunStartLocation location = RunStartPlanner.DecideLocation(
             status.StandardOutput.Trim().Length == 0,
-            runner.AnotherWorktreeIsAttached());
+            anotherWorktreeIsAttached);
 
         string target = resumeTarget ?? branch;
         string? worktreePath = null;

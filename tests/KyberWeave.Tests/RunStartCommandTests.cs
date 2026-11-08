@@ -164,6 +164,24 @@ public sealed class RunStartCommandTests : IDisposable
     }
 
     /// <summary>
+    ///     When the git worktree list probe fails, the command fails and surfaces the worktree error rather
+    ///     than treating the failure as absent worktrees and creating the branch in place.
+    /// </summary>
+    [Fact]
+    public void FailsAndSurfacesErrorWhenWorktreeListProbeFails()
+    {
+        _probe.WriteGitFailOn("worktree", "fatal: simulated worktree list error");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("git worktree list failed:", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A defect run compares the failing build's version with <c>HEAD</c> and with the remote base,
     ///     and prints all three, because the point of the comparison is to show an operator that the bug
     ///     they hit is not the commit they are looking at.

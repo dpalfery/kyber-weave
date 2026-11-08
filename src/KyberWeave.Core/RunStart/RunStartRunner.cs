@@ -95,12 +95,18 @@ public sealed class RunStartRunner
         return outcome.Succeeded ? outcome.StandardOutput.Trim().Length == 0 : null;
     }
 
-    /// <summary>Whether a second worktree is attached to this repository.</summary>
-    public bool AnotherWorktreeIsAttached()
+    /// <summary>The git worktree list outcome for the current repository.</summary>
+    public GitOutcome WorktreeList()
     {
-        GitOutcome outcome = Git("worktree", "list", "--porcelain");
+        return Git("worktree", "list", "--porcelain");
+    }
+
+    /// <summary>Whether a second worktree is attached to this repository, or null when the probe failed.</summary>
+    public bool? AnotherWorktreeIsAttached()
+    {
+        GitOutcome outcome = WorktreeList();
         if (!outcome.Succeeded)
-            return false;
+            return null;
 
         return outcome.StandardOutput
             .Split('\n')
