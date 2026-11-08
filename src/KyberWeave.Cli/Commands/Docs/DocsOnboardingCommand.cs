@@ -97,8 +97,10 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
 
         if (!Directory.Exists(root))
         {
-            AnsiConsole.MarkupLine(
-                $"[red]{Markup.Escape(CommandName)}: error:[/] directory '{Markup.Escape(root)}' does not exist.");
+            string message = File.Exists(root)
+                ? $"'{Markup.Escape(root)}' is a file, not a directory."
+                : $"directory '{Markup.Escape(root)}' does not exist.";
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {message}");
             return RefusedInput;
         }
 
@@ -151,7 +153,18 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return Failed;
         }
 
-        string updated = HostConfigYaml.WithOnboarding(existing, answer);
+        string updated;
+        try
+        {
+            updated = HostConfigYaml.WithOnboarding(existing, answer);
+        }
+        catch (InvalidDataException ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' has an invalid " +
+                $"onboarding configuration: {Markup.Escape(ex.Message)}");
+            return Failed;
+        }
         if (string.Equals(existing, updated, StringComparison.Ordinal))
             return 0;
 

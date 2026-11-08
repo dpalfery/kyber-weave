@@ -165,6 +165,30 @@ public sealed class OnboardingCommandTests : IDisposable
         Assert.Contains("onboarding", result.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PassingAnExistingFileInsteadOfADirectoryReportsItIsAFile()
+    {
+        string filePath = Path.Combine(_probe.Root, "somefile.txt");
+        File.WriteAllText(filePath, "hello");
+
+        ProbeResult result = _probe.RunCli("docs", "onboarding", "done", filePath);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("is a file, not a directory", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RecordingAnswerAgainstBlockOnboardingFailsGracefully()
+    {
+        string original = "ontology:\n  docs-root: docs\nonboarding:\n  nested: block\n";
+        _probe.WriteHostConfig(original);
+
+        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("invalid onboarding configuration", result.Output, StringComparison.Ordinal);
+    }
+
     private string ReadConfig()
     {
         return File.ReadAllText(Path.Combine(_probe.Root, ConfigRelativePath));

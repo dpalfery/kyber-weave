@@ -507,7 +507,6 @@ public sealed class GateCatalogueRenderTests
     public void NonCsharpHostWithGithubActionsRendersPlumbingGatesLive()
     {
         using TempDirectory repository = new();
-        GateCatalogueFamily goFamily = Family("go");
         Dictionary<string, ProjectRootSet> roots = new(StringComparer.Ordinal)
         {
             ["go"] = new ProjectRootSet([new ProjectRoot(".", "go.mod", "root")], false),

@@ -386,6 +386,7 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.All(developers, agent => Assert.NotEmpty(taskGates[agent]));
         Assert.Equal(["dash-typecheck", "dash-lint"], taskGates["typescript-dev"].Select(gate => gate.Id));
         Assert.Equal(["cargo-fmt", "cargo-clippy"], taskGates["rust-dev"].Select(gate => gate.Id));
+        Assert.Equal(["review-config"], taskGates["docs-dev"].Select(gate => gate.Id));
     }
 
     /// <summary>

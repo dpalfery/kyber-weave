@@ -70,7 +70,7 @@ task-gates:
   - id: shellcheck
     role: lint
     agents: [github-devops]
-    include: ["**/*.sh"]
+    include: ["scripts/*.sh", "scripts/**/*.sh"]
     os: "unix"
     note: "Narrow to scripts/**/*.sh if the repository carries shell fixtures or vendored scripts."
     run: [shellcheck, "{changed}"]
