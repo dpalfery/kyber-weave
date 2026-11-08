@@ -118,7 +118,7 @@ Test authorship follows `<test-coding-standard>`. This standard requires that th
 testable: dependencies passed in, behaviour behind traits where a test must substitute it, no
 global state. Test authorship belongs to `test-dev`.
 
-## Commands
+## Completion
 
 The same on macOS, Linux, and Windows (PowerShell):
 
@@ -129,5 +129,9 @@ cargo build --workspace --locked
 cargo nextest run --workspace --locked   # or: cargo test --workspace --locked
 ```
 
-The test line is the gate the review council and CI run. A dev agent never runs the full suite;
-it runs the tests covering its change (`cargo nextest run -E 'test(<name>)'`).
+The three commands answer the three questions a finishing worker has. `cargo fmt --check` is the
+format check: it reports what it would rewrite and writes nothing. `cargo clippy ... -D warnings`
+compiles every target and denies a warning, so it is the build too — run it before the tests, and
+`cargo build --locked` when you want the artifacts without the lint pass. The test line is the
+gate the review council and CI run. A dev agent never runs the full suite; it runs the tests
+covering its change (`cargo nextest run -E 'test(<name>)'`).

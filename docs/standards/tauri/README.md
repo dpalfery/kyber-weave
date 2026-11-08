@@ -117,7 +117,7 @@ this boundary and needs its own review.
   `close_popover_when_unfocused`).
 - `app.macOSPrivateApi` is `true`, matching the `macos-private-api` feature on `tauri`.
 
-## Gates
+## Completion
 
 A change to the Tauri layer passes the Rust gates of the Rust standard, and the tray UI gates
 that the root `AGENTS.md` lists. Run them from the repository root:
@@ -125,13 +125,18 @@ that the root `AGENTS.md` lists. Run them from the repository root:
 ```bash
 scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
 scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
-scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run build
 scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
 ```
 
-The two test lines are the gates the review council and CI run. A dev agent never runs a full
-suite; it adds a name filter to `cargo test` and a path to the UI `test` command.
+The format check is `cargo fmt --check`; it writes nothing and reports what it would rewrite.
+`cargo clippy ... -D warnings` is the build for the crate: it compiles every target and denies a
+warning. `npm --prefix dash/tray/ui run build` is the build for the popover UI — `tsc --noEmit`
+then a Vite bundle — so it proves the UI type-checks and bundles, which `typecheck` alone does
+not. The two test lines are the gates the review council and CI run. A dev agent never runs a
+full suite; it adds a name filter to `cargo test` and a path to the UI `test` command.
 
 Each command runs through the process watchdog, `scripts/proc-guard.sh run --`
 ([runbook](../../../dash/runbook.md#running-tests-safely)).
@@ -139,5 +144,5 @@ Each command runs through the process watchdog, `scripts/proc-guard.sh run --`
 The same three Rust commands run from `dash/tray/src-tauri`, as the Rust standard gives them.
 The council declares them as `review.gates` entries `cargo-fmt`, `cargo-clippy` and `cargo-test`,
 and `tauri-dev` declares `cargo-fmt` and `cargo-clippy` as task gates.
-The bundled application is built by the release automation owned by `github-devops`, not by a
-command in this standard.
+The bundled application — the shipped `.app`, `.dmg` and installer — is built by the release
+automation owned by `github-devops`, not by a command in this standard.

@@ -38,8 +38,8 @@ Discover continuation support from the current harness's exposed tools; do not a
 2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence.
 3. **REFACTOR:** cleanup and the developer exit gate preserve GREEN.
 
-Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner:
-`dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<Namespace>.<TestClass>"`
+Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner the host's test standard gives in its `## Completion` section:
+`dotnet <path-to-test-assembly>.dll -class "<Namespace>.<TestClass>"`
 or `dotnet test --no-build` for fast loops. Reserve full test suite execution for the final review council, which runs it once per run, on the integrated head, and for CI. No worker runs it, and the conductor never dispatches a full run, even for a cross-cutting change. A worker's task end runs only the test classes its task touched, because workers finish together and concurrent full runs overload the machine. Name those classes in the task packet's runner command by their fully qualified names (a short name runs zero tests and exits 0), passing `-class` once per class (`-class "<Namespace>.<A>" -class "<Namespace>.<B>"`). A task with no covering test class reports `TESTS: total=0` with the reason; treat `total=0` on a code change as unverified, not passing. When a worker reports that its change reaches shared test infrastructure, it has run a targeted set and named what it did not run; the council and CI cover the rest.
 
 If changing requirements would require weakening or replacing the approved Test contract, return the artifact to its author and reopen approval for that contract.

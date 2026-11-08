@@ -46,7 +46,7 @@ its modes; `--full` and `--scoped` reach the `test` gate, so they are not for de
 Run the tests that cover your change, plus build/lint of the touched projects, and check each
 run reports a non-zero test count. The commands for each area:
 
-- .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#commands)
+- .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#completion)
 - Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
   [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
 - KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)

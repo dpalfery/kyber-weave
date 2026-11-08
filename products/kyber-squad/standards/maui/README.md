@@ -106,10 +106,18 @@ ViewModels take interfaces in the constructor. They never instantiate a service.
 Tests mock `INavigationService` and data services; this standard only requires that the
 code be mockable. Test ViewModels and services, not Views.
 
-## Commands
+## Completion
 
 ```bash
-dotnet build -c Release
-dotnet build -t:Run -f net10.0-android
+dotnet build -c Release                                 # the build, analyzers and XAML compilation included
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # the ViewModel and service tests covering your change
+dotnet format --verify-no-changes                       # the formatter check
+dotnet build -t:Run -f net10.0-android                  # run it on a device or emulator
 dotnet build -t:Run -f net10.0-ios
 ```
+
+`dotnet build -c Release` is the build gate: a XAML error, a broken binding or a missing resource
+fails here rather than on a device. The filtered `dotnet test` line is what a dev agent runs; the
+unfiltered suite belongs to the review council and CI. `dotnet format --verify-no-changes` is the
+format check. Views have no unit tests under this standard, so a change to a View is proved by the
+ViewModel tests plus a run on a target — say which target you ran.
