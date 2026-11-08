@@ -237,7 +237,7 @@ public sealed class FactoryRendererContractTests : IDisposable
             }
 
             string expectedBody = TestSquadCorpus
-                .ExpectedRenderText(SquadTarget.Factory, agent.InstructionBody)
+                .ExpectedBodyText(SquadTarget.Factory, agent)
                 .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedBody.EndsWith('\n')) expectedBody += "\n";
 

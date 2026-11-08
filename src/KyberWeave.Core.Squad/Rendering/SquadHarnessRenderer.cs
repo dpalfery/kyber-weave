@@ -88,7 +88,13 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             // The canonical text carries a {{harness}} placeholder where the name of the harness
             // running it belongs; this is the one place it is answered, after validation so every
             // source rule still reads what the author wrote.
-            SquadSource renderSource = SubstituteHarnessToken(source, Spec.Token);
+            //
+            // The shared worker baseline is applied here for the same reason: it is one paragraph, it
+            // reaches every worker on every round trip, and this pipeline is the only step all
+            // thirteen harnesses share, so a rule written once cannot reach twelve of them.
+            SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
+                SubstituteHarnessToken(source, Spec.Token),
+                SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory));
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
         catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)

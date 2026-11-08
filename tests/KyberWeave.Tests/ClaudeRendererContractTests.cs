@@ -230,7 +230,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
             // Exact comparison: the renderer appends the normalized body verbatim, so a
             // duplicated or padded body must fail, and the message names the offender.
             string expectedAgentBody = TestSquadCorpus
-                .ExpectedRenderText(SquadTarget.Claude, agent.InstructionBody)
+                .ExpectedBodyText(SquadTarget.Claude, agent)
                 .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedAgentBody.EndsWith('\n'))
             {

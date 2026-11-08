@@ -722,7 +722,7 @@ public sealed class PiRendererContractTests : IDisposable
                     $"Lowered primary agent '{agent.Name}' license mismatch.");
 
                 Assert.Contains(
-                    NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Pi, agent.InstructionBody)),
+                    NormalizeBody(TestSquadCorpus.ExpectedBodyText(SquadTarget.Pi, agent)),
                     body,
                     StringComparison.Ordinal);
 

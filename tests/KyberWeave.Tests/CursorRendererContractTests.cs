@@ -193,7 +193,7 @@ public sealed class CursorRendererContractTests
             Assert.Equal(LoweredSkillFrontmatterKeys, actualKeys);
 
             string expectedBody = TestSquadCorpus
-                .ExpectedRenderText(SquadTarget.Cursor, agent.InstructionBody)
+                .ExpectedBodyText(SquadTarget.Cursor, agent)
                 .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedBody.EndsWith('\n'))
             {

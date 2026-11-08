@@ -173,7 +173,7 @@ public sealed class DevinRendererContractTests : IDisposable
             ];
             Assert.Equal(expectedTools, RequireSequence(frontmatter, "allowed-tools", agent.Name));
 
-            Assert.Equal(NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Devin, agent.InstructionBody)), body);
+            Assert.Equal(NormalizeBody(TestSquadCorpus.ExpectedBodyText(SquadTarget.Devin, agent)), body);
         }
     }
 

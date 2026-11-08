@@ -104,7 +104,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
             Assert.Equal(agent.Name, RequireScalar(ReadFrontmatter(file), "name"));
             Assert.Equal(
-                NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Antigravity, agent.InstructionBody)),
+                NormalizeBody(TestSquadCorpus.ExpectedBodyText(SquadTarget.Antigravity, agent)),
                 ReadBody(file));
         }
 
