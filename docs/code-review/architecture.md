@@ -587,6 +587,14 @@ tracks the gap.
 
 ### Council gates
 
+The council does not choose its own gates. They are declared in the `review.gates` list of the
+repository's configuration, and the council runs the declared ones. What varies per review is which of
+them *apply*: a gate whose `os` does not match the host is skipped, a gate whose `include` matches no
+changed file is skipped (`KW-REVIEW-026`), a gate named by `requires-paths` whose paths are absent does
+not start, and a `full-suite` gate is refused to any caller that is not the council or CI or a person at
+a terminal (`KW-REVIEW-033`). Adding or removing a gate is an edit to the configuration, never a decision
+the model makes during a review.
+
 `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and, since the
 shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full-suite` and
 `requires-paths`:
