@@ -30,6 +30,14 @@ internal sealed class KyberWeaveYamlDocument
     /// </summary>
     public string? Autonomy { get; set; }
 
+    /// <summary>
+    /// Raw <c>onboarding:</c> value — <c>done</c> or <c>declined</c> — or null when the
+    /// repository never answered. Kept a string for the same reason as
+    /// <see cref="Autonomy"/>: a value outside the two then reaches the loader as an error
+    /// that names the setting and both words it accepts.
+    /// </summary>
+    public string? Onboarding { get; set; }
+
     /// <summary>The <c>run:</c> block: where a run starts and what it publishes.</summary>
     public RunYamlSection? Run { get; set; }
 

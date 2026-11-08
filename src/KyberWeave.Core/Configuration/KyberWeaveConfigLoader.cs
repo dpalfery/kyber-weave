@@ -200,7 +200,8 @@ public static class KyberWeaveConfigLoader
                 document.ConfigReg,
                 document.Autonomy,
                 document.Run,
-                document.StopOnToolFailure),
+                document.StopOnToolFailure,
+                document.Onboarding),
             Review = ReviewConfigLoader.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
@@ -244,7 +245,8 @@ public static class KyberWeaveConfigLoader
                 document.ConfigReg,
                 document.Autonomy,
                 document.Run,
-                document.StopOnToolFailure),
+                document.StopOnToolFailure,
+                document.Onboarding),
             Review = ReviewConfigLoader.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,

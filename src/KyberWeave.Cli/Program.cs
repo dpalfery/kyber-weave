@@ -98,6 +98,13 @@ app.Configure(config =>
             .WithExample("docs", "init", ".")
             .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
 
+        docs.AddCommand<DocsOnboardingCommand>("onboarding")
+            .WithDescription(
+                "Record this repository's answer to the onboarding question — done or declined — in " +
+                ".kyber-weave/kyber-weave.yml, and refresh the Config Reg block in AGENTS.md.")
+            .WithExample("docs", "onboarding", "done")
+            .WithExample("docs", "onboarding", "declined");
+
         docs.AddCommand<DocsValidateCommand>("validate")
             .WithDescription("Check documentation frontmatter against the ontology schema (KW-DOC-SPEC-*).")
             .WithExample("docs", "validate", ".")
