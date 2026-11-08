@@ -492,6 +492,36 @@ public sealed class McpLiveProbeTests : IDisposable
         Assert.Equal(0, report.ExitCode);
     }
 
+    /// <summary>
+    /// A provenance line carrying a repository path with spaces in repo= still passes mcp.root.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ProvenanceWithSpacedRootAndRepo_StillPassesMcpRoot()
+    {
+        string spacedRoot = Path.Combine(Root, "repo with spaces");
+        Directory.CreateDirectory(Path.Combine(spacedRoot, ".codegraph"));
+        string served = "provenance: root=" + spacedRoot
+            + " branch=main repo=" + Path.Combine(spacedRoot, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            spacedRoot,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(spacedRoot),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
     private static string ProvenanceCall(string root, string dirty, string rev = "abc123", int documents = 7) =>
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + " rev=" + rev + " dirty=" + dirty + " documents=" + documents + "\"}]}}";
 }

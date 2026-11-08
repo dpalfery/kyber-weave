@@ -23,15 +23,16 @@ namespace KyberWeave.Core.Doctor;
 public static partial class McpLiveProbe
 {
     /// <summary>
-    ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens with no spaces in the
-    ///     value: <c>branch=</c>, <c>repo=</c>, <c>rev=</c>, <c>dirty=</c> and <c>documents=</c>.
+    ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens:
+    ///     <c>branch=</c>, <c>repo=</c>, <c>rev=</c>, <c>dirty=</c> and <c>documents=</c>.
     /// </summary>
     /// <remarks>
     ///     The tokens are named rather than matched as a generic <c>word=value</c> shape, so a root path that happens to
     ///     contain something that looks like a token is not truncated. Order is not fixed, so the pattern repeats the
-    ///     whole alternation to the end of the line and strips whatever subset the server sent.
+    ///     whole alternation to the end of the line and strips whatever subset the server sent. <c>repo=</c> allows spaces
+    ///     because a repository or worktree filesystem path can contain spaces.
     /// </remarks>
-    [GeneratedRegex(@"(?:\s+(?:branch|repo|rev|dirty|documents)=\S+)+$")]
+    [GeneratedRegex(@"(?:\s+(?:branch=\S+|repo=.*?(?=\s+(?:branch|rev|dirty|documents)=|$)|rev=\S+|dirty=\S+|documents=\S+))+$")]
     private static partial Regex TrailingMetadataRegex();
     /// <summary>The MCP protocol revision the probe offers. The server answers with the revision it supports.</summary>
     private const string ProtocolVersion = "2024-11-05";
