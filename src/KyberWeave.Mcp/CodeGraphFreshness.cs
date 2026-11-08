@@ -67,6 +67,7 @@ public sealed class CodeGraphFreshness
 
     private readonly string _repositoryRoot;
     private readonly bool _refreshEnabled;
+    private readonly IProcessExecutor _executor;
     private readonly Lock _gate = new();
 
     private DateTime _lastAttemptUtc = DateTime.MinValue;
@@ -78,10 +79,21 @@ public sealed class CodeGraphFreshness
     /// False when the process was started with <c>--no-codegraph-refresh</c>, which is how
     /// <c>doctor --check</c> keeps its promise that the server never writes an index.
     /// </param>
-    public CodeGraphFreshness(string repositoryRoot, bool refreshEnabled)
+    /// <param name="executor">
+    /// Runs the CodeGraph child the provisioner starts, or null for one bounded by
+    /// <see cref="RefreshBound"/>. The provisioner takes its executor from the caller for the same
+    /// reason it takes the root: a caller that must answer without a CodeGraph binary — a test, or a
+    /// host that supplies its own runner — supplies the executor rather than being answered by
+    /// whichever binary this machine happens to have installed.
+    /// </param>
+    public CodeGraphFreshness(
+        string repositoryRoot,
+        bool refreshEnabled,
+        IProcessExecutor? executor = null)
     {
         _repositoryRoot = Path.GetFullPath(repositoryRoot);
         _refreshEnabled = refreshEnabled;
+        _executor = executor ?? new BoundedExecutor(RefreshBound);
     }
 
     /// <summary>
@@ -148,7 +160,7 @@ public sealed class CodeGraphFreshness
         DoctorCheck provisioned = CodeGraphProvisioner.Provision(
             _repositoryRoot,
             options,
-            new BoundedExecutor(RefreshBound),
+            _executor,
             lockDirectory,
             TimeSpan.Zero);
 

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -38,6 +40,12 @@ namespace KyberWeave.Tests;
 /// a repository declares it. Every test here that expects a refresh therefore arranges a repository
 /// that requires CodeGraph (<see cref="ToolsRequiringCodeGraph"/>); the test that pins the other side
 /// leaves the scaffold's own declaration — <c>kw-docs</c> alone, CodeGraph commented out — untouched.
+/// </para>
+/// <para>
+/// The refresh's index child is scripted, not run (<see cref="ProvisionSucceeds"/>). The refresh only
+/// reaches its resolver after a successful provision, so a real <c>codegraph</c> — present on a
+/// developer's machine, absent on a CI runner — would otherwise choose which branch of the refresh
+/// these tests exercise, and the branch a test pins would change with the machine it ran on.
 /// </para>
 /// </remarks>
 public sealed class McpCodeGraphRefreshTests : IDisposable
@@ -310,7 +318,8 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     /// <remarks>
     /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
     /// from the documents on disk, so a test that observes the refresh has to be the caller that
-    /// requests it.
+    /// requests it. The schedule is handed <see cref="ProvisionSucceeds"/>, so the refresh does not
+    /// depend on a CodeGraph binary being installed on the machine running the test.
     /// </remarks>
     private static DocsTools ScaffoldedTools(string root, Func<ICodeGraphResolver> resolverFactory)
     {
@@ -322,6 +331,31 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
+        return new DocsTools(
+            host,
+            null,
+            new CodeGraphFreshness(root, refreshEnabled: true, ProvisionSucceeds()));
     }
+
+    /// <summary>
+    /// The provisioner's index child, answered the way a working <c>codegraph</c> answers: exit zero,
+    /// and nothing on either stream.
+    /// </summary>
+    /// <remarks>
+    /// A successful provision is what lets the refresh go on to build its resolver, which is the step
+    /// the two resolver-factory tests pin. Any other child is a refusal rather than a silent success:
+    /// the refresh starts the index binary and nothing else, so a command this does not expect means
+    /// the refresh grew a step these tests do not know about.
+    /// </remarks>
+    private static IProcessExecutor ProvisionSucceeds() =>
+        new ScriptedProcessExecutor(startInfo =>
+        {
+            if (Path.GetFileName(startInfo.FileName) != "codegraph")
+            {
+                throw new InvalidOperationException(
+                    $"The refresh started '{startInfo.FileName}', which no test in this class expects.");
+            }
+
+            return new ProcessResult(0, string.Empty, string.Empty);
+        });
 }
