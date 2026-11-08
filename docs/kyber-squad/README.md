@@ -70,7 +70,7 @@ pull request to ready.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 24 `.github/agents/<name>.agent.md` files, 29 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 149 files total, with authored relative links resolving in the output. Every
+linked resources, 150 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):
