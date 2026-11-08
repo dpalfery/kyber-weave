@@ -4,14 +4,16 @@ title: Keywords Identity, Compound Prefix Coverage, and Calibrated OOV IDF
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-03
+last-reviewed: 2026-11-07
 ---
 
 # ADR 0010: Keywords Identity, Compound Prefix Coverage, and Calibrated OOV IDF
 
 ## Status
 
-Accepted, 2026-09-03.
+Accepted, 2026-09-03. Amended 2026-11-07: partial identity ranks the documents a question
+already touches and never introduces one, which changes no weight and no prefix floor
+(decision 5).
 
 ## Context
 
@@ -34,6 +36,12 @@ Natural-language queries that named a surface or stack (for example `"dashboard 
 
    Unanswerable queries with several OOV terms still collapse below the 0.25 floor.
 
+5. **Partial identity re-ranks; it does not introduce.** `ScoreDocumentStage` applies the partial-identity contribution only when the document already scores above zero on something the question touches: `ScoreExact`, title similarity, or body relevance. A shared prefix cannot admit a document on its own.
+
+   This amends the **consequence** of decision 3, not decision 3 itself. The prefix floor stays three characters, the camelCase split stays, and `Coverage` is unchanged: `dashboard` still covers `dash`. No weight changes either — `IdWeight`, `CodeRefWeight`, `EndpointWeight`, `KeywordWeight`, `ComponentWeight`, `TitleWeight`, `BodyWeight`, `IdPartialWeight`, `KeywordPartialWeight` and `ComponentPartialWeight` are untouched, and `MinRelevanceScore` is still 0.25.
+
+   The gate is at document qualification only. `ScoreLeafDocumentIdentity` still adds partial identity unguarded when choosing a leaf inside a document that has already cleared the floor, which is safe because it can only reorder documents that have already qualified.
+
 ## Alternatives Considered
 
 - **Neural or API embeddings for specialized terms.** Rejected. Retrieval in this repository is offline and deterministic; adding a network-dependent embedding path would break that constraint.
@@ -44,6 +52,7 @@ Natural-language queries that named a surface or stack (for example `"dashboard 
 ## Consequences
 
 - Authors can route queries without repeating every alias in prose. The field is optional; documents without keywords keep the previous identity ranking.
+- A document is findable by its id's partial coverage only when the question also touches what that document says or declares outright — an exact identity match, a shared title term, or an informative query term in the prose. A slug that merely shares a prefix with one query term no longer qualifies a document on its own.
 - Prefix matching can over-hit if the three-character floor is lowered; that floor is part of this decision.
 - Changing `KeywordWeight`, `KeywordPartialWeight`, the prefix length floor, or the 20% OOV baseline is a retrieval-contract change and must update [retrieval and ranking](../docgraph/retrieval.md) in the same change.
 
