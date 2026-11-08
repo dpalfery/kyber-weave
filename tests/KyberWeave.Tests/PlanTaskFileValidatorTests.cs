@@ -213,6 +213,9 @@ public sealed class PlanTaskFileValidatorTests
         ReportedFindings run = Validate(fixture);
         AssertReports(run, DiffersFromPlan);
     }
+
+    /// <summary>
+    /// A digest that matches the plan means the file was written from this plan. A stale one
     /// means the plan moved afterwards, so the conductor refuses the file until the architect
     /// regenerates it rather than pasting prompts the plan no longer describes.
     /// </summary>
