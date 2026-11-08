@@ -51,6 +51,17 @@ public sealed record ReviewGate(
     /// Whether this gate runs the full product suite. Only the review council and CI may run it; see <see cref="FullSuiteGate"/>.
     /// </summary>
     public bool FullSuite { get; init; }
+
+    /// <summary>
+    /// Repository-relative paths the gate needs on disk before it can start, such as <c>dash/node_modules</c>.
+    /// </summary>
+    /// <remarks>
+    /// A gate that declares a prerequisite and finds it absent does not start, so the missing install is reported
+    /// as the missing dependency it is rather than through whatever module-not-found output the tool would print.
+    /// The paths are deliberately not required to exist when the configuration loads: their absence is a fact
+    /// about this machine, not about the configuration.
+    /// </remarks>
+    public IReadOnlyList<string> RequiresPaths { get; init; } = [];
 }
 
 /// <summary>
