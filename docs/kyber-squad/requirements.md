@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -14,7 +14,9 @@ decided-by:
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0037-squad-state-in-user-home
   - adr/0050-universal-kyber-weave-mcp-grant
+  - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0061-code-editing-runs-stop-on-unusable-tools
+  - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 ---
 
 # Kyber-Squad requirements and degradation contract
@@ -213,6 +215,27 @@ recorded in [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md):
 
 The thirteen rows are the declared target roster. All thirteen targets (`copilot`, `cursor`, `claude`, `codex`,
 `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`) have implemented and registered renderers.
+
+### Harness behaviour the product relies on
+
+The thirteen rows above say how a harness projects canonical content. This table says what the
+product needs a harness to *do* with that content, and what has been established for each need.
+Every row carries one of two markers. **Confirmed from this tree** means the claim is about what
+the renders emit, and the named source file or test class establishes it. **`[NOT LIVE-VERIFIED]`**
+means the claim is about what an installed harness does with that output: nothing in this
+repository can establish it, so the row names the fallback the product already takes. No row here
+claims a live harness observation that was not made.
+
+| Behaviour | Depends on it | What this tree establishes | Verification | Fallback |
+|---|---|---|---|---|
+| A subagent can call `codegraph_explore` | Code discovery before a read: a worker asks the index first and reads a file directly only for what it does not cover | The tool is named in the source roster — `products/kyber-squad/toolchain.yml`, `required-mcp-tools.codegraph: [codegraph_explore]`, listed from the server over MCP on 2026-09-21 — and every worker's rendered body asks for it first, from the one injected baseline (`products/kyber-squad/shared/worker-baseline.md`). The grant reaches a specialist and is withheld from `conductor` through one predicate, `CapabilityDegradations.GrantsOrchestratorExcludedMcpServers`, which `SquadUniversalMcpGrantContractTests` holds ten targets to. Codex, Cursor and Warp render no per-agent grant at all — their MCP reach is session-inherited, per the Permission Model column above — and Pi's overlay names the eight `kw-docs` tools only, so a Pi subagent's rendered grant names no code-graph tool | `[NOT LIVE-VERIFIED]` — whether the harness hands a subagent process the tool, and whether Antigravity's `.agents/skills` co-deployment with Pi, ZCode and Command Code leaves that grant intact, are harness behaviours | `codegraph explore "…"` from the worker's own shell, whose grant the next row records |
+| A worker's shell can run `kyber-weave doctor --ensure` | Code discovery, and the run-start tooling check | The `worker` profile is `process.execute: allow` (`products/kyber-squad/profiles/capabilities.yml`), and each renderer maps that decision onto the harness's own shell tool where the target enforces a tool list, so the shell is in every worker's rendered allow-list there. The verb is the CLI's own, and the shipped `bug-crusher` and `delivery-execution` text calls it before a run's first task | `[NOT LIVE-VERIFIED]` — whether the harness's shell starts, finds the binary, and returns inside a worker's budget | `STATUS: TOOL_FAILURE` under `stop-on-tool-failure`, before any worker is dispatched — see the run-start invariant above and [ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) |
+| A conductor holds a shell at run start | The run-start tooling check | The `orchestrator` profile is `process.execute: deny`, and Copilot's conductor declares no `execute/*` entry in its `copilot-tools` list (`products/kyber-squad/agents/conductor.md`), so on the targets that enforce a rendered tool list no conductor carries a shell. Codex, Cursor and Warp scope nothing per agent (the Permission Model column above), so there the question is the session's rather than the render's | `[NOT LIVE-VERIFIED]` — whether a skill loaded in a harness's main session can run a command regardless of the agent's own tool list | Dispatch `github-devops` |
+| The per-harness token reaches the rendered text | The run-start step, and the harness name it carries ([ADR 0060](../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md)) | **Confirmed from this tree.** `SquadHarnessRenderer.SubstituteHarnessToken` is the single substitution point — over agent and skill bodies, descriptions and resource content — and `SquadHarnessTokenRenderTests` renders every shipped target, taking its rows from `SquadCommandComposition.CreateRenderers()`, and fails on a leftover `{{harness}}` or on a missing `SquadTargetCatalog.GetToken` value. Each renderer also claims its own root and no two share one: `.github`, `.cursor`, `.claude`, `.codex`, `.opencode`, `.kilo`, `.factory`, `.agents`, `.warp`, `.pi`, `.zcode`, `.devin` and `.commandcode` (`SquadRendererRegistry`). The thirteen roots are distinct as rendered | **Confirmed from this tree** for the substitution. `[NOT LIVE-VERIFIED]` for the co-deployment: which directories a harness reads beyond its own root — `.agents/skills` read by Pi, ZCode and Command Code included — is vendor behaviour | `--harness` is required and validated, so a wrong token is at worst a wrong label |
+| Session continuation | Rework and verification in the original worker's session rather than a replacement worker that has to re-read everything | The instruction tells the conductor to discover continuation support from the harness's exposed tools rather than assume it from the model, role name or renderer, and to pass a recovery brief where it is unavailable (`products/kyber-squad/skills/delivery-execution/SKILL.md`); the digest requires the recorded handle, or the reason there is none | `[NOT LIVE-VERIFIED]` — no session was continued here, and Command Code's resumability is unverified | A fresh worker invoked with the recovery brief |
+| The Arbiter sees a dispatch | The dispatch-time rules `KW-ARB-PLANREAD-001` and `KW-ARB-GATE-REPORT-001`, which can only fire where a harness delivers the event | Hooks are produced for ten targets — `ArbiterHookWiring.HookedTargets` holds `claude`, `codex`, `copilot`, `cursor`, `opencode`, `pi`, `kilo`, `antigravity`, `factory` and `devin` — while `warp` and `zcode` record `arbiter-not-enforced` as `fallback-only` and `commandcode` records it as `dispatch-unconfirmed`. The precondition each harness sets before its hook may run is recorded in `ArbiterHookWiring.TrustSteps`: Claude's workspace trust, with `claude -p` never counted as trusted; Copilot's trusted workspace with `chat.useHooks`; Codex's per-hook review through `/hooks`; Pi's project trust. `ArbiterHookWiringTests` pins the two rosters and the `commandcode` record | `[NOT LIVE-VERIFIED]` — whether the harness delivers the dispatch event to the hook. Being on the hooked roster is not evidence that a hook fires, which is why OpenCode, Kilo and VS Code Copilot stay unconfirmed despite being wired | The Arbiter's MCP fallback for the orchestrator and reviewer profiles, and `KW-DOC-TASKS-005` at validation |
+| An edited pull request title is re-checked | The naming gate on a delivery branch | **Confirmed from this tree.** `.github/workflows/pr-naming-recheck.yml` listens on `pull_request: types: [edited]`, guards on `github.event.changes.title`, and re-runs the `pr-naming` job of the latest CI run for the head commit; `ci.yml` deliberately does not listen to `edited`. `PrNamingWorkflowTests` (`tests/KyberWeave.RepoPolicy.Tests/`) pins both halves | **Confirmed from this tree** for the workflow and its guard. `[NOT LIVE-VERIFIED]` as an observed run: no title edit was made here, so the workflow has not been seen to fire | The next push re-checks, because `ci.yml` runs `pr-naming` on every pull request update |
+| An MCP tool-call timeout sits above the refresh bound | The docs and code tools answering a fresh index ([ADR 0062](../adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)) | The refresh bound is 30 seconds and the shortest gap between attempts is 60, in `CodeGraphFreshness` (`src/KyberWeave.Mcp/`); `McpCodeGraphRefreshTests` pins that a tool call returns inside the bound | `[NOT LIVE-VERIFIED]` — no harness's MCP client timeout is known from this tree | Lower the bound |
 
 ---
 
