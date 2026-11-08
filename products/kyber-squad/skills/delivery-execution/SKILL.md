@@ -1,6 +1,14 @@
-# Execution and Review
+---
+name: delivery-execution
+description: "The worker execution contract — how work is dispatched, verified and reported. Both entry points load it: the conductor for Ready plans and Ready specification task artifacts, and the bug-crusher workflow for a single escalated defect. Use when sequencing a ready queue, isolating parallel workers in worktrees, running test-first or standard mode, applying the developer exit gate and its six-field completion digest, enforcing the iteration circuit-breaker and its failure-cluster tallies, draining findings, running the final review council and its STATUS COUNCIL_SEATS_NEEDED handback, or closing out a plan or specification. Do not use as a substitute for the conductor or bug-crusher role bodies: those load this skill and own the routing around it."
+license: MIT
+---
 
-This contract is shared by Ready plans and Ready specification task artifacts.
+# Worker Execution Contract
+
+This is the worker execution contract: both entry points load it to learn how work is dispatched, verified and reported, and neither restates these rules in its own words. It is shared by Ready plans and Ready specification task artifacts, and by the `bug-crusher` skill when a single defect escalates to a plan.
+
+Where this contract says "the conductor", read the orchestrating session: the `conductor` for plan- and spec-backed work, the `bug-crusher` main session for a single escalated defect. The role bodies own routing — the ready queue, the tripwires, the escalation decision. This contract owns what happens once work is dispatched, and how each dispatch is proved.
 
 ## Ready queue
 
@@ -63,7 +71,7 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 
 Worktree workers committing locally report their `<commit-sha>`, while uncommitted/unpushed task runs report `NONE` and `UNPUSHED`.
 
-Lines of the explanatory message body that are not digest fields and are never counted or rejected as a seventh field are exactly these shapes: the `Discovery: codegraph N, docs N, direct reads N` header; `COVERAGE_GAPS:` followed by free text; and `Artifact:` or `Baseline:` followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
+Lines of the explanatory message body that are not digest fields and are never counted or rejected as a seventh field are exactly these shapes: the `Discovery: codegraph N, docs N, direct reads N` header; `COVERAGE_GAPS:` followed by free text; `RED_EVIDENCE:` followed by the runner filter, the failing tests and the reason (test-dev's RED record, not one of the six fields); and `Artifact:` or `Baseline:` followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
 
 - **Missing line or `FAIL`:** reject the digest, except a valid escalation under the circuit-breaker section below. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it. During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block; every other developer worker may return its standard completion, meaning the completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, so a standard completion without it is rejected as `task-gate/missing`, and the `FILES`, `TESTS`, `COMMIT` and `REMOTE_HEAD` fields are not required of it. The missing-or-`FAIL` `TASK_GATE` rejection and its `task-gate/<gate-id>` / `task-gate/missing` tally apply to every developer worker.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.
@@ -126,8 +134,6 @@ Before closeout completes, run the documentation-impact review step:
 ### Closeout completion
 
 Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE in the execution artifact and carry the outcome in the PR description.
-
-Only a successful closeout completes the objective.
 
 ## Arbiter routing headers
 

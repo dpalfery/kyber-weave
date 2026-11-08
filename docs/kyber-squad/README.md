@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and 29 skills — each projecting its validated resource closure beside the rendered principal — for all thirteen registered renderers while retaining a governed thirteen-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and the canonical skills — each projecting its validated resource closure beside the rendered principal — for all thirteen registered renderers while retaining a governed thirteen-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in the lock and receipt under `~/.kyber-weave/squad/`, with a registry of project installs—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -49,13 +49,13 @@ Modifying local developer environments or repository-level agent configurations 
 
 ## Canonical, packaged, and rendered skill surfaces
 
-The canonical product contains 28 `SKILL.md` files. `code-review-loop` and `kilo-review-loop`
+The canonical product contains the canonical `SKILL.md` files under `skills/`. `code-review-loop` and `kilo-review-loop`
 are authored in Kyber-Squad;
 every imported skill except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches
-the designated canonical copy byte for byte. It also retains 87 supplemental references, scripts, provider
-instructions, and metadata files, for 116 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 116 files and
+the designated canonical copy byte for byte. It also retains the supplemental references, scripts, provider
+instructions, and metadata files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry every file and
 preserve each retained local reference.
 
 The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -70,7 +70,7 @@ pull request to ready.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 24 `.github/agents/<name>.agent.md` files, 29 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 149 files total, with authored relative links resolving in the output. Every
+linked resources, 150 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

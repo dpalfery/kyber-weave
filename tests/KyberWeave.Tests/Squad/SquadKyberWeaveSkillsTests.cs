@@ -73,9 +73,6 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 /// </remarks>
 public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePackFixture>, IDisposable
 {
-    /// <summary>The Squad canonical roster: one <c>SKILL.md</c> per directory under <c>products/kyber-squad/skills</c>.</summary>
-    private const int SquadCanonicalSkillCount = 28;
-
     private const string PackedVersion = SquadKyberWeavePackFixture.PackedVersion;
 
     /// <summary>The Squad skill whose render path each target's Kyber-Weave skill path is derived from.</summary>
@@ -155,7 +152,9 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
             Assert.Contains(name, loaded);
         }
 
-        Assert.Equal(SquadCanonicalSkillCount + expected.Length, loaded.Length);
+        string[] squadNames = SquadSkillNames();
+        string[] expectedAll = squadNames.Concat(expected).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(expectedAll, loaded.Order(StringComparer.Ordinal).ToArray());
     }
 
     /// <summary>
@@ -730,7 +729,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
     /// <summary>
     /// Asserts that an archive carries each Kyber-Weave skill tree at <c>skills/&lt;name&gt;/&lt;relative&gt;</c> with
-    /// the same text, keeps the 28 Squad skills, and holds exactly one <c>SKILL.md</c> per skill.
+    /// the same text, keeps the canonical Squad skills, and holds exactly one <c>SKILL.md</c> per skill.
     /// </summary>
     private static void AssertArchiveCarriesSkillTrees(ZipArchive archive)
     {
@@ -760,7 +759,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
 
         string[] squadSkills = SquadSkillNames();
-        Assert.Equal(SquadCanonicalSkillCount, squadSkills.Length);
+        Assert.NotEmpty(squadSkills);
         foreach (string squadSkill in squadSkills)
         {
             string entryName = $"skills/{squadSkill}/SKILL.md";
@@ -769,7 +768,13 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 $"The archive has no entry '{entryName}'; a Squad skill went missing.");
         }
 
-        Assert.Equal(SquadCanonicalSkillCount + kyberWeaveSkills.Length, archive.Entries.Count(IsSkillPrincipal));
+        string[] expectedPrincipalNames = squadSkills.Concat(kyberWeaveSkills).Order(StringComparer.Ordinal).ToArray();
+        string[] archivePrincipalNames = archive.Entries.Where(IsSkillPrincipal).Select(entry =>
+        {
+            string[] parts = entry.FullName.Split('/');
+            return parts[1];
+        }).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(expectedPrincipalNames, archivePrincipalNames);
     }
 
     private static bool IsSkillPrincipal(ZipArchiveEntry entry)

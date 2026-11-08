@@ -115,8 +115,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 34 skills (the 28 Squad skills and the 6 Kyber-Weave skills from `.apm/skills/`) with 91 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 34 portable skills (the same 28 Squad and 6 Kyber-Weave skills), their 91 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, the Squad skills and the Kyber-Weave skills from `.apm/skills/` with their supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All portable skills (the same Squad and Kyber-Weave skills), their supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -135,7 +135,7 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-`squad pack` also adds the six Kyber-Weave skills from `.apm/skills/` beside the Squad skills, so the
+`squad pack` also adds the Kyber-Weave skills from `.apm/skills/` beside the Squad skills, so the
 release carries the same skills that `squad install` deploys to each user-level folder. It loads the
 real Squad tree and the composed tree before it writes an archive, and it exits 1 with no archive
 when a companion skill clashes with a Squad skill or agent name, ignoring letter case, or when a
@@ -144,8 +144,8 @@ or folder inside that skill. A refused pack leaves the previous archive in place
 write: each archive is written to a temporary file beside its target and replaces it only when complete. See
 [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
-Both formats package `skills/` recursively: 34 `SKILL.md` files (28 Squad and 6 Kyber-Weave) plus 91
-retained resources, for 125 skill-tree files. Every one of the 88 retained Squad resources has a
+Both formats package `skills/` recursively: every `SKILL.md` file (Squad and Kyber-Weave) plus their
+retained resources. Every one of the retained Squad resources has a
 reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the

@@ -1,6 +1,6 @@
 # Autonomy
 
-`autonomy` is `supervised` or `autonomous`. It decides who answers the gates the other contracts define. Supervised behaviour is unchanged: every gate in the plan, spec, intake, and execution contracts is relayed to the user exactly as written there.
+`autonomy` is `supervised` or `autonomous`. It decides who answers the gates the other contracts define. Supervised behaviour is unchanged: every gate in the plan, spec and intake paths, and in the `delivery-execution` skill, is relayed to the user exactly as written there.
 
 ## Resolution
 

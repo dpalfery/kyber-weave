@@ -24,8 +24,12 @@ public sealed class SquadWorktreeMcpContractTests
 {
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
+    /// <summary>
+    /// The shared execution contract, which both entry points load. It is a canonical skill rather
+    /// than a conductor reference so a fallback target receives it.
+    /// </summary>
     private const string ConductorExecutionPath =
-        "products/kyber-squad/agents/conductor/references/execution-and-review.md";
+        "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string McpRunbookDocPath = "docs/docgraph/mcp-runbook.md";

@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -34,7 +34,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**28 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+the canonical skills, plus the Kyber-Weave skills it ships beside them, with transactional
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
@@ -843,11 +843,11 @@ It reports these:
 
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kyber-docs-authoring`,
 `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
 `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
-release. The six follow the Squad lifecycle at the same scope and on the same targets as the Squad
+release. They follow the Squad lifecycle at the same scope and on the same targets as the Squad
 skills:
 
 - **Global scope.** `kyber-weave squad install --global` writes them into each selected harness's
@@ -1235,6 +1235,29 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
 and standardized completion digests to minimize token consumption and eliminate validation churn:
 
+### One execution contract, two entry points
+
+The rules below live in the canonical `delivery-execution` skill, not in an agent body and not in
+a conductor reference. `conductor` loads it for plan- and spec-backed work; the `bug-crusher`
+workflow loads the same skill when one escalated defect becomes a plan. A canonical skill is
+emitted for every target, where a conductor-only reference is not, so the one-defect path on a
+narrower harness obeys the same queue, exit gate, breaker and council instead of a paraphrase.
+Neither entry point restates the rules; if you are editing one of them, the contract change
+belongs in the skill.
+
+**What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
+`architect` (planning the escalated defect), `test-dev` (establishing RED), `code-reviewer` (the
+finished fix), and the twelve developer agents a task routes to, alongside the investigator,
+`docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
+is the architect's own delegation and the owner is the human, so `research-agent`,
+`product-owner` and `azure-reader` stay off the roster. The roster is what scopes the
+`root-fixer` capability profile's `delegate` grant.
+
+**Bug-crusher does not write the plan.** `architect` owns every write to a plan artifact,
+including its status line and its index row. The bug-crusher session asks for the write and
+relays the result; recording a decision in the plan, or advancing its status, is one re-invocation
+of `architect` with the gate id, not an edit by the orchestrating session.
+
 ### Inlined task packets (zero plan context hunting)
 
 Conductor task packets are self-contained. Rather than pointing workers to large plan or
@@ -1449,13 +1472,13 @@ gap, not introduced here: a symbolic link inside `products/kyber-squad/` that po
 is still packed when no loaded file references it. See the
 [architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
 
-Both archive formats recurse through each skill directory. They contain all 28 canonical `SKILL.md`
-files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
-`.apm/skills/` and their three resource files: 34 skills and 125 skill-tree files in each archive.
+Both archive formats recurse through each skill directory. They contain all canonical `SKILL.md`
+files plus their retained supplemental resources, together with the Kyber-Weave skills from
+`.apm/skills/` and their resource files, in each archive.
 Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 149 files on Copilot today — with authored relative links resolving inside
+beside its principal — 150 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

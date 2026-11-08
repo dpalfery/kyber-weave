@@ -15,6 +15,13 @@ public sealed class SquadCanonicalContentTests
     private const string DefaultOrchestrationTrigger = "default entry point";
 
     /// <summary>
+    /// The shared worker execution contract, relative to the canonical product root. It is a canonical
+    /// skill rather than a conductor reference so a fallback target receives it, and so bug-crusher can
+    /// load it without linking out of its own directory.
+    /// </summary>
+    private const string DeliveryExecutionSkillRelativePath = "skills/delivery-execution/SKILL.md";
+
+    /// <summary>
     /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
     /// reject a fifth token, so harvested trigger lines must equal this set.
     /// </summary>
@@ -288,6 +295,7 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "csp-security",
         "dal-dev",
+        "delivery-execution",
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
@@ -390,6 +398,48 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// One copy of the worker execution contract, in a canonical skill both entry points load: the corpus
+    /// holds it, the bundle selects it so every target receives it, and the conductor's body and
+    /// bug-crusher's workflow both name it.
+    /// </summary>
+    /// <remarks>
+    /// Bug-crusher used to keep a partial second copy of these rules inside its own workflow, and the two
+    /// drifted the first time one moved. The bodies are read from the loaded corpus rather than the files,
+    /// because the loader's normalized instruction body is what a harness receives: a name that survives
+    /// only in a frontmatter comment never reaches a reader.
+    /// </remarks>
+    [Fact]
+    public void LoadFullProductTreeCarriesTheSharedExecutionSkillBothEntryPointsLoad()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        bool loaded = source.Skills.Any(skill => skill.Name == "delivery-execution");
+        bool selected = source.Bundle.SkillNames.Contains("delivery-execution", StringComparer.Ordinal);
+
+        Assert.True(
+            loaded && selected,
+            $"The corpus must hold '{DeliveryExecutionSkillRelativePath}' and the bundle must select it, or no " +
+            $"target receives it and no entry point can load it. Loaded: {loaded}. Selected: {selected}. " +
+            $"Roster: {string.Join(", ", source.Skills.Select(skill => skill.Name))}.");
+
+        (string Surface, string Body)[] entryPoints =
+        [
+            ("agents/conductor.md", source.Agents.Single(agent => agent.Name == "conductor").InstructionBody),
+            ("skills/bug-crusher/SKILL.md", source.Skills.Single(skill => skill.Name == "bug-crusher").InstructionBody)
+        ];
+        string[] silent =
+        [
+            .. entryPoints
+                .Where(entryPoint => !entryPoint.Body.Contains("delivery-execution", StringComparison.Ordinal))
+                .Select(entryPoint => entryPoint.Surface)
+        ];
+
+        Assert.True(
+            silent.Length == 0,
+            $"Both entry points must name the '{DeliveryExecutionSkillRelativePath}' skill they load. " +
+            $"Silent: {string.Join(", ", silent)}.");
+    }
+
+    /// <summary>
     /// The retired <c>second-brain</c> skill moves to Kyber-Docs. The Squad bundle file and
     /// the loaded bundle roster must not name it, or pack and install keep shipping it.
     /// </summary>
@@ -406,9 +456,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
-    /// its canonical-skill counts, and it must state the count the tree actually holds: 28 once the retired
-    /// <c>response-format</c> skill is gone.
+    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree.
+    /// It states the skills without a hardcoded count: the directories under <c>skills/</c> are the
+    /// inventory, so a skill added later changes no prose.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -416,8 +466,7 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1079,7 +1128,7 @@ public sealed class SquadCanonicalContentTests
             Path.Combine(ProductRoot, "skills", "dp-code-reviewer", "SKILL.md"),
             Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
             Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md")
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md")
         ];
 
         string[] forbiddenPhrases =
@@ -1091,6 +1140,10 @@ public sealed class SquadCanonicalContentTests
             "always-human",
             "max-reviewable-lines"
         ];
+
+        Assert.All(
+            reviewSurfaces,
+            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
 
         foreach (string surface in reviewSurfaces)
         {
@@ -1293,10 +1346,16 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("superseded", contract, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The conductor's iteration circuit-breaker: the failure-cluster key and tally, the two-dispatch
+    /// retry limit, oscillation detection, and the closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary.
+    /// The rules live in the shared execution contract both entry points load, so that skill is the
+    /// surface asserted here rather than the conductor's own body.
+    /// </summary>
     [Fact]
     public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
@@ -1367,12 +1426,13 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// Task sessions are worker-only: the deterministic <c>task-gate</c> is not a session-bearing
-    /// agent, so the conductor records and resumes exactly one session per task.
+    /// agent, so the conductor records and resumes exactly one session per task. The session rules
+    /// live in the shared execution contract, so that skill is the surface asserted here.
     /// </summary>
     [Fact]
     public void ConductorRetainsOnlyWorkerSessionsForTaskRework()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("original worker session", contract, StringComparison.Ordinal);
         Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
@@ -1822,7 +1882,7 @@ public sealed class SquadCanonicalContentTests
         string[] reviewSurfaces =
         [
             Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"),
             Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
             Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
             Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
@@ -1838,6 +1898,10 @@ public sealed class SquadCanonicalContentTests
             "parked NEEDS_HUMAN",
             "at least one review"
         ];
+
+        Assert.All(
+            reviewSurfaces,
+            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
 
         string[] offenders = reviewSurfaces
             .SelectMany(path => retiredPhrases
@@ -1968,15 +2032,14 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void TheFinalCouncilRunsAloneLastInTheForegroundWithNoDocsWorkOrEdits()
     {
-        string contract = ReadProductFile("agents/conductor/references/execution-and-review.md");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
         string[] blocks = Paragraphs(contract)
             .Where(block => block.Contains("foreground", StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         Assert.True(
             blocks.Length > 0,
-            "'agents/conductor/references/execution-and-review.md' must state that the review runs last, in the " +
-            "foreground.");
+            $"'{DeliveryExecutionSkillRelativePath}' must state that the review runs last, in the foreground.");
 
         Assert.True(
             blocks.Any(block => AloneWording.IsMatch(block)
@@ -2263,11 +2326,15 @@ public sealed class SquadCanonicalContentTests
                 .Select(File.ReadAllText));
     }
 
-    /// <summary>Reads one canonical product file by its repository-relative path.</summary>
+    /// <summary>
+    /// Reads a canonical product file, asserting its presence first so a moved or missing artifact
+    /// reports the absent path rather than an I/O exception.
+    /// </summary>
     private static string ReadProductFile(string relativePath)
     {
-        return File.ReadAllText(
-            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return File.ReadAllText(path);
     }
 
     /// <summary>The blank-line separated blocks of a document, so an assertion reads a whole instruction.</summary>

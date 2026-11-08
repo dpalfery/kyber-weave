@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **24 canonical agents** and **28 canonical skills**,
+It maintains a target-neutral, declarative catalog of **24 canonical agents** and the canonical skills,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -59,7 +59,7 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # 28 canonical skill directories; 116 recursive files
+├── skills/                             # canonical skill directories and their resources
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -71,6 +71,7 @@ products/kyber-squad/
 │   ├── csharp-dev/
 │   ├── csp-security/
 │   ├── dal-dev/
+│   ├── delivery-execution/
 │   ├── dp-code-reviewer/
 │   ├── github-cli/
 │   ├── github-devops/
@@ -122,15 +123,15 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (28 Canonical Skills)
+### 2. Skills (Canonical Skills)
 
-The 28 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop`,
 and `kilo-review-loop` are authored in Kyber-Squad. Every imported raw `SKILL.md` except the five
 explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 88 supplemental resources, for 116 skill-tree files in total; recursive APM and
+tree also retains its supplemental resources; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -148,10 +149,19 @@ beside `SKILL.md`.
 task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
 files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
 
+`delivery-execution` is the worker execution contract: how work is dispatched, verified and
+reported. Both entry points load it — `conductor` for plan- and spec-backed work, and the
+`bug-crusher` workflow for a single escalated defect — so the rules live in one copy instead of
+drifting between two. It holds the ready queue and its concurrency cap, worktree and artifact
+isolation, task session continuity, test-first and standard mode, the developer exit gate and its
+six-field completion digest, the iteration circuit-breaker and failure-cluster tallies, the
+findings drain, the final review council with its `STATUS: COUNCIL_SEATS_NEEDED` handback, the
+bounded Critical/Major remediation loop, and the plan and specification closeout.
+
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
 linked resource: a fresh Copilot render now emits the 53 principal files plus each owner's linked
-resources (149 files total). Every skill resource reaches every render except
+resources (150 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
@@ -164,7 +174,7 @@ The six Kyber-Weave skills under `.apm/skills/` (`kyber-docs-authoring`, `kyber-
 `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`)
 are authored once, in `.apm/skills/`, which stays their only source. The Kyber-Docs APM package reads that
 folder, and Kyber-Squad ships every skill in it as well. `squad pack` and the checkout release source add
-them beside the 28 canonical skills, so every Squad deployment carries them. They are not copied into
+them beside the canonical skills, so every Squad deployment carries them. They are not copied into
 `skills/` and are not listed in `bundles/full.yml`. See [ADR 0049](../../docs/adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
 ### 3. Profiles
@@ -215,9 +225,9 @@ deployment without link rewriting.
 
 - **Generated-output boundary**: Generated APM trees, Agent Plugins packages (`plugin.json`),
   and target-rendered harness trees are deployment/build output, not canonical or package source.
-  The repository root `.github/agents/` and `.github/skills/` trees are an intentional tracked,
-  stale Copilot self-deployment; `.kyber-weave/squad.lock.yml` and
-  `.kyber-weave/squad.receipt.json` are its stale tracked state. This synchronization leaves all
-  four paths untouched. A human will refresh them after a fresh Kyber-Weave release candidate.
+  The repository root `.github/agents/` and `.github/skills/` trees and the tracked
+  `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state were removed (#349).
+  Generated `.github` trees are deployment output, never canonical source, and must not return
+  as tracked files.
 - **Immutable Role Digests**: Instruction digests are computed deterministically after UTF-8 and LF normalization; they are never hand-edited.
 - **Strict Validation**: All manifests and profiles are validated against their respective JSON schemas during build and packaging.

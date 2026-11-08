@@ -701,7 +701,10 @@ public sealed class CopilotRendererTests
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData(
         "bug-crusher",
-        "agents: ['bug-crusher-investigator', 'docs-dev', 'review-lens', 'review-triage']")]
+        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
+        "'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', " +
+        "'review-lens', 'review-triage', 'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', " +
+        "'typescript-dev']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
         string agentName,
         string expectedAgentsLine)
@@ -829,7 +832,7 @@ public sealed class CopilotRendererTests
     }
 
     private static readonly string[] ConductorReferenceFiles =
-        ["plan-path.md", "spec-path.md", "intake-path.md", "execution-and-review.md", "autonomy.md"];
+        ["plan-path.md", "spec-path.md", "intake-path.md", "autonomy.md"];
 
     /// <summary>
     /// Regression for the global-install report where <c>conductor</c> could not find
@@ -910,7 +913,9 @@ public sealed class CopilotRendererTests
             .Select(segment => segment[..segment.IndexOf(')', StringComparison.Ordinal)])
             .Where(target => target.Contains("/agents/conductor/references/", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(9, targets.Length);
+        // Four reference files the conductor links, plus the three cross-links the reference files
+        // carry between themselves.
+        Assert.Equal(7, targets.Length);
         Assert.All(targets, target => Assert.DoesNotContain("\\", target, StringComparison.Ordinal));
     }
 

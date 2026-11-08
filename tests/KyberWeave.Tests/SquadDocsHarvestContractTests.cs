@@ -264,11 +264,12 @@ public sealed class SquadDocsHarvestContractTests
     /// <summary>
     /// The execution contract records the closeout run: a run record, the DOCS_REVIEW
     /// rows, the Q2 CLOSEOUT_COMPLETE marker, and the PR description that carries them.
+    /// The rules live in the shared execution skill both entry points load.
     /// </summary>
     [Fact]
     public void ExecutionAndReviewCloseoutRecordsRunRecordAndDocsReview()
     {
-        string text = ReadProduct("agents", "conductor", "references", "execution-and-review.md");
+        string text = ReadProduct("skills", "delivery-execution", "SKILL.md");
 
         AssertAll(text, "run record", "DOCS_REVIEW", "CLOSEOUT_COMPLETE", "PR description");
     }
@@ -326,7 +327,10 @@ public sealed class SquadDocsHarvestContractTests
             ?.Trim();
 
         Assert.Equal(
-            "agents: ['bug-crusher-investigator', 'docs-dev', 'review-lens', 'review-triage']",
+            "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
+            "'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', " +
+            "'review-lens', 'review-triage', 'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', " +
+            "'typescript-dev']",
             actual);
     }
 
@@ -502,7 +506,7 @@ public sealed class SquadDocsHarvestContractTests
         [
             Path.Combine("agents", "docs-dev.md"),
             Path.Combine("agents", "conductor.md"),
-            Path.Combine("agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine("skills", "delivery-execution", "SKILL.md"),
             Path.Combine("agents", "conductor", "references", "autonomy.md"),
             Path.Combine("agents", "conductor", "references", "plan-path.md"),
             Path.Combine("agents", "conductor", "references", "spec-path.md"),

@@ -26,7 +26,7 @@ public sealed class SquadAutonomyContractTests
             Read("agents", "conductor", "references", "intake-path.md"),
             Read("agents", "conductor", "references", "plan-path.md"),
             Read("agents", "conductor", "references", "spec-path.md"),
-            Read("agents", "conductor", "references", "execution-and-review.md"));
+            Read("skills", "delivery-execution", "SKILL.md"));
     }
 
     private static void AssertAll(string text, params string[] phrases)
@@ -96,7 +96,7 @@ public sealed class SquadAutonomyContractTests
     public void AutonomousCircuitBreakerIsAReportedFindingAndDeliveryContinues()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
-        string execution = Read("agents", "conductor", "references", "execution-and-review.md");
+        string execution = Read("skills", "delivery-execution", "SKILL.md");
 
         AssertAll(
             autonomy,
