@@ -7,12 +7,15 @@ model-profile: fast
 capability-profile: root-fixer
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
 # The skill dispatches bug-crusher-investigator as its first act on every defect and
-# docs-dev for the documentation-impact review, so the roster has to permit both.
-# `review-lens` and `review-triage` are for one situation only: `code-reviewer` returns
-# `STATUS: COUNCIL_SEATS_NEEDED` because its harness gave it no way to start its own
-# seats, and this session starts them and re-invokes it. `root-fixer` grants `delegate`
-# for exactly this; the roster is what keeps the grant scoped to those four agents.
-delegates-to: [bug-crusher-investigator, docs-dev, review-lens, review-triage]
+# docs-dev for the documentation-impact review. The escalated path adds architect, which
+# plans; test-dev, which establishes RED; code-reviewer, which judges the finished fix; and
+# every developer agent a task can route to. `review-lens` and `review-triage` are for one
+# situation only: `code-reviewer` returns `STATUS: COUNCIL_SEATS_NEEDED` because its
+# harness gave it no way to start its own seats, and this session starts them and
+# re-invokes it. `root-fixer` grants `delegate` for exactly this; the roster is what keeps
+# the grant scoped to these agents. Discovery stays off it on purpose: the architect owns
+# its own discovery delegates, and the reviewer seats its own lenses.
+delegates-to: [architect, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, pulumi-dev, python-dev, react-dev, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []
 ---

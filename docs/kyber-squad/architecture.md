@@ -1638,7 +1638,9 @@ Quality and verification rigor depend on objective, adversarial test authorship:
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
-`products/kyber-squad/agents/conductor/references/execution-and-review.md`,
+`products/kyber-squad/agents/conductor/references/{plan-path,spec-path,intake-path,autonomy}.md`,
+`products/kyber-squad/skills/delivery-execution/SKILL.md` (the worker execution contract both
+`conductor` and `bug-crusher` load),
 `products/kyber-squad/agents/csharp-dev.md`,
 `products/kyber-squad/agents/test-dev.md`, and
 `products/kyber-squad/agents/github-devops.md`.

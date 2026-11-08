@@ -1,6 +1,14 @@
-# Execution and Review
+---
+name: delivery-execution
+description: "The worker execution contract — how work is dispatched, verified and reported. Both entry points load it: the conductor for Ready plans and Ready specification task artifacts, and the bug-crusher workflow for a single escalated defect. Use when sequencing a ready queue, isolating parallel workers in worktrees, running test-first or standard mode, applying the developer exit gate and its six-field completion digest, enforcing the iteration circuit-breaker and its failure-cluster tallies, draining findings, running the final review council and its STATUS COUNCIL_SEATS_NEEDED handback, or closing out a plan or specification. Do not use as a substitute for the conductor or bug-crusher role bodies: those load this skill and own the routing around it."
+license: MIT
+---
 
-This contract is shared by Ready plans and Ready specification task artifacts.
+# Worker Execution Contract
+
+This is the worker execution contract: both entry points load it to learn how work is dispatched, verified and reported, and neither restates these rules in its own words. It is shared by Ready plans and Ready specification task artifacts, and by the `bug-crusher` skill when a single defect escalates to a plan.
+
+Where this contract says "the conductor", read the orchestrating session: the `conductor` for plan- and spec-backed work, the `bug-crusher` main session for a single escalated defect. The role bodies own routing — the ready queue, the tripwires, the escalation decision. This contract owns what happens once work is dispatched, and how each dispatch is proved.
 
 ## Ready queue
 
