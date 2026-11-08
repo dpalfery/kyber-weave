@@ -1604,6 +1604,35 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// The shipped roster reaches its coding standard through the MCP tool. The developer agents
+    /// are the roles that write code, so their instructions are what decide whether a standard
+    /// arrives for a budget with the sections the task names — or is read whole from the file,
+    /// 21,354 characters of it for the test standard alone against a 12,000-character default.
+    /// </summary>
+    /// <param name="agentName">The canonical developer agent identity.</param>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("go-dev")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("rust-dev")]
+    [InlineData("sql-database-architect")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
+    public void DeveloperAgentBodyRoutesItsCodingStandardThroughTheTool(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("docs_get_coding_standard_for_technology", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The <c>TASK_GATE:</c> digest is a developer exit contract. A non-developer body that emits it
     /// would claim a gate it never ran.
     /// </summary>
