@@ -274,7 +274,8 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
-    ///     A branch named 'head' in lowercase is not treated as the uppercase 'HEAD' symbolic reference.
+    ///     A branch named 'head' in lowercase is not treated as the uppercase 'HEAD' symbolic reference,
+    ///     and resuming it succeeds with exit 0 and checks out the branch.
     /// </summary>
     [Fact]
     public void DoesNotRefuseLowercaseHeadBranchAsSymbolicRef()
@@ -289,7 +290,8 @@ public sealed class RunStartPlannerTests : IDisposable
             "--slug", "tighten-the-gate",
             "--resume", Resumed);
 
-        Assert.NotEqual(2, result.ExitCode);
+        Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming branch named 'head': {result.Output}");
+        Assert.Equal(Resumed, _probe.CurrentBranch());
         Assert.DoesNotContain("symbolic reference", result.Output, StringComparison.Ordinal);
     }
 
