@@ -42,6 +42,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-GATE-CORROBORATED-001",
         "KW-ARB-GATE-001",
         "KW-ARB-PLANREAD-001",
+        "KW-ARB-GATE-REPORT-001",
     ];
 
     [Fact]

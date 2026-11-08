@@ -74,7 +74,7 @@ public sealed record ArbiterConfig
     public IReadOnlyList<ArbiterLensPathEntry> LensPaths { get; init; } = [];
 
     /// <summary>
-    /// Product defaults for an unconfigured host: disabled, no provider, all 18
+    /// Product defaults for an unconfigured host: disabled, no provider, all 20
     /// shipped rules enabled.
     /// </summary>
     /// <remarks>

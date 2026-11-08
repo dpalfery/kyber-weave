@@ -41,6 +41,12 @@ public static class TriggerFactBuilder
             && !string.Equals(fact, "delegation.target-profile", StringComparison.Ordinal))
             return ArbiterFactLabel.Asserted;
 
+        // The one gate fact the Arbiter computes rather than receives: it joins a returned
+        // digest to the report it names, so it is derived even though gate.* is usually
+        // dispatch or lens output.
+        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal))
+            return ArbiterFactLabel.Derived;
+
         if (fact.StartsWith("lens.name", StringComparison.Ordinal)
             || fact.StartsWith("finding.", StringComparison.Ordinal)
             || fact.StartsWith("gate.", StringComparison.Ordinal))

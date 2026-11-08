@@ -182,6 +182,10 @@ public sealed class ArbiterEvaluator
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config, ev.ObservesReturns);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
+        // D29: a return's TASK_GATE: line is checked against the report it names. Absent
+        // evidence answers absent and the rule escalates; an unexpected failure here
+        // reaches the catch in EvaluateAsync, which escalates with the reason.
+        facts = GateReportFacts.Enrich(facts, ev);
 
         // Read once here and reused for both REPEAT and the record, so the count and the
         // entry it is written beside are keyed on the same digest.

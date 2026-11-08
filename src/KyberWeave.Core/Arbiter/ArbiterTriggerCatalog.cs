@@ -59,7 +59,7 @@ public static class ArbiterTriggerCatalog
             ["delegate"] = DelegateFacts,
             ["delegate.returned"] = Union(
                 DelegateFacts,
-                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths"]),
+                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths", "gate.report.agrees"]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(
                 DelegatePlannerFacts,
