@@ -11,15 +11,22 @@ public sealed class DoctorSettings : CommandSettings
     public string Path { get; set; } = ".";
 
     [CommandOption("--check")]
-    [Description("Read-only: detect CodeGraph and the index and prove the MCP server. Never runs init or index.")]
+    [Description("Read-only: detect CodeGraph and the index and prove the MCP server. Never runs init, sync or index.")]
     public bool Check { get; set; }
 
     [CommandOption("--provision")]
-    [Description("Provision the CodeGraph index: init when .codegraph/ is absent, index otherwise. Never installs anything.")]
+    [Description("Provision the CodeGraph index: init when .codegraph/ is absent, sync otherwise. Never installs anything.")]
     public bool Provision { get; set; }
 
+    [CommandOption("--ensure")]
+    [Description(
+        "Leave the tooling working in one command: sync the index (or init it), restore the tracked files the index "
+        + "wrote, prove the index and the docs server with one call each, and repair once if a step fails. "
+        + "Exit 3 means CodeGraph is missing; follow stop-on-tool-failure otherwise.")]
+    public bool Ensure { get; set; }
+
     [CommandOption("--index-timeout <SECONDS>")]
-    [Description("The bound on one codegraph init or index run, and how long a second doctor waits for the lock. Default 600.")]
+    [Description("The bound on one codegraph init, sync or index run, and how long a second doctor waits for the lock. Default 600.")]
     public int IndexTimeoutSeconds { get; set; } = 600;
 
     [CommandOption("--mcp-timeout <SECONDS>")]

@@ -22,13 +22,25 @@ namespace KyberWeave.Core.Doctor;
 /// </remarks>
 public static partial class McpLiveProbe
 {
-    [GeneratedRegex(@"\s+rev=\S+(?:\s+dirty=\S+)?(?:\s+documents=\d+)?$")]
+    /// <summary>
+    ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens with no spaces in the
+    ///     value: <c>branch=</c>, <c>repo=</c>, <c>rev=</c>, <c>dirty=</c> and <c>documents=</c>.
+    /// </summary>
+    /// <remarks>
+    ///     The tokens are named rather than matched as a generic <c>word=value</c> shape, so a root path that happens to
+    ///     contain something that looks like a token is not truncated. Order is not fixed, so the pattern repeats the
+    ///     whole alternation to the end of the line and strips whatever subset the server sent.
+    /// </remarks>
+    [GeneratedRegex(@"(?:\s+(?:branch|repo|rev|dirty|documents)=\S+)+$")]
     private static partial Regex TrailingMetadataRegex();
     /// <summary>The MCP protocol revision the probe offers. The server answers with the revision it supports.</summary>
     private const string ProtocolVersion = "2024-11-05";
 
     /// <summary>The prefix the server puts on the first line of its provenance block.</summary>
     private const string ProvenancePrefix = "provenance: root=";
+
+    /// <summary>The flag that stops the server refreshing CodeGraph during the probe's tool call.</summary>
+    private const string NoCodeGraphRefreshFlag = "--no-codegraph-refresh";
 
     /// <summary>The longest a child stderr line is allowed into a failure reason.</summary>
     private const int MaxDetailLength = 160;
@@ -69,9 +81,12 @@ public static partial class McpLiveProbe
             // working directory. Passing the flag is what makes the probe answer for the repository this
             // run resolved; without it the child inherits doctor's cwd and a healthy target can fail
             // mcp.root, or pass against the wrong checkout.
+            //
+            // --no-codegraph-refresh keeps the promise --check makes. The server refreshes CodeGraph on its
+            // first tool call, so a probe without this flag would make the read-only verb write an index.
             return new StdioSession(
                 options.McpExecutable,
-                ["--repo-root", root],
+                ["--repo-root", root, NoCodeGraphRefreshFlag],
                 options.McpTimeout);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)

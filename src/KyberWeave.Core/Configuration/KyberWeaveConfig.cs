@@ -21,6 +21,19 @@ public sealed class KyberWeaveConfig
 
     public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
 
+    /// <summary>
+    /// Whether a run stops when a required tool — CodeGraph, or the docs server's CodeGraph read —
+    /// cannot be repaired.
+    /// </summary>
+    /// <remarks>
+    /// The repository setting is <c>stop-on-tool-failure</c>. Absent means stop, so the default is
+    /// <c>true</c>: a repository that says nothing about the setting is the strict case, and
+    /// continuing past a broken code index has to be asked for explicitly. The default lives here
+    /// rather than on the YAML document so every path that builds a config — a repository file, a
+    /// user file, the product defaults, a test fixture — reads the same answer.
+    /// </remarks>
+    public bool StopsOnToolFailure { get; init; } = true;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -67,7 +80,8 @@ public sealed class KyberWeaveConfig
         ConfigRegConfig? configReg = null,
         ReviewConfig? review = null,
         ArbiterConfig? arbiter = null,
-        McpConfig? mcp = null) =>
+        McpConfig? mcp = null,
+        bool? stopsOnToolFailure = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
@@ -77,6 +91,7 @@ public sealed class KyberWeaveConfig
             ConfigReg = configReg ?? ConfigReg,
             Review = review ?? Review,
             Arbiter = arbiter ?? Arbiter,
-            Mcp = mcp ?? Mcp
+            Mcp = mcp ?? Mcp,
+            StopsOnToolFailure = stopsOnToolFailure ?? StopsOnToolFailure
         };
 }

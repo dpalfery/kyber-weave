@@ -70,10 +70,14 @@ public sealed class RepositoryDoctorTests : IDisposable
         Assert.Equal(0, report.ExitCode);
     }
 
-    /// <summary>An existing <c>.codegraph/</c> is incrementally indexed, never re-initialised.</summary>
-    /// <remarks>D3 "always index" on provisioning: <c>index</c> is the cheap path once an index exists.</remarks>
+    /// <summary>An existing <c>.codegraph/</c> is brought up to date with <c>sync</c>, never re-initialised.</summary>
+    /// <remarks>
+    /// D22: provisioning runs <c>sync</c> when an index exists and <c>init</c> when it does not. <c>index</c> is the
+    /// repair step for a failed <c>sync</c>, never the routine one: re-indexing after a successful sync would rebuild
+    /// the whole index on every provision for no new information, which is the cost this slice removes.
+    /// </remarks>
     [Fact]
-    public void Doctor_Provision_IndexPresent_RunsIndex()
+    public void Doctor_Provision_IndexPresent_RunsSync()
     {
         Directory.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
@@ -87,18 +91,18 @@ public sealed class RepositoryDoctorTests : IDisposable
 
         Assert.Contains(
             executor.CallsTo("codegraph"),
-            call => call.ArgumentList.Contains("index", StringComparer.Ordinal));
+            call => call.ArgumentList.Contains("sync", StringComparer.Ordinal));
         DoctorHarness.AssertNoCall(executor, "init");
         Assert.True(DoctorHarness.CheckNamed(report, "codegraph.index").Passed);
     }
 
     /// <summary>
-    /// An index that exceeds the timeout fails the check with exit 1. The tree kill itself happens in the process
+    /// A <c>sync</c> that exceeds the timeout fails the check with exit 1. The tree kill itself happens in the process
     /// executor, which this unit test cannot observe.
     /// </summary>
     /// <remarks>
     /// The executor surfaces a timeout as <see cref="TimeoutException"/>, the production contract of
-    /// <c>ProcessExecutor</c>. Without the failure path, a hung index would hang the doctor or pass silently.
+    /// <c>ProcessExecutor</c>. Without the failure path, a hung sync would hang the doctor or pass silently.
     /// </remarks>
     [Fact]
     public void Doctor_Provision_IndexTimeout_KillsTreeExits1()
@@ -106,8 +110,8 @@ public sealed class RepositoryDoctorTests : IDisposable
         Directory.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
             Root,
-            arguments => arguments.Contains("index", StringComparer.Ordinal)
-                ? throw new TimeoutException("codegraph index exceeded its timeout.")
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? throw new TimeoutException("codegraph sync exceeded its timeout.")
                 : DoctorHarness.Ok());
 
         DoctorReport report = RepositoryDoctor.Run(

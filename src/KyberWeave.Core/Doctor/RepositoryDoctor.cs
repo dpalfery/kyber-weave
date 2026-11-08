@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
@@ -18,7 +19,7 @@ public static class RepositoryDoctor
 {
     /// <summary>Runs the doctor against <paramref name="root"/>.</summary>
     /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
-    /// <param name="mode">Read-only or provisioning.</param>
+    /// <param name="mode">Read-only, provisioning, or the ensure run that leaves the index and both tools proved.</param>
     /// <param name="options">The budgets and executable names.</param>
     /// <param name="executor">
     ///     Runs git and CodeGraph children. Production passes an executor bounded by <see cref="DoctorOptions.IndexTimeout"/>.
@@ -65,12 +66,37 @@ public static class RepositoryDoctor
 
         List<DoctorCheck> checks = [.. codegraph.Checks, .. McpLiveProbe.Run(repositoryRoot, options)];
 
+        // D1: a repository may set `stop-on-tool-failure: false` to be told about a broken tool and carry on. The exit
+        // code is what a caller branches on, so the opt-out has to change the code and not only the wording. It applies
+        // to the ensure run — the command a code-editing run starts with — and never to `--check`, whose reader asked
+        // for a verdict. A missing binary still exits 3: installing it is the user's decision either way.
+        bool stops = mode != DoctorMode.Ensure || StopsOnToolFailure(repositoryRoot);
+        if (!stops)
+            checks = [.. checks.Select(AsWarning)];
+
         int exitCode = codegraph.BinaryMissing
             ? 3
             : checks.Any(check => !check.Passed) ? 1 : 0;
 
         return new DoctorReport(repositoryRoot, mode, exitCode, checks);
     }
+
+    /// <summary>
+    /// Whether this repository wants a run to stop when a required tool cannot be repaired.
+    /// </summary>
+    /// <remarks>
+    /// Read from the repository's own <c>.kyber-weave/kyber-weave.yml</c>. A file that cannot be loaded leaves the
+    /// default in place — stop — because a broken configuration must not be the thing that weakens the rule.
+    /// </remarks>
+    private static bool StopsOnToolFailure(string repositoryRoot)
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot);
+        return result.Config?.StopsOnToolFailure ?? true;
+    }
+
+    /// <summary>Turns a failed check into a passing one whose reason says it is a warning, for a repository that opted out.</summary>
+    private static DoctorCheck AsWarning(DoctorCheck check) =>
+        check.Passed ? check : new DoctorCheck(check.Id, true, $"warning: {check.Reason}", null);
 
     /// <summary>
     ///     Asks git for the toplevel of <paramref name="root"/>. A directory outside any repository, or a git that

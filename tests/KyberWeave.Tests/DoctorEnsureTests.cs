@@ -173,6 +173,13 @@ public sealed class DoctorEnsureTests : IDisposable
             {
                 string arguments = string.Join(' ', startInfo.ArgumentList);
 
+                // The doctor reads the repository root from git before it does anything else, so a scripted git
+                // that answers this with nothing would stop the run before the restore this case exists to pin.
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+                }
+
                 // The tracked changes before the run, then the same set plus the file init created.
                 if (arguments.Contains("status", StringComparison.Ordinal)
                     || arguments.Contains("diff", StringComparison.Ordinal))
@@ -312,6 +319,17 @@ internal static class DoctorAppHarness
                     // default resolver leaves a type it has no registration for.
                     return null;
                 }
+            }
+
+            // Spectre asks for every extension point it supports as an IEnumerable<T> and iterates the
+            // answer while it composes the command tree. A null answer throws there, before Execute is
+            // ever reached, and app.Run reports that as -1 — a value indistinguishable from the verb
+            // refusing the call, which is why a harness that answered null made every case read as
+            // "the option does not exist". The harness registers no extension point, so the honest
+            // answer is an empty sequence rather than null.
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            {
+                return Array.CreateInstance(type.GetGenericArguments()[0], 0);
             }
 
             if (!type.IsAbstract && !type.IsInterface && type.GetConstructor(Type.EmptyTypes) is not null)

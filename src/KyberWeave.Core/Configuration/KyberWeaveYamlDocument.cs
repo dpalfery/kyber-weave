@@ -29,4 +29,11 @@ internal sealed class KyberWeaveYamlDocument
     /// reaches the loader as a configuration error rather than a deserialization failure.
     /// </summary>
     public string? Autonomy { get; set; }
+
+    /// <summary>
+    /// Raw top-level <c>stop-on-tool-failure:</c> value, for the same reason as
+    /// <see cref="Autonomy"/>: a value that is neither <c>true</c> nor <c>false</c> has to reach
+    /// the loader as a diagnostic naming the setting, not as a binding failure naming a type.
+    /// </summary>
+    public string? StopOnToolFailure { get; set; }
 }

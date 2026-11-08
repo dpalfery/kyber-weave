@@ -16,6 +16,9 @@ public static class KyberWeaveConfigLoader
     /// <summary>Stable rule code for a non-fatal problem in <c>kyber-weave.yml</c>, such as an unknown key.</summary>
     public const string ConfigWarningCode = "KW-CONFIG-002";
 
+    /// <summary>The repository setting a run reads to decide whether a broken tool stops it.</summary>
+    private const string StopOnToolFailureKey = "stop-on-tool-failure";
+
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
     /// <c>working-directory</c> is refused; use <see cref="Load(string, string?)"/> for that.
@@ -200,6 +203,7 @@ public static class KyberWeaveConfigLoader
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
         };
     }
 
@@ -237,7 +241,32 @@ public static class KyberWeaveConfigLoader
                 repositoryRoot,
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
-            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp)
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
         };
+    }
+
+    /// <summary>
+    /// Reads the top-level <c>stop-on-tool-failure</c> setting. Absent means stop.
+    /// </summary>
+    /// <remarks>
+    /// The value is parsed here rather than bound as a <see cref="bool"/> on the YAML document, because a
+    /// binding failure reports the type it wanted — an operator who wrote <c>stop-on-tool-failure: strict</c>
+    /// is told to fix a type they cannot see. This is the same treatment <c>autonomy:</c> gets: the setting
+    /// is named, the two values it accepts are named, and the absent case is spelled out.
+    /// </remarks>
+    /// <exception cref="YamlException">The value is present and is neither <c>true</c> nor <c>false</c>.</exception>
+    private static bool ParseStopOnToolFailure(string? value)
+    {
+        if (value is null)
+            return true;
+
+        if (bool.TryParse(value, out bool stops))
+            return stops;
+
+        throw new YamlException(
+            $"{StopOnToolFailureKey} '{value}' is not a boolean. Use 'true' to stop a run when a " +
+            "required tool cannot be repaired, or 'false' to warn and carry on, or remove the key; " +
+            "a run treats an absent setting as 'true'.");
     }
 }
