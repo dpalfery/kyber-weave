@@ -139,7 +139,7 @@ Test authorship follows `<test-coding-standard>`. This standard requires that th
 testable: dependencies passed in, no module-level mutable state, clocks injectable. Test files
 (`*.test.ts`, `*.spec.ts`) belong to `test-dev`.
 
-## Commands
+## Completion
 
 Run the scripts the package declares; these are the shape they usually take. The same on macOS,
 Linux, and Windows:
@@ -148,11 +148,16 @@ Linux, and Windows:
 npm ci
 npm run typecheck        # tsc --noEmit for every tsconfig in the package
 npm run lint             # eslint .
-npm run build            # when the package builds
+npx prettier --check .   # the format check, where the package formats with Prettier
+npm run build            # the build, when the package builds
 npm test                 # vitest run (or the declared runner)
 ```
 
-The `npm test` line is the gate the review council and CI run. A dev agent never runs the full
-suite; it runs the tests covering its change (`npx vitest run <path>`).
+`npm run typecheck` compiles without emitting, so it catches a type error that a runner transpiles
+past. `npx prettier --check .` is the format check where the package uses Prettier; a repository
+that formats by ESLint rule has the same answer from `npm run lint`, and says so here. `npm run
+build` is the build and proves the package as it will ship. The `npm test` line is the gate the
+review council and CI run. A dev agent never runs the full suite; it runs the tests covering its
+change (`npx vitest run <path>`).
 
 A repository with several packages names each package's gates here.

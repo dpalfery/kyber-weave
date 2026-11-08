@@ -73,6 +73,14 @@ of the language's own documentation, and not rules the analyzers already enforce
 
 A rule that holds regardless of language belongs in [`rules/`](../rules/README.md) instead.
 
+Every standard ends with a **`## Completion`** section: the build, the targeted test command and
+the format check a finishing worker runs, what runs when, and why. That knowledge used to sit in
+the portable agent files, which sent this repository's commands to every host on every round trip
+and let them drift per project. It lives in the standard instead, reached by topic only when a
+worker is finishing — [the test standard](test/README.md#completion) is the worked example. A
+standard has exactly one such section, and no separate `## Commands` section beside it: two
+sections answering "how do I finish" drift apart the moment one is edited and the other is not.
+
 Every factual statement in a standard with `status: current` must be checkable in this repository
 when it is written: a gate command, a setting, a file, or a version. A claim from a template that
 is false here is dropped or reworded. A prescriptive rule that existing code does not fully meet

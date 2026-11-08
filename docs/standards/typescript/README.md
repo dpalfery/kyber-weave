@@ -102,12 +102,15 @@ In React views, distinguish missing data, derived values, and measured zero in b
 display and accessible text where the distinction affects interpretation. Do not make a
 missing value look like a healthy zero.
 
-## Style and verification
+## Style
 
 The repository's ESLint configuration is authoritative: TypeScript uses the recommended
 `typescript-eslint` rules, rejects explicit `any`, and treats lint findings as errors. Keep
 the strict compiler settings enabled. Follow nearby formatting: two-space indentation,
-single-quoted strings, and generally no semicolons.
+single-quoted strings, and generally no semicolons. There is no separate Prettier pass here, so
+the format check is the lint gate below rather than a formatter of its own.
+
+## Completion
 
 For changes under `dash/`, run the applicable gates from the repository instructions:
 
@@ -118,13 +121,17 @@ scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
 scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
 
-`<files>` are relative to `dash/`. The whole `npm --prefix dash run test` suite is the review
-council's and CI's gate; a dev agent does not run it.
+`typecheck` is the build check: it compiles every project in `dash/`, including `web/` and the test
+tsconfig, and emits nothing. `lint` is also the format check, because ESLint owns formatting under
+`dash/`. `test:related` runs the tests covering the files you touched, and `<files>` are relative
+to `dash/`. The whole `npm --prefix dash run test` suite is the review council's and CI's gate; a
+dev agent does not run it.
 
 Run each command through `scripts/proc-guard.sh run --` (the process watchdog); see
 [Running tests safely](../../dash/runbook.md#running-tests-safely).
 
-Changes to the engine's built output or update path also require `npm --prefix dash run build:cli`; changes to the build/update path require `./scripts/update-loop.sh`. Changes to
-`dash/tray/` additionally use the tray UI and Rust gates in the root `AGENTS.md`. Test
-authorship follows the observable-behavior guidance in the repository's test standard;
-Vitest tests remain TypeScript and follow this document's language rules.
+A change to the engine's shipped output also requires `npm --prefix dash run build:cli`, and a
+change to the build or update path requires `./scripts/update-loop.sh`. Changes to `dash/tray/`
+additionally use the tray UI and Rust gates in the root `AGENTS.md`. Test authorship follows the
+observable-behavior guidance in the repository's test standard; Vitest tests remain TypeScript and
+follow this document's language rules.

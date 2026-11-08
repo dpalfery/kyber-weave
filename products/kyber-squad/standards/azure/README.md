@@ -81,3 +81,23 @@ property, not an operations problem discovered later.
 
 Everything environment-specific is configuration: endpoints, resource names, tenant ids. A
 resource name compiled into the binary is a promise about someone else's subscription.
+
+## Completion
+
+Azure work is written in a language with its own standard, so the build, test and format commands
+are that standard's and are not repeated here. What this standard adds is what must be true of the
+run before the change is reported done:
+
+- **The build is green, with warnings denied.** `dotnet build -c Release` for C#, `npm run build`
+  for TypeScript, or the language standard's own build. An Azure SDK call that no longer compiles
+  is not a network problem and does not need a retry.
+- **The tests are the ones covering your change, and they exercise the failure paths.** A timeout,
+  a 429 that honours `Retry-After`, a 403 that fails fast rather than retrying — those are the
+  behaviours that break in production, and a test that only proves the happy path proves the
+  least interesting thing about cloud code. The unfiltered suite belongs to the review council
+  and CI.
+- **The format check passes:** `dotnet format --verify-no-changes`, `npx prettier --check .`, or
+  the language standard's formatter. It is a separate check from the build.
+- **The diff carries no credential.** Search it for a key, a connection string, a SAS token or a
+  tenant secret before you report: a secret in a commit is not undone by deleting it in the next
+  one, it is undone by rotating it.

@@ -66,7 +66,6 @@ public sealed class SquadPerformanceContractTests
     private const string DirectAssemblyRunner =
         "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
 
-    private const string DirectAssemblyDll = "tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
     /// <summary>
     ///     Retired. The quiet reporter prints the same one banner line for a passing run and for a
     ///     filter that matched nothing, so a worker can neither check the total nor fill in its
@@ -183,10 +182,44 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesSpecifyDirectAssemblyTestRunner(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
-        Assert.Matches(DirectAssemblyRegex, content);
+        AssertNamesTheHostTestStandardForTheRunner(content, relativePath);
         Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Matches(@"(?i)\bpre-?computed\s+test\s+commands?\b", content);
+    }
+
+    /// <summary>
+    ///     Asserts the exact runner is reachable from a portable file, without the portable file
+    ///     naming this repository's own assembly path.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <c>products/kyber-squad/</c> ships to every consumer, so a line naming
+    ///         <c>tests/KyberWeave.Tests/bin/…</c> teaches every downstream repository a fact about
+    ///         this one, and that is what slice 7's D5 forbids. The rule the earlier pin enforced is
+    ///         unchanged — the worker is still told the exact runner, and still told the class must be
+    ///         fully qualified — and only its home moved: the host's test standard carries the
+    ///         concrete path in its <c>## Completion</c> section, and the portable file points there.
+    ///     </para>
+    ///     <para>
+    ///         Both halves are asserted, because either alone is satisfiable by a wrong tree: a pointer
+    ///         with no literal behind it sends the worker nowhere, and a literal with no pointer is
+    ///         never reached.
+    ///     </para>
+    /// </remarks>
+    private static void AssertNamesTheHostTestStandardForTheRunner(string portableContent, string relativePath)
+    {
+        Assert.True(
+            portableContent.Contains("test standard", StringComparison.OrdinalIgnoreCase),
+            $"{relativePath} must name the host's test standard as the home of the exact runner; a "
+            + "portable file cannot carry this repository's own assembly path.");
+        Assert.True(
+            portableContent.Contains("## Completion", StringComparison.Ordinal),
+            $"{relativePath} must point at the standard's '## Completion' section, which is where the "
+            + "inner-loop commands live.");
+
+        string standard = ReadRepoFile(TestCodingStandardPath);
+        Assert.Contains(DirectAssemblyRunner, standard, StringComparison.Ordinal);
+        Assert.Matches(DirectAssemblyRegex, standard);
     }
 
     [Theory]
@@ -371,8 +404,7 @@ public sealed class SquadPerformanceContractTests
     public void WorkerSurfacesSpecifyBuildOnceTestManyWithDirectAssemblyRunner(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains(DirectAssemblyDll, content, StringComparison.Ordinal);
-        Assert.Matches(DirectAssemblyRegex, content);
+        AssertNamesTheHostTestStandardForTheRunner(content, relativePath);
         Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
     }

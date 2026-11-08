@@ -28,7 +28,8 @@ task did not change.
 ## Command
 
 Use the `kyber-weave` command on `PATH`. Inside this checkout, when it is not on `PATH`, use
-the fallback `dotnet run --project src/KyberWeave.Cli -c Release --` in its place.
+the source-run form the host's `AGENTS.md` declares in its place —
+`dotnet run --project <the CLI project> -c Release --`.
 
 Fix pass, scoped to this task:
 

@@ -184,16 +184,25 @@ timeout by design. Do not give it one; a timeout would end a live session.
 the file, the API name or line text, and the bound. If the site cannot state a bound, it does not
 belong in a test: remove it or inject a fake.
 
-## Commands
+## Completion
 
-Run every command through the watchdog, from the repository root. **No dev agent runs the full
-test suite**: the review council's `test` gate and CI run it. Build once, then run the tests
-covering your change:
+This is how a change to a test is proved. Build once, run the classes the change touches, run the
+format check, then report. Every command runs through the watchdog, from the repository root.
+**No dev agent runs the full test suite**: the review council's `test` gate and CI run it.
 
 ```bash
 scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
+scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
+
+The build comes first and `--no-build` depends on it: the same build produced the binaries the
+filtered run executes. The filter names a class by its fully qualified name — a short name runs
+zero tests and exits 0, so read the total and treat zero as nothing verified. The format check is
+two verbs, `whitespace` and `style`, because the council runs both as blocking gates
+(`format-whitespace` and `format-style` in [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml));
+a test file that fails either is a finding the council raises and no test catches.
 
 A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
 `-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its

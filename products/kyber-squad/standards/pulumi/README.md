@@ -116,14 +116,19 @@ is still a decision.
 - When a provider or API-version choice is non-obvious, cite the Pulumi docs or the
   `azure-native` registry page, pinned to the package version in use.
 
-## Commands
+## Completion
 
 ```bash
+dotnet build -c Release                                 # the build
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # the component and helper unit tests
+dotnet format --verify-no-changes                       # the formatter check
 pulumi preview              # required before any apply path
 pulumi up                   # apply a reviewed preview
 pulumi stack output         # read agreed cross-stack / CI contracts
-dotnet test                 # component and helper unit tests
 ```
 
-The `dotnet test` line is the gate the review council and CI run. A dev agent never runs the full suite;
-it runs the tests covering its change (`dotnet test --filter "FullyQualifiedName~<TestClass>"`).
+`pulumi preview` output goes in the pull request, and `pulumi up` only follows a preview someone
+read. The build must be green first: an infrastructure change that does not compile has no
+preview worth reviewing. The filtered `dotnet test` line is what a dev agent runs, and the
+unfiltered suite is the gate the review council and CI run. `dotnet format --verify-no-changes`
+is the format check.

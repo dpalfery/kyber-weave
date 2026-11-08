@@ -97,3 +97,25 @@ build that passes today fails on a morning nobody changed anything.
 
 Jobs run on a Linux runner unless the job needs another OS — Windows for a MAUI publish, macOS
 for iOS signing — and say why when they do.
+
+## Completion
+
+A workflow is not proved by reading it. Three checks run before the change is reported done, and
+none of them is optional because the file is "only YAML":
+
+- **The linter is the build.** `actionlint .github/workflows/<file>.yml` — or the workflow linter
+  this repository declares — parses the file, resolves expressions, and runs shellcheck over every
+  `run:` block. A workflow that does not parse fails here the way a build fails, and it is the
+  build you name in your report.
+- **The format check is the repository's YAML formatter** — `npx prettier --check` where YAML is
+  formatted with Prettier, `yamlfmt -lint` where it is formatted with that. A workflow file that
+  neither formats is not exempt: say which one this repository uses here and run it.
+- **The tests are the workflow's own commands, run by hand.** Every `dotnet test`, `npm test`,
+  `cargo test` or linter a step invokes is a command you can run locally, filtered to what your
+  change touches, exactly as the step runs it. Run those and put the result in the pull request.
+  A workflow edit that changes a test command and was never exercised is untested, whatever the
+  YAML says.
+
+Executing the workflow itself — a dispatch on a scratch branch, or `act` where the repository
+allows it — is the only evidence that the job graph runs; where the repository permits that, the
+run's conclusion is what you cite.
