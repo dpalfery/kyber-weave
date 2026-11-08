@@ -226,7 +226,8 @@ Within a standard, `##` sections are ranked by rarity-weighted similarity, selec
 the budget runs out, then **emitted in document order** so the prose still reads. Short
 sections are damped, because a three-word stub can overlap a query almost perfectly while
 saying nothing. A section is selected only when its score clears the 0.02 section floor, with
-the top-ranked section always returned so the answer is never a path and a list of headings.
+the top-ranked clearing section always included even if it alone exceeds the budget so the
+answer is never a path and a list of headings.
 
 **A topic is scored on its words, not its phrase.** Vectorising the topic yields its
 individual words plus one fused compound per adjacent pair — `error handling` also produces

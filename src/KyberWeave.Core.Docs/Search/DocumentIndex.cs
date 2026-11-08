@@ -778,7 +778,7 @@ public sealed partial class DocumentIndex
         {
             int cost = section.Heading.Length + section.Body.Length;
 
-            // The top section is always included even if it alone exceeds the budget —
+            // The top clearing section is always included even if it alone exceeds the budget —
             // it gets truncated at the transport edge. Returning nothing but a path would
             // make the tool a directory listing, which is what sent callers to Read.
             bool mustInclude = chosen.Count == 0 && score >= MinSectionScore;
