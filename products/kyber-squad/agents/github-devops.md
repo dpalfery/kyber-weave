@@ -50,7 +50,7 @@ kyber-weave run start --harness <token> --type <type> --slug <slug> [--resume <b
 - Run it exactly as given, from the repository root. Do not substitute the harness token, type or slug: together they name the branch the run's pull request will carry.
 - It is local source control only. It fetches `origin` with `--prune`, creates the branch from the base the `run.base-branch` setting names or from `origin/HEAD` when the repository names none, and creates no commit, no push and no pull request.
 - Report back the facts it printed: `base`, `branch`, `where`, `revision`, and the failing, `HEAD` and base versions. The orchestrator records them in the run record and dispatches the rest of the run into `where`.
-- Exit `0` is the branch in place. Exit `2` is input it refused: relay the argument it names and stop. Exit `3` is the missing `codegraph` binary and exit `1` is a tool failure under `stop-on-tool-failure`: relay the printed line and its `fix:` hint, and install or repair nothing.
+- Exit `0` is the branch in place (a failed fetch alone only warns and continues when `stop-on-tool-failure` is off). Exit `2` is input it refused: relay the argument it names and stop. Exit `3` is the missing `codegraph` binary: relay the printed line and its `fix:` hint, and install or repair nothing. Exit `1` is a tool failure: when `stop-on-tool-failure` is on or git cannot create the branch, relay the error as a blocker, because a run with no branch has nothing to commit to.
 
 ## Standard
 
