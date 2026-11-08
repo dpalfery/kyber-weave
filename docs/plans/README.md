@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
+|---|---|---|---|---|---|
+| [2026-11-07-conductor-run-speed-code-index.md](2026-11-07-conductor-run-speed-code-index.md) | Ready — approved for execution under AP1, autonomy `autonomous`; slice 2 of the conductor run-speed parent design, which stays on its own branch and is deliberately not in this tree | 2026-11-07 | — | Harvest targets: [docgraph/mcp-runbook.md](../docgraph/mcp-runbook.md) and [docgraph/architecture.md](../docgraph/architecture.md) (H1); [kyber-squad/onboarding.md](../kyber-squad/onboarding.md) plus the runbook's worktree section (H2); [kyber-squad/requirements.md](../kyber-squad/requirements.md) matrix (H3); [kyber-squad/architecture.md](../kyber-squad/architecture.md) (H4); ADR disposition: two new ADRs (the "never block a run" reversal; the docs server refreshes CodeGraph and fails its tools) and ADR 0050 amended in place | Make CodeGraph work in the tree the worker is actually in: `doctor --ensure` and `sync` as the worker's first command, the docs server refreshes the index and fails its tools, a worktree keeps its own index, and a failed required tool stops the run instead of passing as a warning. |
 
 ## Archived Plans
 
