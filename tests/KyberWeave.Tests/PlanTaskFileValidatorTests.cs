@@ -122,6 +122,59 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
+    /// A null task entry inside the tasks list reports KW-DOC-TASKS-002 instead of crashing
+    /// with a NullReferenceException.
+    /// </summary>
+    [Fact]
+    public void ANullTaskEntryIsKWDOCTASKS002()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string taskFile = $$"""
+            {
+              "schema-version": 1,
+              "plan": "{{PlanTaskFileProbe.PlanPath}}",
+              "execution-digest": "{{PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown())}}",
+              "tasks": [null]
+            }
+            """;
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, taskFile);
+
+        ReportedFindings run = Validate(fixture);
+        AssertReports(run, DiffersFromPlan);
+    }
+
+    /// <summary>
+    /// A null element inside files or depends-on does not crash Normalize with a
+    /// NullReferenceException and reports KW-DOC-TASKS-002.
+    /// </summary>
+    [Fact]
+    public void ANullFileOrDependencyElementIsKWDOCTASKS002()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string taskFile = $$"""
+            {
+              "schema-version": 1,
+              "plan": "{{PlanTaskFileProbe.PlanPath}}",
+              "execution-digest": "{{PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown())}}",
+              "tasks": [
+                {
+                  "id": "{{PlanTaskFileProbe.FirstTask}}",
+                  "role": "csharp-dev",
+                  "depends-on": [null],
+                  "files": [null],
+                  "session": "{{PlanTaskFileProbe.FirstTask}}",
+                  "prompt": "run `dotnet test`\n\nAcceptance criteria:\n- passes"
+                }
+              ]
+            }
+            """;
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, taskFile);
+
+        ReportedFindings run = Validate(fixture);
+        AssertReports(run, DiffersFromPlan);
+    }
+
+    /// <summary>
     /// A digest that matches the plan means the file was written from this plan. A stale one
     /// means the plan moved afterwards, so the conductor refuses the file until the architect
     /// regenerates it rather than pasting prompts the plan no longer describes.
