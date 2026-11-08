@@ -26,23 +26,34 @@ public static class GateCatalogue
 
     private static readonly string[] AgentOrder =
     [
-        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev",
+        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops",
         "typescript-dev", "react-dev", "rust-dev", "tauri-dev",
-        "go-dev", "python-dev", "test-dev"
+        "go-dev", "python-dev", "test-dev", "docs-dev"
     ];
 
+    /// <summary>
+    /// The technology whose declaration makes an agent's task gates render.
+    /// </summary>
+    /// <remarks>
+    /// <c>github-devops</c> and <c>docs-dev</c> edit the repository's plumbing — its workflows, the shell
+    /// scripts those workflows call and the review configuration both read — rather than a language.
+    /// <c>github-actions</c> is the declared technology that covers those files, so a host that declares it
+    /// receives their gates and a host that does not is left alone.
+    /// </remarks>
     private static readonly Dictionary<string, string> AgentTechnology = new(StringComparer.Ordinal)
     {
         ["csharp-dev"] = "csharp",
         ["dal-dev"] = "csharp",
         ["maui-dev"] = "csharp",
         ["pulumi-dev"] = "csharp",
+        ["github-devops"] = "github-actions",
         ["typescript-dev"] = "typescript",
         ["react-dev"] = "react",
         ["rust-dev"] = "rust",
         ["tauri-dev"] = "tauri",
         ["go-dev"] = "go",
-        ["python-dev"] = "python"
+        ["python-dev"] = "python",
+        ["docs-dev"] = "github-actions"
     };
 
     private static readonly string[] KnownRoles = ["format", "lint", "typecheck", "build", "test"];
@@ -314,7 +325,7 @@ public static class GateCatalogue
         renderer.CouncilLines.Add($"    # {technologies}: {selected.Role} ({context.Label})");
         AddNoteComment(renderer.CouncilLines, selected, "    ");
         renderer.CouncilLines.AddRange(CouncilGateLines(id, run, include, selected.Os, workingDirectory,
-            selected.Blocking, selected.TimeoutSeconds, "    ", selected.FailOnOutput));
+            selected.Blocking, selected.TimeoutSeconds, "    ", selected.FailOnOutput, IsFullSuite(selected)));
         renderer.Written.Add((served[0], id));
 
         if (string.Equals(family.Family, "csharp", StringComparison.Ordinal) &&
@@ -491,7 +502,7 @@ public static class GateCatalogue
         renderer.CouncilLines.Add($"    # {technologies}: {entry.Role} ({context.Label})");
         renderer.CouncilLines.Add($"    # {reason}");
         foreach (string line in CouncilGateLines(id, run, include, entry.Os, WorkingDirectoryFor(entry, context),
-                     entry.Blocking, entry.TimeoutSeconds, "    ", entry.FailOnOutput))
+                     entry.Blocking, entry.TimeoutSeconds, "    ", entry.FailOnOutput, IsFullSuite(entry)))
             renderer.CouncilLines.Add($"    # {line.TrimStart()}");
 
         AddCommentedOut(renderer, id, reason);
@@ -615,6 +626,32 @@ public static class GateCatalogue
         return yaml.ToString();
     }
 
+    /// <summary>
+    /// Whether a council gate runs the whole suite, which only the review council and CI may run.
+    /// </summary>
+    /// <remarks>
+    /// The <c>test</c> role is the whole suite: a catalogue test gate runs every test the project
+    /// has, and ADR 0059 reserves that run for the council and CI. Deriving the key from the role
+    /// rather than from a gate id means a family that ships a second whole-suite gate — a separate
+    /// integration or end-to-end suite — carries it without another row here. A gate that runs one
+    /// check of the change carries no key, so a developer agent can still run it.
+    /// </remarks>
+    private static bool IsFullSuite(FamilyGate gate)
+    {
+        return string.Equals(gate.Role, "test", StringComparison.Ordinal);
+    }
+
+    /// <summary>One council gate, as the lines the <c>review.gates:</c> block carries.</summary>
+    /// <param name="id">The rendered gate id.</param>
+    /// <param name="run">The substituted command.</param>
+    /// <param name="include">The substituted include globs.</param>
+    /// <param name="os">The platform restriction, or null for both.</param>
+    /// <param name="workingDirectory">The working directory, or null for the repository root.</param>
+    /// <param name="blocking">Whether a failure blocks the change.</param>
+    /// <param name="timeoutSeconds">The runner's kill budget, or null for the product default.</param>
+    /// <param name="indent">The indentation the entry is written at.</param>
+    /// <param name="failOnOutput">Whether a zero exit with output on stdout fails the gate.</param>
+    /// <param name="fullSuite">Whether the gate runs the whole suite; see ADR 0059.</param>
     private static List<string> CouncilGateLines(
         string id,
         IReadOnlyList<string> run,
@@ -624,9 +661,12 @@ public static class GateCatalogue
         bool blocking,
         int? timeoutSeconds,
         string indent,
-        bool failOnOutput = false)
+        bool failOnOutput = false,
+        bool fullSuite = false)
     {
         List<string> lines = [$"{indent}- id: {id}", $"{indent}  run: [{string.Join(", ", run.Select(Quote))}]"];
+        if (fullSuite)
+            lines.Add($"{indent}  full-suite: true");
         if (!blocking)
             lines.Add($"{indent}  blocking: false");
         if (timeoutSeconds.HasValue)

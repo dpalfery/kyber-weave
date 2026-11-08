@@ -21,6 +21,7 @@ review:
     # csharp: test (.)
     - id: csharp-test
       run: ['dotnet', 'test', 'Fixture.sln', '-c', 'Release', '--no-build']
+      full-suite: true
   task-gates:
     csharp-dev:
       # csharp: format (.)

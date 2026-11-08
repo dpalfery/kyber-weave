@@ -18,6 +18,7 @@ review:
     # go: test (.)
     - id: go-test
       run: ['go', 'test', './...']
+      full-suite: true
     # go: lint (.)
     # optional gate; uncomment to enable
     # - id: go-lint
