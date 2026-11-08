@@ -191,7 +191,7 @@ The policy project's classes keep the `KyberWeave.Tests` namespace, so a fully-q
   - **Depends on:** T11, T12
   - **Acceptance:** `codegraph` is turned on under `mcp.required-servers`. `AGENTS.md:105-111` and `:117-119` follow D24. T15's row holds.
 - **T16: Docs and closeout for slice 2**
-  - **Files:** `docs/docgraph/mcp-runbook.md`, `docs/docgraph/architecture.md`, `docs/kyber-squad/architecture.md`, `docs/kyber-squad/onboarding.md`, `docs/kyber-squad/requirements.md`, `docs/configuration.md`, `docs/cli-command-surface.md`, `docs/ci-pipelines/rule-reference.md`, `src/KyberWeave.Mcp/AGENTS.md`, `docs/adr/0050-universal-kyber-weave-mcp-grant.md`, `docs/adr/README.md`, `docs/plans/README.md`
+  - **Files:** `docs/docgraph/mcp-runbook.md`, `docs/docgraph/architecture.md`, `docs/kyber-squad/architecture.md`, `docs/kyber-squad/onboarding.md`, `docs/kyber-squad/requirements.md`, `docs/configuration.md`, `docs/cli-command-surface.md`, `docs/ci-pipelines/rule-reference.md`, `src/KyberWeave.Mcp/AGENTS.md`, `src/KyberWeave.Core/AGENTS.md`, `docs/adr/0050-universal-kyber-weave-mcp-grant.md`, `docs/adr/README.md`, `docs/plans/README.md`, `docs/todo/`
   - **Required skills:** `docs-dev`
   - **Depends on:** T11, T12, T13, T14, T15
   - **Acceptance:** harvest, two new ADRs including the reversal, ADR 0050 amended, child plan archived, zero findings.
