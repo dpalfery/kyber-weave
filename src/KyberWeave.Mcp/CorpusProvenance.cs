@@ -119,7 +119,10 @@ internal static class CorpusProvenance
             string target = pointer[GitDirPrefix.Length..].Trim();
             return target.Length == 0 ? null : Path.GetFullPath(target, root);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException)
         {
             return null;
         }
@@ -139,7 +142,10 @@ internal static class CorpusProvenance
             string common = File.ReadAllText(pointer).Trim();
             return common.Length == 0 ? gitDirectory : Path.GetFullPath(common, gitDirectory);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException)
         {
             return gitDirectory;
         }
@@ -226,8 +232,11 @@ internal static class CorpusProvenance
         string dirty = status is null
             ? "unknown"
             : status.Trim().Length == 0 ? "no" : "yes";
-        return (revision is null ? Unavailable : revision.Trim(), dirty);
+        return (revision is null ? Unavailable : FirstLine(revision), dirty);
     }
+
+    private static string FirstLine(string text) =>
+        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(Unavailable).Trim();
 
     private static string? RunGit(string root, params string[] arguments)
     {

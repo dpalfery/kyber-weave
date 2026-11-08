@@ -34,8 +34,10 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// <summary>The branch field, capturing its value. Anchored on a preceding space so <c>repo=</c> cannot match it.</summary>
     private static readonly Regex BranchField = new(@"(?:^|\s)branch=(?<value>\S+)", RegexOptions.CultureInvariant);
 
-    /// <summary>The repository field, capturing its value.</summary>
-    private static readonly Regex RepoField = new(@"(?:^|\s)repo=(?<value>\S+)", RegexOptions.CultureInvariant);
+    /// <summary>The repository field, capturing its value without truncating paths that contain spaces.</summary>
+    private static readonly Regex RepoField = new(
+        @"(?:^|\s)repo=(?<value>.*?)(?=\s+(?:rev|dirty|documents|branch)=|$)",
+        RegexOptions.CultureInvariant);
 
     /// <summary>Values a field carries when the information could not be read, never when it was.</summary>
     private static readonly string[] PlaceholderValues =
@@ -90,6 +92,67 @@ public sealed class CorpusProvenanceTests : IDisposable
             !PlaceholderValues.Contains(servedRepo, StringComparer.OrdinalIgnoreCase),
             $"The provenance line names the repository directory '{servedRepo}', which is a placeholder "
             + "rather than the git directory of this checkout.");
+        Assert.Contains(".git", servedRepo, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A repository path with spaces is captured completely in the provenance line without truncation.
+    /// </summary>
+    [Fact]
+    public void ProvenanceRepoWithSpacesInPathIsCapturedWithoutTruncation()
+    {
+        string spacedRoot = Path.Combine(_root.Path, "repo with spaces");
+        Directory.CreateDirectory(spacedRoot);
+        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(spacedRoot);
+        DocsScaffolder.Scaffold(spacedRoot);
+
+        string line = Status(spacedRoot);
+        string servedRepo = FieldValue(RepoField, line);
+
+        Assert.Contains("repo with spaces", servedRepo, StringComparison.Ordinal);
+        Assert.Contains(".git", servedRepo, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An untrusted .git pointer containing illegal path characters does not throw an uncaught
+    /// exception, but degrades gracefully to unavailable.
+    /// </summary>
+    [Fact]
+    public void CorruptDotGitWithIllegalCharacters_DoesNotThrow_DegradesGracefully()
+    {
+        string corruptRoot = Path.Combine(_root.Path, "corrupt-dot-git");
+        Directory.CreateDirectory(corruptRoot);
+        DocsScaffolder.Scaffold(corruptRoot);
+        File.WriteAllText(Path.Combine(corruptRoot, ".git"), "gitdir: \0illegal\0path");
+
+        string line = Status(corruptRoot);
+        string servedBranch = FieldValue(BranchField, line);
+        string servedRepo = FieldValue(RepoField, line);
+
+        Assert.Equal("unavailable", servedBranch);
+        Assert.Equal("unavailable", servedRepo);
+    }
+
+    /// <summary>
+    /// A commondir pointer containing illegal path characters does not throw, but falls back to
+    /// the checkout's git directory.
+    /// </summary>
+    [Fact]
+    public void CorruptCommonDirWithIllegalCharacters_DoesNotThrow_FallsBackToGitDirectory()
+    {
+        string corruptRoot = Path.Combine(_root.Path, "corrupt-commondir");
+        Directory.CreateDirectory(corruptRoot);
+        DocsScaffolder.Scaffold(corruptRoot);
+        string dotGit = Path.Combine(corruptRoot, ".git");
+        Directory.CreateDirectory(dotGit);
+        File.WriteAllText(Path.Combine(dotGit, "commondir"), "\0illegal\0path");
+        File.WriteAllText(Path.Combine(dotGit, "HEAD"), "ref: refs/heads/main\n");
+
+        string line = Status(corruptRoot);
+        string servedBranch = FieldValue(BranchField, line);
+        string servedRepo = FieldValue(RepoField, line);
+
+        Assert.Equal("main", servedBranch);
         Assert.Contains(".git", servedRepo, StringComparison.Ordinal);
     }
 
