@@ -169,7 +169,7 @@ Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `
 `create-pull-request`, and `pr-review-fix-comments`) matches the canonical
 bytes; the retired `create-pull-request-github` skill is folded into `create-pull-request`.
 Canonical storage preserves every supplemental resource beside each `SKILL.md`. Each release archive
-adds the six `.apm/skills` skills and their resource files. Renderers project every file a Markdown link reaches beside the rendered
+adds the `.apm/skills` skills and their resource files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
 skill-UI metadata. The tracked root `.github/` self-deployment predates resource delivery. Every

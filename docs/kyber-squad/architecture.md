@@ -199,8 +199,8 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
   package formats. No count is stated here: the directories on disk are the inventory, so a
   skill added later changes no prose.
 - **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
-  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
-  skills and their resources. `SquadCompanionSkills` is the one type
+  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds the
+  Squad skills and the Kyber-Weave skills with their resources. `SquadCompanionSkills` is the one type
   both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
   `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The
   companion skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` lists only the

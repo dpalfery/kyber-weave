@@ -843,7 +843,7 @@ It reports these:
 
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `kyber-docs-authoring`,
+Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kyber-docs-authoring`,
 `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
 `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
