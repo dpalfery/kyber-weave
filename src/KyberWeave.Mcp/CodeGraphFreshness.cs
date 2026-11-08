@@ -114,7 +114,7 @@ public sealed class CodeGraphFreshness
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
-                bool stops = loaded is { Success: true, Config: not null } && loaded.Config.StopsOnToolFailure;
+                bool stops = loaded is { Success: true, Config: not null } ? loaded.Config.StopsOnToolFailure : true;
                 _last = Failure(stops, exception.Message, null);
                 _lastAttemptUtc = now;
             }
@@ -163,39 +163,6 @@ public sealed class CodeGraphFreshness
         return resolver.IsAvailable
             ? CodeGraphGate.Clear
             : Failure(stops, resolver.UnavailableReason, null);
-    }
-
-    /// <summary>
-    /// Whether another process holds the refresh lock, asked the way the provisioner asks it: by
-    /// opening the file with no sharing. A lock file nothing holds is opened and released here.
-    /// </summary>
-    /// <remarks>
-    /// A lock that cannot be opened for any other reason — a missing lock directory, a permission,
-    /// a path error — is not contention, and only sharing violations report as busy.
-    /// </remarks>
-    private static bool IsLocked(string lockPath)
-    {
-        try
-        {
-            using FileStream probe = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            return false;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return false;
-        }
-        catch (PathTooLongException)
-        {
-            return false;
-        }
-        catch (IOException ex) when (CodeGraphProvisioner.IsSharingViolation(ex))
-        {
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
     }
 
     /// <summary>

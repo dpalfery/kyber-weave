@@ -157,6 +157,30 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     }
 
     /// <summary>
+    /// When the resolver throws and the configuration file is unparseable,
+    /// the failure defaults to the stop rule (STATUS: TOOL_FAILURE) rather than fail-open advisory.
+    /// </summary>
+    [Fact]
+    public void WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
+    {
+        DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
+
+        DocsTools tools = ScaffoldedTools(
+            Root,
+            () =>
+            {
+                File.WriteAllText(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"), "unparseable: [yaml: broken");
+                throw new InvalidOperationException("boom resolver failed");
+            });
+
+        string response = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("warning:", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Only genuine sharing violations are classified as contention; non-lock IO exceptions
     /// (such as PathTooLongException or disk errors) are not treated as busy contention.
     /// </summary>
