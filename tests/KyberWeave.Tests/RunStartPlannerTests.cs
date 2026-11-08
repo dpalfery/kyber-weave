@@ -172,6 +172,29 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     A resumed branch passed as <c>origin/&lt;branch&gt;</c> is accepted when the branch exists on the
+    ///     remote, checking out that branch without duplicating the remote prefix into the branch name.
+    /// </summary>
+    [Fact]
+    public void ResumesRemoteBranchWhenPassedWithOriginPrefix()
+    {
+        const string Resumed = "claude/fix/remote-fix";
+        _probe.CreateBranchWithCommit(Resumed, "earlier work");
+        _probe.Git("push", "origin", Resumed);
+        _probe.Git("switch", "main");
+        _probe.Git("branch", "-D", Resumed);
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", "origin/" + Resumed);
+
+        Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming origin/branch. {result.Output}");
+        Assert.Equal(Resumed, _probe.CurrentBranch());
+    }
+
+    /// <summary>
     ///     A fetch that fails stops the run when <c>stop-on-tool-failure</c> is unset, because absence is
     ///     the stop setting and a run that continues from a base it could not refresh plans against stale
     ///     history.

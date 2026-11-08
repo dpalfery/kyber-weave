@@ -149,15 +149,28 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         string? resume = string.IsNullOrWhiteSpace(settings.Resume) ? null : settings.Resume.Trim();
         string resumeRef = string.Empty;
+        string? resumeTarget = null;
         if (resume is not null)
         {
+            string remotePrefix = RunStartPlanner.Remote + "/";
+            string stripped = resume.StartsWith(remotePrefix, StringComparison.Ordinal)
+                ? resume[remotePrefix.Length..]
+                : resume;
+
             if (runner.HasLocalBranch(resume))
             {
                 resumeRef = resume;
+                resumeTarget = resume;
             }
-            else if (runner.HasRemoteBranch(resume))
+            else if (runner.HasLocalBranch(stripped))
             {
-                resumeRef = RunStartPlanner.Remote + "/" + resume;
+                resumeRef = stripped;
+                resumeTarget = stripped;
+            }
+            else if (runner.HasRemoteBranch(stripped))
+            {
+                resumeRef = remotePrefix + stripped;
+                resumeTarget = stripped;
             }
             else
             {
@@ -183,19 +196,19 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             runner.CheckoutIsClean(),
             runner.AnotherWorktreeIsAttached());
 
-        string target = resume ?? branch;
+        string target = resumeTarget ?? branch;
         string? worktreePath = null;
         GitOutcome created;
         if (location == RunStartLocation.InPlace)
         {
-            created = resume is null
+            created = resumeTarget is null
                 ? runner.CreateBranchInPlace(target, startRef)
                 : runner.SwitchToBranch(target);
         }
         else
         {
             worktreePath = runner.WorktreePathFor(target);
-            created = resume is null
+            created = resumeTarget is null
                 ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
                 : runner.AddWorktreeForBranch(target, worktreePath);
         }
@@ -246,7 +259,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             location,
             worktreePath,
             baseRevision,
-            resume,
+            resumeTarget,
             settings.FailingVersion,
             headVersion,
             baseVersion,
