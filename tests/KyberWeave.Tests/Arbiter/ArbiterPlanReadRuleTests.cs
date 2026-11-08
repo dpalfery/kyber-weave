@@ -49,6 +49,11 @@ public sealed class ArbiterPlanReadRuleTests
     }
 
     /// <summary>The facts a delegate dispatch supplies for <paramref name="prompt"/>.</summary>
+    /// <remarks>
+    /// The ontology's docs root is <c>docs</c>, as in every other planning-directory test here:
+    /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, so a prompt naming
+    /// <c>docs/plans/…</c> would name no configured planning directory and the rule could not fire.
+    /// </remarks>
     private static ArbiterFactSet Facts(string prompt, string target = "csharp-dev")
     {
         return TriggerFactBuilder.Build(
@@ -57,7 +62,10 @@ public sealed class ArbiterPlanReadRuleTests
             prompt,
             "conductor",
             "harness",
-            KyberWeaveConfig.ProductDefaults);
+            new KyberWeaveConfig
+            {
+                Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+            });
     }
 
     /// <summary>The effect the shipped rule produces for those facts.</summary>

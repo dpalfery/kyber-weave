@@ -20,6 +20,8 @@ Use this path when the user supplies a specification or selects one from the dir
 
 After `SPEC_READY`, ask the final blocking question as **approve and execute**, stating the declared scale and components so the owner confirms the impact before execution (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence, and load the `delivery-execution` skill when it does: that skill, not this path, holds the dispatch, verification, digest, findings and closeout rules.
 
+The specification form of the task file is `<spec-folder>/tasks.json`, beside its `tasks.md`. Validate it before the first dispatch and dispatch each worker's prompt from it unchanged: `tasks.md` is the approved record, not the dispatch source.
+
 ## Gate collapse in autonomous mode
 
 When a tasks-phase digest returns `STATUS: READY_FOR_REVIEW` with `GAPS: none` and `OPEN_QUESTIONS: none`, the conductor may present one consolidated review covering both tasks approval and the final approve and execute question, instead of two separate gates. The consolidated review records two AUTONOMOUS_APPROVAL rows (tasks plus execute) from one presentation within max 2 gates, then follows the normal finalization path: it still ends at `STATUS: SPEC_FINALIZED` with validation evidence before execution begins.

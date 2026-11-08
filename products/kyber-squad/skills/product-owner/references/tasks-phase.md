@@ -31,6 +31,12 @@ Include a verification contract for every implementation task: exact automated t
 
 Mark any genuinely no-test task explicitly and name its replacement validation. A contract change after approval requires reapproval.
 
+## Task file
+
+Beside `tasks.md`, persist the tracked task file `<spec-folder>/tasks.json`, the specification form of the same contract a plan uses. It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+
+Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
+
 ## Gaps and coverage
 
 Do not invent missing design. If design blocks task decomposition, return `STATUS: DESIGN_GAP`; if the cause is a missing requirement, say so in `GAPS`. Every requirement id must be covered by at least one task.

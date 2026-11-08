@@ -200,6 +200,28 @@ public sealed class RunStartRunner
         return (ahead, behind);
     }
 
+    /// <summary>
+    ///     The commits <paramref name="tip" /> has that <paramref name="baseRef" /> does not, with their full
+    ///     messages, in one call.
+    /// </summary>
+    /// <param name="baseRef">The ref the resumed branch started from.</param>
+    /// <param name="tip">The resumed branch or its remote-tracking ref.</param>
+    /// <remarks>
+    ///     One call rather than one per commit: a resume reads every task the branch finished, so a log per
+    ///     commit would make resuming cost grow with the length of the run. Records are NUL-separated because
+    ///     a commit message spans lines and git forbids a NUL inside one, so no separator here is ambiguous.
+    ///     The range is the branch's own work: a task recorded before <paramref name="baseRef" /> belongs to
+    ///     whatever finished it, not to this run. Oldest first, so the last task listed is where the run got
+    ///     to and the operator reads the progress in the order it happened.
+    /// </remarks>
+    public GitOutcome CommitMessages(string baseRef, string tip)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tip);
+
+        return Git("log", "--reverse", "-z", "--format=%H%n%B", baseRef + ".." + tip, "--");
+    }
+
     /// <summary>The address <c>origin</c> points at, or null when there is no such remote.</summary>
     public string? OriginAddress()
     {

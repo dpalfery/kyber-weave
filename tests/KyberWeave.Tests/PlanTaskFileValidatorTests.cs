@@ -366,6 +366,7 @@ internal static class PlanTaskFileProbe
         title: Ready tasks
         doc-type: plan
         status: current
+        component: MotorcycleRAG API
         owner: Maintainers
         last-reviewed: 2026-11-07
         development-mode: test-first

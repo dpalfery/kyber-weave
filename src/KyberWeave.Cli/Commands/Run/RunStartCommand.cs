@@ -197,6 +197,26 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             }
         }
 
+        // The finished tasks come from the resumed branch's own commits, read while it is still the branch
+        // named rather than the one checked out. A branch carrying none is a normal beginning, not a
+        // failure, and a log that cannot be read is reported without stopping a resume that can still
+        // continue the work.
+        IReadOnlyList<RunStartCompletedTask> completed = [];
+        string? completedWarning = null;
+        if (resumeRef.Length > 0)
+        {
+            GitOutcome log = runner.CommitMessages(startRef, resumeRef);
+            if (log.Succeeded)
+            {
+                completed = RunStartResumeReader.Read(log.StandardOutput);
+            }
+            else
+            {
+                completedWarning =
+                    $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
+            }
+        }
+
         // Read before anything is switched: the versions and the divergence describe the checkout as the
         // operator left it, which is the state a defect was observed in. A resumed branch is described by
         // its own tip, because that is what continuing on it means.
@@ -262,6 +282,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                     location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
                     revision = baseRevision,
                     resumed = resume is not null,
+                    completed = completed.Select(task => new { id = task.Id, report = task.Report }),
+                    completedWarning,
                     versions = new
                     {
                         failing = settings.FailingVersion,
@@ -298,7 +320,9 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             baseVersion,
             ahead,
             behind,
-            headRevision);
+            headRevision,
+            completed,
+            completedWarning);
 
         return Ready;
     }
@@ -390,7 +414,9 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         string baseVersion,
         int? ahead,
         int? behind,
-        string? headRevision)
+        string? headRevision,
+        IReadOnlyList<RunStartCompletedTask> completed,
+        string? completedWarning)
     {
         string where = worktreePath is null ? "in place" : worktreePath;
 
@@ -425,7 +451,45 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                     $"  [yellow]warn[/] '{Markup.Escape(resumed)}' has no commit yet, so it cannot be " +
                     "compared with the base.");
             }
+
+            if (completedWarning is not null)
+                AnsiConsole.MarkupLine($"  [yellow]warn[/] {Markup.Escape(completedWarning)}");
+
+            if (resumed is not null)
+                WriteCompletedTasks(resumed, completed);
         });
+    }
+
+    /// <summary>
+    ///     Prints each finished task with the report its commit carried, so a resumed run knows what the
+    ///     branch already did without a pass over the plan that measures the same thing in minutes.
+    /// </summary>
+    /// <param name="branch">The branch whose commits were read.</param>
+    /// <param name="completed">The tasks its trailer areas record, in the order the commits were made.</param>
+    private static void WriteCompletedTasks(string branch, IReadOnlyList<RunStartCompletedTask> completed)
+    {
+        if (completed.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"  completed none — no commit on '{Markup.Escape(branch)}' ends with a 'Task:' line, so no " +
+                "finished task is recorded there.");
+            return;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"  completed {completed.Count.ToString(CultureInfo.InvariantCulture)}");
+        foreach (RunStartCompletedTask task in completed)
+        {
+            AnsiConsole.MarkupLine($"    {Markup.Escape(task.Id)}");
+            if (task.Report.Length == 0)
+                continue;
+
+            foreach (string line in task.Report.Split('\n'))
+            {
+                string text = line.TrimEnd('\r');
+                AnsiConsole.MarkupLine(text.Length == 0 ? string.Empty : $"      {Markup.Escape(text)}");
+            }
+        }
     }
 
     private static int Refuse(string message)

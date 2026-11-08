@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -16,6 +16,9 @@ through a rule engine that answers in up to three steps — plain code, a decisi
 reasoning agent — enforced by harness hooks, delivered in three phases by harness group:
 Phase 1 Claude, Copilot in VS Code, Copilot CLI, and OpenCode; Phase 2 Pi, Codex, and Cursor;
 Phase 3 Kilo, Antigravity, Factory, Devin, Warp, and ZCode.
+
+Amended 2026-11-08 by the conductor run-speed programme: decision 9's changed-path basis
+becomes committed plus dirty (D44), and decision 23 adds `KW-ARB-PLANREAD-001`.
 
 ## Context
 
@@ -64,16 +67,21 @@ judgement about meaning is made without a confidence attached.
 8. **Undecidable maps by trigger family (D10).** Conductor and investigate triggers escalate
    on `undecidable`; review triggers allow and log, because lenses and refutations run as
    they do today. A plan with no parseable tasks escalates.
-9. **Review uses hooks with refutation as step 2 (D11).** Lens applicability gates the spawn
-   (skip below P(applies) 0.1); quote presence and hunk membership annotate the return; a
-   `choice` question verifies claims at confidence 0.9 or a corroborating gate skips the
-   refutation. A finding is never dropped on a model answer alone.
+9. **Review uses hooks with refutation as step 2 (D11).** Lens applicability gates the spawn (skip
+   below P(applies) 0.1). The changed-path basis is the review base against the working tree —
+   **committed plus dirty**, the form `GitFacts.GetChangedPathsSinceBase` already computes — not the
+   dirty list alone, because per-task commits are the normal case and a dirty-only basis makes a
+   committed change invisible. An empty set is **not** treated as Markdown-only: `correctness` and
+   `test-adequacy` apply unless the changed paths positively show there is no code to judge, so a
+   tree we cannot read is judged rather than skipped. Quote presence and hunk membership annotate
+   the return; a `choice` question verifies claims at confidence 0.9 or a corroborating gate skips
+   the refutation. A finding is never dropped on a model answer alone.
 10. **Gates declare `applies-when` (D12).** A gate that matches no changed path is reported
     as not applicable (`KW-REVIEW-026`), never executed, and never counted as passed or
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Eighteen shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
+12. **Nineteen shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -130,6 +138,15 @@ judgement about meaning is made without a confidence attached.
     no `FILES:` header (D33): no mechanism is added for a problem that has not occurred.
 22. **One specification covers all three phases (D34).** Phase PRs land in order; a single
     closeout after Phase 3 archives the specification.
+23. **The plan-read ban is enforced at dispatch (fix 10).** `KW-ARB-PLANREAD-001` runs on the
+    `delegate` trigger. After the routing header block is removed, it asks whether the prompt names
+    a path under `config.planning-dirs`; if it does, the dispatch escalates. The routing header is
+    removed first because that block names the plan by design, so a rule reading the raw prompt
+    would fire on every dispatch. Documentation-profile targets are exempt, because a `docs-dev`
+    dispatch naming the plan at closeout is correct. It shares `PlanReadInstruction` with
+    `KW-DOC-TASKS-005`, so the prompt-time ban and the authoring-time check cannot drift apart, and
+    it may not fire where dispatch hooks are unconfirmed — a harness with no hook runs no rule, and
+    claiming otherwise would report a check that never executed.
 
 Egress follows one rule (R9): a step-1 question declares its state as named facts, and no
 fact outside those declared states leaves the machine.
@@ -170,7 +187,7 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (18 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+Rule ids `KW-ARB-*` (19 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
 `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
 record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
 headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, and `REFUTE:` are permanent.
@@ -184,3 +201,4 @@ Renaming one silently un-suppresses host tuning, receipts, and logs keyed on it.
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers and gate applicability
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-ARB-*` id and `KW-REVIEW-026`
+- [ADR 0063](0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the tracked task file, whose prompt-time ban decision 23 enforces with the same detector

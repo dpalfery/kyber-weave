@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-run-speed-ready-tasks
 title: Ready-to-paste tasks (conductor run-speed, slice 5)
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-07
@@ -17,7 +17,9 @@ impact-components:
 
 # Ready-to-paste tasks (conductor run-speed, slice 5)
 
-**Status: Ready.** This plan is **Ready and approved for execution under AP1**, with resolved autonomy `autonomous`. It is the child plan of the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 5's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children; this plan is archived in this slice's own pull request. Every decision is answered below with its provenance; the parent's AP1 approval covers the Test contract this plan restates and carries to this child through `AUTONOMOUS_APPROVAL` per D12, and the conductor presents the approve-and-execute gate. The pair of documentation gates ran in this worktree — `docs validate .` and `docs drift .`, not `--merge-ready` while the plan is open — each at zero findings; the kw-docs server is bound to the canonical checkout and cannot see a file written only here, so a passing answer from it would describe the wrong tree.
+**Status: Archived.** Closed 2026-11-08; see the Closeout and Closeout mapping sections at the end.
+
+This plan is **Ready and approved for execution under AP1**, with resolved autonomy `autonomous`. It is the child plan of the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 5's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children; this plan is archived in this slice's own pull request. Every decision is answered below with its provenance; the parent's AP1 approval covers the Test contract this plan restates and carries to this child through `AUTONOMOUS_APPROVAL` per D12, and the conductor presents the approve-and-execute gate. The pair of documentation gates ran in this worktree — `docs validate .` and `docs drift .`, not `--merge-ready` while the plan is open — each at zero findings; the kw-docs server is bound to the canonical checkout and cannot see a file written only here, so a passing answer from it would describe the wrong tree.
 
 ## Problem and goal
 
@@ -110,7 +112,7 @@ The parent's harvest table carries `KW-ARB-GATE-REPORT-001` in the same row as H
 
 ## ADR disposition
 
-One new ADR, written by T31 at the next free number: **0063** in this tree (`docs/adr/` holds 0001 to 0062; slices 1 and 2 took 0060 to 0062 and none since), confirmed at closeout per the parent's D35. It records the tracked task file with the Markdown plan as authority — D2, D18, D19, D38, D39 — and the rejected alternatives: pointing workers at a file, moving tasks out of the plan. [ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md) is amended in place for the two new enforcement behaviours — `KW-ARB-PLANREAD-001` and the lens-skip change, D44 — with its index row updated. ADR waiver, per the parent's own harvest note: fix 6 (the session group) refines existing session rules and opens no boundary of its own, so no ADR covers it; its durable behaviour lands in H1's targets and the `delivery-execution` skill.
+One new ADR, written by T31 at the next free number: **0063** in this tree (`docs/adr/` holds 0001 to 0062; slices 1 and 2 took 0060 to 0062 and none since), confirmed at closeout per the parent's D35. It records the tracked task file with the Markdown plan as authority — D2, D18, D19, D38, D39 — and the rejected alternatives: pointing workers at a file, moving tasks out of the plan. [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) is amended in place for the two new enforcement behaviours — `KW-ARB-PLANREAD-001` and the lens-skip change, D44 — with its index row updated. ADR waiver, per the parent's own harvest note: fix 6 (the session group) refines existing session rules and opens no boundary of its own, so no ADR covers it; its durable behaviour lands in H1's targets and the `delivery-execution` skill.
 
 ## Test contract
 
@@ -213,8 +215,127 @@ This slice's pull request goes through **one `code-reviewer` council over its wh
 
 ## Closeout
 
-**Not closed.** This section is written by this slice's closeout (`docs-dev`, T31): what was verified against the delivered tree, the gates run, and the archive move to `docs/archive/plans/` in this slice's own pull request. This plan carries no `<plan>.tasks.json` of its own — the mechanism it delivers is not live at its own finalization, so the first plan finalized under the new architect text is a later slice's — so at this closeout `git rm` has nothing to remove; the removal duty starts with the plans delivered after this slice, and `KW-DOC-TASKS-006`'s warning is the expected state until then.
+**Closed 2026-11-08 by `docs-dev`. Status: Archived.**
+
+### Verification
+
+Verified against this tree — branch `factory/feat/conductor-run-speed-ready-tasks`, head
+`6e17c918` — by reading the delivered code and the canonical documents, not by trusting a task's
+summary:
+
+- **The task file and its validator.** `PlanTaskFile` and `PlanTaskFileValidator` live in
+  `src/KyberWeave.Core.Docs/Validation/`, and the validator raises `KW-DOC-TASKS-001` malformed or
+  unread older schema, `-002` plan/tasks/files/dependencies disagree, `-003` stale digest, `-004`
+  prompt without a command or acceptance criteria, `-005` prompt that names a planning path, and
+  `-006` (warning) Ready plan with no file. `DocsSchemaGate` constructs it for every `docs validate`
+  run, not behind a flag, because the orchestrator has the docs tools and no shell.
+- **The execution digest covers the execution.** `PlanDocumentParser.ExecutionDigest` hashes the mode,
+  the task count, each task's id, title, text, files, dependencies and skills, the test contract
+  rows, and the out-of-scope paths — so a status flip or a Decisions edit does not mark a file stale
+  while a task edit does. The raw-text `Digest` is untouched and still hashes the whole file.
+- **The merge-time half.** `OpenWorkValidator` raises `KW-DOC-LIFECYCLE-005` for a leftover task file
+  and runs only under `--merge-ready`, walking the configured docs root and looking under the archive
+  too, so a specification folder moved with its `tasks.json` is caught.
+- **The rule.** `default-rules.yml:1` says nineteen rules, and `KW-ARB-PLANREAD-001` is the
+  nineteenth (`:280`): a documentation-profile target answers `closeout`, a zero count answers
+  `no-plan`, and a named planning path answers `names-plan`, which escalates. It reads the prompt
+  after the routing header block is removed, through `PlanReadInstruction`, the same detector
+  `KW-DOC-TASKS-005` uses, so the dispatch-time and authoring-time checks cannot drift apart.
+- **The lens basis.** `HookGitFacts` fills `review.changed-paths` from
+  `GitFacts.GetChangedPathsSinceBase`, and `KW-ARB-LENS-001`'s two skip branches now require the set to
+  be non-empty as well as Markdown-only, so a committed tree no longer loses `correctness` and
+  `test-adequacy`.
+- **Resume.** `RunStartResumeReader` reads `Task: <id>` trailers from the resumed branch's commits and
+  `RunStartCommand` prints the completed tasks and their results. `--resume` still accepts the branch
+  form only (D56).
+- **The agent text.** `plan-authoring.md:25` now asks for the `session` group, path plus symbol, full
+  test class names and exact commands; `delivery-execution/SKILL.md:25-29` states the task file and
+  the paste-and-fill rule; `docs-dev.md:43` and `:70` add `git rm` to its closed command list and to
+  the plan-closeout steps.
+- **The RED classes exist:** `PlanTaskFileValidatorTests`, `PlanExecutionDigestTests`,
+  `RunStartResumeTests`, `Arbiter/ArbiterPlanReadRuleTests`, `Arbiter/ArbiterLensCleanTreeTests`.
+- **Not claimed here.** This closeout did not run the whole suite; the run's council and CI are that
+  evidence, and the two sweeps below re-ran only the classes these edits could move.
+
+### No task file existed for this plan, and that is the correct state
+
+There is no `docs/plans/2026-11-07-conductor-run-speed-ready-tasks.tasks.json`, and the archive
+removed none. This slice introduced the mechanism, and a plan that introduces a mechanism is not
+finalized by an architect that can use it: the mechanism is not live at its own finalization, so the
+first plan to carry a file is a later slice's. `KW-DOC-TASKS-006` warned on this plan while it was
+Ready, which was the intended advisory — it never fails a merge — and that warning retired with the
+archive.
+
+One Ready plan in the tree still has no task file after this closeout: slice 4's
+`2026-11-07-conductor-run-speed-shared-execution.md`. That is expected and is not silenced here. Its
+warning clears when it archives in its own pull request, which is blocked on the live Claude check the
+owner must run. The removal duty (`git rm` in the archiving commit) starts with the plans delivered
+after this slice.
+
+### Deferred work recorded
+
+- **T26's gap — the MCP route is unpinned for the task-file rules.** The six ids reach the conductor
+  through `docs_validate_governed_document_schema`, and no test drives that tool over a Ready plan with
+  no task file: the positive case rests on the shared call chain, which is a reading rather than a run.
+  Filed as [mcp-docs-gate-unpinned-for-task-files.md](../../todo/mcp-docs-gate-unpinned-for-task-files.md).
+- **T27's discovery — `KW-ARB-GATE-001` has the vacuous shape D44 fixed for the lenses.** The rule
+  answers `not-applicable` when `review.changed-paths` exists and nothing intersects, so an empty set
+  marks every path-scoped gate not applicable; D44 scoped the repair to the two lenses and left this
+  one unfixed. Filed as
+  [arbiter-gate-select-empty-changed-set.md](../../todo/arbiter-gate-select-empty-changed-set.md),
+  because a tree the Arbiter cannot read would otherwise report every gate as not applicable.
+- **D56 — the `--resume` pull-request form.** `run start --resume` still refuses a number with exit
+  `2`; widening or narrowing it stays owned by
+  [run-start-resume-refuses-a-pull-request-number.md](../../todo/run-start-resume-refuses-a-pull-request-number.md),
+  filed by slice 6 and left open. T28 read `Task:` commit lines and did not widen a form it was not
+  asked to change.
+
+### Gates
+
+After the archive move, from the repository root:
+
+- `kyber-weave docs validate .` — 0 critical, 0 error, **1 warning**: `KW-DOC-TASKS-006` on slice 4's
+  Ready plan, the known remaining item above. Zero findings for this plan.
+- `kyber-weave docs drift .` — 0 findings.
+- `kyber-weave docs validate . --merge-ready` — no closeout finding for this plan: `KW-DOC-LIFECYCLE-004`
+  and `KW-DOC-LIFECYCLE-005` are both clear, and the mapping below is what cleared the archive gate.
+  One error remains, `KW-DOC-LIFECYCLE-003` on slice 4's plan, which is open in this branch because
+  this slice is stacked on slice 4 (D55) — not this plan's finding, and not fixable here.
+
+The two test sweeps this closeout ran are recorded in the slice's pull request; neither ran the full
+suite (ADR 0059).
 
 ## Closeout mapping
 
-**To be written at closeout.** Every durable decision (D2, D12, D13, D18, D19, D35, D38, D39, D44, AP1, D55 to D58) and both harvest rows (H1, H2) map to a destination; the mapping table is recorded when the slice closes.
+Every decision id in this plan's ledger — D2, D12, D13, D18, D19, D35, D38, D39, D44, AP1, D55, D56,
+D57, D58 — and the Design harvest's two requirement-groups map to a destination below, or to a
+recorded Documentation waiver. The harvest declares **H1** and **H2**; they land in four documents, so
+the table records **H3** and **H4** for the two further destinations each group carries. The parent's
+third harvest item, `KW-ARB-GATE-REPORT-001`, is slice 8's and is not harvested here.
+
+Documentation-impact for every mapped row: `extends-component`. Impact components: KyberSquad,
+KyberArbiter. Last reviewed: 2026-11-08. Status: archived.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D2 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the tracked task file, the plan as authority, and the rejected alternatives; [plans index policy](../../plans/README.md#plan-decisions-and-closeout-policy) — the file at authoring time and `git rm` at closeout | extends-component | KyberSquad | 2026-11-08 | archived |
+| D12 | [plans index policy](../../plans/README.md#plan-decisions-and-closeout-policy) — one plan never spans several pull requests, and the task-file paragraphs that sit beside it | extends-component | KyberSquad | 2026-11-08 | archived |
+| D13 | Documentation waiver: cross-slice build order and sequencing for one continuous run — a scheduling decision with no surviving architectural, operational or behavioural invariant. All five reorderings it names landed in their slices | extends-component | KyberSquad | 2026-11-08 | archived |
+| D18 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the execution digest and what it covers; [kyber-squad architecture, the tracked task file](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) — why a status or Decisions edit is not stale and a task edit is | extends-component | KyberSquad | 2026-11-08 | archived |
+| D19 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the six ids and why the check runs in the docs tools rather than behind a flag; [rule reference](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) — each id's meaning, and `KW-DOC-LIFECYCLE-005` at merge | extends-component | KyberSquad | 2026-11-08 | archived |
+| D35 | Documentation waiver: ADR numbering bookkeeping — which decisions take a record, resolved by writing ADR 0063 and amending ADR 0053. The records themselves carry the durable behaviour; the allocation note survives nowhere | extends-component | KyberSquad | 2026-11-08 | archived |
+| D38 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — resume from the branch and the `Task:` trailer; [kyber-squad architecture](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) — each task commits with `Task: <id>` and why "do not commit" was the defect | extends-component | KyberSquad | 2026-11-08 | archived |
+| D39 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the specification form, `<spec-folder>/tasks.json`, removed before the folder moves; [plans index policy](../../plans/README.md#plan-decisions-and-closeout-policy) — the archive walk that catches it | extends-component | KyberSquad | 2026-11-08 | archived |
+| D44 | [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) decision 9, amended in place — committed plus dirty against the review base, and an empty set is not Markdown-only; [kyber-arbiter architecture](../../kyber-arbiter/architecture.md#the-rules) — the same rule stated with the failure it repairs | extends-component | KyberArbiter | 2026-11-08 | archived |
+| AP1 | Documentation waiver: execution-approval provenance, transient, with no surviving invariant | extends-component | KyberSquad | 2026-11-08 | archived |
+| D55 | Documentation waiver: stacked-branch delivery sequencing for this one branch — branch from the unmerged slice, target its branch, retarget when it merges. The rule itself is already canonical in [plans index policy](../../plans/README.md#plan-decisions-and-closeout-policy), which this closeout left unchanged | extends-component | KyberSquad | 2026-11-08 | archived |
+| D56 | [run start --resume refuses a pull request number](../../todo/run-start-resume-refuses-a-pull-request-number.md) — left open, unchanged: this slice did not widen the form, and the todo owns the decision and its pinning test | extends-component | KyberSquad | 2026-11-08 | archived |
+| D57 | Documentation waiver: test-runner bookkeeping for a policy-project class. `SquadAutonomousGatesInventoryTests` lives in `tests/KyberWeave.RepoPolicy.Tests/` in namespace `KyberWeave.Tests`, so it is proven by a POLICY-RUN, and the page it pins holds no `KW-ARB-*` id; the rule it protects is recorded in [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) decision 23 and the [rule reference](../../ci-pipelines/rule-reference.md#shipped-rules--default-rulesyml) | extends-component | KyberArbiter | 2026-11-08 | archived |
+| D58 | Documentation waiver: implementation bookkeeping for three migration reports whose `final-body-sha256` covers the agent bodies T29 edited. The reports are regenerated source, not documentation, and the behaviour those bodies carry is recorded in [kyber-squad architecture](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) and pinned by `SquadCanonicalContentTests` | extends-component | KyberSquad | 2026-11-08 | archived |
+| H1 | [kyber-squad architecture, the tracked task file and the paste-and-fill dispatch](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) — the file's format, what a prompt carries, the two slots, the execution digest, the `Task:` trailer and the `session` group boundary; [plans index policy](../../plans/README.md#plan-decisions-and-closeout-policy) — the authoring and removal duties | extends-component | KyberSquad | 2026-11-08 | archived |
+| H2 | [kyber-arbiter architecture, the rules](../../kyber-arbiter/architecture.md#the-rules) — `KW-ARB-PLANREAD-001` on `delegate` with its documentation-profile exemption and the routing-header removal, and the committed-plus-dirty lens basis; [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) decisions 9 and 23 | extends-component | KyberArbiter | 2026-11-08 | archived |
+| H3 | [kyber-squad adoption guide, inlined task packets](../../kyber-squad/onboarding.md#inlined-task-packets-zero-plan-context-hunting) — what the conductor does with the file at dispatch (validates, pastes unchanged, fills two slots), the `session` group rule for operators, and the `Task:` commit trailer | extends-component | KyberSquad | 2026-11-08 | archived |
+| H4 | [rule reference, plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) and the [shipped Arbiter rules](../../ci-pipelines/rule-reference.md#shipped-rules--default-rulesyml) — the six `KW-DOC-TASKS-*` ids, `KW-DOC-LIFECYCLE-005`, and `KW-ARB-PLANREAD-001` with a one-line meaning each | extends-component | KyberArbiter | 2026-11-08 | archived |
+| Deferred work: the MCP docs gate is unpinned for the task-file rules (T26) | [mcp-docs-gate-unpinned-for-task-files.md](../../todo/mcp-docs-gate-unpinned-for-task-files.md) | extends-component | DocGraph | 2026-11-08 | archived |
+| Deferred work: `KW-ARB-GATE-001` reads an empty changed set as not applicable (T27) | [arbiter-gate-select-empty-changed-set.md](../../todo/arbiter-gate-select-empty-changed-set.md) | extends-component | KyberArbiter | 2026-11-08 | archived |
+| Deferred work: the `--resume` pull-request form stays unimplemented (D56) | [run-start-resume-refuses-a-pull-request-number.md](../../todo/run-start-resume-refuses-a-pull-request-number.md), reached from D56 | extends-component | KyberSquad | 2026-11-08 | archived |

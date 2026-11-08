@@ -18,7 +18,7 @@ Stop and return `STATUS: NOT_READY` unless:
 1. Verify each requirement against implementation, tests, and review evidence; implementation is authoritative where it diverged from intent.
 2. Harvest the specification's Design harvest declared at authoring time at its declared scale, reading the scale from the document declaring scale. Migrate durable architecture, behavior, operations, configuration, interfaces, and consequential decisions into the canonical documentation located through Config Reg. Create an ADR only when the repository's ADR criteria are met. Record the documentation-impact of each migrated item with its target component and doc type.
 3. Move the specification from the active inventory to the archive register, naming the canonical documents that replace it.
-4. Archive the whole feature specification and mark its artifacts archived according to the index's lifecycle rules.
+4. Remove the specification's `<spec-folder>/tasks.json` with `git rm` before the folder is archived, in the same change, so no task file reaches the main branch; `tasks.md` keeps the tasks and their contract. Then archive the whole feature specification and mark its artifacts archived according to the index's lifecycle rules.
 5. Run the repository's documentation validation and drift checks.
 
 Migrate first and archive second. Archived specifications are not current guidance.
