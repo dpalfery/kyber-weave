@@ -24,6 +24,20 @@ public sealed class SquadPerformanceContractTests
     private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
     private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
     private const string TestDevSkillPath = "products/kyber-squad/skills/test-dev/SKILL.md";
+
+    /// <summary>
+    ///     The skill a worker loads when it finishes. Report formats — the completion digest and its
+    ///     fields — belong here rather than in each agent body (the rule map's "Report formats" row),
+    ///     so the pins below read this file instead of the per-agent copies.
+    /// </summary>
+    private const string TaskGateSkillPath = "products/kyber-squad/skills/task-gate/SKILL.md";
+
+    /// <summary>
+    ///     The one always-on source of worker text (decision D27): the Discovery order, the plan-read
+    ///     ban, the full-suite ban and the batched-read rule are injected from here into every worker
+    ///     render, so no agent body repeats them.
+    /// </summary>
+    private const string WorkerBaselinePath = "products/kyber-squad/shared/worker-baseline.md";
     private const string TestCodingStandardPath = "docs/standards/test/README.md";
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string OnboardingDocPath = "docs/kyber-squad/onboarding.md";
@@ -333,13 +347,15 @@ public sealed class SquadPerformanceContractTests
             content);
     }
 
-    [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
-    public void WorkerSurfacesSpecifyExplicitSixFieldCompletionDigestSchema(string relativePath)
+    /// <summary>
+    ///     One home for the report format: the skill a worker loads when it finishes carries the six
+    ///     fields, the exact <c>COMMIT:</c> and <c>REMOTE_HEAD:</c> spellings and the contiguous
+    ///     template. Pinning it in each agent body is what let three copies drift apart.
+    /// </summary>
+    [Fact]
+    public void TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema()
     {
-        string content = ReadRepoFile(relativePath);
+        string content = ReadRepoFile(TaskGateSkillPath);
         foreach (string field in RequiredDigestFields) Assert.Contains(field, content, StringComparison.Ordinal);
 
         Assert.Contains("COMMIT: <commit-sha | NONE>", content, StringComparison.Ordinal);
@@ -544,24 +560,27 @@ public sealed class SquadPerformanceContractTests
     }
 
     /// <summary>
-    ///     Only the review council and CI run the full suite. It walks the agents directory, so a
-    ///     dev agent added later is covered without anyone remembering this list.
+    ///     Only the review council and CI run the full suite. Decision D27 puts that ban in one
+    ///     always-on line injected into every worker's text from the shared baseline, so the ban is
+    ///     asserted where it is written, and no agent body repeats it — text in each agent file is
+    ///     re-sent on every round trip of every worker.
     /// </summary>
     [Fact]
-    public void EveryAgentThatRunsTheTaskGateIsToldNeverToRunTheFullTestSuite()
+    public void TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten()
     {
-        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
-        string[] gated = Directory.GetFiles(agents, "*.md")
-            .Where(path => File.ReadAllText(path).Contains("`task-gate` skill", StringComparison.Ordinal))
-            .ToArray();
+        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(WorkerBaselinePath));
 
-        Assert.NotEmpty(gated);
-        string[] missing = gated
-            .Where(path => !Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
+        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
+        string[] repeating = Directory.GetFiles(agents, "*.md", SearchOption.AllDirectories)
+            .Where(path => Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
             .Select(Path.GetFileName)
             .OfType<string>()
             .ToArray();
-        Assert.True(missing.Length == 0, "Missing the full-suite rule: " + string.Join(", ", missing));
+
+        Assert.True(
+            repeating.Length == 0,
+            "The full-suite ban is injected from the shared baseline; these agent bodies repeat it: " +
+            string.Join(", ", repeating));
     }
 
     [Theory]

@@ -645,6 +645,70 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // The {tests} token (decision D30): a gate that declares it runs the classes that cover the
+    // change, and a change nothing covers is skipped rather than passed.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    ///     The token reaches the gate as a class name that exists in this repository's test tree, and
+    ///     it is fully qualified: <c>-class</c> and <c>--filter</c> both match on the fully qualified
+    ///     name, so a short name runs zero tests and still exits zero. This programme has shipped
+    ///     prompts naming classes that matched nothing, which is why the value is read back rather
+    ///     than assumed.
+    /// </summary>
+    [Fact]
+    public void AMappedChangeRunsTheTestsGateWithTheTestClassThatExists()
+    {
+        WriteRepositoryFile("tests/KyberWeave.Tests/ATests.cs", "// the test class the convention resolves\r\n");
+        MustGit("add", "tests/KyberWeave.Tests/ATests.cs");
+        WriteConfiguration("""
+                           review:
+                             task-gates:
+                               csharp-dev:
+                                 - id: tests
+                                   include: ["**/*.cs"]
+                                   run: [git, config, --local, t46.tests, "{tests}"]
+                           """);
+        ChangeTracked("src/a.cs");
+
+        CliRun run = Cli(GatesCommand("--agent", "csharp-dev"));
+
+        AssertTestsTokenAccepted(run);
+        AssertExitCode(0, run);
+        (int exitCode, string output) = Git("config", "--local", "--get", "t46.tests");
+        Assert.True(exitCode == 0, "the gate did not record the expanded {tests} value.");
+        Assert.Contains("ATests", output, StringComparison.Ordinal);
+        Assert.Contains(".", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("{tests}", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Nothing mapped is skipped with the gate-not-applicable rule, never a pass: a gate that ran a
+    ///     filter matching nothing would exit zero and read as executed evidence.
+    /// </summary>
+    [Fact]
+    public void AChangeNoTestClassCoversSkipsTheTestsGate()
+    {
+        WriteConfiguration("""
+                           review:
+                             task-gates:
+                               csharp-dev:
+                                 - id: tests
+                                   include: ["**/*.cs"]
+                                   run: [git, --version, "{tests}"]
+                           """);
+        ChangeTracked("src/gone.cs");
+
+        CliRun run = Cli(GatesCommand("--agent", "csharp-dev"));
+
+        AssertTestsTokenAccepted(run);
+        AssertExitCode(0, run);
+        AssertRendered(run, GateSkipped);
+        using JsonDocument report = ReadReport();
+        Assert.Empty(GateIds(report));
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Client input: the agent-only flags without --agent are refused with exit 2.
     // --paths and --base are no longer agent-only: they scope the repository-wide council gates too.
     // That change is intentional (task decision T3), so they are covered in ReviewGatesCouncilCommandTests.
@@ -733,6 +797,18 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     private static bool GatePassed(JsonDocument report, string id)
     {
         return GateElement(report, id).GetProperty("passed").GetBoolean();
+    }
+
+    /// <summary>
+    ///     The <c>{tests}</c> token is either accepted by <c>review.task-gates</c> or the whole run stops
+    ///     on a configuration error, so the case names that first: a failing exit code from a refused
+    ///     configuration would otherwise read as a gate result.
+    /// </summary>
+    private static void AssertTestsTokenAccepted(CliRun run)
+    {
+        Assert.True(
+            !run.Output.Contains("unknown token", StringComparison.OrdinalIgnoreCase),
+            $"review.task-gates must accept the {{tests}} token (decision D30). Output:{Environment.NewLine}{run.Output}");
     }
 
     private static void AssertExitCode(int expected, CliRun run)

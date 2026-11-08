@@ -22,6 +22,14 @@ public sealed class SquadCanonicalContentTests
     private const string DeliveryExecutionSkillRelativePath = "skills/delivery-execution/SKILL.md";
 
     /// <summary>
+    ///     The failure-loop rules a developer agent used to carry in its own body. T52 moved them to the
+    ///     one reference the task gate loads after a failed fix (D43), so the pins below read that
+    ///     reference rather than each agent's body, and <c>WorkerRuleSingleHomeTests</c> asserts the
+    ///     bodies no longer carry them.
+    /// </summary>
+    private const string ReworkReferenceRelativePath = "skills/task-gate/references/rework.md";
+
+    /// <summary>
     /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
     /// reject a fifth token, so harvested trigger lines must equal this set.
     /// </summary>
@@ -1372,29 +1380,31 @@ public sealed class SquadCanonicalContentTests
         AssertClosedCircuitBreakerTriggerSet(contract);
     }
 
-    [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("test-dev")]
-    [InlineData("github-devops")]
-    public void LoadDeveloperAgentsDefineJevCheckpointsAndIterationCircuitBreaker(string agentName)
+    /// <summary>
+    ///     The failure-loop rules — the JEV checkpoints, the retry limit, oscillation detection and the
+    ///     closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary — moved out of each developer agent's body
+    ///     into the one reference the task gate loads after a failed fix. The strings are unchanged;
+    ///     only the home is, which is what T50 pins before T52 removes them.
+    /// </summary>
+    [Fact]
+    public void TheReworkReferenceDefinesJevCheckpointsAndIterationCircuitBreaker()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+        string contract = ReadProductFile(ReworkReferenceRelativePath);
 
-        Assert.Contains("Maximum of 3 incremental", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("ITERATION_CAP_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("THRASH_OSCILLATION_DETECTED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("INVARIANT_CONTRADICTION", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("BLAST_RADIUS_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
-        AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
+        Assert.Contains("Maximum of 3 incremental", contract, StringComparison.Ordinal);
+        Assert.Contains("JEV", contract, StringComparison.Ordinal);
+        Assert.Contains("circuit breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STATUS: ESCALATION", contract, StringComparison.Ordinal);
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", contract, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", contract, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("FAILURE_CLUSTER", contract, StringComparison.Ordinal);
+        Assert.Contains("CONTRADICTORY_INVARIANTS", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS", contract, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(contract);
     }
 
     [Theory]
