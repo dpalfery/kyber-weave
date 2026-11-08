@@ -25,6 +25,12 @@ namespace KyberWeave.Tests;
 /// docs tools already consult. That keeps the test on a seam that exists today, so it fails because
 /// the behaviour is missing rather than because it does not compile.
 /// </para>
+/// <para>
+/// Each test's repository declares <c>codegraph</c> among its required MCP servers, because D23
+/// applies the refresh — and with it the failure pinned here — only where CodeGraph is declared. The
+/// scaffold's own declaration names <c>kw-docs</c> alone, so
+/// <see cref="McpDeclarationFixture"/> adds the entry the scaffold leaves commented out.
+/// </para>
 /// </remarks>
 public sealed class McpToolFailureTests : IDisposable
 {
@@ -53,6 +59,7 @@ public sealed class McpToolFailureTests : IDisposable
     public void DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
     {
         DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
 
         string response = Tools(Root).Explore("anything");
 
@@ -74,6 +81,7 @@ public sealed class McpToolFailureTests : IDisposable
     public void DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
     {
         DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
         File.AppendAllText(
             Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"),
             Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
@@ -98,6 +106,7 @@ public sealed class McpToolFailureTests : IDisposable
     public void TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
     {
         DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
         DocsTools tools = Tools(Root);
 
         string explore = tools.Explore("anything");

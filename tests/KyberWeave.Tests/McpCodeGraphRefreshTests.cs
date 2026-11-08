@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -32,12 +33,26 @@ namespace KyberWeave.Tests;
 /// with it. The lock is acquired with no sharing, which is what the provisioner does, so a busy
 /// lock is the real condition rather than a simulated one.
 /// </para>
+/// <para>
+/// D23 applies the refresh only where CodeGraph is declared, and <c>mcp.required-servers</c> is where
+/// a repository declares it. Every test here that expects a refresh therefore arranges a repository
+/// that requires CodeGraph (<see cref="ToolsRequiringCodeGraph"/>); the test that pins the other side
+/// leaves the scaffold's own declaration — <c>kw-docs</c> alone, CodeGraph commented out — untouched.
+/// </para>
 /// </remarks>
 public sealed class McpCodeGraphRefreshTests : IDisposable
 {
     /// <summary>How a busy lock is reported: one line naming the index work already under way.</summary>
     private static readonly Regex BusyNote = new(
         @"(?im)^.*\b(?:codegraph|index)\b.*\b(?:busy|lock|refresh\w*|another)\b.*$",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// How a repository that set <c>stop-on-tool-failure: false</c> is told CodeGraph was unusable:
+    /// one line opening with <c>warning:</c>.
+    /// </summary>
+    private static readonly Regex CodeGraphWarning = new(
+        @"(?im)^warning:.*codegraph.*$",
         RegexOptions.CultureInvariant);
 
     /// <summary>The documented bound on one refresh, which a tool call may never exceed on top of its own work.</summary>
@@ -62,7 +77,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void TheFirstToolCallRefreshesCodeGraph()
     {
-        DocsTools tools = Tools(Root);
+        DocsTools tools = ToolsRequiringCodeGraph(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
@@ -86,7 +101,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void ABusyRefreshLockAnswersOneNoteInsteadOfFailingOrWaiting()
     {
-        DocsTools tools = Tools(Root);
+        DocsTools tools = ToolsRequiringCodeGraph(Root);
         string lockPath = LockPath(Root);
         Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 
@@ -118,7 +133,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void TheRefreshIntervalSuppressesASecondAttempt()
     {
-        DocsTools tools = Tools(Root);
+        DocsTools tools = ToolsRequiringCodeGraph(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
@@ -138,6 +153,61 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         Assert.Equal(firstRefresh, File.GetLastWriteTimeUtc(lockPath));
     }
 
+    /// <summary>
+    /// A repository whose declaration names no CodeGraph takes no index lock and gets ordinary docs
+    /// answers, whichever way it set the stop rule.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// D23 applies the refresh only where CodeGraph is declared, and <c>mcp.required-servers</c> is
+    /// where a repository declares it. The configuration <c>docs init</c> scaffolds declares
+    /// <c>kw-docs</c> and leaves the CodeGraph entry commented out, so the scaffold's own default is a
+    /// repository that asked for no index. Refreshing there spends a provision on a dependency the
+    /// repository never claimed, and once CodeGraph is not installed every docs question in that
+    /// repository answers <c>STATUS: TOOL_FAILURE</c> — a failure about the tool's own guess rather
+    /// than about anything the repository declared.
+    /// </para>
+    /// <para>
+    /// The refresh is observed through the index lock, the same seam the tests above use: a refresh
+    /// that ran would have taken it. The resolver is the production adapter over this repository,
+    /// which has no index, so a refresh that ran would find CodeGraph unusable and report it in the
+    /// form the stop rule selects — the failure under the default, the warning line under
+    /// <c>stop-on-tool-failure: false</c>.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ARepositoryThatRequiresNoCodeGraphNeitherRefreshesNorFailsItsDocsTools(bool stopsOnToolFailure)
+    {
+        string stopRule = stopsOnToolFailure ? "the default stop rule" : "stop-on-tool-failure: false";
+        string lockPath = LockPath(Root);
+        RemoveStaleLock(lockPath);
+
+        DocsScaffolder.Scaffold(Root);
+        if (!stopsOnToolFailure)
+        {
+            File.AppendAllText(
+                Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"),
+                Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
+        }
+
+        DocsTools tools = ScaffoldedTools(Root, () => CodeGraphResolverAdapter.ForRepository(Root));
+
+        string response = tools.Explore("anything");
+
+        Assert.False(
+            File.Exists(lockPath),
+            $"A repository that declares no CodeGraph took the index lock at '{lockPath}', so it refreshed an "
+            + "index it never asked for.");
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.False(
+            CodeGraphWarning.IsMatch(response),
+            $"Under {stopRule} the response carries a CodeGraph warning although the repository declares no "
+            + $"CodeGraph. It was:{Environment.NewLine}{response}");
+        Assert.StartsWith("provenance:", response, StringComparison.Ordinal);
+    }
+
     private static string LockPath(string root) => CodeGraphProvisioner.LockPathFor(root, Path.GetTempPath());
 
     /// <summary>
@@ -152,13 +222,24 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         }
     }
 
-    private static DocsTools Tools(string root)
+    /// <summary>
+    /// Tools over a repository that requires CodeGraph: the scaffold as it comes, plus the CodeGraph
+    /// entry it leaves commented out. This is the repository the refresh applies to.
+    /// </summary>
+    private static DocsTools ToolsRequiringCodeGraph(string root)
     {
         DocsScaffolder.Scaffold(root);
+        McpDeclarationFixture.RequireCodeGraph(root);
+        return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols());
+    }
+
+    /// <summary>Tools over the corpus already scaffolded at <paramref name="root"/>.</summary>
+    private static DocsTools ScaffoldedTools(string root, Func<ICodeGraphResolver> resolverFactory)
+    {
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
         DocumentIndexHost host = new(
             root,
-            () => FakeCodeGraphResolver.WithSymbols(),
+            resolverFactory,
             () => new DocumentLoader(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
