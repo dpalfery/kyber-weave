@@ -67,6 +67,15 @@ consistently:
 2. <url>
 ```
 
+# Discovery order
+
+A question about this repository's code goes to `codegraph_explore` first, and one about its
+documentation to `docs_answer_question_from_repo_documentation`. This role runs no shell and
+edits nothing, so the CLI form, `codegraph explore "…"`, is not available to it: read the file
+the request names directly, and say so under `Caveats`. The `kw-docs` and `codegraph` servers
+stay bound to the canonical checkout, so an answer whose provenance `branch=` is not the branch in
+hand describes another tree.
+
 # Guardrails
 
 - Read-only: no file edits, no shell commands, no git operations, no package

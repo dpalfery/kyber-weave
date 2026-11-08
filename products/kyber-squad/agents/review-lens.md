@@ -33,7 +33,7 @@ and stop. Skipping is a first-class, expected outcome, not a failure and not a s
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first, and only when its provenance `branch=` is the branch under review: the server stays bound to the canonical checkout, so otherwise its answer describes a tree you are not reviewing. Your packet carries the absolute worktree path; read that path directly and count each such read as a direct read with the reason "server bound to another revision". This role runs no shell, so the CLI form, `codegraph explore "…"`, is not available to it: a lens that can read neither the tool nor the packet's path returns `SKIPPED` with the reason.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema.

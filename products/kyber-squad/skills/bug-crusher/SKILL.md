@@ -36,11 +36,11 @@ This applies where a human reads the text and nowhere else. The investigator's v
 
 # Workflow
 
-## 0. Run-start documentation check
+## 0. Run-start tooling check
 
-When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — run `kyber-weave doctor --check` before anything else. It is read-only. Record one line in the run record: `run-start doctor: <exit> <check ids>`.
+When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — the session begins with `kyber-weave doctor --ensure` before anything else. It leaves the tooling working in one command: it syncs the CodeGraph index or initialises it, restores any tracked file the initialisation rewrote, proves the index with one `codegraph explore` call and the docs server with one call, and repairs once with `codegraph index` before retrying once. Record one line in the run record: `run-start doctor: <exit> <check ids>`.
 
-**Warn and continue.** A failure is a line in the record, never a stop, and nothing is ever installed. Exit 1 with `codegraph.index` and the binary present: run `kyber-weave doctor --provision` immediately (repository-local init is already authorised by the root `AGENTS.md`; do not ask for approval before that step). Exit 3, the `codegraph` executable is missing: in supervised mode tell the user to install it, quoting the printed `fix:` line; in autonomous mode record it as pending human review. Do not install it in either mode. When the repository has no governed docs, skip this step entirely.
+**A failure is a stop.** `stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml` decides it, and the doctor reads that setting itself: absent, it means stop, so the session ends with `STATUS: TOOL_FAILURE` and the doctor's `fix:` line before any investigation is dispatched. A repository that sets `stop-on-tool-failure: false` is told the tool failed and the work continues. Exit 3, the `codegraph` executable is missing, is the stop under the default too: tell the human to install it, quoting the printed `fix:` line. Never install it yourself either way. A repository with governed docs and no CodeGraph index stops until the index is installed or the setting is `false`. When the repository has no governed docs, skip this step entirely.
 
 ## 1. Investigate — always first, always delegated
 

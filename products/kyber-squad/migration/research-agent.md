@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/research-agent.agent.md
 sources:
   .github/agents/research-agent.agent.md: e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
-final-body-sha256: 68ae251723de616a6afeb6e1ca4657d79365ae9e63e691cd47bab96e562c1101
+final-body-sha256: 0b593531d48c8c91c8c896412e3112dd34c676319ae721373a6e5aad2d23b3b2
 ---
 # research-agent migration
 
