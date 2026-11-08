@@ -272,6 +272,26 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     A branch named 'head' in lowercase is not treated as the uppercase 'HEAD' symbolic reference.
+    /// </summary>
+    [Fact]
+    public void DoesNotRefuseLowercaseHeadBranchAsSymbolicRef()
+    {
+        const string Resumed = "head";
+        _probe.CreateBranchWithCommit(Resumed, "branch named head");
+        _probe.Git("switch", "main");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", Resumed);
+
+        Assert.NotEqual(2, result.ExitCode);
+        Assert.DoesNotContain("symbolic reference", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     When resuming a branch that exists only on the remote in a dirty checkout, the command creates
     ///     the worktree for the tracking branch without failing on an invalid reference.
     /// </summary>

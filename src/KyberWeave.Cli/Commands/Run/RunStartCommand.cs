@@ -158,8 +158,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 ? resume[remotePrefix.Length..]
                 : resume;
 
-            if (string.Equals(stripped, "HEAD", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(resume, "HEAD", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(stripped, "HEAD", StringComparison.Ordinal))
             {
                 return Refuse(
                     $"'{resume}' is a symbolic reference, not a branch name. Pass the " +
