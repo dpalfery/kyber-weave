@@ -131,6 +131,94 @@ public static partial class PlanDocumentParser
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(markdown)));
     }
 
+    /// <summary>
+    /// The SHA-256 of what a parsed plan says, lowercase hex: the value a task file records so
+    /// the conductor can tell a file written from this plan from one written from an older
+    /// draft.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Computed over the parsed document rather than its text, and only over the fields the
+    /// Arbiter judges a dispatch by: the development mode, the tasks with their text, file
+    /// scope, dependencies and skills, the test contract rows, and the out-of-scope paths. The
+    /// plan's status is excluded, as is every section the Arbiter never reads.
+    /// </para>
+    /// <para>
+    /// The exclusions are the point. A plan moves from draft to Ready, and its decision rows are
+    /// answered, in the same finalization that writes the task file: a digest over the raw text
+    /// would mark every finished file stale and force an architect dispatch on every prose
+    /// amendment. Hashing the whole text is the opposite mistake — it would also accept a file
+    /// whose prompt the plan has moved past — so the fields are enumerated rather than sampled.
+    /// </para>
+    /// <para>
+    /// The checkbox state of a spec-grammar task is excluded: it is recorded for information and
+    /// is not completion, so ticking it does not move the plan a dispatch is judged against.
+    /// </para>
+    /// </remarks>
+    /// <param name="plan">The parsed plan whose digest is wanted.</param>
+    /// <returns>A 64-character lowercase hexadecimal digest.</returns>
+    public static string ExecutionDigest(PlanDocument plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        StringBuilder canonical = new();
+        Append(canonical, plan.DevelopmentMode);
+        Append(canonical, plan.HasTasks ? "tasks" : "no-tasks");
+
+        Append(canonical, plan.Tasks.Count);
+        foreach (PlanTask task in plan.Tasks)
+        {
+            Append(canonical, task.Id);
+            Append(canonical, task.Title);
+            Append(canonical, task.Text);
+            Append(canonical, task.Files);
+            Append(canonical, task.DependsOn);
+            Append(canonical, task.Skills);
+        }
+
+        Append(canonical, plan.ContractRows.Count);
+        foreach (PlanContractRow row in plan.ContractRows)
+        {
+            Append(canonical, row.TaskId);
+            Append(canonical, row.TestProjectOrFile);
+            Append(canonical, row.RunnerFilter);
+            Append(canonical, row.ObservableBehaviour);
+            Append(canonical, row.RedEvidenceRequired);
+            Append(canonical, row.GreenAcceptance);
+        }
+
+        Append(canonical, plan.OutOfScope);
+
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
+    }
+
+    // Each value carries its own length, so no field's content can imitate the boundary that
+    // separates it from the next. A list is written as its count and then its items, which is
+    // what an empty list and an absent one have in common: both are zero, and neither can be
+    // confused with a list holding one empty string.
+    private static void Append(StringBuilder builder, string? value)
+    {
+        if (value is null)
+        {
+            builder.Append('~');
+            return;
+        }
+
+        builder.Append(value.Length).Append(':').Append(value);
+    }
+
+    private static void Append(StringBuilder builder, int count) =>
+        builder.Append(count).Append(';');
+
+    private static void Append(StringBuilder builder, IReadOnlyList<string> values)
+    {
+        Append(builder, values.Count);
+        foreach (string value in values)
+        {
+            Append(builder, value);
+        }
+    }
+
     /// <summary>Parses plan or spec task artifact text into a <see cref="PlanDocument"/>.</summary>
     /// <param name="markdown">The file text as authored. The parser writes nothing.</param>
     public static PlanDocument Parse(string markdown)

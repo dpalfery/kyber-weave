@@ -5,7 +5,11 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/docs-dev.agent.md
 sources:
   .github/agents/docs-dev.agent.md: db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
-final-body-sha256: 0bcd0dd209645871501e863e43795a4749d5a8ee75b27421f31d1d9567050648
+<<<<<<< HEAD
+final-body-sha256: c0b4a0533a1f320f40d0feb0d63c980f9f5a1937fc3c05efe8aa9284d5cad21c
+=======
+final-body-sha256: c0b4a0533a1f320f40d0feb0d63c980f9f5a1937fc3c05efe8aa9284d5cad21c
+>>>>>>> factory/feat/conductor-run-speed-ready-tasks
 ---
 # docs-dev migration
 

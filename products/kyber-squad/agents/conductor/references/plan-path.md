@@ -33,6 +33,8 @@ The conductor never edits a plan. Require `architect` to persist every decision 
 
 In autonomous mode the conductor never writes the row: it re-invokes `architect` with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input (provenance `autonomous: recommendation accepted`), and `architect` records it in `## Decisions` exactly as it records a human approval. An approval that says only “approve” is sufficient when it clearly answers the presented **approve and execute** gate. Once `PLAN_FINALIZED` is returned, load the `delivery-execution` skill and enter the ready queue immediately: that skill, not this path, holds the dispatch, verification, digest, findings and closeout rules.
 
+`PLAN_FINALIZED` also returns `TASK_FILE:`, the path of the plan's `<plan>.tasks.json`. Accept it only when it sits beside the saved plan, validate it before the first dispatch, and dispatch each worker's prompt from that file unchanged: the plan is the approved record, not the dispatch source.
+
 ## Planner dispatches
 
 Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), planner dispatches to `architect` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Draft authoring and resume carry a `PLAN_FILE:` header; finalization carries the `PLAN_FILE:` header followed by the `FINALIZE` line; the findings drain carries `FINDINGS:`; an escalation carries the `STATUS: ARBITER_ESCALATION` envelope itself as its marker.
