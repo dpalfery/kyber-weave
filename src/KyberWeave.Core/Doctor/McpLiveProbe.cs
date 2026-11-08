@@ -27,10 +27,10 @@ public static partial class McpLiveProbe
     ///     <c>branch=</c>, <c>repo=</c>, <c>rev=</c>, <c>dirty=</c> and <c>documents=</c>.
     /// </summary>
     /// <remarks>
-    ///     The tokens are named rather than matched as a generic <c>word=value</c> shape, so a root path that happens to
-    ///     contain something that looks like a token is not truncated. Order is not fixed, so the pattern repeats the
-    ///     whole alternation to the end of the line and strips whatever subset the server sent. <c>repo=</c> allows spaces
-    ///     because a repository or worktree filesystem path can contain spaces.
+    ///     The tokens are anchored on the fixed trailing order guaranteed by <c>CorpusProvenance.Line</c>
+    ///     (<c>rev=</c>, <c>dirty=</c>, <c>documents=</c> at end-of-line, preceded by optional <c>branch=</c>
+    ///     and <c>repo=</c>). Parsing from the right prevents root and repository paths containing token-like
+    ///     substrings (such as <c>rev=evil</c> or spaces) from being prematurely truncated.
     /// </remarks>
     [GeneratedRegex(@"(?:(?:\s+branch=\S+)?\s+repo=.*?(?:\s+branch=\S+)?|\s+branch=\S+)?\s+rev=\S+\s+dirty=\S+\s+documents=\S+$")]
     private static partial Regex TrailingMetadataRegex();

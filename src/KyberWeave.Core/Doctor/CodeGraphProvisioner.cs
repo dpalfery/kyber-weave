@@ -356,8 +356,21 @@ public static class CodeGraphProvisioner
                 $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
     }
 
-    private static string QuoteShellPath(string path) =>
-        "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    internal static string QuoteShellPath(string path) =>
+        QuoteShellPath(path, OperatingSystem.IsWindows());
+
+    internal static string QuoteShellPath(string path, bool isWindows)
+    {
+        if (!NeedsQuoting(path))
+            return path;
+
+        return isWindows
+            ? "\"" + path.Replace("\"", "\\\"", StringComparison.Ordinal) + "\""
+            : "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    }
+
+    private static bool NeedsQuoting(string path) =>
+        path.Length == 0 || path.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '/' && c != '\\' && c != '.' && c != '-' && c != '_');
 
     /// <summary>Restores one path from <c>HEAD</c>, in both the working tree and the index.</summary>
     private static bool RestoreOne(string root, string path, IProcessExecutor executor)
