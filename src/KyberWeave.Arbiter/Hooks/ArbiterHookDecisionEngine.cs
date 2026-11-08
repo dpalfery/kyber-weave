@@ -22,8 +22,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// (<c>~/.config/kyber-weave/arbiter.yml</c>) applies field by field to the provider,
 /// as in every other host. A non-allow outcome renders the escalation envelope on
 /// conductor and investigate triggers, the post-return block, or the review note;
-/// an error result — the evaluator throws rather than allows — blocks with
-/// <c>KW-ARB-HOOK-001</c>. Nothing but the returned outcome ever reaches stdout:
+/// an error result — the evaluator throws rather than allows — writes
+/// <c>KW-ARB-HOOK-001</c> to the log and the chat-visible note and lets the dispatch
+/// continue. A malformed user override still fails closed like a malformed host
+/// config. Nothing but the returned outcome ever reaches stdout:
 /// diagnostics go to <see cref="HookContext.Log"/> (stderr in production).
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
@@ -195,6 +197,13 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 .GetAwaiter().GetResult();
             return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, isPost);
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A broken decision model lets the dispatch continue loudly: the failure is
+            // written to the log and the chat-visible note, never a block. Cancellation
+            // stays a cancellation: the harness timed out the hook, not the model.
+            return AllowLoudly(harness, exception.Message, context.NewDecisionId(), context);
+        }
         finally
         {
             owned?.Dispose();
@@ -213,8 +222,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
     {
         if (result.IsError)
         {
-            return BlockWithError(
-                harness, caller, OneLine(result.ErrorMessage), context.NewDecisionId(), isPost);
+            return AllowLoudly(
+                harness, OneLine(result.ErrorMessage), context.NewDecisionId(), context);
         }
 
         if (string.Equals(result.Outcome, RuleEffects.Allow, StringComparison.Ordinal)
@@ -230,9 +239,24 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 .LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
         if (record is null)
         {
-            return BlockWithError(
-                harness, caller, "the decision log holds no decision for this evaluation.",
-                context.NewDecisionId(), isPost);
+            return AllowLoudly(
+                harness,
+                "the decision log holds no decision for this evaluation.",
+                context.NewDecisionId(),
+                context);
+        }
+
+        if (string.Equals(record.Provider.Status, ArbiterProviderStatuses.Error, StringComparison.Ordinal))
+        {
+            // The model failed before judging: an escalation with no model behind it
+            // lets the dispatch continue loudly rather than blocking on a verdict
+            // nothing reached.
+            return AllowLoudly(
+                harness,
+                $"the decision model failed (provider {record.Provider.Kind}); " +
+                "the escalation was judged by no model.",
+                context.NewDecisionId(),
+                context);
         }
 
         string reason = RenderReason(record, prompt, harness, caller, config);
@@ -391,6 +415,22 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(hash);
+    }
+
+    /// <summary>
+    /// Lets a dispatch continue loudly after a hook or decision-model failure: the failure
+    /// goes to the log and the chat-visible note, and the outcome allows.
+    /// </summary>
+    private static HookOutcome AllowLoudly(
+        string harness, string message, string decisionId, HookContext context)
+    {
+        string flat = OneLine(message);
+        context.Log.WriteLine(
+            $"Arbiter hook failure ({decisionId}) on '{harness}': {HookCommand.FailClosedCode}: {flat}. " +
+            "The dispatch continues without a decision.");
+        return new HookOutcome(
+            HookOutcomeKind.AllowWithNote,
+            $"{HookCommand.FailClosedCode}: {flat}. The dispatch continues without an Arbiter decision.");
     }
 
     private static HookOutcome BlockWithError(

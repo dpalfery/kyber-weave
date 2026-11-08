@@ -215,16 +215,11 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         string? completedWarning = null;
         if (resumeRef.Length > 0)
         {
-            GitOutcome log = runner.CommitMessages(startRef, resumeRef);
-            if (log.Succeeded)
-            {
-                completed = RunStartResumeReader.Read(log.StandardOutput);
-            }
-            else
-            {
-                completedWarning =
-                    $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
-            }
+            TryReadResumeLog(
+                () => runner.CommitMessages(startRef, resumeRef),
+                resumeRef,
+                out completed,
+                out completedWarning);
         }
 
         // Read before anything is switched: the versions and the divergence describe the checkout as the
@@ -279,6 +274,12 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Fail(
                 $"git could not put '{target}' in place: {created.FirstErrorLine}");
         }
+
+        // The branch is placed: record the base it was created from where a later dispatch
+        // hook can read it. The record is auxiliary — the run's own report below still names
+        // the base — so a missing home degrades to the hook's default base rather than
+        // failing a run that is otherwise ready.
+        RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
 
         if (settings.Json)
         {
@@ -337,12 +338,84 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         return Ready;
     }
 
+    /// <summary>
+    /// Records the base <paramref name="branch" /> was created from where a later dispatch
+    /// hook can read it. Best effort: false when there is nowhere to record (or the record
+    /// cannot be written), in which case the hook falls back to its default base.
+    /// </summary>
+    internal static bool RecordBase(string homeDirectory, string branch, string baseRef)
+    {
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+        {
+            return false;
+        }
+
+        try
+        {
+            RunBaseState.Write(homeDirectory, branch, baseRef);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>
     /// <param name="context">The command context Spectre supplies.</param>
     /// <param name="settings">The parsed settings.</param>
     public int Execute(CommandContext context, RunStartSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reads the resumed branch's finished tasks from its commit log. A log that cannot be read
+    /// is a warning on a resume that can still continue the work; anything else is reported
+    /// through <paramref name="completedWarning" /> with no finished tasks.
+    /// </summary>
+    /// <remarks>
+    /// The catch stays narrow on purpose: a cancelled wait escapes, and an
+    /// <c>ArgumentException</c> — the guards on <c>RunStartRunner.CommitMessages</c> throw it for
+    /// an empty ref — is a programming error, not a log that cannot be read, so it escapes too
+    /// instead of passing as a soft warning.
+    /// </remarks>
+    /// <param name="readLog">Reads the commit log between the base and the resumed ref.</param>
+    /// <param name="resumeRef">The resumed ref, named in the warning when the log cannot be read.</param>
+    /// <param name="completed">The finished tasks the log names, or empty when it cannot be read.</param>
+    /// <param name="completedWarning">Null when the log read cleanly.</param>
+    internal static void TryReadResumeLog(
+        Func<GitOutcome> readLog,
+        string resumeRef,
+        out IReadOnlyList<RunStartCompletedTask> completed,
+        out string? completedWarning)
+    {
+        ArgumentNullException.ThrowIfNull(readLog);
+
+        GitOutcome log;
+        try
+        {
+            log = readLog();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not ArgumentException)
+        {
+            completed = [];
+            completedWarning =
+                $"git log could not read the commits on '{resumeRef}': {ex.Message}";
+            return;
+        }
+
+        if (log.Succeeded)
+        {
+            completed = RunStartResumeReader.Read(log.StandardOutput);
+            completedWarning = null;
+        }
+        else
+        {
+            completed = [];
+            completedWarning =
+                $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
+        }
     }
 
     /// <summary>

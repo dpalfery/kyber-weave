@@ -456,9 +456,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
-    /// its canonical-skill counts, and it must state the count the tree actually holds: 29, the 28 left after
-    /// the retired <c>response-format</c> skill plus <c>delivery-execution</c>.
+    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree.
+    /// It states the skills without a hardcoded count: the directories under <c>skills/</c> are the
+    /// inventory, so a skill added later changes no prose.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -466,8 +466,7 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

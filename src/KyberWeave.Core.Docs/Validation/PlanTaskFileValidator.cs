@@ -214,9 +214,12 @@ public sealed partial class PlanTaskFileValidator
         CheckTasks(parsed, file, taskFile, report);
         CheckDigest(parsed, file, taskFile, report);
 
-        foreach (PlanTaskFileEntry entry in file.Tasks ?? [])
+        foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
-            CheckPrompt(entry, taskFile, planningDirectories, report);
+            if (entry is not null)
+            {
+                CheckPrompt(entry, taskFile, planningDirectories, report);
+            }
         }
     }
 
@@ -241,7 +244,7 @@ public sealed partial class PlanTaskFileValidator
                 "be stale anyway."));
             return false;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             report.Add(new Diagnostic(
                 Malformed,
@@ -282,16 +285,16 @@ public sealed partial class PlanTaskFileValidator
         }
 
         Dictionary<string, PlanTaskFileEntry> declared = new(StringComparer.Ordinal);
-        foreach (PlanTaskFileEntry entry in file.Tasks ?? [])
+        foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
-            if (string.IsNullOrWhiteSpace(entry.Id) || !declared.TryAdd(entry.Id, entry))
+            if (entry is null || string.IsNullOrWhiteSpace(entry.Id) || !declared.TryAdd(entry.Id, entry))
             {
+                string id = entry?.Id ?? string.Empty;
                 report.Add(new Diagnostic(
                     DiffersFromPlan,
                     Severity.Error,
-                    $"Task file '{taskFile}' carries a task with no id, or two tasks sharing the id " +
-                    $"'{entry.Id ?? string.Empty}'.",
-                    entry.Id ?? taskFile,
+                    $"Task file '{taskFile}' carries a task with no id, or two tasks sharing the id '{id}'.",
+                    entry?.Id ?? taskFile,
                     taskFile,
                     Hint: "Give every entry the id of the plan task it was written from, once each."));
             }
@@ -325,6 +328,18 @@ public sealed partial class PlanTaskFileValidator
             if (!byId.TryGetValue(id, out PlanTask? task))
             {
                 continue;
+            }
+
+            if (HasBlankElement(entry.Files) || HasBlankElement(entry.DependsOn))
+            {
+                report.Add(new Diagnostic(
+                    DiffersFromPlan,
+                    Severity.Error,
+                    $"Task '{id}' carries an empty file or dependency entry in task file '{taskFile}': " +
+                    "every entry must name a file or a task.",
+                    id,
+                    taskFile,
+                    Hint: "Remove the empty entry, or copy the plan's file scope and dependencies."));
             }
 
             if (!SameSet(task.Files, entry.Files ?? []))
@@ -505,9 +520,14 @@ public sealed partial class PlanTaskFileValidator
                 }
 
                 string trimmed = lines[next].TrimStart();
-                return trimmed.Length != lines[next].Length
-                       || trimmed.StartsWith("- ", StringComparison.Ordinal)
-                       || trimmed.StartsWith("* ", StringComparison.Ordinal);
+                if (trimmed.Length != lines[next].Length
+                    || trimmed.StartsWith("- ", StringComparison.Ordinal)
+                    || trimmed.StartsWith("* ", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                break;
             }
         }
 
@@ -540,8 +560,22 @@ public sealed partial class PlanTaskFileValidator
     private static bool SameSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
         string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal);
 
+    /// <summary>
+    /// Whether a file scope or dependency list carries an entry that names nothing: a null or
+    /// blank element the JSON shape allows but no plan task declares. Normalization drops such
+    /// entries, so without this check <c>files:[null]</c> compares equal to <c>files:[]</c> and
+    /// junk passes as a matching scope.
+    /// </summary>
+    private static bool HasBlankElement(IReadOnlyList<string>? values) =>
+        values is not null && values.Any(string.IsNullOrWhiteSpace);
+
     private static string Normalize(IReadOnlyList<string> values) =>
-        string.Join('\n', values.Select(value => value.Trim().Replace('\\', '/')).Order(StringComparer.Ordinal));
+        string.Join(
+            '\n',
+            values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim().Replace('\\', '/'))
+                .Order(StringComparer.Ordinal));
 
     private static string Describe(IReadOnlyList<string> values) =>
         values.Count == 0 ? "none" : string.Join(", ", values);

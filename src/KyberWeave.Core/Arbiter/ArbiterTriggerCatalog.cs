@@ -85,6 +85,7 @@ public static class ArbiterTriggerCatalog
                 "lens.name",
                 "lens.applicability",
                 "review.changed-paths",
+                "review.base-ref",
                 "review.diff-summary",
             },
             ["lens.returned"] = new HashSet<string>(StringComparer.Ordinal)
@@ -111,6 +112,7 @@ public static class ArbiterTriggerCatalog
                 "gate.id",
                 "gate.applies-when.paths",
                 "review.changed-paths",
+                "review.base-ref",
             },
         };
 

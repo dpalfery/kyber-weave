@@ -110,8 +110,10 @@ public static partial class PlanReadInstruction
         foreach (string candidate in CandidatePaths(text))
         {
             string path = candidate.Trim().Replace('\\', '/').TrimEnd('.', ',', ';', ':', ')', ']', '"', '\'');
+            string normalized = NormalizePath(path);
             if (path.Length > 0
-                && directories.Exists(directory => IsUnder(path, directory))
+                && (directories.Exists(directory => IsUnder(path, directory))
+                    || (normalized.Length > 0 && directories.Exists(directory => IsUnder(normalized, directory))))
                 && !named.Contains(path, StringComparer.Ordinal))
             {
                 named.Add(path);
@@ -119,6 +121,46 @@ public static partial class PlanReadInstruction
         }
 
         return named;
+    }
+
+    /// <summary>
+    /// Lexically normalizes a path: collapses redundant separators, removes <c>.</c> segments,
+    /// and resolves <c>..</c> segments.
+    /// </summary>
+    private static string NormalizePath(string raw)
+    {
+        if (raw.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        string[] segments = raw.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        List<string> normalized = [];
+        foreach (string segment in segments)
+        {
+            if (segment == ".")
+            {
+                continue;
+            }
+
+            if (segment == "..")
+            {
+                if (normalized.Count > 0 && normalized[^1] != "..")
+                {
+                    normalized.RemoveAt(normalized.Count - 1);
+                }
+                else
+                {
+                    normalized.Add(segment);
+                }
+            }
+            else
+            {
+                normalized.Add(segment);
+            }
+        }
+
+        return string.Join('/', normalized);
     }
 
     private static bool IsUnder(string path, string directory)
