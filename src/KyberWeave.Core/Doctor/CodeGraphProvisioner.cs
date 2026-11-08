@@ -356,12 +356,17 @@ public static class CodeGraphProvisioner
                 $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
     }
 
-    internal static string QuoteShellPath(string path)
+    internal static string QuoteShellPath(string path) =>
+        QuoteShellPath(path, OperatingSystem.IsWindows());
+
+    internal static string QuoteShellPath(string path, bool isWindows)
     {
         if (!NeedsQuoting(path))
             return path;
 
-        return "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+        return isWindows
+            ? "\"" + path.Replace("\"", "\\\"", StringComparison.Ordinal) + "\""
+            : "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
     }
 
     private static bool NeedsQuoting(string path) =>

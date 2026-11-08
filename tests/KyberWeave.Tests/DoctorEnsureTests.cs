@@ -473,7 +473,8 @@ public sealed class DoctorEnsureTests : IDisposable
 
     /// <summary>
     /// Clean paths without spaces or shell metacharacters are left unquoted across all platforms,
-    /// while paths with spaces or metacharacters use single-quote wrapping with escaped quotes.
+    /// while paths with spaces or metacharacters use single-quote wrapping on POSIX and double-quote
+    /// wrapping on Windows (so cmd.exe does not treat single quotes as literal characters).
     /// </summary>
     [Theory]
     [InlineData("src/foo.cs", "src/foo.cs")]
@@ -482,9 +483,20 @@ public sealed class DoctorEnsureTests : IDisposable
     [InlineData("src/$evil.cs", "'src/$evil.cs'")]
     [InlineData("src/$evil'quote.cs", "'src/$evil'\"'\"'quote.cs'")]
     [InlineData("src/`cmd`.cs", "'src/`cmd`.cs'")]
-    public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingSingleQuotes(string input, string expected)
+    public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingSingleQuotesOnPosix(string input, string expected)
     {
-        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input));
+        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input, isWindows: false));
+    }
+
+    [Theory]
+    [InlineData("src/foo.cs", "src/foo.cs")]
+    [InlineData("src/dir/bar.cs", "src/dir/bar.cs")]
+    [InlineData("src/My File.cs", "\"src/My File.cs\"")]
+    [InlineData("src/My\"File.cs", "\"src/My\\\"File.cs\"")]
+    [InlineData("src/$evil.cs", "\"src/$evil.cs\"")]
+    public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingDoubleQuotesOnWindows(string input, string expected)
+    {
+        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input, isWindows: true));
     }
 
     /// <summary>
