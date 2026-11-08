@@ -39,6 +39,16 @@ public static class GitFacts
         return string.IsNullOrWhiteSpace(root) ? null : root;
     }
 
+    /// <summary>Reads the current branch name.</summary>
+    /// <returns>The branch, or <c>null</c> on a detached head or outside a repository.</returns>
+    public static string? GetCurrentBranch(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(
+            workingDirectory, gitExecutable, string.Empty, "branch", "--show-current");
+        string branch = output?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(branch) ? null : branch;
+    }
+
     /// <summary>Reads the current commit.</summary>
     /// <returns>The full <c>HEAD</c> sha, or <c>null</c> when it cannot be determined.</returns>
     public static string? GetHead(string workingDirectory, string gitExecutable = "git")
