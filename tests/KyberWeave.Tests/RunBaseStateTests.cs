@@ -77,6 +77,26 @@ public sealed class RunBaseStateTests : IDisposable
     }
 
     /// <summary>
+    /// Branches whose sanitized names collide still keep separate records: the key carries
+    /// a hash of the full name, so <c>a/b</c> never reads <c>a-b</c>'s base.
+    /// </summary>
+    [Fact]
+    public void ACollidingBranchNameKeepsItsOwnRecord()
+    {
+        RunBaseState.Write(_temp.Path, "a/b", "origin/main");
+        RunBaseState.Write(_temp.Path, "a-b", "origin/develop");
+
+        Assert.True(
+            RunBaseState.TryReadBaseRef(_temp.Path, "a/b", out string? first),
+            "a slashed branch must keep its own record.");
+        Assert.True(
+            RunBaseState.TryReadBaseRef(_temp.Path, "a-b", out string? second),
+            "a dashed branch must keep its own record.");
+        Assert.Equal("origin/main", first);
+        Assert.Equal("origin/develop", second);
+    }
+
+    /// <summary>
     /// A corrupt state file reads absent rather than crashing the hook that reads it.
     /// </summary>
     [Fact]

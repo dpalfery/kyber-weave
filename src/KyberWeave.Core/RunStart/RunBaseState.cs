@@ -92,13 +92,16 @@ public static class RunBaseState
 
     /// <summary>
     /// Flattens a branch name to one file name: separators and characters no file system
-    /// takes become dashes, so the key never escapes the runs directory.
+    /// takes become dashes, with a hash of the full name appended, so distinct branches
+    /// never share a key and the key never escapes the runs directory.
     /// </summary>
     private static string KeyOf(string branch)
     {
         char[] invalid = Path.GetInvalidFileNameChars();
-        return string.Concat(branch.Select(character =>
+        string flat = string.Concat(branch.Select(character =>
             character == '/' || character == '\\' || Array.IndexOf(invalid, character) >= 0 ? '-' : character));
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(branch));
+        return flat + "-" + Convert.ToHexStringLower(hash)[..8];
     }
 
     private sealed record StateDocument(string BaseRef);

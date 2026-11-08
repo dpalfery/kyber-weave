@@ -55,7 +55,8 @@ internal sealed class HookGitFacts(string workingDirectory, string? homeDirector
 
     /// <summary>
     /// The base the review is measured from: the base the run recorded for the checkout's
-    /// branch, or the default review base when the branch has no recorded run.
+    /// branch when that base still resolves, or the default review base otherwise. A stale
+    /// or bogus record falls back rather than measuring against a ref that is gone.
     /// </summary>
     private string ResolveBase(string workingDirectory)
     {
@@ -63,7 +64,8 @@ internal sealed class HookGitFacts(string workingDirectory, string? homeDirector
         string? branch = GitFacts.GetCurrentBranch(workingDirectory);
         if (branch is not null &&
             RunBaseState.TryReadBaseRef(home, branch, out string? recorded) &&
-            !string.IsNullOrWhiteSpace(recorded))
+            !string.IsNullOrWhiteSpace(recorded) &&
+            GitFacts.RefExists(workingDirectory, recorded))
         {
             return recorded;
         }

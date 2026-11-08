@@ -267,16 +267,9 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         // The branch is placed: record the base it was created from where a later dispatch
         // hook can read it. The record is auxiliary — the run's own report below still names
-        // the base — so an unwritable home degrades to the hook's default base rather than
+        // the base — so a missing home degrades to the hook's default base rather than
         // failing a run that is otherwise ready.
-        try
-        {
-            RunBaseState.Write(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
 
         if (settings.Json)
         {
@@ -333,6 +326,29 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             completedWarning);
 
         return Ready;
+    }
+
+    /// <summary>
+    /// Records the base <paramref name="branch" /> was created from where a later dispatch
+    /// hook can read it. Best effort: false when there is nowhere to record (or the record
+    /// cannot be written), in which case the hook falls back to its default base.
+    /// </summary>
+    internal static bool RecordBase(string homeDirectory, string branch, string baseRef)
+    {
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+        {
+            return false;
+        }
+
+        try
+        {
+            RunBaseState.Write(homeDirectory, branch, baseRef);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>

@@ -111,6 +111,34 @@ public sealed class HookGitFactsBaseStateTests : IDisposable
         Assert.Equal(stored ? ParentBranch : "origin/HEAD", basis!.Value);
     }
 
+    /// <summary>
+    /// The recorded basis is a catalogued review fact, so rules and tooling can rely on its
+    /// name like every other review fact.
+    /// </summary>
+    [Fact]
+    public void TheRecordedBasisIsACataloguedFact()
+    {
+        Assert.Contains(
+            "review.base-ref", ArbiterTriggerCatalog.AllFacts, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A recorded base that resolves to no ref is not measured from: the review falls back
+    /// to the default base instead of degrading to a dirty-only set against a bogus ref.
+    /// </summary>
+    [Fact]
+    public void ABogusRecordedBaseFallsBackToTheDefault()
+    {
+        RunBaseState.Write(_home.Path, FeatureBranch, "no-such-ref");
+
+        ArbiterFactSet facts = EnrichedFacts();
+
+        Assert.True(
+            facts.TryGet("review.base-ref", out ArbiterFact? basis),
+            "the review must record the base it measured from.");
+        Assert.Equal("origin/HEAD", basis!.Value);
+    }
+
     private IReadOnlyList<string> ChangedPaths()
     {
         ArbiterFactSet facts = EnrichedFacts();
