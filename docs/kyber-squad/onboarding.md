@@ -21,6 +21,7 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -455,11 +456,12 @@ servers keep the original non-orchestrator rule. The predicate itself lives once
 `CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
 agreeing with the others.
 
-**Where the key comes from.** Every server name in this section is one value from
-`McpServerNames` in `src/KyberWeave.Core/Configuration/`, which holds the three keys
-`Docs` (`kw-docs`), `Dash` (`kw-dash`), and `Arbiter` (`kw-arbiter`) and nothing else — no
-executable and no tool name. The renderers and the Arbiter's `ArbiterServer` constant read it,
-so a key cannot drift between a grant and the toolchain roster. **The Squad roster is
+**Where the key comes from.** Every key in this section is declared once. The first-party names are
+the three values of `McpServerNames` — `Docs` (`kw-docs`), `Dash` (`kw-dash`), `Arbiter`
+(`kw-arbiter`) — and the code graph is `McpConfig.CodeGraphServer` (`codegraph`) in Core, re-exported
+as `CapabilityDegradations.CodeGraphMcpServer` so the renderers and the docs server cannot disagree
+about which declared server is the code graph. No executable and no tool name lives in either place:
+tool names come from `toolchain.yml`'s `required-mcp-tools` roster. **The Squad roster is
 `kw-docs` and `kw-arbiter`: `kw-dash` is not in `toolchain.yml`, in `products/kyber-squad/mcp.json`,
 or in any agent grant**, because the KyberDash MCP surface belongs to KyberDash and Squad
 neither deploys nor checks it.
@@ -470,6 +472,18 @@ rendered `allowed-tools`, Pi's take no `tools` or `extensions`. So the orchestra
 whatever its session already has, and that is a structural boundary rather than a narrower grant.
 The parity guard pins both targets by name, so a change to either shows up as a failing assertion
 instead of a quiet discrepancy.
+
+**The code graph reaches every specialist the partition entitles.** `codegraph` is granted through
+the orchestrator-excluded half of the same predicate,
+`GrantsOrchestratorExcludedMcpServers`, so every agent outside the pure orchestrator profile gets it
+and `conductor` does not; `context7` is **not** widened. The form follows each target's vehicle: the
+`mcp__codegraph__*` wildcard on Claude, the enumerated `mcp__codegraph__explore` name from the
+roster on ZCode, Devin's subagent path and Command Code, and the server key `codegraph_*: allow` on
+OpenCode and Kilo. Both halves are one grant per target, and `SquadCodeGraphGrantContractTests` pins
+the set. **Pi is unchanged**: it grants only `kw-docs`, because its grant vehicle is a per-server
+adapter overlay and the namespace mapping for a second server is a separate decision. Before this
+grant existed, a Command Code, OpenCode or Kilo subagent had no index tool at all and every code
+question degraded to grep.
 
 **Why the orchestrator is included.** One `kw-docs` tool is
 `docs_get_coding_standard_for_technology`, which hands an agent the coding standard it must
@@ -1272,12 +1286,27 @@ When conductor executes concurrent tasks in isolated git worktrees, MCP configur
 
 1. **Argument splicing**: Worktree MCP setup splices `--repo-root` and `--path` arguments to absolute canonical paths so tools inspect canonical governance and symbols.
 2. **Symlink guard (fail closed)**: Worktrees must never create symbolic links or reparse points to `.codegraph/` (background watchers would mutate the canonical database from worktree state). Worktree setup fails closed if a `.codegraph` symlink is detected.
-3. **Canonical doctor check**: Worktree initialization executes:
+3. **A worktree indexes itself**:
    ```bash
-   kyber-weave doctor --check <canonical-root>
+   kyber-weave doctor --ensure .
    ```
-   This verifies canonical index presence and MCP server responsiveness before dispatching worker tasks, avoiding false-positive index failures against empty worktrees.
-4. **Conditional worktree indexing**: Ephemeral worktrees share the canonical index by default. A local `codegraph init .` is run in the worktree only when a task's acceptance criteria explicitly require indexing newly added branch symbols.
+   Run it in the worktree, as its first command. A worktree does not share the canonical checkout's index: it builds its own, at about 8 seconds and about 223 MB until cleanup removes it. A shared index was measured answering for another branch — a method added on the worktree's branch was found from the worktree and not from the canonical checkout — so the guarantee that the index describes the tree the worker is in is worth the disk.
+4. **Work in the canonical checkout when you can.** Branching in place on a clean, idle checkout keeps the docs server, the architect and the workers on one revision. A worktree is for a dirty or busy checkout and for parallel workers, and it costs an index per tree. The run-start command that does this automatically arrives with the run-start surface and is not in this repository yet; until it ships, branching in place is the operator's choice.
+
+#### The worktree limitation, per role
+
+The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on another branch can be answered about the wrong code. Every docs response carries `branch=` and `repo=` in its provenance line, and `repo=` is the git directory every worktree of the repository shares — a different `root=` with the same `repo=` is another worktree of your repository, not a foreign one ([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+
+| Role | Code questions | Docs and standards | If the check fails |
+|---|---|---|---|
+| Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
+| `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
+| `review-lens`, `review-triage` (no shell) | The packet carries `.agent_scratchpad/<task-id>/review-diff.patch` and the absolute worktree path. Direct reads of that path. MCP code tools only when provenance `branch=` matches the packet. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
+| `architect` (no shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, direct reads at the absolute worktree path, each counted as a direct read with reason "server bound to another revision", and the plan states which revision was read. | The server cannot see a plan written into a worktree. The architect writes to `<WORKTREE>/docs/plans/…`, returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree", the two CLI gates run there, and it is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
+
+A session started inside a worktree is already correct, because `--repo-root .` resolves there. A
+worktree created *after* the docs server started is outside the server's reach: the refresh covers
+the root the server is bound to, and nothing else.
 
 ---
 

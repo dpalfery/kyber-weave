@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/dal-dev.agent.md
 sources:
   .github/agents/dal-dev.agent.md: efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
-final-body-sha256: 728e875375f1b325d60b50db118c5ab10ff1dbea82589e331428dad91e1b2c5c
+final-body-sha256: ff068e134d1773841022a3deac8901ee4e22232375660028fc041e7e1fea7fa9
 ---
 # dal-dev migration
 

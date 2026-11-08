@@ -4,7 +4,7 @@ title: The kw-docs MCP Server Reaches Every Entitled Agent, the Conductor Includ
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-07
 component: KyberSquad
 decided-by: []
 supersedes: []
@@ -52,6 +52,16 @@ The change lands on top of the Factory per-droid whitelist delivered in
 [ADR 0034](0034-factory-droid-entry-point-skill.md)'s 2026-10-31 amendment, which derived a droid's
 `mcpServers` value from the servers the squad itself declares.
 
+**Amended 2026-11-07, in place: the code graph is granted too, from the same predicate.** Decision 2
+reserved `codegraph` and `context7` for non-orchestrator agents but left each renderer to decide
+whether to emit that grant, and the measured conductor run showed the result — Command Code, OpenCode
+and Kilo granted only `kw-docs`, so their subagents had no index tool at all and every code question
+degraded to grep. The carve-out is unchanged and is now **applied**: `codegraph` is granted to every
+agent `GrantsOrchestratorExcludedMcpServers` entitles, `context7` is not widened, and the names come
+from the toolchain roster rather than from a list inside a renderer. Decision 2 states the boundary
+and the per-target table below states each vehicle; the run rule that made the gap expensive is
+[ADR 0061](0061-code-editing-runs-stop-on-unusable-tools.md).
+
 ## Decision
 
 1. **The owner's directive governs: `kw-docs` is granted to every agent whose capability
@@ -66,12 +76,15 @@ The change lands on top of the Factory per-droid whitelist delivered in
    rather than withheld (decision 5 states the per-target outcomes, and the parity guard pins the
    two absences).
 
-2. **The pure-orchestrator carve-out is reversed for `kw-docs` and survives for `codegraph`
-   and `context7`.** Those two servers keep their existing non-orchestrator-only behaviour. The
-   directive's quality reason reaches the standards tool; it does not reach code-graph symbol
-   lookup or third-party documentation lookup, and the carve-out's original reasoning remains
-   true for both. The `filesystem.read` anchor is kept rather than dropped, so a capability
-   profile that cannot be resolved still withholds every grant: the rule stays fail-closed.
+2. **The pure-orchestrator carve-out is reversed for `kw-docs` and survives for `codegraph` and
+   `context7` — and the surviving half is now actually granted.** `kw-docs` reaches the orchestrator.
+   `codegraph` is granted to every agent whose capability profile is not the pure orchestrator and
+   that `filesystem.read` entitles, through `GrantsOrchestratorExcludedMcpServers` — the same
+   predicate `kw-docs` rides, its narrowed half — so the orchestrator keeps the carve-out and every
+   specialist gains an index tool. `context7` is not widened: the measured failure was the code
+   graph, and third-party documentation lookup is a separate decision for a separate reason. The
+   `filesystem.read` anchor is kept rather than dropped, so a capability profile that cannot be
+   resolved still withholds every grant: the rule stays fail-closed.
 
 3. **The orchestrator's widened reach is an accepted, recorded widening.** The `conductor`
    profile denies `filesystem.search` and `process.execute`, and this change grants it eight
@@ -93,6 +106,10 @@ The change lands on top of the Factory per-droid whitelist delivered in
    computing the granted set from the loaded source rather than from any renderer, so a future
    edit cannot change one target's grant without changing the others. Sharing the predicate is
    what makes the narrowed carve-out a single decision rather than four that happen to agree.
+   Since the 2026-11-07 amendment the same type owns the derivations the code-graph grant is
+   built from — `CodeGraphMcpServer`, `CodeGraphMcpToolNames` and `CodeGraphMcpServerNames`, all
+   read off the toolchain roster — and `SquadCodeGraphGrantContractTests` pins that set, so the
+   widened half cannot drift apart the way the four copies would have.
 
 5. **Per-target outcomes.** The rule is expressed in whatever form each harness actually accepts,
    and the form is the contract rather than a rendering detail:
@@ -103,11 +120,11 @@ The change lands on top of the Factory per-droid whitelist delivered in
    | Claude | Tool-level wildcards in the agent's `tools` allow-list | Receives `mcp__kw-docs__*` only, and not `mcp__codegraph__*` or `mcp__context7__*` |
    | ZCode | Enumerated `mcp__<server>__<tool>` names from `toolchain.yml`'s `required-mcp-tools`; no wildcard is expanded | Receives the eight `kw-docs` names, not the `codegraph`/`context7` names |
    | Devin | The same enumerated `mcp__<server>__<tool>` names in `allowed-tools`, on the subagent path only | **Structurally inexpressible, not narrow.** A Devin primary agent lowers to a skill, and a Devin skill carries no rendered `allowed-tools` — the renderer emits that key on the subagent path alone, because on a skill it pre-approves rather than restricts — so there is no governed surface on which the orchestrator could be granted anything. Its reach on this target is only what the session it runs in already has |
-   | OpenCode | The server-scoped permission key `kw-docs_*` | Granted |
+   | OpenCode | The server-scoped permission keys `kw-docs_*`, and `codegraph_*` for an agent outside the pure orchestrator | Granted: `kw-docs_*`. No `codegraph_*` key, and no `context7` key |
    | Copilot | The agent's own `copilot-tools` frontmatter entry `kw-docs/*`; no renderer injects it | Gains that one entry in canonical frontmatter |
-   | Command Code | Enumerated `mcp__kw-docs__<tool>` names in the agent's `tools` | Receives the eight names |
+   | Command Code | Enumerated `mcp__kw-docs__<tool>` names in the agent's `tools`, plus the `mcp__codegraph__explore` name from the same roster for an agent outside the pure orchestrator | Receives the eight `kw-docs` names, and no code-graph or `context7` name |
    | Pi | Renderer-derived overlay for every entitled **subagent**, replacing the hand-authored `research-agent`-only overlay for this server: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kw_docs__<tool>` entry per roster tool | Granted in every subagent file. A primary agent lowers to a skill, which carries no `tools` or `extensions`, so the grant is structurally inexpressible on the lowered form and the degradation record says so — the same class of exception as Devin |
-   | Kilo | The agent frontmatter `permission` map entry `kw-docs_*: allow`; an unentitled agent emits no `permission` key at all | Granted: `permission: {kw-docs_*: allow}` |
+   | Kilo | The agent frontmatter `permission` map entries `kw-docs_*: allow`, and `codegraph_*: allow` for an agent outside the pure orchestrator; an unentitled agent emits no `permission` key at all | Granted: `permission: {kw-docs_*: allow}` and no code-graph key |
    | Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, read from the squad's own `mcp.json`; no entry when the squad declares no such server | Granted: `mcpServers: [{name: kw-docs, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
    | Cursor, Codex, Warp | No per-agent key: MCP reach is structurally inherited from the session | Unchanged, and already reaching `kw-docs` once the operator wires it |
 
@@ -265,6 +282,13 @@ The change lands on top of the Factory per-droid whitelist delivered in
   `filesystem.read` is entitled by the same rule with no per-agent declaration.
 - The one shared predicate plus the parity guard means a change to the entitlement rule is one
   edit and one failing test away from being wrong, on every target at once.
+- Since the 2026-11-07 amendment, every specialist agent on a target that can express a per-agent
+  grant also carries the `codegraph` grant, so a code question reaches an index instead of grep.
+  The orchestrator still carries none, and `context7` is still withheld from it everywhere. **Pi is
+  the one target whose code-graph grant is not rendered**: its grant vehicle is a per-server
+  adapter overlay, whose namespace mapping was verified for the one hyphenated first-party key, so
+  extending it to a second server is a separate decision and is tracked as a todo rather than
+  guessed.
 - ZCode installs now require the `kw-docs` server to be declared, or `squad doctor` fails.
   That is a stricter install prerequisite than before, and it follows from the harness's own
   hard requirement rather than from a Squad choice.

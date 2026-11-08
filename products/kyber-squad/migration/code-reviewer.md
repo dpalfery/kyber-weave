@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: bba1e59f0ceccdb01c486331835858f56a89c100f7807593e6a70f82859607e5
+final-body-sha256: 896ea2dfb9200415042d41b239c2fbcc1f2821e3fccbbdfdf9f134ce9c9fa379
 ---
 # code-reviewer migration
 

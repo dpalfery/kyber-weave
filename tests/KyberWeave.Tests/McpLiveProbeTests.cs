@@ -428,6 +428,131 @@ public sealed class McpLiveProbeTests : IDisposable
             $"The remedy suggested '{suggested}', which is not a timeout --mcp-timeout accepts.");
     }
 
+    /// <summary>
+    /// The probe starts the server with its CodeGraph refresh disabled, so <c>doctor --check</c> keeps
+    /// the promise its own description makes.
+    /// </summary>
+    /// <remarks>
+    /// D23: <c>--check</c> says it "never runs init or index", but the probe makes a real docs call, and
+    /// the server now refreshes CodeGraph on its first tool call. Without the flag the read-only verb
+    /// would write an index, and every read-only caller — run start, CI, a reviewer — would inherit a
+    /// write it was told would not happen.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_StartsTheServerWithCodeGraphRefreshDisabled()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string argvPath = Path.Combine(_stubs.Path, "argv.txt");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.Contains("--no-codegraph-refresh", File.ReadAllLines(argvPath));
+    }
+
+    /// <summary>
+    /// A provenance line carrying the branch and repository fields still passes <c>mcp.root</c> when the
+    /// root is this checkout.
+    /// </summary>
+    /// <remarks>
+    /// D24: the header gained <c>branch=</c> and <c>repo=</c>. The probe compares the served root to the
+    /// resolved one after stripping the metadata that follows it, so a metadata field it does not know
+    /// becomes part of the path it compares — and a healthy server answering for this very repository
+    /// fails the check. That is the failure this case prevents: the added fields must not turn a correct
+    /// server into a "wrong repository" diagnosis.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_ProvenanceWithBranchAndRepoMetadata_StillPassesMcpRoot()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string served = "provenance: root=" + Root
+            + " branch=main repo=" + Path.Combine(Root, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// A provenance line carrying a repository path with spaces in repo= still passes mcp.root.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ProvenanceWithSpacedRootAndRepo_StillPassesMcpRoot()
+    {
+        string spacedRoot = Path.Combine(Root, "repo with spaces");
+        Directory.CreateDirectory(Path.Combine(spacedRoot, ".codegraph"));
+        string served = "provenance: root=" + spacedRoot
+            + " branch=main repo=" + Path.Combine(spacedRoot, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            spacedRoot,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(spacedRoot),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// A repository path containing token-like substrings like "rev=evil" in root and repo
+    /// is not truncated by the metadata stripper.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ProvenancePathContainingTokenSubstrings_StillPassesMcpRoot()
+    {
+        string evilRoot = Path.Combine(Root, "my rev=evil");
+        Directory.CreateDirectory(Path.Combine(evilRoot, ".codegraph"));
+        string served = "provenance: root=" + evilRoot
+            + " branch=main repo=" + Path.Combine(evilRoot, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            evilRoot,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(evilRoot),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
     private static string ProvenanceCall(string root, string dirty, string rev = "abc123", int documents = 7) =>
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + " rev=" + rev + " dirty=" + dirty + " documents=" + documents + "\"}]}}";
 }

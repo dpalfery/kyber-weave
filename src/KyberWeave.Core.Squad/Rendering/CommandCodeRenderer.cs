@@ -39,14 +39,20 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// <b>MCP is granted by fully qualified tool name, on the file-read entitlement.</b> Command Code
 /// gives a subagent no MCP tool it does not name in its own <c>tools</c> list, so an unnamed
-/// server is a server the agent cannot call. This renderer therefore names the
-/// <c>kw-docs</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
-/// whose capability profile resolves and allows <c>filesystem.read</c> — the pure orchestrator
-/// included, because that server carries <c>docs_get_coding_standard_for_technology</c>
-/// (ADR 0050). It names that one server and no other: <c>codegraph</c> and <c>context7</c> keep
-/// the orchestrator carve-out, and this target never named them before the widening either, so
-/// it is not the surface on which that carve-out is expressed. Where the grant is empty — a
-/// profile that denies the read, or an unresolvable one — the agent names no MCP tool and its
+/// server is a server the agent cannot call. This renderer names two entitlement classes, in this
+/// order, and no others. The <c>kw-docs</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c>
+/// entries reach every agent whose capability profile resolves and allows
+/// <c>filesystem.read</c> — the pure orchestrator included, because that server carries
+/// <c>docs_get_coding_standard_for_technology</c> (ADR 0050). The code-graph roster's entries
+/// reach the agents <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers"/>
+/// entitles, which is the same read entitlement minus the pure orchestrator: a role that only
+/// routes work has no use for a code graph, and a developer that does has been told to query one
+/// by its own instructions. A library-lookup server keeps that cut-out too and is not named here,
+/// because widening the carve-out for the code graph is not a widening for library lookups. Both
+/// rosters come from the toolchain rather than from a list in this file, so a tool added to
+/// <c>toolchain.yml</c> is granted without a renderer edit and a roster that declares nothing
+/// grants nothing. Where the grant is empty — a profile that denies the read, or an unresolvable
+/// one — the agent names no MCP tool and its
 /// <c>permission-not-expressible</c> record states that reason rather than claiming in general
 /// terms that Squad names nothing.
 /// </para>
@@ -118,14 +124,9 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
 
     private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
-        // Read from canonical source through the shared derivation rather than a renderer-local
-        // list, so a tool renamed upstream is a source edit, the doctor check reads the same
-        // roster, and this target cannot disagree with the others about which server is which
-        // entitlement class (ADR 0050 decision 4).
-        IReadOnlyList<string> universalMcpToolNames = context.GetOrCreateState(static c =>
-            CapabilityDegradations.UniversalMcpToolNames(c.Source.Toolchain.RequiredMcpTools));
+        McpPlan mcp = context.GetOrCreateState(McpPlan.Create);
 
-        context.AddPrincipal(RenderAgentFile(context, agent, universalMcpToolNames), agent.Resources);
+        context.AddPrincipal(RenderAgentFile(context, agent, mcp), agent.Resources);
         context.AddEntryPointSkillProjection(
             agent,
             "an agent",
@@ -134,10 +135,10 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
                 agent,
                 fallbackProfile,
                 context.CapabilityProfiles,
-                universalMcpToolNames,
+                mcp,
                 path,
                 reused),
-            () => BuildDegradationRecords(agent, context.CapabilityProfiles, universalMcpToolNames));
+            () => BuildDegradationRecords(agent, context.CapabilityProfiles, mcp));
     }
 
     private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
@@ -147,7 +148,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
     private static SquadDeploymentFile RenderAgentFile(
         SquadHarnessRenderContext context,
         SquadAgent agent,
-        IReadOnlyList<string> universalMcpToolNames)
+        McpPlan mcp)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -169,7 +170,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         // Always emit tools. Omitting it already grants nothing, but an explicit list keeps
         // the grant reviewable in the file, and an empty grant is the visible tools: [].
         frontmatter["tools"] = new CommandCodeYamlFlowSequence(
-            ResolveTools(agent, context.CapabilityProfiles, universalMcpToolNames));
+            ResolveTools(agent, context.CapabilityProfiles, mcp));
 
         return context.CreateFile(
             $"{context.AgentsDirectory}/{agent.Name}.md",
@@ -194,32 +195,43 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
     /// the MCP entitlement is written out name by name — which is how the target consumes the
     /// roster, not how the roster is derived. Which names the roster holds, and which of them a
     /// profile is entitled to, are the shared
+    /// <see cref="CapabilityDegradations.CodeGraphMcpToolNames"/>,
     /// <see cref="CapabilityDegradations.UniversalMcpToolNames"/> and
     /// <see cref="CapabilityDegradations.ResolveMcpToolNames"/> derivations — the ones Devin and
     /// ZCode consume — so an edit to the entitlement partition reaches this target instead of
     /// leaving it rendering the set the others just changed.
     /// <para>
-    /// The orchestrator-excluded class is passed in empty rather than filtered out here: this
-    /// target names the universal server alone and has since before the widening, so it grants
-    /// none of that class. Declaring the class empty at the call site keeps the derivation
-    /// shared while stating, in one place a reader can see, that this target has no member of it.
+    /// The orchestrator-excluded class is passed in as its code-graph member alone. That class
+    /// covers a library-lookup server too, and this target names neither that server nor the
+    /// Arbiter one: the widening this renderer carries is the code graph's, so the class is
+    /// narrowed here rather than filtered out later, which keeps the per-profile decision inside
+    /// the shared derivation.
     /// </para>
     /// </remarks>
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> universalMcpToolNames)
+        McpPlan mcp)
     {
         return
         [
             .. Tools.Resolve(agent.CapabilityProfile, capabilityProfiles),
-            .. CapabilityDegradations.ResolveMcpToolNames(
-                agent.CapabilityProfile,
-                capabilityProfiles,
-                orchestratorExcludedMcpToolNames: [],
-                universalMcpToolNames)
+            .. ResolveMcpToolNames(agent.CapabilityProfile, capabilityProfiles, mcp)
         ];
     }
+
+    /// <summary>
+    /// The MCP tool names one principal's entitlement carries, through the shared resolution.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveMcpToolNames(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        McpPlan mcp) =>
+        CapabilityDegradations.ResolveMcpToolNames(
+            profileName,
+            capabilityProfiles,
+            mcp.CodeGraphToolNames,
+            mcp.UniversalToolNames);
 
     /// <summary>
     /// Builds the degradation records for a primary agent that also renders as an
@@ -233,7 +245,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> universalMcpToolNames,
+        McpPlan mcp,
         string entryPointSkillPath,
         bool reusedCanonicalSkill = false)
     {
@@ -260,7 +272,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
                      agent,
                      capabilityProfiles,
-                     universalMcpToolNames,
+                     mcp,
                      $"The same-name entry point at {entryPointSkillPath} runs under the " +
                      "session's permissions; the agent's explicit tools allow-list does not " +
                      "apply to it."))
@@ -272,7 +284,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> universalMcpToolNames,
+        McpPlan mcp,
         string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
@@ -317,14 +329,19 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         }
 
         // The parent-MCP sentence states the actual condition, and only when the condition
-        // holds: an agent whose tools list names the roster's MCP tools must not carry a record
-        // claiming Squad names none. The cause is selected rather than assumed, so a roster that
-        // declares nothing is not reported as a profile that denied the read.
-        if (!CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles) ||
-            universalMcpToolNames.Count == 0)
+        // holds: an agent whose tools list names any of the roster's MCP tools must not carry a
+        // record claiming Squad names none. The test is on the resolved grant rather than on one
+        // entitlement class, because the list now carries two classes and an agent can be
+        // granted one of them while the other is empty.
+        IReadOnlyList<string> grantedMcpToolNames =
+            ResolveMcpToolNames(agent.CapabilityProfile, capabilityProfiles, mcp);
+
+        if (grantedMcpToolNames.Count == 0)
         {
-            string cause = universalMcpToolNames.Count == 0
-                ? "the toolchain roster declares no tool for the server every agent needs"
+            string cause = CapabilityDegradations.GrantsUniversalMcpServers(
+                agent.CapabilityProfile,
+                capabilityProfiles)
+                ? "the toolchain roster declares no tool for the servers this agent is entitled to"
                 : $"capability profile '{agent.CapabilityProfile}' does not allow 'filesystem.read'";
             notExpressibleDetails.Add(
                 "MCP tools reach a Command Code subagent only when named in its tools list; " +
@@ -368,6 +385,27 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
         {
             yield return notIsolable;
         }
+    }
+
+    /// <summary>
+    /// The MCP name lists this renderer grants from, resolved once per render.
+    /// </summary>
+    /// <remarks>
+    /// Read from the toolchain roster through the shared derivations rather than a renderer-local
+    /// list, so a tool renamed upstream is a source edit, the doctor check reads the same roster,
+    /// and this target cannot disagree with the others about which server is which entitlement
+    /// class (ADR 0050 decision 4). Two lists rather than one resolved grant, because which class
+    /// an agent receives is the per-profile question
+    /// <see cref="CapabilityDegradations.ResolveMcpToolNames"/> answers; this record only states
+    /// the names each class carries.
+    /// </remarks>
+    private sealed record McpPlan(
+        IReadOnlyList<string> CodeGraphToolNames,
+        IReadOnlyList<string> UniversalToolNames)
+    {
+        public static McpPlan Create(SquadHarnessRenderContext context) => new(
+            CapabilityDegradations.CodeGraphMcpToolNames(context.Source.Toolchain.RequiredMcpTools),
+            CapabilityDegradations.UniversalMcpToolNames(context.Source.Toolchain.RequiredMcpTools));
     }
 
     /// <summary>

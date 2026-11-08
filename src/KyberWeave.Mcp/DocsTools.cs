@@ -20,7 +20,7 @@ namespace KyberWeave.Mcp;
 /// caps its own: a retrieval tool that returns a whole corpus is a slower grep.
 /// </summary>
 [McpServerToolType]
-public sealed partial class DocsTools(DocumentIndexHost host)
+public sealed partial class DocsTools
 {
     /// <summary>Hard ceiling on any single section, so one huge section cannot crowd out
     /// every other document in the response.</summary>
@@ -66,13 +66,46 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         nameof(AnalysisRuleKind.Terminology)
     };
 
-    private readonly DocumentIndexHost _host = host ?? throw new ArgumentNullException(nameof(host));
+    private readonly DocumentIndexHost _host;
     private readonly IDocsAnalysisReader? _analysisReader;
+    private readonly CodeGraphFreshness _freshness;
 
-    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader analysisReader)
-        : this(host)
+    /// <summary>Tools over <paramref name="host"/>, with the documentation analysis surface unavailable.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    public DocsTools(DocumentIndexHost host)
+        : this(host, null, null)
     {
-        _analysisReader = analysisReader ?? throw new ArgumentNullException(nameof(analysisReader));
+    }
+
+    /// <summary>Tools over <paramref name="host"/>, with the analysis tools backed by <paramref name="analysisReader"/>.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    /// <param name="analysisReader">The port the glossary and analysis tools read the corpus through.</param>
+    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader analysisReader)
+        : this(host, analysisReader ?? throw new ArgumentNullException(nameof(analysisReader)), null)
+    {
+    }
+
+    /// <summary>Tools over <paramref name="host"/>, with the given CodeGraph refresh schedule, if any.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    /// <param name="analysisReader">The analysis port, or null when this host has no analysis surface.</param>
+    /// <param name="freshness">
+    /// The refresh schedule the composition root built, or null to answer from the documents on disk
+    /// with no CodeGraph check at all.
+    /// </param>
+    /// <remarks>
+    /// The schedule is opt-in, and null means no schedule, because it is a gate as much as a refresh:
+    /// where the repository declares CodeGraph and the index is unreadable, a scheduled tool returns
+    /// <c>STATUS: TOOL_FAILURE</c> in place of its answer. A caller that passes nothing is asking a
+    /// document question and has not asked for a tool-availability gate — a CI runner has no index to
+    /// satisfy one — so a default schedule would withhold answers those callers can have. Keeping an
+    /// index fresh is a decision for the process, made once at the composition root, which passes the
+    /// schedule explicitly.
+    /// </remarks>
+    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader? analysisReader, CodeGraphFreshness? freshness)
+    {
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _analysisReader = analysisReader;
+        _freshness = freshness ?? new CodeGraphFreshness(_host.RepositoryRoot, refreshEnabled: false);
     }
 
     [McpServerTool(Name = "docs_answer_question_from_repo_documentation", ReadOnly = true, OpenWorld = false)]
@@ -99,19 +132,22 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         string? cursor = null)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         ExploreAnswer answer = index.Explore(query, cursor);
 
         if (answer.IsInvalidCursor)
         {
-            return Lead(provenance, answer.InvalidCursorMessage ?? string.Empty);
+            return Lead(gate, provenance, answer.InvalidCursorMessage ?? string.Empty);
         }
 
         if (answer.IsMiss)
         {
             string docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
-            return Lead(provenance, $"""
+            return Lead(gate, provenance, $"""
                 No document in the documentation tree scored above the relevance threshold for '{query}'.
                 {answer.DocumentsConsidered} documents were considered.
 
@@ -121,7 +157,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 """);
         }
 
-        return Lead(provenance, FormatExploreAnswer(answer));
+        return Lead(gate, provenance, FormatExploreAnswer(answer));
     }
 
     private const string ExploreReadingRule =
@@ -172,13 +208,17 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     public string ForSymbol(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
         if (hits.Count == 0)
         {
             return Lead(
+                gate,
                 provenance,
                 $"No document declares '{symbol}' in its code-refs frontmatter. " +
                 "It may be undocumented, or documented only in prose.");
@@ -195,7 +235,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             AppendJoins(sb, hit);
         }
 
-        return Lead(provenance, sb.ToString());
+        return Lead(gate, provenance, sb.ToString());
     }
 
     [McpServerTool(Name = "docs_find_duplicates_conflicts_ambiguous_terms", ReadOnly = true, OpenWorld = false)]
@@ -215,16 +255,20 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         int effectiveBudget = Math.Max(0, Math.Clamp(charBudget, 0, AnalysisCharCap) - provenance.Length - 1);
 
         if (_analysisReader is null)
-            return Lead(provenance, "Documentation analysis is unavailable in this host.");
+            return Lead(gate, provenance, "Documentation analysis is unavailable in this host.");
 
         if (!TryParseKind(kind, out AnalysisRuleKind? parsedKind))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"Unknown documentation-analysis kind '{kind}'. Use duplicate, conflict, or terminology.",
@@ -239,6 +283,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"Documentation analysis is unavailable: {exception.Message}",
@@ -257,6 +302,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         if (start < 0)
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"The analysis cursor '{cursor}' is no longer present. Start again without a cursor.",
@@ -272,7 +318,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             sb.AppendLine(parsedKind is null
                 ? "No documentation-analysis candidates are pending."
                 : $"No {parsedKind.Value.ToString().ToUpperInvariant()} candidates are pending.");
-            return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+            return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
         }
 
         int emitted = 0;
@@ -295,6 +341,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
         if (emitted == 0)
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     sb.AppendLine("The response budget is too small for a candidate.").ToString(),
@@ -306,7 +353,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             if (sb.Length + footer.Length <= effectiveBudget) sb.Append(footer);
         }
 
-        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+        return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
     [McpServerTool(Name = "docs_look_up_glossary_term_definition", ReadOnly = true, OpenWorld = false)]
@@ -323,14 +370,17 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     public string Glossary(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         int effectiveBudget = Math.Max(0, AnalysisCharCap - provenance.Length - 1);
 
         if (_analysisReader is null)
-            return Lead(provenance, "The managed documentation glossary is unavailable in this host.");
+            return Lead(gate, provenance, "The managed documentation glossary is unavailable in this host.");
         if (string.IsNullOrWhiteSpace(term))
-            return Lead(provenance, "Provide a glossary term to look up.");
+            return Lead(gate, provenance, "Provide a glossary term to look up.");
 
         GlossaryLookupResult result;
         try
@@ -340,6 +390,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"The managed documentation glossary is unavailable: {exception.Message}",
@@ -349,6 +400,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         if (result.Senses.Count == 0)
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"No glossary senses are declared for '{result.Term.ReplaceLineEndings(" ")}'.",
@@ -388,7 +440,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
         if (result.Senses.Count > AnalysisCandidateCap)
             sb.AppendLine(CultureInfo.InvariantCulture, $"… {result.Senses.Count - AnalysisCandidateCap} more senses omitted by the hard cap.");
-        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+        return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
     [McpServerTool(Name = "docs_validate_governed_document_schema", ReadOnly = true, OpenWorld = false)]
@@ -417,11 +469,14 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         DiagnosticReport report = new();
         if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
-            return FormatGateResponse(provenance, report, charBudget);
+            return FormatGateResponse(gate, provenance, report, charBudget);
 
         try
         {
@@ -444,7 +499,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Hint: "Fix the repository configuration or corpus access, then call docs_validate_governed_document_schema again."));
         }
 
-        return FormatGateResponse(provenance, report, charBudget);
+        return FormatGateResponse(gate, provenance, report, charBudget);
     }
 
     [McpServerTool(Name = "docs_detect_drift_between_documents_and_code", ReadOnly = true, OpenWorld = false)]
@@ -463,11 +518,18 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
+        // This tool answers even when the gate reports a failure, and that is deliberate: its
+        // verdict is the CodeGraph failure report the caller came for — the linter emits a
+        // critical diagnostic naming the unreadable index and its remedy, and its result line is
+        // the documented second line of the response. Replacing that with the generic block would
+        // throw away the findings. The gate's one-line note still rides above the verdict.
         DiagnosticReport report = new();
         if (!TryLoadHostConfiguration(report, out KyberWeaveConfig _))
-            return FormatGateResponse(provenance, report, charBudget);
+            return FormatGateResponse(gate, provenance, report, charBudget);
 
         try
         {
@@ -485,7 +547,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Hint: "Fix the repository configuration or corpus access, then call docs_detect_drift_between_documents_and_code again."));
         }
 
-        return FormatGateResponse(provenance, report, charBudget);
+        return FormatGateResponse(gate, provenance, report, charBudget);
     }
 
     /// <summary>
@@ -557,6 +619,8 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             the floor behaves as the floor rather than as an empty answer.
             """)] int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
 
@@ -564,7 +628,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         // otherwise be answered with "no standard for ''". Usage prose is the honest reply to
         // a call that named nothing.
         if (string.IsNullOrWhiteSpace(technology))
-            return Lead(provenance, StandardUsage);
+            return Lead(gate, provenance, StandardUsage);
 
         string requested = technology.Trim().ReplaceLineEndings(" ");
         IReadOnlyList<DocumentHit> hits = index.CodingStandards(
@@ -573,7 +637,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             Math.Clamp(charBudget, MinCharBudget, MaxCharBudget));
 
         if (hits.Count == 0)
-            return Lead(provenance, StandardMiss(index, requested));
+            return Lead(gate, provenance, StandardMiss(index, requested));
 
         StringBuilder sb = new();
         AppendStandardCount(sb, requested, hits);
@@ -598,22 +662,42 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             AppendExcerpt(sb, withheld.Elide(hit.Excerpt), "topic");
         }
 
-        return Lead(provenance, sb.ToString());
+        return Lead(gate, provenance, sb.ToString());
     }
+
+    /// <summary>
+    /// The one CodeGraph gate every tool except <see cref="DocsStatus"/> consults before it
+    /// answers: refresh the index on the server's own schedule, then decide whether this call may
+    /// answer at all.
+    /// </summary>
+    /// <remarks>
+    /// One gate rather than a check per tool, because the question is the same for all of them:
+    /// the joins these tools report come from CodeGraph, and an answer with the joins silently
+    /// missing reads exactly like a complete one. <see cref="DocsStatus"/> is exempt because it is
+    /// the tool a caller reaches for once something else has failed, and it has to answer.
+    /// </remarks>
+    private CodeGraphGate CheckCodeGraph() => _freshness.Evaluate(_host.CreateCodeGraphResolver);
 
     /// <summary>
     /// The provenance header for a response answered from <paramref name="index"/>. Every
     /// user-visible return leads with this so a caller can tell which corpus answered.
     /// </summary>
-    private string Provenance(DocumentIndex index) =>
-        CorpusProvenance.Line(_host.RepositoryRoot, index.DocumentCount, _host.CorpusBuilds);
+    private string Provenance(DocumentIndex? index = null) =>
+        CorpusProvenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? _host.DocumentCount, _host.CorpusBuilds);
 
     /// <summary>
-    /// Puts the provenance line first, then the body. The header is emitted whole and the
-    /// body is what gets clipped, so the tell is never the part truncated away.
+    /// Puts the provenance line first, then the gate's one-line note when it has one, then the
+    /// body. The header is emitted whole and the body is what gets clipped, so the tell is never
+    /// the part truncated away.
     /// </summary>
-    private static string Lead(string provenance, string body) =>
-        provenance + "\n" + body;
+    private static string Lead(CodeGraphGate gate, string provenance, string body) =>
+        gate.Note is { } note ? provenance + "\n" + note + "\n" + body : provenance + "\n" + body;
+
+    /// <summary>
+    /// The response of a tool the gate stopped: the provenance line, so the failure names the
+    /// corpus it is about, then the failure itself and nothing else.
+    /// </summary>
+    private static string Blocked(string provenance, string failure) => provenance + "\n" + failure;
 
     private bool TryLoadHostConfiguration(DiagnosticReport report, out KyberWeaveConfig config)
     {
@@ -645,7 +729,11 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return true;
     }
 
-    private static string FormatGateResponse(string provenance, DiagnosticReport report, int charBudget)
+    private static string FormatGateResponse(
+        CodeGraphGate gate,
+        string provenance,
+        DiagnosticReport report,
+        int charBudget)
     {
         int effectiveBudget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
         string verdict = report.HasErrors ? "fail" : "pass";
@@ -731,7 +819,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             ? resultLine
             : resultLine + "\n" + findingsText.ToString().TrimEnd('\r', '\n');
 
-        return Lead(provenance, body);
+        return Lead(gate, provenance, body);
     }
 
     private static string FormatGateFinding(Diagnostic diagnostic)

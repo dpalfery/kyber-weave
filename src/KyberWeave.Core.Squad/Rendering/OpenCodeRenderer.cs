@@ -42,7 +42,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Server-scoped MCP mapping for the declared <c>kw-docs</c> server grants <c>kw-docs_*</c> to every agent
 /// with <c>filesystem.read: allow</c>, pure orchestrators included, excluding shared identities whose
 /// canonical skill is the only projection emitted. The orchestrator keeps the grant because that server
-/// carries <c>docs_get_coding_standard_for_technology</c> (ADR 0050).
+/// carries <c>docs_get_coding_standard_for_technology</c> (ADR 0050). The code-graph server is mapped the
+/// same way but keeps the orchestrator carve-out, so <c>codegraph_*</c> reaches exactly the agents
+/// <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers"/> entitles: the permission map
+/// is where this harness gates MCP reach, and an agent with no key for a server cannot call its tools.
+/// Its key is emitted only when granted, never as a deny. A library-lookup server is not mapped, because
+/// the carve-out was widened for the code graph and not for library lookups.
 /// <c>network.publish</c> has no native tool and is withheld, emitting <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
@@ -158,7 +163,11 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         // suppressed shared identity withholds the KyberWeave MCP permission: the primary wrappers
         // edit files and run commands, so withholding it would strip the tools their role exists
         // to use.
-        frontmatter["permission"] = ResolvePermissions(agent, context.CapabilityProfiles, context.SuppressedSkillIdentities);
+        frontmatter["permission"] = ResolvePermissions(
+            agent,
+            context.CapabilityProfiles,
+            context.SuppressedSkillIdentities,
+            context.GetOrCreateState(McpPlan.Create).CodeGraphServerNames);
 
         context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
         context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles));
@@ -176,7 +185,8 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
     private static Dictionary<string, object> ResolvePermissions(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> suppressedSkillIdentities)
+        IReadOnlySet<string> suppressedSkillIdentities,
+        IReadOnlyList<string> codeGraphServerNames)
     {
         HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
         object? taskPermissionValue = null;
@@ -205,6 +215,21 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
                 CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))
             {
                 granted.Add(KyberWeaveMcpPermission);
+            }
+
+            // The code graph keeps the orchestrator carve-out, so its own keys are gated on its
+            // own predicate. A server name comes from the toolchain roster, so a roster that
+            // declares no code-graph server adds nothing rather than an entry that resolves
+            // against no configured server.
+            if (!suppressedSkillIdentities.Contains(agent.Name) &&
+                CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    capabilityProfiles))
+            {
+                foreach (string serverName in codeGraphServerNames)
+                {
+                    granted.Add($"{serverName}_*");
+                }
             }
 
             if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -236,6 +261,23 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
                 // global default decides, and the global default is allow.
                 ordered["task"] = taskPermissionValue ?? "deny";
                 continue;
+            }
+
+            if (string.Equals(key, KyberWeaveMcpPermission, StringComparison.Ordinal))
+            {
+                // The code-graph keys sit beside the universal one: all of them are per-server MCP
+                // entries rather than members of OpenCode's own closed vocabulary, and each is
+                // emitted only for the agents its predicate entitles. An unentitled agent gets no
+                // key at all rather than a deny, because a deny would pin a claim about a server
+                // the canonical source may never declare, and an absent grant withholds already.
+                foreach (string serverName in codeGraphServerNames)
+                {
+                    string codeGraphPermission = $"{serverName}_*";
+                    if (granted.Contains(codeGraphPermission))
+                    {
+                        ordered[codeGraphPermission] = "allow";
+                    }
+                }
             }
 
             ordered[key] = granted.Contains(key) ? "allow" : "deny";
@@ -330,5 +372,19 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         {
             yield return notIsolable;
         }
+    }
+
+    /// <summary>
+    /// The server names this renderer's permission map grants from, resolved once per render.
+    /// </summary>
+    /// <remarks>
+    /// Read from the toolchain roster through the shared derivation rather than spelled in this
+    /// file, so the server is renamed in one place and this target cannot disagree with the other
+    /// single-server targets about which server the widening names (ADR 0050 decision 4).
+    /// </remarks>
+    private sealed record McpPlan(IReadOnlyList<string> CodeGraphServerNames)
+    {
+        public static McpPlan Create(SquadHarnessRenderContext context) => new(
+            CapabilityDegradations.CodeGraphMcpServerNames(context.Source.Toolchain.RequiredMcpTools));
     }
 }

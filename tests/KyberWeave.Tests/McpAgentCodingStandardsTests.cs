@@ -45,13 +45,19 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     private const string TitleOnlyRuleId = "KW-TITLE-999";
 
     /// <summary>
-    /// The header contract every docs tool response leads with — root, a short revision or the
-    /// literal <c>unavailable</c>, a dirty marker or <c>unknown</c>, and the live document
-    /// count. Repeated rather than shared because the copy in <c>McpDocsProvenanceTests</c> is
-    /// private to that class, and a helper hoisted across test files belongs to neither.
+    /// The header contract every docs tool response leads with — root, the branch and git
+    /// directory it was read from, a short revision or the literal <c>unavailable</c>, a dirty
+    /// marker or <c>unknown</c>, and the live document count. Repeated rather than shared because
+    /// the copy in <c>McpDocsProvenanceTests</c> is private to that class, and a helper hoisted
+    /// across test files belongs to neither.
     /// </summary>
+    /// <remarks>
+    /// The tokens after the root are named rather than assumed adjacent to it: <c>branch=</c> and
+    /// <c>repo=</c> sit between the root and <c>rev=</c>, and a pattern that expected <c>rev=</c>
+    /// straight after the root read both of them as part of the root path.
+    /// </remarks>
     private static readonly Regex ProvenancePattern = new(
-        "^provenance: root=(?<root>.+?) rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
+        "^provenance: root=(?<root>.+?) branch=\\S+ repo=.+? rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
         + "dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\\d+)$",
         RegexOptions.CultureInvariant);
 

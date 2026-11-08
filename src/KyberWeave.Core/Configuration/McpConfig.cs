@@ -183,12 +183,46 @@ public sealed record RequiredMcpServer
 public sealed class McpConfig
 {
     /// <summary>
+    /// The code-graph server's name in <c>mcp.required-servers</c>: the key a repository writes
+    /// when its instructions rely on a code index.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The name is written once, here, because the declaration is what the rest of the product
+    /// branches on. The Squad renderers read it through
+    /// <c>CapabilityDegradations.CodeGraphMcpServer</c>, which re-exports this constant, and the
+    /// docs server reads it through <see cref="DeclaresCodeGraph"/>; a second literal would let
+    /// them disagree about which declared server is the code graph.
+    /// </para>
+    /// <para>
+    /// It lives in Configuration rather than in the Squad assembly because the declaration it names
+    /// is configuration. ADR 0057 decision 3 is the rule this follows: a type moves down into Core
+    /// when Core code needs it, and moving one needs no ADR.
+    /// </para>
+    /// </remarks>
+    public const string CodeGraphServer = "codegraph";
+
+    /// <summary>
     /// The servers the repository's agent instructions rely on, keyed by server name, in
     /// declaration order. Empty when the host declares none.
     /// </summary>
     public IReadOnlyDictionary<string, RequiredMcpServer> RequiredServers { get; init; } =
         new ReadOnlyDictionary<string, RequiredMcpServer>(
             new Dictionary<string, RequiredMcpServer>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// Whether this repository declares the code-graph server, either required or recommended.
+    /// </summary>
+    /// <remarks>
+    /// Presence, not <see cref="RequiredMcpServer.Level"/>, because the level says how strongly an
+    /// instruction depends on a server, not whether the repository asked for it. The scaffolded
+    /// declaration leaves the CodeGraph entry commented out, so a repository that never uncomments
+    /// it has asked for no index and nothing governs, refreshes, or reports on one. The docs server
+    /// is the caller that matters: it refreshes CodeGraph and fails its tools only where this is
+    /// true, so a repository that never declared the dependency keeps answering exactly as it did
+    /// before the refresh existed.
+    /// </remarks>
+    public bool DeclaresCodeGraph => RequiredServers.ContainsKey(CodeGraphServer);
 
     /// <summary>Product defaults for a host that declares no <c>mcp:</c> section.</summary>
     /// <remarks>

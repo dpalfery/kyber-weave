@@ -103,6 +103,10 @@ MCP tool names may be namespace-qualified by the active harness.
 before text search; name a file or symbol when you need line-numbered source.
 <!-- CODEGRAPH_END -->
 
+In a worktree, or when the tool is not listed, run `codegraph explore "…"` from that
+worktree's shell; read files directly only if it fails. A worktree indexes ITSELF with
+`kyber-weave doctor --ensure .` and never shares the main checkout's index.
+
 If `.codegraph/` is missing or stale and a docs drift / codegraph tool needs it, this
 repository authorizes `codegraph init .` at the root immediately
 (repository-local only; installing CodeGraph is the user's decision). Do not ask for user
@@ -115,9 +119,12 @@ Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_docume
 before contract changes, `docs_find_documents_citing_code_symbol`; for taxonomy,
 `docs_look_up_glossary_term_definition` and `docs_find_duplicates_conflicts_ambiguous_terms`.
 No CLI equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
-current guidance. The server's configuration key is `kw-docs`. Confirm each response's
-`provenance:` `root=` matches `git rev-parse --show-toplevel`
-(`docs_get_source_repository_and_revision`); a mismatch means the wrong repository.
+current guidance. The server's configuration key is `kw-docs`. Every answer leads with a
+`provenance:` line carrying `root=`, `branch=`, `repo=`, `rev=`, `dirty=` and `documents=N`
+(`docs_get_source_repository_and_revision`). Compare `repo=`, the repository's common git
+directory, not `root=`: a `root=` that is not your own working tree's root is another worktree
+of this repository, and only a different `repo=` means the wrong repository. `branch=` names the
+branch the answer came from.
 
 ## Non-negotiables
 

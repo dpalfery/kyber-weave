@@ -42,7 +42,7 @@ so every harness gets the same behaviour and the rules stay in one place.
    ```
 
    This is repository-local: it runs `codegraph init .` when `.codegraph/` is absent and
-   `codegraph index .` otherwise, always at the git root, and it never installs anything.
+   `codegraph sync .` otherwise, always at the git root, and it never installs anything.
    If it fails, report the check id and the `fix:` line and stop.
 
 5. **Any other exit** — report the `FAIL <check-id> <reason>` and `fix:` lines verbatim.
@@ -62,8 +62,8 @@ so every harness gets the same behaviour and the rules stay in one place.
   doctor says so and suggests the removal; a human does it.
 - **Repository-local only.** Provisioning runs at the git root of the repository being
   worked in, never at `$HOME` and never for another checkout.
-- **Prefer `--check`.** It never writes. `--provision` indexes, which on a large
-  repository costs minutes.
+- **Prefer `--check`.** It never writes. `--provision` syncs the index, which on a large
+  repository still costs time the check does not.
 
 ## When not to use this
 

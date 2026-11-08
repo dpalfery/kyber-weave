@@ -31,6 +31,15 @@ under the paths declared as **<plan-index>** and **<specification-index>** in th
 What falls out of this and governs everything after it is **which lenses can possibly apply**;
 a change touching only Markdown does not need a database-migration lens spun up to tell you so.
 
+**Review the tree the change is in.** When the change lives in a git worktree, every command and
+every reading happens there: the gates below run in it, and so do the two documentation gates,
+`kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Code questions go to
+`codegraph explore "…"` in that worktree's own shell, because a worktree does not share the
+canonical checkout's CodeGraph index. The `kw-docs` and `codegraph` MCP servers stay bound to the
+canonical checkout on purpose, so an MCP answer describes that checkout unless its provenance
+`branch=` is the branch under review; treat it as evidence about another tree when it is not. A
+review run in a worktree that reads the canonical checkout's index reviews code nobody changed.
+
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
 ground rules and the sections that match the changed technologies are the host's own standard

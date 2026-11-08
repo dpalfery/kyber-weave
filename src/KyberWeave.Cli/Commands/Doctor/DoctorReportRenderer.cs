@@ -26,7 +26,7 @@ internal static class DoctorReportRenderer
                 new
                 {
                     root = report.Root,
-                    mode = report.Mode == DoctorMode.Provision ? "provision" : "check",
+                    mode = ModeName(report.Mode),
                     exitCode = report.ExitCode,
                     checks = report.Checks.Select(check => new
                     {
@@ -61,4 +61,21 @@ internal static class DoctorReportRenderer
         text is null
             ? string.Empty
             : string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    /// <summary>The wire name of the mode the run actually used. It matches the option that selected it.</summary>
+    /// <remarks>
+    ///     A report that names a mode it did not run is a report that lies about what it did, which is the one thing a
+    ///     doctor report exists to prevent: an ensure run used to render as <c>"check"</c>, so a JSON consumer could
+    ///     not tell a run that wrote the index from one that promised not to. Every member is named explicitly rather
+    ///     than derived from the enum, so the wire contract is visible here and a new mode cannot inherit a wrong
+    ///     name; a value outside the enum reports itself rather than borrowing another mode's name.
+    /// </remarks>
+    private static string ModeName(DoctorMode mode) =>
+        mode switch
+        {
+            DoctorMode.Check => "check",
+            DoctorMode.Provision => "provision",
+            DoctorMode.Ensure => "ensure",
+            _ => mode.ToString()
+        };
 }

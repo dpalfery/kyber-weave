@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xunit;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
@@ -54,5 +55,34 @@ public sealed class DoctorReportRendererTests
         });
 
         Assert.Equal("PASS codegraph.binary found on PATH", execution.Output.Trim());
+    }
+
+    /// <summary>
+    /// The JSON report's <c>mode</c> field names the mode the run actually used, for every mode
+    /// there is.
+    /// </summary>
+    /// <remarks>
+    /// A report that names a mode it did not run is a report that lies about what it did, and this
+    /// is the one thing a doctor report exists to prevent. The field was a two-way ternary, so an
+    /// <c>--ensure</c> run rendered as <c>"check"</c> and a JSON consumer could not tell a run that
+    /// wrote the index from one that promised not to. Pin each mode by name: a new mode needs a row
+    /// here rather than inheriting another mode's name.
+    /// </remarks>
+    [Theory]
+    [InlineData(DoctorMode.Check, "check")]
+    [InlineData(DoctorMode.Provision, "provision")]
+    [InlineData(DoctorMode.Ensure, "ensure")]
+    public void TheJsonReportNamesTheModeTheRunUsed(DoctorMode mode, string expectedName)
+    {
+        DoctorReport report = new("/repo", mode, 0, []);
+
+        CapturedConsoleExecution<object?> execution = ProcessConsoleCapture.Run<object?>(() =>
+        {
+            DoctorReportRenderer.Write(report, asJson: true);
+            return null;
+        });
+
+        using JsonDocument json = JsonDocument.Parse(execution.Output);
+        Assert.Equal(expectedName, json.RootElement.GetProperty("mode").GetString());
     }
 }

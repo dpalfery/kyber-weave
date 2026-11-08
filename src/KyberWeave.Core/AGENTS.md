@@ -16,6 +16,12 @@ namespaces. Move a type down into Core only when Core code needs it. See
 [ADR 0057](../../docs/adr/0057-squad-and-docs-are-their-own-assemblies.md). This file's rules
 apply to all three.
 
+**The code-graph server's name lives here** — `McpConfig.CodeGraphServer`, in `Configuration/` —
+for the same reason: Core code needs it, and the MCP server cannot reference `KyberWeave.Core.Squad`,
+so it cannot read the renderers' copy. `CapabilityDegradations.CodeGraphMcpServer` re-exports the
+constant and the docs server branches on it through `McpConfig.DeclaresCodeGraph`; a second literal
+would let the renderers and the server disagree about which declared server is the code graph.
+
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
 
 ## Core does not construct its own collaborators

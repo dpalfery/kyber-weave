@@ -254,14 +254,8 @@ public sealed class ConfigRegConfig
         // Same rule for the run settings: a property an operator did not write publishes
         // nothing, because an agent already applies the documented default. Only a value that
         // was actually chosen is worth a line, and only a chosen value can differ from it.
-        if (StopOnToolFailure is not null)
-        {
-            entries.Add(new ConfigRegEntry(
-                StopOnToolFailureProperty,
-                ModeWord(StopOnToolFailure.Value),
-                ConfigRegEntryKind.Mode));
-        }
-
+        // stop-on-tool-failure is deliberately not published: the CLI and the MCP server are
+        // the readers, not an agent instruction file (ADR 0061).
         if (!string.IsNullOrWhiteSpace(RunBaseBranch))
         {
             entries.Add(new ConfigRegEntry(

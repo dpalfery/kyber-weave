@@ -27,6 +27,7 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
 sections:
   "#":
     keywords:
@@ -1602,12 +1603,15 @@ execution throughput, conductor does not serialize all task execution or test ru
   banned because concurrent writes and background watchers rewrite canonical database state from
   worktree checkouts. Setup fails closed if a `.codegraph` symlink or reparse point is detected.
 - **Subagent MCP exposure across renderers**: Subagents deployed into worktrees inherit MCP server bindings
-  appropriate to their capability profiles. CodeGraph MCP access is granted to non-orchestrator specialists
-  (such as `architect`, `csharp-dev`, and `research-agent`) that require semantic symbol navigation, while
-  strictly withheld from pure orchestrators like `conductor` per [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md).
-- **Conditional worktree indexing**: Ephemeral worktrees reuse the canonical CodeGraph index. `codegraph init .`
-  is executed in a worktree only when a task's explicit acceptance criteria require indexing newly added branch
-  symbols.
+  appropriate to their capability profiles. The code graph is granted to every agent the shared
+  `GrantsOrchestratorExcludedMcpServers` predicate entitles and strictly withheld from pure orchestrators
+  like `conductor`, per [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) as amended; `context7`
+  is not widened. The names come from the toolchain roster, never from a list inside a renderer.
+- **A worktree keeps its own index**: Ephemeral worktrees do not share the canonical CodeGraph index. A
+  new worktree indexes itself with `kyber-weave doctor --ensure`, which is how a worker in that tree gets
+  answers about the code it is editing; the MCP servers stay bound to the canonical checkout, so a worker
+  with a shell asks its own index through `codegraph explore` rather than through the MCP tool. A shared
+  index was measured answering for another branch.
 - **Serialized branch-head integration**: Only final integration and branch-head mutations are
   serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
   recording shared index and review gate state, and running `git push` execute sequentially at the
@@ -1778,29 +1782,57 @@ This check is the documentation half of a run's start; the branch half is
 [run start](#run-start-fetch-and-branch-first) above.
 
 `conductor` (under **Shared lifecycle invariants**) and `bug-crusher` (step 0 of **Workflow**)
-both run a read-only documentation check before they do anything else. The check is an
-invariant of the squad, not a convenience:
+both run a tooling check before they do anything else. The check is an invariant of the squad,
+not a convenience, and **a failure stops the run**
+([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 - **Predicate.** The step runs only when the repository has governed docs: `.kyber-weave/kyber-weave.yml`
   exists at the git root, and the docs root it declares exists as a directory. A repository without
   governed docs skips the step entirely.
-- **Read-only.** It runs `kyber-weave doctor --check`, which never runs `codegraph init` or
-  `codegraph index`. A run never pays for an index build at start.
-- **Warn and continue.** A failed check is one line in the run record and never a stop. The one
-  provisioning action is `kyber-weave doctor --provision`, run once, and only on exit `1` with
-  `codegraph.index` while the binary is present. Repository-local `codegraph init .` is already
-  authorised by the root `AGENTS.md`.
+- **One command, in the tree the workers will use.** `kyber-weave doctor --ensure` — the canonical
+  checkout, or the worktree when the task runs in one. It syncs the index or initialises it,
+  restores any tracked file the initialisation rewrote, proves the index with one `codegraph explore`
+  call and the docs server with one call, and repairs once with `codegraph index` before retrying
+  once. It replaces the old `--check`-then-`--provision` pair.
+- **A failure stops the run, before any worker is dispatched.** Under the default the agent reports
+  `STATUS: TOOL_FAILURE` with the doctor's `fix:` line and dispatches nothing, in supervised mode and
+  under `autonomy: autonomous` alike. `autonomy: autonomous` stops rather than parking the item for
+  human review, because a run with no code search produces findings nobody can trust.
+- **The setting is read, not judged.** `stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml`
+  decides it, and the doctor reads that setting itself, so no agent interprets a degraded result:
+  **absent means stop**, `false` means the tool's failure is reported and the run continues. A value
+  that is not a boolean is a configuration error naming the setting, the way `autonomy` is refused.
+  Publishing the setting in the `AGENTS.md` Config Reg block is not part of this decision.
+- **Read-only runs do not stop.** The rule governs code-editing runs. A read-only run is never
+  stopped by it: a reviewer with no index still reviews, and a lens that cannot read reports
+  `SKIPPED` with the reason.
+- **A repository with governed docs and no usable CodeGraph stops** until CodeGraph is installed or
+  the setting is `false`, because every code join downstream would otherwise be silently absent.
 - **Record line.** The run record carries `run-start doctor: <exit> <check ids>`, for example
   `run-start doctor: 1 codegraph.index`. The bug-crusher report and the pull request description
   carry the same line.
 - **Nothing installs.** Exit `3` means the `codegraph` executable is missing. In supervised mode the
-  agent asks the user and quotes the printed fix line. In autonomous mode it records the item as
-  pending human review. Neither mode installs anything.
+  agent asks the user and quotes the printed fix line. In autonomous mode it stops with the same
+  line. Neither mode installs anything: the stop is the report, and installing it stays the user's
+  decision.
+
+**This reverses the rule the squad carried before 2026-11-07**, which was "warn and continue; never
+block a run on it". It is the owner's explicit decision, recorded in
+[ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
+rejected. The cost is a repository that cannot repair its index stopping code-editing runs until it
+does; the alternative was a run that proceeds as if its code search worked.
+
+**The worktree consequence.** The MCP servers stay bound to the canonical checkout, so a worktree's
+worker can be answered about another branch. The per-role rules are in the
+[MCP runbook](../docgraph/mcp-runbook.md#the-worktree-limitation-per-role); the short form is that a
+shell role asks its own index, a shell-less role reads the worktree path its packet names, and the
+architect returns `BLOCKED` naming "server root differs" so the two CLI gates run in the worktree
+before it plans.
 
 The check is defined by [`doctor`](../cli-command-surface.md#doctor--repository-documentation-tooling)
-and its [runbook](../docgraph/mcp-runbook.md#the-live-check-doctor---check). The squad step names
-the command and the two path checks only, with no editor- or harness-specific tool names, because
-these instructions ship to every harness.
+and its [runbook](../docgraph/mcp-runbook.md#the-workers-first-command-doctor---ensure). The squad
+step names the command and the two path checks only, with no editor- or harness-specific tool names,
+because these instructions ship to every harness.
 
 **Where the rule lives.** The squad instructions carry the predicate as prose, so the agent
 evaluates it on any harness, including one with no shell builtins to lean on.

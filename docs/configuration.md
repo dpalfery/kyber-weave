@@ -6,6 +6,7 @@ status: current
 owner: dpalfery
 last-reviewed: 2026-11-07
 code-refs:
+  - KyberWeaveConfig
   - KyberWeaveConfigLoader
   - OntologyConfig
   - SquadConfig
@@ -59,6 +60,7 @@ config-reg:
   auth-design: docs/reference/auth-design.md
 
 autonomy: supervised
+stop-on-tool-failure: true
 
 squad:
   bundle: full
@@ -224,6 +226,38 @@ rejected.
 block that no longer matches configuration as `KW-CONFIG-REG-002`, but only once a repository
 has adopted the registry — see [governance](docgraph/governance.md).
 
+### Stop on tool failure
+
+A top-level `stop-on-tool-failure:` key decides what a code-editing run does when a required
+tool — CodeGraph, or the docs server's CodeGraph read — cannot be repaired:
+
+```yaml
+stop-on-tool-failure: false
+```
+
+- **Absent means stop.** A repository that says nothing is the strict case: the run stops before
+  dispatching workers. Continuing past a broken code index has to be asked for explicitly.
+- **The values are `true` and `false`.** Anything else is a configuration error naming the
+  setting and the two values it accepts, the same treatment `autonomy:` gets — not a binding
+  failure naming a type an operator cannot see. A file that cannot be loaded at all leaves the
+  doctor's default in place, which is stop: a broken configuration must not be the thing that
+  weakens the rule.
+- **`false` warns and continues.** The failure is reported and the work proceeds, with code joins
+  possibly missing.
+- **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
+  no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
+  between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
+  route the exit code rather than interpreting it.
+- **What it never covers.** A read-only run is never stopped by it. A repository with no governed
+  docs skips the check. `doctor --check` ignores it, because a caller that asked for a verdict gets
+  one. And a missing `codegraph` binary is exit `3` under either value: installing it is the user's
+  decision.
+
+It is not published in the `AGENTS.md` Config Reg block, so a portable instruction file cannot read
+it directly; the CLI and the MCP server are the readers. See
+[the run-start rule](kyber-squad/architecture.md#run-start-documentation-check) and
+[ADR 0061](adr/0061-code-editing-runs-stop-on-unusable-tools.md).
+
 ### Intake assessment
 
 An `intake:` key under `ontology:` opts a repository in to the intake assessment:
@@ -282,20 +316,21 @@ publishing an empty branch cannot look configured while resolving to nothing a r
 against.
 
 **A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
-renders `<stop-on-tool-failure>`, `<run-base-branch>` and `<run-harness-names>` into the
-generated block of the repository root `AGENTS.md` only when the key was actually written:
+renders `<run-base-branch>` and `<run-harness-names>` into the generated block of the repository
+root `AGENTS.md` only when the key was actually written:
 
 ```markdown
-- **<stop-on-tool-failure>**: `false`
 - **<run-base-branch>**: `develop`
 - **<run-harness-names>**: `true`
 ```
 
 An absent key publishes no line, because an agent already applies the documented default and
-only a value somebody chose can differ from it. The three names are reserved: declaring any of
-them under `config-reg:` is rejected with the setting that owns it named in the refusal. They
+only a value somebody chose can differ from it. Declaring either name (or `stop-on-tool-failure`)
+under `config-reg:` is rejected with the setting that owns it named in the refusal. They
 are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
-but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`).
+but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`). As noted above, `stop-on-tool-failure`
+is deliberately not published in the block: the CLI and the MCP server are the readers, not an
+agent instruction file (ADR 0061).
 
 The run that reads them is [`run start`](cli-command-surface.md#run--run-start), which exits `1`
 on a tool failure while `stop-on-tool-failure` is on — and warns instead of stopping when it is
@@ -562,7 +597,7 @@ offered for it either.
 
 | Key | Default | Effect |
 |---|---|---|
-| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees — today `kw-docs`, `kw-dash`, and `kw-arbiter` |
+| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees — today `kw-docs`, `kw-dash`, `kw-arbiter`, and `codegraph` for a repository that wants an index |
 | `required-servers.<name>.command` | required | Launch command as argv — the program first, then each argument. Never a shell line, for the same reason `review.gates` takes argv |
 | `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships, today `kyber-weave-mcp`) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked. `first-party` is bound to the shipped binary: it is accepted only when the command's program is `kyber-weave-mcp` |
 | `required-servers.<name>.level` | `required` | `required` reports a missing server as a warning; `recommended` reports the same line at `info` |
@@ -598,6 +633,14 @@ Unknown keys are ignored, as in every other section. A declaration that gives a 
 blank name, names no command, carries an empty argument, claims `first-party` for a command
 that does not run `kyber-weave-mcp`, or gives an unrecognised `provenance` or `level` fails
 the load as `KW-CONFIG-001`, naming the section and the server at fault.
+
+**The `codegraph` declaration does more than the wiring check.** It is the switch the docs MCP
+server reads: a repository that lists `codegraph` here gets the index refresh on its tool calls,
+and has its tools fail with `STATUS: TOOL_FAILURE` when the index cannot be read. A repository that
+never declared it takes no index lock and reports nothing, so a host that wants nothing to do with
+CodeGraph keeps working unchanged — the same reason the default is no servers at all. `docs init`
+leaves the entry commented out in the scaffold, so turning it on is a deliberate edit. See
+[the response contract](docgraph/mcp-runbook.md#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot).
 
 **`first-party` is a claim about who ships the binary, so it is refused when it is untrue.**
 The provenance decides the remedy an absent binary gets, and the first-party remedy is

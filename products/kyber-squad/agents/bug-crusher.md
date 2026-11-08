@@ -39,3 +39,12 @@ Where a target lowers this identity to a skill (Cursor, Pi, ZCode, Devin, Warp) 
 skill *is* the entry point and this wrapper is not deployed. Where a target keeps a native
 agent file (Claude, Factory, Copilot, Codex, OpenCode, Kilo, Antigravity) this wrapper is that
 file and the canonical skill sits beside it, so loading it always resolves.
+
+## Run start and discovery order
+
+The skill owns the procedure. These two rules are restated here because they decide whether any
+of it runs at all. `kyber-weave doctor --ensure` is the first command of every session, and
+`stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml` decides whether a tool that will not
+repair itself stops the run. For discovery, `codegraph_explore` answers first; in a worktree, or
+when that tool is not among those on offer, run `codegraph explore "…"` in your own shell,
+because the MCP servers stay bound to the canonical checkout and a worktree keeps its own index.

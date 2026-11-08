@@ -93,6 +93,38 @@ public sealed class DocumentIndexHost
     /// <summary>Loads the document set the host was constructed to serve.</summary>
     public DocumentSet LoadDocumentSet() => _documentSetFactory();
 
+    /// <summary>
+    /// Current count of documents in the corpus if available. Returns the cached count if
+    /// available; if the corpus has not yet been built, attempts to build it safely.
+    /// Returns null when the corpus is unavailable or cannot be loaded, avoiding conflating
+    /// missing or unreadable documents with an empty corpus (0).
+    /// </summary>
+    public int? DocumentCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_corpus is not null)
+                    return _corpus.Documents.Count;
+
+                try
+                {
+                    long docsStamp = ComputeDocsStamp();
+                    _corpus = DocumentCorpus.Build(_documentSetFactory());
+                    _docsStamp = docsStamp;
+                    _index = null;
+                    CorpusBuilds++;
+                    return _corpus.Documents.Count;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return null;
+                }
+            }
+        }
+    }
+
     /// <summary>Resolves the CodeGraph port for this repository using the host's factory.</summary>
     public ICodeGraphResolver CreateCodeGraphResolver() => _resolverFactory();
 

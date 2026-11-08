@@ -30,4 +30,8 @@
     <ProjectReference Include="..\KyberWeave.Core.Docs\KyberWeave.Core.Docs.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -1820,25 +1820,28 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// Both run-start surfaces carry the read-only doctor step, gated on the docs-enabled condition, with the
-    /// warn-and-continue rule. A later edit that drops any one of the three silently disables the check.
+    /// Both run-start surfaces carry the <c>doctor --ensure</c> step, gated on the docs-enabled condition,
+    /// and state the stop rule instead of warn-and-continue.
     /// </summary>
     /// <remarks>
-    /// The condition is the D14 predicate: the config file and its docs-root. The rule is D15: a failed doctor
-    /// is recorded and the run continues, so a missing index never blocks a fresh clone.
+    /// This is the owner's reversal of "never block a run" (D1, decided 2026-11-07), not a weakening of the
+    /// check: a required tool that cannot be repaired now stops the run before any worker is dispatched,
+    /// because every agent downstream would otherwise work from joins that are silently absent. The
+    /// docs-enabled condition is unchanged, and a repository with no governed docs still skips the step.
     /// </remarks>
     [Theory]
     [InlineData("agents/conductor.md")]
     [InlineData("skills/bug-crusher/SKILL.md")]
-    public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
+    public void RunStartSurfacesStopTheRunWhenTheDocsToolingCannotBeEnsured(string relativePath)
     {
         string text =
             File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave doctor --ensure", text, StringComparison.Ordinal);
         Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
         Assert.Contains("docs-root", text, StringComparison.Ordinal);
-        Assert.Contains("warn and continue", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stop-on-tool-failure", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("warn and continue", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1851,7 +1854,7 @@ public sealed class SquadCanonicalContentTests
         string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
         int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
         int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
-        int doctor = conductor.IndexOf("kyber-weave doctor --check", StringComparison.Ordinal);
+        int doctor = conductor.IndexOf("kyber-weave doctor --ensure", StringComparison.Ordinal);
 
         Assert.True(invariants >= 0, "'agents/conductor.md' must keep its 'Shared lifecycle invariants' section.");
         Assert.True(
@@ -1986,6 +1989,87 @@ public sealed class SquadCanonicalContentTests
             "The COUNCIL_SEATS_NEEDED paragraph must list the lenses and the scope, say it stops after its gates, and " +
             "say the session that can start the seats re-invokes the reviewer. Found:" +
             Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", blocks));
+    }
+
+    /// <summary>
+    /// Every shipped agent file states the stop rule and the discovery order, so no role is left with the
+    /// old instruction to carry on past a broken tool.
+    /// </summary>
+    /// <remarks>
+    /// A single agent file that still says the run continues is enough to keep the failure alive, because
+    /// that is the file the delegate reads. The discovery order travels with it: in a worktree, or when the
+    /// MCP tool is not among the tools on offer, the shell runs <c>codegraph explore</c>, and a file is read
+    /// directly only when that fails.
+    /// </remarks>
+    [Fact]
+    public void EveryAgentFileStatesTheStopRuleAndTheDiscoveryOrder()
+    {
+        string[] agents = Directory.GetFiles(Path.Combine(ProductRoot, "agents"), "*.md");
+
+        Assert.NotEmpty(agents);
+
+        string[] offenders =
+        [
+            .. agents
+                .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                .Where(file => !file.Text.Contains("codegraph explore", StringComparison.Ordinal))
+                .Select(file => $"{Path.GetFileName(file.Path)}: no 'codegraph explore' discovery order")
+        ];
+
+        Assert.Empty(offenders);
+
+        string[] stillWarn =
+        [
+            .. agents
+                .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                .Where(file => file.Text.Contains("warn and continue", StringComparison.OrdinalIgnoreCase))
+                .Select(file => Path.GetFileName(file.Path))
+        ];
+
+        Assert.Empty(stillWarn);
+    }
+
+    /// <summary>
+    /// A tool failure is routed to the orchestrator and listed among the hard stops in autonomous mode.
+    /// </summary>
+    /// <remarks>
+    /// A required tool that cannot be repaired is the one failure an autonomous run cannot resolve for
+    /// itself: it needs an install the run may not perform. Listing it with the other hard stops is what
+    /// stops the run from continuing to a worker that would answer from absent joins.
+    /// </remarks>
+    [Fact]
+    public void ConductorAutonomyContractListsToolFailureAmongTheHardStops()
+    {
+        string autonomy = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"));
+        int hardStops = autonomy.IndexOf("## Hard stops", StringComparison.Ordinal);
+        int toolFailure = autonomy.IndexOf("STATUS: TOOL_FAILURE", StringComparison.Ordinal);
+
+        Assert.True(hardStops >= 0, "'autonomy.md' must keep its 'Hard stops' section.");
+        Assert.True(
+            toolFailure > hardStops,
+            "'autonomy.md' must list 'STATUS: TOOL_FAILURE' as a hard stop in autonomous mode.");
+    }
+
+    /// <summary>
+    /// The architect compares <c>repo=</c> rather than <c>root=</c>, so a worktree of this repository is not
+    /// mistaken for a foreign one.
+    /// </summary>
+    /// <remarks>
+    /// D25: every docs response now carries <c>repo=</c>. An architect that still compares <c>root=</c>
+    /// abandons a correct corpus as "the wrong repository" whenever it plans from a worktree, which is the
+    /// case the whole slice exists to make work.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/architect.md")]
+    [InlineData("agents/architect/references/plan-authoring.md")]
+    public void ArchitectSurfacesCompareTheRepositoryRatherThanTheRoot(string relativePath)
+    {
+        string text = File.ReadAllText(
+            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("repo=", text, StringComparison.Ordinal);
+        Assert.Contains("worktree", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
