@@ -234,7 +234,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             worktreePath = runner.WorktreePathFor(target);
             created = resumeTarget is null
                 ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                : runner.AddWorktreeForBranch(target, worktreePath);
+                : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
         }
 
         if (!created.Succeeded)

@@ -279,10 +279,20 @@ public sealed class RunStartRunner
     /// <summary>Checks an existing branch out in a worktree at <paramref name="worktreePath" />.</summary>
     /// <param name="branch">The existing branch.</param>
     /// <param name="worktreePath">The directory the worktree occupies.</param>
-    public GitOutcome AddWorktreeForBranch(string branch, string worktreePath)
+    /// <param name="startRef">
+    ///     The remote-tracking ref the branch starts from (for example <c>origin/feat/foo</c>) when
+    ///     the branch does not yet exist locally. When null or when the branch already exists locally,
+    ///     only the branch name is checked out.
+    /// </param>
+    public GitOutcome AddWorktreeForBranch(string branch, string worktreePath, string? startRef = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
         ArgumentException.ThrowIfNullOrWhiteSpace(worktreePath);
+
+        if (!HasLocalBranch(branch) && !string.IsNullOrWhiteSpace(startRef))
+        {
+            return AddWorktree(worktreePath, ["-b", branch], startRef);
+        }
 
         return AddWorktree(worktreePath, [], branch);
     }

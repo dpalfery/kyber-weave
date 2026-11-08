@@ -227,6 +227,32 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     When resuming a branch that exists only on the remote while another worktree is attached,
+    ///     the command creates a worktree with a tracking branch from the remote ref.
+    /// </summary>
+    [Fact]
+    public void ResumesRemoteOnlyBranchInWorktreeWithTrackingBranch()
+    {
+        const string Resumed = "claude/fix/remote-worktree-tracking";
+        _probe.CreateBranchWithCommit(Resumed, "remote work");
+        _probe.Git("push", "origin", Resumed);
+        _probe.Git("switch", "main");
+        _probe.Git("branch", "-D", Resumed);
+
+        _probe.AddLinkedWorktree("linked-worker");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", "origin/" + Resumed);
+
+        Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming remote branch in worktree: {result.Output}");
+        Assert.Contains(Resumed, _probe.WorktreeBranches(), StringComparison.Ordinal);
+        Assert.True(_probe.BranchExists(Resumed), $"Local branch '{Resumed}' must be created.");
+    }
+
+    /// <summary>
     ///     Refuses --resume HEAD or --resume origin/HEAD with exit 2 because HEAD is a symbolic reference,
     ///     not a branch.
     /// </summary>
@@ -243,6 +269,32 @@ public sealed class RunStartPlannerTests : IDisposable
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("symbolic reference", result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     When resuming a branch that exists only on the remote in a dirty checkout, the command creates
+    ///     the worktree for the tracking branch without failing on an invalid reference.
+    /// </summary>
+    [Fact]
+    public void ResumesRemoteOnlyBranchInWorktreeWhenCheckoutIsDirty()
+    {
+        const string Resumed = "claude/fix/remote-only-worktree";
+        _probe.CreateBranchWithCommit(Resumed, "remote work");
+        _probe.Git("push", "origin", Resumed);
+        _probe.Git("switch", "main");
+        _probe.Git("branch", "-D", Resumed);
+        _probe.Git("config", "worktree.guessRemote", "false");
+
+        _probe.AppendLine("README.md", "dirty local changes");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", "origin/" + Resumed);
+
+        Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming in worktree: {result.Output}");
+        Assert.Contains(Resumed, _probe.WorktreeBranches(), StringComparison.Ordinal);
     }
 
     /// <summary>
