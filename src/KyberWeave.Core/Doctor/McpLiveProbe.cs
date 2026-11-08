@@ -32,7 +32,7 @@ public static partial class McpLiveProbe
     ///     whole alternation to the end of the line and strips whatever subset the server sent. <c>repo=</c> allows spaces
     ///     because a repository or worktree filesystem path can contain spaces.
     /// </remarks>
-    [GeneratedRegex(@"(?:\s+(?:branch=\S+|repo=.*?(?=\s+(?:branch|rev|dirty|documents)=|$)|rev=\S+|dirty=\S+|documents=\S+))+$")]
+    [GeneratedRegex(@"(?:(?:\s+branch=\S+)?\s+repo=.*?(?:\s+branch=\S+)?|\s+branch=\S+)?\s+rev=\S+\s+dirty=\S+\s+documents=\S+$")]
     private static partial Regex TrailingMetadataRegex();
     /// <summary>The MCP protocol revision the probe offers. The server answers with the revision it supports.</summary>
     private const string ProtocolVersion = "2024-11-05";
