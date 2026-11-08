@@ -202,8 +202,8 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
   in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
   skills and their resources. `SquadCompanionSkills` is the one type
   both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
-  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
-  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` lists only the
+  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The
+  companion skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` lists only the
   Squad skills.
 - **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
   `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
