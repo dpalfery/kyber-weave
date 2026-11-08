@@ -834,7 +834,8 @@ public sealed class AnalysisPersistenceTests
             UseShellExecute = false
         };
         using Process process = Process.Start(startInfo)!;
-        process.WaitForExit(5000);
+        _ = process.StandardOutput.ReadToEnd();
+        Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
 
         // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
         process.StandardInput.AutoFlush = false;

@@ -177,6 +177,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
     [Theory]
     [InlineData("/dash/node_modules")]
     [InlineData("~/dash/node_modules")]
+    [InlineData("~ /dash/node_modules")]
     [InlineData("~")]
     [InlineData("C:/dash/node_modules")]
     [InlineData("c:dash/node_modules")]

@@ -279,7 +279,7 @@ public static class ReviewConfigLoader
             string trimmed = path.Trim();
             // Both separators are accepted on every host; the stored form uses '/' only.
             string spelled = trimmed.Replace('\\', '/');
-            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || IsHomeDirectoryPath(spelled) || LooksLikeWindowsDriveAbsolute(spelled))
+            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
             {
                 throw new YamlException(
                     $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
@@ -307,6 +307,12 @@ public static class ReviewConfigLoader
                     $"{where} '{path}' names the repository root. Name a path inside it, such as 'dash/node_modules'.");
             }
 
+            if (segments[0] == "~")
+            {
+                throw new YamlException(
+                    $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
+            }
+
             parsed.Add(string.Join('/', segments));
         }
 
@@ -317,9 +323,6 @@ public static class ReviewConfigLoader
         path.Length >= 2
         && char.IsAsciiLetter(path[0])
         && path[1] == ':';
-
-    private static bool IsHomeDirectoryPath(string path) =>
-        path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal);
 
     /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
     private static string? ParseOs(string? os, string gateWhere)
@@ -373,21 +376,28 @@ public static class ReviewConfigLoader
         List<string> segments = [];
         foreach (string segment in spelled.Split('/'))
         {
-            if (segment is "" or ".")
+            string clean = segment.Trim();
+            if (clean is "" or ".")
                 continue;
 
-            if (segment == "..")
+            if (clean == "..")
             {
                 throw new YamlException(
                     $"{where} '{declared}' contains '..' and would leave the repository root. Name a directory inside it.");
             }
 
-            segments.Add(segment);
+            segments.Add(clean);
         }
 
         // Nothing left means the repository root itself, which is what an absent key already means.
         if (segments.Count == 0)
             return null;
+
+        if (segments[0] == "~")
+        {
+            throw new YamlException(
+                $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
+        }
 
         if (commands.Any(argv => argv.Any(element => element.Contains("{changed}", StringComparison.Ordinal))))
         {
