@@ -52,18 +52,21 @@ internal static class CorpusProvenance
 
     /// <summary>The one-line provenance header for a response over <paramref name="documentCount"/> documents.</summary>
     /// <param name="repositoryRoot">The bound repository root; normalised with <see cref="Path.GetFullPath(string)"/>.</param>
-    /// <param name="documentCount">The live document count for the corpus.</param>
+    /// <param name="documentCount">The live document count for the corpus, or null if unavailable.</param>
     /// <param name="corpusStamp">The host's corpus stamp, used with the git fingerprint to expire the cache.</param>
-    public static string Line(string repositoryRoot, int documentCount, int corpusStamp)
+    public static string Line(string repositoryRoot, int? documentCount, int corpusStamp)
     {
         string root = Path.GetFullPath(repositoryRoot);
         CachedIdentity identity = Identity(root, corpusStamp);
+        string docs = documentCount is { } count
+            ? count.ToString(CultureInfo.InvariantCulture)
+            : Unavailable;
         return "provenance: root=" + root
             + " branch=" + identity.Branch
             + " repo=" + identity.Repository
             + " rev=" + identity.Revision
             + " dirty=" + identity.Dirty
-            + " documents=" + documentCount.ToString(CultureInfo.InvariantCulture);
+            + " documents=" + docs;
     }
 
     private static CachedIdentity Identity(string root, int corpusStamp)

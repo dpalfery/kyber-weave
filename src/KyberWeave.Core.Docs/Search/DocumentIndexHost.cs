@@ -94,11 +94,12 @@ public sealed class DocumentIndexHost
     public DocumentSet LoadDocumentSet() => _documentSetFactory();
 
     /// <summary>
-    /// Current count of documents in the corpus. Returns the cached count if available;
-    /// if the corpus has not yet been built, attempts to build it safely without throwing.
-    /// Invalidation of the corpus clears any cached index so joins are kept in sync.
+    /// Current count of documents in the corpus if available. Returns the cached count if
+    /// available; if the corpus has not yet been built, attempts to build it safely.
+    /// Returns null when the corpus is unavailable or cannot be loaded, avoiding conflating
+    /// missing or unreadable documents with an empty corpus (0).
     /// </summary>
-    public int DocumentCount
+    public int? DocumentCount
     {
         get
         {
@@ -116,9 +117,9 @@ public sealed class DocumentIndexHost
                     CorpusBuilds++;
                     return _corpus.Documents.Count;
                 }
-                catch (Exception)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    return 0;
+                    return null;
                 }
             }
         }

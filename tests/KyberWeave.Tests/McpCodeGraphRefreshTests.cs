@@ -189,6 +189,35 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     }
 
     /// <summary>
+    /// When the docs tree is unreadable and CodeGraph fails, the blocked response reports
+    /// documents=unavailable rather than conflating failure with an empty corpus (documents=0).
+    /// </summary>
+    [Fact]
+    public void WhenDocsTreeUnreadable_BlockedResponseReportsDocumentsUnavailable()
+    {
+        DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        DocumentIndexHost host = new(
+            Root,
+            () => throw new InvalidOperationException("boom resolver"),
+            () => throw new IOException("disk error / unreadable docs"),
+            config.Ontology.DocsRoots,
+            config.Ontology.ResolvedCatalogPath);
+
+        DocsTools tools = new(
+            host,
+            null,
+            new CodeGraphFreshness(Root, refreshEnabled: true, ProvisionSucceeds()));
+
+        string response = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.Contains("documents=unavailable", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=0", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Only genuine sharing violations are classified as contention; non-lock IO exceptions
     /// (such as PathTooLongException or disk errors) are not treated as busy contention.
     /// </summary>

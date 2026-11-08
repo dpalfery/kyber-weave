@@ -257,7 +257,7 @@ public sealed class DocumentIndexHostTests : IDisposable
         File.WriteAllText(doc, File.ReadAllText(doc) + "\n\n## More\n\nExtra prose.\n");
         File.SetLastWriteTimeUtc(doc, DateTime.UtcNow.AddMinutes(1));
 
-        int count = host.DocumentCount;
+        int? count = host.DocumentCount;
         Assert.Equal(2, count);
 
         DocumentIndex index2 = host.Current();
@@ -266,15 +266,15 @@ public sealed class DocumentIndexHostTests : IDisposable
     }
 
     [Fact]
-    public void DocumentCount_WhenDocumentLoaderThrows_ReturnsZeroWithoutThrowing()
+    public void DocumentCount_WhenDocumentLoaderThrows_ReturnsNullWithoutThrowing()
     {
         DocumentIndexHost host = new(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
             () => throw new IOException("disk error / unreadable docs"));
 
-        int count = host.DocumentCount;
-        Assert.Equal(0, count);
+        int? count = host.DocumentCount;
+        Assert.Null(count);
     }
 
     [Fact]
@@ -295,7 +295,7 @@ public sealed class DocumentIndexHostTests : IDisposable
         Assert.Equal(1, loadCalls);
 
         // Subsequent DocumentCount calls when corpus exists must not invoke the loader
-        int count = host.DocumentCount;
+        int? count = host.DocumentCount;
         Assert.True(count > 0);
         Assert.Equal(1, loadCalls);
     }
