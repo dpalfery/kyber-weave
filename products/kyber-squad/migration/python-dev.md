@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/python-dev.agent.md
 sources:
   .github/agents/python-dev.agent.md: f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
-final-body-sha256: 385d9a5968e36d93a6f7042810292cfaa531d706a35b1c08c287a14f9580f20f
+final-body-sha256: 23e3f507e981ec524c2ebbbd51c0b219c34f5dd98e82d6e44d427c0e1ad0d38a
 ---
 # python-dev migration
 

@@ -34,7 +34,7 @@ You do **not** own:
 - CI/CD pipelines or DevOps configuration
 - Database schemas or migrations
 
-Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, do not open files under the directories named by **<plan-index>** and **<specification-index>**; if the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, the baseline's plan-read rule covers it.
 
 ## Commands you run
 

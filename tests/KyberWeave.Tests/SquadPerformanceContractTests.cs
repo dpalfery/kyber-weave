@@ -1,4 +1,9 @@
+using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -615,12 +620,52 @@ public sealed class SquadPerformanceContractTests
             string.Join(", ", repeating));
     }
 
-    [Theory]
-    [InlineData("products/kyber-squad/skills/bug-crusher/SKILL.md")]
-    [InlineData("products/kyber-squad/agents/bug-crusher-investigator.md")]
-    public void BugCrusherSurfacesAreToldNeverToRunTheFullTestSuite(string relativePath)
+    /// <summary>The harnesses that ship; each one renders the bug-crusher surfaces.</summary>
+    public static TheoryData<SquadTarget> ShippedRenderTargets() =>
+        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+
+    /// <summary>
+    ///     The bug-crusher skill is a primary session, so the baseline never reaches it and the ban has
+    ///     to be in its own text.
+    /// </summary>
+    [Fact]
+    public void BugCrusherSkillIsToldNeverToRunTheFullTestSuite()
     {
-        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(relativePath));
+        Assert.Matches(
+            NeverRunFullSuiteRegex,
+            ReadRepoFile("products/kyber-squad/skills/bug-crusher/SKILL.md"));
+    }
+
+    /// <summary>
+    ///     The investigator is a dispatched subagent, so the ban reaches it the way it reaches every
+    ///     worker: from the shared baseline, once per render (decision D27). The evidence that this
+    ///     agent is told never to run the full suite is therefore that render, not a second copy in its
+    ///     body — a body copy is what
+    ///     <see cref="TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten"/> forbids. The subject is
+    ///     unchanged; only where it is read from moved.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedRenderTargets))]
+    public async Task BugCrusherInvestigatorIsToldNeverToRunTheFullTestSuiteByItsRender(SquadTarget target)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        (string RelativePath, string Content)[] investigatorFiles =
+        [
+            .. result.Files
+                .Where(file => file.RelativePath.Contains("bug-crusher-investigator", StringComparison.Ordinal))
+                .Select(file => (file.RelativePath, Content: Encoding.UTF8.GetString(file.Content.Span)))
+        ];
+
+        Assert.True(
+            investigatorFiles.Length > 0,
+            $"The {target} render carries no file for 'bug-crusher-investigator', so this case would prove nothing.");
+
+        Assert.True(
+            investigatorFiles.Any(file => Regex.IsMatch(file.Content, NeverRunFullSuiteRegex)),
+            $"The {target} render of 'bug-crusher-investigator' carries no 'never run the full test suite' line. " +
+            "It reaches the agent from the shared baseline, which every worker render injects once.");
     }
 
     [Theory]

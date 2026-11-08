@@ -90,7 +90,8 @@ FAILURE_CLUSTER: task-gate/<gate-id>
 ```
 
 The trigger set is closed; this gate raises `ITERATION_CAP_EXCEEDED` when the 2-cycle cap is spent. Use `task-gate/<gate-id>` with
-the id of the gate that stayed red.
+the id of the gate that stayed red. The full failure loop — the iteration cap, the JEV
+checkpoints and the payload each trigger carries — is in [references/rework.md](references/rework.md).
 
 ## Digest line
 
@@ -111,6 +112,38 @@ Choose the status word by these rules:
 Fill the fields from the report at `report=<path>`. `gates` counts declared gates, `failed`
 lists failing gate ids or `none`, `skipped` counts gates recorded as skipped, and `runs`
 counts CLI executions in this task, including the fix runs.
+
+## Completion digest
+
+The task ends with this digest. It is the report format every developer worker returns, and it
+is written here once so no agent body carries a second copy of it. The `TASK_GATE:` line holds
+the result the section above defines; the other fields are fixed and appear in this order, in
+one contiguous block:
+
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=<name> gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
+RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
+```
+
+`RED_EVIDENCE:` is part of the template, not an aside. The in-flight ledger reads its value from
+the returned output as its `ledger.red-evidence` fact, and Arbiter rule `KW-ARB-MODE-001` uses
+that fact to gate test-first plans: an implementation dispatch with no RED evidence on record
+escalates. The line names the runner filter that was run, the tests that failed, and the
+assertion the RED run failed on — not a build error. Emit `RED_EVIDENCE: none` when the work
+recorded no RED run, such as a maintenance pass with no failing-first cycle. Anything but a
+literal `none` counts as evidence, so the fields must be the values actually run, never
+placeholders.
+
+Lines of the explanatory message body that are not digest fields are never counted or rejected
+as a seventh field. They are exactly these shapes: the `Discovery: codegraph N, docs N, direct
+reads N` header, `COVERAGE_GAPS:` followed by free text, and `Artifact:` or `Baseline:` followed
+by one path. When the circuit breaker trips, return the escalation in
+[references/rework.md](references/rework.md) instead of this digest.
 
 ## Boundaries
 

@@ -29,7 +29,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 
 # Method
 
-**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. If that command is the full suite, run only the failing classes it reported: never run the full test suite yourself. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
+**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. If that command is the full suite, run only the failing classes it reported. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
 
 The dispatch carries the run-start facts: the branch, where its checkout sits, and three versions — the failing binary's, `HEAD`, and the base the branch was started from. Read them before you reproduce anything and compare the three: the defect is a regression only when the failing build is the commit under review rather than the base, and that comparison is handed to you so you are not hunting for it.
 

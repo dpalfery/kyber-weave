@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/bug-crusher-investigator.agent.md
 sources:
   .github/agents/bug-crusher-investigator.agent.md: e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
-final-body-sha256: 9bd2f1b99f15e6aea5388d12bb4987780dc190a2d800ccc78ea08eeafdd69827
+final-body-sha256: b726320b686517533df57ebd0ef2970cf39237ce33ec3d073213080945fcee5b
 ---
 # bug-crusher-investigator migration
 
