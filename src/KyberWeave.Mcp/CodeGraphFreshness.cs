@@ -33,9 +33,11 @@ namespace KyberWeave.Mcp;
 /// </para>
 /// <para>
 /// The configuration is read again at each attempt, so a repository that changes
-/// <c>stop-on-tool-failure</c> is answered by the new setting without a restart. A repository
-/// that declares no required MCP server has not asked this server to govern its tooling, and is
-/// left answering from whatever is on disk, exactly as before.
+/// <c>stop-on-tool-failure</c> is answered by the new setting without a restart. Both the refresh
+/// and the failure are gated on the repository declaring the code-graph server in
+/// <c>mcp.required-servers</c> (<see cref="McpConfig.DeclaresCodeGraph"/>): a repository that
+/// declares it is refreshed and stopped when the index cannot be read, and every other repository
+/// is left answering from whatever is on disk, exactly as it did before this refresh existed.
 /// </para>
 /// </remarks>
 public sealed class CodeGraphFreshness
@@ -120,9 +122,12 @@ public sealed class CodeGraphFreshness
         if (loaded is not { Success: true, Config: not null })
             return CodeGraphGate.Clear;
 
-        // A repository that requires no MCP server has declared no dependency on this one, so the
-        // server keeps the behaviour it had before the refresh existed.
-        if (loaded.Config.Mcp.RequiredServers.Count == 0)
+        // The refresh and the failure apply only where the repository declares CodeGraph. The
+        // scaffolded declaration leaves the CodeGraph entry commented out, so a repository that
+        // never uncommented it has claimed no dependency on an index: it keeps the behaviour it
+        // had before this refresh existed — no index lock, no TOOL_FAILURE, no warning line — and
+        // other repositories keep working.
+        if (!loaded.Config.Mcp.DeclaresCodeGraph)
             return CodeGraphGate.Clear;
 
         bool stops = loaded.Config.StopsOnToolFailure;

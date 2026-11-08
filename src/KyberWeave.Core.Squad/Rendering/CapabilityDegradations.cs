@@ -67,11 +67,17 @@ internal static class CapabilityDegradations
     /// <see cref="GrantsOrchestratorExcludedMcpServers"/> covers more than this server — a
     /// library-lookup server keeps the same carve-out — so naming this one is a decision a call
     /// site takes rather than a restatement of the partition, and widening the carve-out for the
-    /// code graph widens nothing else. The name is declared here, beside
-    /// <see cref="UniversalMcpServer"/>, so the targets that grant it spell it once and a rename
-    /// reaches all of them instead of leaving one rendering the old name.
+    /// code graph widens nothing else. The targets that grant it therefore spell it once, and a
+    /// rename reaches all of them instead of leaving one rendering the old name.
+    /// <para>
+    /// The name itself is declared in <see cref="McpConfig.CodeGraphServer"/> and re-exported here,
+    /// because the configuration is what branches on it: a repository declares the server in
+    /// <c>mcp.required-servers</c> and the docs server gates its refresh on that declaration. A
+    /// second literal would let the renderers and the server disagree about which declared server
+    /// is the code graph.
+    /// </para>
     /// </remarks>
-    public const string CodeGraphMcpServer = "codegraph";
+    public const string CodeGraphMcpServer = McpConfig.CodeGraphServer;
 
     /// <summary>
     /// The capability profile whose holder routes work rather than researching it. Declared by id
