@@ -67,6 +67,7 @@ public sealed class CodeGraphFreshness
 
     private readonly string _repositoryRoot;
     private readonly bool _refreshEnabled;
+    private readonly IProcessExecutor _executor;
     private readonly Lock _gate = new();
 
     private DateTime _lastAttemptUtc = DateTime.MinValue;
@@ -78,10 +79,21 @@ public sealed class CodeGraphFreshness
     /// False when the process was started with <c>--no-codegraph-refresh</c>, which is how
     /// <c>doctor --check</c> keeps its promise that the server never writes an index.
     /// </param>
-    public CodeGraphFreshness(string repositoryRoot, bool refreshEnabled)
+    /// <param name="executor">
+    /// Runs the CodeGraph child the provisioner starts, or null for one bounded by
+    /// <see cref="RefreshBound"/>. The provisioner takes its executor from the caller for the same
+    /// reason it takes the root: a caller that must answer without a CodeGraph binary — a test, or a
+    /// host that supplies its own runner — supplies the executor rather than being answered by
+    /// whichever binary this machine happens to have installed.
+    /// </param>
+    public CodeGraphFreshness(
+        string repositoryRoot,
+        bool refreshEnabled,
+        IProcessExecutor? executor = null)
     {
         _repositoryRoot = Path.GetFullPath(repositoryRoot);
         _refreshEnabled = refreshEnabled;
+        _executor = executor ?? new BoundedExecutor(RefreshBound);
     }
 
     /// <summary>
@@ -106,8 +118,19 @@ public sealed class CodeGraphFreshness
             if (_lastAttemptUtc != DateTime.MinValue && now - _lastAttemptUtc < RefreshInterval)
                 return _last;
 
-            _lastAttemptUtc = now;
-            _last = Refresh(resolverFactory);
+            try
+            {
+                _last = Refresh(resolverFactory);
+                _lastAttemptUtc = now;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
+                bool stops = loaded is { Success: true, Config: not null } ? loaded.Config.StopsOnToolFailure : true;
+                _last = Failure(stops, exception.Message, null);
+                _lastAttemptUtc = now;
+            }
+
             return _last;
         }
         finally
@@ -132,23 +155,18 @@ public sealed class CodeGraphFreshness
 
         bool stops = loaded.Config.StopsOnToolFailure;
         string lockDirectory = Path.GetTempPath();
-        string lockPath = CodeGraphProvisioner.LockPathFor(_repositoryRoot, lockDirectory);
-
-        if (IsLocked(lockPath)) return CodeGraphGate.Advisory(BusyNote);
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
         DoctorCheck provisioned = CodeGraphProvisioner.Provision(
             _repositoryRoot,
             options,
-            new BoundedExecutor(RefreshBound),
+            _executor,
             lockDirectory,
             TimeSpan.Zero);
 
         if (!provisioned.Passed)
         {
-            // A refresh that failed while another process holds the lock is still contention
-            // rather than a broken index; the lock is the one honest witness of that.
-            return IsLocked(lockPath)
+            return CodeGraphProvisioner.IsBusy(provisioned)
                 ? CodeGraphGate.Advisory(BusyNote)
                 : Failure(stops, provisioned.Reason, provisioned.Fix);
         }
@@ -157,39 +175,6 @@ public sealed class CodeGraphFreshness
         return resolver.IsAvailable
             ? CodeGraphGate.Clear
             : Failure(stops, resolver.UnavailableReason, null);
-    }
-
-    /// <summary>
-    /// Whether another process holds the refresh lock, asked the way the provisioner asks it: by
-    /// opening the file with no sharing. A lock file nothing holds is opened and released here.
-    /// </summary>
-    /// <remarks>
-    /// A lock that cannot be opened for any other reason — a missing lock directory, a permission
-    /// — is not contention, and is left for <see cref="CodeGraphProvisioner.Provision"/> to
-    /// report with the reason it has. The directory case is caught first because .NET derives
-    /// <see cref="DirectoryNotFoundException"/> from <see cref="IOException"/>.
-    /// </remarks>
-    private static bool IsLocked(string lockPath)
-    {
-        try
-        {
-            using FileStream probe = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            return false;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return true;
-        }
-        catch (Exception exception) when (exception is UnauthorizedAccessException
-            or NotSupportedException
-            or ArgumentException)
-        {
-            return false;
-        }
     }
 
     /// <summary>

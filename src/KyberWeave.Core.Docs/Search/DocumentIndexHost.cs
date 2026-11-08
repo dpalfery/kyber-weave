@@ -93,6 +93,29 @@ public sealed class DocumentIndexHost
     /// <summary>Loads the document set the host was constructed to serve.</summary>
     public DocumentSet LoadDocumentSet() => _documentSetFactory();
 
+    /// <summary>
+    /// Current count of documents in the corpus, rebuilding only the document corpus if stale,
+    /// without calling the CodeGraph resolver factory.
+    /// </summary>
+    public int DocumentCount
+    {
+        get
+        {
+            long docsStamp = ComputeDocsStamp();
+            lock (_gate)
+            {
+                if (_corpus is null || docsStamp != _docsStamp)
+                {
+                    _corpus = DocumentCorpus.Build(_documentSetFactory());
+                    _docsStamp = docsStamp;
+                    CorpusBuilds++;
+                }
+
+                return _corpus.Documents.Count;
+            }
+        }
+    }
+
     /// <summary>Resolves the CodeGraph port for this repository using the host's factory.</summary>
     public ICodeGraphResolver CreateCodeGraphResolver() => _resolverFactory();
 

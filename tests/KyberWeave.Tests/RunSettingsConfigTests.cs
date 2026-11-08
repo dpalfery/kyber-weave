@@ -52,21 +52,17 @@ public sealed class RunSettingsConfigTests
     private const string HarnessNamesSetting = "harness-names";
 
     /// <summary>
-    ///     A configured <c>stop-on-tool-failure</c> reaches the registry an agent reads, as a setting
-    ///     rather than a path: there is no file named <c>false</c> for the registry validator to find.
+    ///     A configured <c>stop-on-tool-failure</c> does not reach the registry an agent reads: the CLI
+    ///     and the MCP server are the readers, not a portable instruction file (ADR 0061).
     /// </summary>
     [Fact]
-    public void AConfiguredStopOnToolFailurePublishesAModeProperty()
+    public void AConfiguredStopOnToolFailureIsNotPublishedInTheRegistry()
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("stop-on-tool-failure: false\n");
 
-        ConfigRegEntry entry = Assert.Single(
+        Assert.DoesNotContain(
             config.ConfigReg.Resolve(config.Ontology),
             candidate => candidate.Name.Contains(StopOnToolFailureSetting, StringComparison.Ordinal));
-        Assert.Equal(ConfigRegEntryKind.Mode, entry.Kind);
-
-        string line = RenderedLine(config, StopOnToolFailureSetting);
-        Assert.Contains("`", line, StringComparison.Ordinal);
     }
 
     /// <summary>

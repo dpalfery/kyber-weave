@@ -186,10 +186,6 @@ public static class CodeGraphProvisioner
     {
         List<DoctorCheck> checks = [];
 
-        // The tracked files already modified before this run. Whatever appears after it is not the operator's work,
-        // and rewinding the operator's work would be unrecoverable data loss disguised as housekeeping.
-        HashSet<string> dirtyBefore = TrackedChanges(root, executor);
-
         using FileStream? lockFile = AcquireLock(
             LockPathFor(root, lockDirectory), options.IndexTimeout, out string? lockFailure);
         if (lockFile is null)
@@ -197,6 +193,10 @@ public static class CodeGraphProvisioner
             checks.Add(LockRefused(lockFailure, EnsureFlag));
             return checks;
         }
+
+        // The tracked files already modified before this run, sampled after acquiring the lock so
+        // that operator edits made while waiting on another run are never rewound.
+        HashSet<string>? dirtyBefore = TrackedChanges(root, executor);
 
         if (Directory.Exists(indexDirectory) && !IsWritable(indexDirectory))
         {
@@ -309,15 +309,23 @@ public static class CodeGraphProvisioner
     ///     already modified.
     /// </summary>
     /// <returns>
-    ///     The <c>codegraph.restore</c> check, or null when the preparation wrote no tracked file.
+    ///     The <c>codegraph.restore</c> check, or null when the preparation wrote no tracked file or when baseline
+    ///     tracked changes could not be read.
     /// </returns>
     private static DoctorCheck? RestoreWritten(
         string root,
-        HashSet<string> dirtyBefore,
+        HashSet<string>? dirtyBefore,
         IProcessExecutor executor)
     {
+        if (dirtyBefore is null)
+            return null;
+
+        HashSet<string>? dirtyAfter = TrackedChanges(root, executor);
+        if (dirtyAfter is null)
+            return null;
+
         List<string> written = [];
-        foreach (string path in TrackedChanges(root, executor))
+        foreach (string path in dirtyAfter)
         {
             if (!dirtyBefore.Contains(path))
                 written.Add(path);
@@ -345,8 +353,11 @@ public static class CodeGraphProvisioner
                 RestoreCheckId,
                 false,
                 $"the index wrote tracked files that could not be restored: {string.Join(", ", failed)}",
-                $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed)}");
+                $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
     }
+
+    private static string QuoteShellPath(string path) =>
+        "'" + path.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 
     /// <summary>Restores one path from <c>HEAD</c>, in both the working tree and the index.</summary>
     private static bool RestoreOne(string root, string path, IProcessExecutor executor)
@@ -366,25 +377,25 @@ public static class CodeGraphProvisioner
 
     /// <summary>
     ///     The repository-relative paths git reports as modified, staged, deleted or renamed, from
-    ///     <c>git status --porcelain -uno</c>.
+    ///     <c>git status --porcelain -uno</c>, or null when git status fails.
     /// </summary>
     /// <remarks>
     ///     Untracked entries are excluded by <c>-uno</c>. This set exists so the ensure run can tell the edits it
     ///     caused from the edits that were already there, and a path git does not track cannot be restored. A git
-    ///     that cannot run yields an empty set rather than an exception: failing to read the working tree must not
-    ///     skip the index checks that follow it.
+    ///     that cannot run yields null rather than an empty set: failing to read the working tree must not be
+    ///     confused with a clean tree, which would cause existing modifications to be restored as index-written.
     /// </remarks>
-    private static HashSet<string> TrackedChanges(string root, IProcessExecutor executor)
+    private static HashSet<string>? TrackedChanges(string root, IProcessExecutor executor)
     {
-        HashSet<string> paths = new(StringComparer.Ordinal);
         try
         {
             ProcessResult result = executor.Run(
                 StartInfo("git", root, "status", "--porcelain", "-uno"),
                 string.Empty);
             if (result.ExitCode != 0)
-                return paths;
+                return null;
 
+            HashSet<string> paths = new(StringComparer.Ordinal);
             foreach (string line in result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
             {
                 // Porcelain v1 is two status columns, a space, then the path. Anything shorter than that is not an
@@ -402,13 +413,13 @@ public static class CodeGraphProvisioner
                 if (path.Length > 0)
                     paths.Add(path);
             }
+
+            return paths;
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
         {
-            return paths;
+            return null;
         }
-
-        return paths;
     }
 
     /// <summary>Runs one CodeGraph verb from the root and records what the check line needs to know about it.</summary>
@@ -486,6 +497,25 @@ public static class CodeGraphProvisioner
         return Math.Min(seconds * 2L, int.MaxValue);
     }
 
+    /// <summary>Whether a doctor check reports that the CodeGraph index was busy provisioning.</summary>
+    public static bool IsBusy(DoctorCheck check) =>
+        check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
+
+    /// <summary>
+    ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
+    /// </summary>
+    public static bool IsSharingViolation(IOException ex)
+    {
+        int hr = ex.HResult;
+        if (hr is unchecked((int)0x80070020) or unchecked((int)0x80070021) || (hr & 0xFFFF) is 32 or 33)
+            return true;
+
+        string msg = ex.Message;
+        return msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("sharing violation", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("locked", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>The check a run reports when another doctor holds the lock, or when the lock path is unusable.</summary>
     private static DoctorCheck LockRefused(string? failure, string flag) =>
         failure is { } reason
@@ -527,12 +557,22 @@ public static class CodeGraphProvisioner
                 failure = $"the index lock directory for '{path}' does not exist";
                 return null;
             }
-            catch (IOException) when (DateTime.UtcNow < deadline)
+            catch (PathTooLongException)
+            {
+                failure = $"the index lock path '{path}' is too long";
+                return null;
+            }
+            catch (IOException ex) when (IsSharingViolation(ex) && DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(LockPollInterval);
             }
-            catch (IOException)
+            catch (IOException ex) when (IsSharingViolation(ex))
             {
+                return null;
+            }
+            catch (IOException ex)
+            {
+                failure = $"the index lock '{path}' could not be opened: {ex.Message}";
                 return null;
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException or ArgumentException)

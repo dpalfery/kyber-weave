@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -38,6 +40,12 @@ namespace KyberWeave.Tests;
 /// a repository declares it. Every test here that expects a refresh therefore arranges a repository
 /// that requires CodeGraph (<see cref="ToolsRequiringCodeGraph"/>); the test that pins the other side
 /// leaves the scaffold's own declaration — <c>kw-docs</c> alone, CodeGraph commented out — untouched.
+/// </para>
+/// <para>
+/// The refresh's index child is scripted, not run (<see cref="ProvisionSucceeds"/>). The refresh only
+/// reaches its resolver after a successful provision, so a real <c>codegraph</c> — present on a
+/// developer's machine, absent on a CI runner — would otherwise choose which branch of the refresh
+/// these tests exercise, and the branch a test pins would change with the machine it ran on.
 /// </para>
 /// </remarks>
 public sealed class McpCodeGraphRefreshTests : IDisposable
@@ -110,6 +118,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         string response = tools.Explore("anything");
         elapsed.Stop();
 
+        TimeSpan waitBudget = TimeSpan.FromSeconds(2);
+        Assert.True(
+            elapsed.Elapsed < waitBudget,
+            $"The tool call spent {elapsed.Elapsed.TotalSeconds:0.0}s with the refresh lock held by another "
+            + $"process; a busy lock must not wait (tight budget {waitBudget.TotalSeconds:0}s).");
         Assert.True(
             elapsed.Elapsed < RefreshBound,
             $"The tool call spent {elapsed.Elapsed.TotalSeconds:0.0}s with the refresh lock held by another "
@@ -119,6 +132,74 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             BusyNote.IsMatch(response),
             $"With another process holding the refresh lock the response carries no note naming the index "
             + $"work already under way. It was:{Environment.NewLine}{response}");
+    }
+
+    /// <summary>
+    /// When the refresh throws an exception (e.g. resolver construction failure), the failure is
+    /// converted to STATUS: TOOL_FAILURE rather than escaping, and the throttle does not bypass the gate.
+    /// </summary>
+    [Fact]
+    public void WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
+    {
+        DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
+
+        int resolverCalls = 0;
+        DocsTools tools = ScaffoldedTools(
+            Root,
+            () =>
+            {
+                resolverCalls++;
+                throw new InvalidOperationException("boom resolver failed");
+            });
+
+        string first = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", first, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=0", first, StringComparison.Ordinal);
+
+        // Subsequent call must not answer Clear as if healthy
+        string second = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", second, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", second, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When the resolver throws and the configuration file is unparseable,
+    /// the failure defaults to the stop rule (STATUS: TOOL_FAILURE) rather than fail-open advisory.
+    /// </summary>
+    [Fact]
+    public void WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
+    {
+        DocsScaffolder.Scaffold(Root);
+        McpDeclarationFixture.RequireCodeGraph(Root);
+
+        DocsTools tools = ScaffoldedTools(
+            Root,
+            () =>
+            {
+                File.WriteAllText(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"), "unparseable: [yaml: broken");
+                throw new InvalidOperationException("boom resolver failed");
+            });
+
+        string response = tools.Explore("anything");
+        Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.Contains("boom resolver failed", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("warning:", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only genuine sharing violations are classified as contention; non-lock IO exceptions
+    /// (such as PathTooLongException or disk errors) are not treated as busy contention.
+    /// </summary>
+    [Fact]
+    public void NonSharingViolationIOException_IsNotTreatedAsBusyLock()
+    {
+        Assert.False(CodeGraphProvisioner.IsSharingViolation(new PathTooLongException("path too long")));
+        Assert.False(CodeGraphProvisioner.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
+
+        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
+        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
     }
 
     /// <summary>
@@ -237,7 +318,8 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     /// <remarks>
     /// The refresh schedule is asked for explicitly. It is opt-in: tools built without one answer
     /// from the documents on disk, so a test that observes the refresh has to be the caller that
-    /// requests it.
+    /// requests it. The schedule is handed <see cref="ProvisionSucceeds"/>, so the refresh does not
+    /// depend on a CodeGraph binary being installed on the machine running the test.
     /// </remarks>
     private static DocsTools ScaffoldedTools(string root, Func<ICodeGraphResolver> resolverFactory)
     {
@@ -249,6 +331,31 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
+        return new DocsTools(
+            host,
+            null,
+            new CodeGraphFreshness(root, refreshEnabled: true, ProvisionSucceeds()));
     }
+
+    /// <summary>
+    /// The provisioner's index child, answered the way a working <c>codegraph</c> answers: exit zero,
+    /// and nothing on either stream.
+    /// </summary>
+    /// <remarks>
+    /// A successful provision is what lets the refresh go on to build its resolver, which is the step
+    /// the two resolver-factory tests pin. Any other child is a refusal rather than a silent success:
+    /// the refresh starts the index binary and nothing else, so a command this does not expect means
+    /// the refresh grew a step these tests do not know about.
+    /// </remarks>
+    private static IProcessExecutor ProvisionSucceeds() =>
+        new ScriptedProcessExecutor(startInfo =>
+        {
+            if (Path.GetFileName(startInfo.FileName) != "codegraph")
+            {
+                throw new InvalidOperationException(
+                    $"The refresh started '{startInfo.FileName}', which no test in this class expects.");
+            }
+
+            return new ProcessResult(0, string.Empty, string.Empty);
+        });
 }

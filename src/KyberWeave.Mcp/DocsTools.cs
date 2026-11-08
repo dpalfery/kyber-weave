@@ -133,9 +133,9 @@ public sealed partial class DocsTools
         string? cursor = null)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         ExploreAnswer answer = index.Explore(query, cursor);
 
@@ -209,9 +209,9 @@ public sealed partial class DocsTools
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
@@ -256,9 +256,9 @@ public sealed partial class DocsTools
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         int effectiveBudget = Math.Max(0, Math.Clamp(charBudget, 0, AnalysisCharCap) - provenance.Length - 1);
 
@@ -371,9 +371,9 @@ public sealed partial class DocsTools
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         int effectiveBudget = Math.Max(0, AnalysisCharCap - provenance.Length - 1);
 
@@ -470,9 +470,9 @@ public sealed partial class DocsTools
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         DiagnosticReport report = new();
         if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
@@ -622,9 +622,9 @@ public sealed partial class DocsTools
             """)] int charBudget = DocumentIndex.DefaultCharBudget)
     {
         CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        if (gate.Failure is { } failure) return Blocked(provenance, failure);
 
         // The index folds an unnamed technology into an empty result, so a caller error would
         // otherwise be answered with "no standard for ''". Usage prose is the honest reply to
@@ -707,8 +707,8 @@ public sealed partial class DocsTools
     /// The provenance header for a response answered from <paramref name="index"/>. Every
     /// user-visible return leads with this so a caller can tell which corpus answered.
     /// </summary>
-    private string Provenance(DocumentIndex index) =>
-        CorpusProvenance.Line(_host.RepositoryRoot, index.DocumentCount, _host.CorpusBuilds);
+    private string Provenance(DocumentIndex? index = null) =>
+        CorpusProvenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? _host.DocumentCount, _host.CorpusBuilds);
 
     /// <summary>
     /// Puts the provenance line first, then the gate's one-line note when it has one, then the
