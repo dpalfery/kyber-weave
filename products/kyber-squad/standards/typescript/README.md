@@ -148,7 +148,7 @@ Linux, and Windows:
 npm ci
 npm run typecheck        # tsc --noEmit for every tsconfig in the package
 npm run lint             # eslint .
-npx prettier --check .   # the format check, where the package formats with Prettier
+npx prettier --check .   # prettier check (keep prettier or lint, as the package declares)
 npm run build            # the build, when the package builds
 npm test                 # vitest run (or the declared runner)
 ```

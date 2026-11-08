@@ -217,8 +217,6 @@ nothing, and the build is also where the analyzers run.
 dotnet build -c Release                                 # the build; warnings are errors
 dotnet test --filter "FullyQualifiedName~<TestClass>"   # the tests covering your change
 dotnet format --verify-no-changes                       # the formatter check
-dotnet watch                                            # hot reload, while writing
-dotnet run                                              # local run
 ```
 
 `dotnet build` is the build gate, and where `TreatWarningsAsErrors` is on a warning fails it.

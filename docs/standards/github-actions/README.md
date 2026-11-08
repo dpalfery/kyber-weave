@@ -222,7 +222,8 @@ A workflow change is proved the way a code change is — a build, the tests cove
 format check — and the three are not optional because the file is YAML:
 
 ```bash
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build
+scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<TestClass>"
 git diff --check
 actionlint .github/workflows/<file>.yml
 ```

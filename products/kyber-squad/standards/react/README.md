@@ -88,7 +88,7 @@ else.
 npm ci
 npm run typecheck                        # tsc --noEmit
 npm run lint                             # eslint
-npx prettier --check <path>              # the format check, where the repository formats with Prettier
+npx prettier --check <path>              # prettier check (keep prettier or lint, as the repository declares)
 npm test -- <path>                       # the tests covering the components you changed
 npm run build                            # the build, when the package builds
 ```

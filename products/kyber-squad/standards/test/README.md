@@ -153,7 +153,7 @@ no dev agent runs them, even for a cross-cutting change.
 
 ```bash
 dotnet build -c Release                                 # the build, once
-dotnet test --filter <TestClass>                        # C#
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # C#
 pytest tests/<module>                                   # Python
 cargo nextest run -E 'test(<name>)'                     # Rust, or: cargo test -p <crate> '<name>'
 go test -race -run '<TestName>' ./<package>             # Go

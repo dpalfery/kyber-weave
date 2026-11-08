@@ -699,7 +699,9 @@ anywhere, and a single check keeps running for a developer agent. The key is wha
 ([ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md)), so a host
 scaffolded by `docs init` cannot hand a developer agent the whole suite. The generated command is
 **not** wrapped in `scripts/proc-guard.sh`: the guard is this repository's own file and does not
-ship to a host, while the key is the half that travels. `GateCatalogueRenderTests` pins both
+ship to a host, while the key is the half that travels; host repositories rely on the gate runner's
+`timeout-seconds` rather than repository-specific process tree caps or slot queuing.
+`GateCatalogueRenderTests` pins both
 directions of the rule in one comparison, so a scaffold that marked every gate full-suite and one
 that marked none both fail.
 

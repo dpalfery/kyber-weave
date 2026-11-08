@@ -308,8 +308,9 @@ onboarding: done
 | absent | The question is **unanswered**. This is the only state that stops a run. |
 
 **Absent is not a third answer.** A repository whose configuration never wrote the key has not been
-asked, so `kyber-weave run start` stops before it checks anything else and names the
-`kyber-docs-onboarding-and-assessment` skill and the verb that records the answer. Both recorded
+asked, so `kyber-weave run start` stops (the first check after configuration loads, ahead of the tool
+checks and the fetch) and names the `kyber-docs-onboarding-and-assessment` skill and the verb that
+records the answer. Both recorded
 values end the question, which is why `declined` exists: without it the only answers a repository
 could record would be "done" and "never asked", so a user who said no would be asked again on every
 start.
