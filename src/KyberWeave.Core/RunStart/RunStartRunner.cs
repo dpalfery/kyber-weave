@@ -101,16 +101,20 @@ public sealed class RunStartRunner
         return Git("worktree", "list", "--porcelain");
     }
 
+    /// <summary>Whether git worktree porcelain output reports more than one worktree.</summary>
+    public static bool HasMultipleWorktrees(string porcelain)
+    {
+        ArgumentNullException.ThrowIfNull(porcelain);
+        return porcelain
+            .Split('\n')
+            .Count(line => line.StartsWith("worktree ", StringComparison.Ordinal)) > 1;
+    }
+
     /// <summary>Whether a second worktree is attached to this repository, or null when the probe failed.</summary>
     public bool? AnotherWorktreeIsAttached()
     {
         GitOutcome outcome = WorktreeList();
-        if (!outcome.Succeeded)
-            return null;
-
-        return outcome.StandardOutput
-            .Split('\n')
-            .Count(line => line.StartsWith("worktree ", StringComparison.Ordinal)) > 1;
+        return outcome.Succeeded ? HasMultipleWorktrees(outcome.StandardOutput) : null;
     }
 
     /// <summary>

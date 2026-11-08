@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.RunStart;
 using Xunit;
 using Xunit.Sdk;
 
@@ -217,6 +218,18 @@ public sealed class RunStartCommandTests : IDisposable
         Assert.True(result.ExitCode == 0, $"'run start --help' must exit 0, not {result.ExitCode}. {result.Output}");
         foreach (string flag in new[] { "--harness", "--type", "--slug" })
             Assert.Contains(flag, result.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     HasMultipleWorktrees correctly parses git worktree porcelain output.
+    /// </summary>
+    [Theory]
+    [InlineData("worktree /path/to/main\nHEAD abc\nbranch refs/heads/main\n\n", false)]
+    [InlineData("worktree /path/to/main\nHEAD abc\nbranch refs/heads/main\n\nworktree /path/to/worker\nHEAD def\nbranch refs/heads/worker\n\n", true)]
+    [InlineData("", false)]
+    public void HasMultipleWorktreesParsesPorcelain(string porcelain, bool expected)
+    {
+        Assert.Equal(expected, RunStartRunner.HasMultipleWorktrees(porcelain));
     }
 
     /// <summary>

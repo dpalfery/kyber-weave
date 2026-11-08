@@ -221,9 +221,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Fail($"git worktree list failed: {worktrees.FirstErrorLine}");
         }
 
-        bool anotherWorktreeIsAttached = worktrees.StandardOutput
-            .Split('\n')
-            .Count(line => line.StartsWith("worktree ", StringComparison.Ordinal)) > 1;
+        bool anotherWorktreeIsAttached = RunStartRunner.HasMultipleWorktrees(worktrees.StandardOutput);
 
         RunStartLocation location = RunStartPlanner.DecideLocation(
             status.StandardOutput.Trim().Length == 0,
