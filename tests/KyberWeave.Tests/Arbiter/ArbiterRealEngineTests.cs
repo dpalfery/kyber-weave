@@ -236,6 +236,28 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A loud allow to an implementation specialist still strips the routing headers: the
+    /// worker gets a clean prompt plus the note, never the headers the strip exists to
+    /// remove.
+    /// </summary>
+    [Fact]
+    public void RealEngine_LoudAllowToASpecialistStillStripsHeaders()
+    {
+        WriteConfig(DisabledShippedRules());
+        HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
+
+        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string updated = output.GetProperty("updatedInput").GetProperty("prompt").GetString() ?? string.Empty;
+        Assert.DoesNotContain("KYBER-ARBITER", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("TASK: T3", updated, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RealEngine_RemoteProviderWithoutSecretTool_AllowsLoudlyWithActionableEvidence()
     {

@@ -223,6 +223,8 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                     outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                         "Hook engine returned allow-with-rewrite without rewritten input.")),
                 HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                    toolInput,
+                    prompt,
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine allowed with a note but wrote none.")),
                 HookOutcomeKind.Deny => RenderPreDeny(
@@ -495,17 +497,24 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     private static bool IsHandbackTool(string? tool) =>
         string.Equals(tool, "SubagentHandback", StringComparison.Ordinal);
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(JsonElement toolInput, string prompt, string note)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Claude hook event: tool_input is not a JSON object.");
+        updated["prompt"] = HeaderBlock.Strip(prompt);
+        return new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
             {
                 ["hookEventName"] = "PreToolUse",
                 ["permissionDecision"] = "allow",
                 ["permissionDecisionReason"] = note,
+                ["updatedInput"] = updated,
             },
             ["systemMessage"] = note,
         }.ToJsonString();
+    }
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject
