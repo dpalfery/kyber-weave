@@ -6,6 +6,8 @@ status: archived
 component: ReviewCouncil
 owner: dpalfery
 last-reviewed: 2026-11-08
+documentation-impact: extends-component
+impact-components: [ReviewCouncil]
 ---
 
 # No task gate runs review suppressions
@@ -57,3 +59,29 @@ change (a `{base}`-style argument or no argument at all, comparing against `HEAD
 The command and the ids are documented and stay as they are: [the suppression
 gate](../code-review/architecture.md#the-suppression-gate) and the [rule
 reference](../ci-pipelines/rule-reference.md#suppressions--review-suppressions).
+
+## Decisions
+
+| ID | Question | Answer / decision | Where it is recorded |
+|---|---|---|---|
+| RSG1 | Which side was missing — the command or the wiring? | The wiring. `review suppressions` and its two rule ids already shipped and were documented; no gate declared it and the catalogue offered it to no host, so nothing ran it. | [Review council architecture: the suppression gate](../../code-review/architecture.md#the-suppression-gate) |
+| RSG2 | Which agents get the task gate? | Every .NET authoring role: `csharp-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`, `sql-database-architect` and `test-dev`. A warning-disable pragma is the same defect wherever it is written, and a test file is written by an author like any other. | [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) `review.task-gates` |
+| RSG3 | How is the gate invoked — with `{changed}` or bare? | Bare: `review suppressions "."`. The command reads the change against its base itself, so naming the changed files would scan them twice and still miss a suppression added to a file the gate's `include` did not list. | [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) `review.task-gates`, id `suppressions` |
+| RSG4 | Does the catalogue carry it too, or only this repository? | Both. This repository's config gains the gate so the change is caught here, and the csharp catalogue family carries the same entry so `docs init` scaffolds it into any host installing a .NET stack. The golden fixture was regenerated through the real code path; the diff is the five gate entries and nothing else. | [The shipped gate catalogue](../../code-review/architecture.md#the-shipped-gate-catalogue) and `products/kyber-squad/standards/csharp/gates.yml` |
+| RSG5 | What about `sql-database-architect` in the catalogue? | Left off it, deliberately. `GateCatalogue`'s developer-slug vocabulary does not list that agent, so naming it in a catalogue gate fails every render. The gap is recorded as its own todo rather than hidden by widening the vocabulary to make the error go away. | [sql-database-architect is not a catalogue developer slug](../todo/sql-database-architect-is-not-a-catalogue-developer-slug.md) |
+| RSG6 | Was the gate verified by running it, or by reading it? | Run. `review gates --agent <name>` passes clean for all six agents, and fails with `KW-REVIEW-022` for `dal-dev` on a `.cs` file given an injected warning-disable pragma with no reason; the injection was removed afterwards. | This note's closing paragraph, and the gate's own output |
+
+## Design harvest
+
+| ID | Target component | Target doc type | Target doc | Durable item |
+|---|---|---|---|---|
+| DH1 | ReviewCouncil | architecture | [The suppression gate](../../code-review/architecture.md#the-suppression-gate) | The suppression gate is selected by the task gates of every .NET authoring role and runs bare rather than over `{changed}`, because the command reads the change against its base itself and a changed-file list would both scan twice and miss a file the gate did not list |
+| DH2 | ReviewCouncil | architecture | [The shipped gate catalogue](../../code-review/architecture.md#the-shipped-gate-catalogue) | A gate that ships in the catalogue reaches installing hosts through the golden fixture, which is regenerated through the real `docs init` path so a hand edit to the catalogue cannot silently change what a host receives |
+
+## Closeout mapping
+
+| ID | Destination | Impact component | Last-reviewed | Status |
+|---|---|---|---|---|
+| RSG1, RSG2, RSG3, RSG6, DH1 | [The suppression gate](../../code-review/architecture.md#the-suppression-gate) | ReviewCouncil | 2026-11-08 | archived |
+| RSG4, DH2 | [The shipped gate catalogue](../../code-review/architecture.md#the-shipped-gate-catalogue) | ReviewCouncil | 2026-11-08 | archived |
+| RSG5 | Documentation waiver: the agent that the catalogue cannot name is a boundary fact, not a lasting design statement, and the durable record is the todo that tracks it; the run-it-for-real check needs no prose beyond the paragraph above, because the gate's behaviour is already stated in the suppression-gate section. | ReviewCouncil | 2026-11-08 | archived |

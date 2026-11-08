@@ -559,9 +559,19 @@ suppression passes untouched, and a change that adds none passes.
 found on a context line satisfies nothing, and an empty change is a pass. The command needs no
 `review:` section, so it runs in a host that declares none.
 
-No task gate in this repository selects the command yet, so it is knowledge a worker can run rather
-than a check that already runs for every .NET change; the declaration is deferred work, recorded as
-[the suppression gate is not selected by any task gate](../todo/review-suppressions-gate-not-selected.md).
+Every .NET authoring role runs it as a task gate: `csharp-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`,
+`sql-database-architect` and `test-dev`. A suppression is the same defect wherever it is written, and a
+test file is written by an author like any other. The gate's argv is bare — `review suppressions "."` —
+and never carries `{changed}`: the command reads the change against its base itself, so a changed-file
+list would scan those files twice and still miss a suppression added to a file the gate's `include` did
+not list.
+
+The `csharp` family ships the same gate in its catalogue entry, so `docs init` scaffolds it into any host
+that installs a .NET stack rather than leaving the check to this repository alone. That entry names the
+five developers the catalogue's developer-slug vocabulary admits; `sql-database-architect` is not one of
+them, so a host scaffolded from the catalogue gets the gate for the other five and
+[sql-database-architect is not a catalogue developer slug](../todo/sql-database-architect-is-not-a-catalogue-developer-slug.md)
+tracks the gap.
 
 ### Council gates
 
@@ -745,6 +755,13 @@ with its note as the reason). Conditions are evaluated per root, because two roo
 one repository can differ — one `package.json` may define a `lint` script while another
 does not. Entries sharing an id pick one form per root. Every command is argv, and every
 gate id has a source URL in its family file.
+
+**What a host receives is pinned, not reviewed by eye.** Each family has an approved
+`expected-review.yml` under `tests/fixtures/gate-catalogue/<family>/`, and `DocsInitWritesTheApprovedReviewBlock`
+asserts that the `review:` section `docs init` writes equals it, version stamp aside. A hand edit to a
+family file that changes what an installing repository gets therefore fails a test rather than shipping
+quietly, and a gate added to a family is delivered by regenerating that fixture through the real
+`docs init` path so the diff is the new entries and nothing else.
 
 **A gate whose `role` is `test` is rendered with `full-suite: true`, and no other gate is.** The
 role is the catalogue's own definition of a whole-suite run, so a family that later ships a second
