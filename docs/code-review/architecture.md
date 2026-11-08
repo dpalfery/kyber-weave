@@ -575,7 +575,11 @@ there would mean a gate carrying an explicit `--base` per pipeline, and the task
 author that adds the suppression.
 
 The `csharp` family ships the same gate in its catalogue entry, so `docs init` scaffolds it into any host
-that installs a .NET stack rather than leaving the check to this repository alone. That entry names the
+that installs a .NET stack rather than leaving the check to this repository alone. Unlike the family's
+three plumbing gates it carries no `os` restriction: a .NET authoring role writes a suppression on any
+platform, and `kyber-weave` is a dotnet tool that resolves the way `dotnet` does, so restricting it would
+leave a Windows host with every other csharp gate and not this one. Windows is not exercised. That entry
+names the
 five developers the catalogue's developer-slug vocabulary admits; `sql-database-architect` is not one of
 them, so a host scaffolded from the catalogue gets the gate for the other five and
 [sql-database-architect is not a catalogue developer slug](../todo/sql-database-architect-is-not-a-catalogue-developer-slug.md)
