@@ -638,7 +638,6 @@ public sealed partial class DocsTools
 
         if (hits.Count == 0)
             return Lead(gate, provenance, StandardMiss(index, requested));
-
         // A topic that matched nothing still returns the standard, which means the same call
         // made without a topic — built once, and only when a standard's topic actually missed.
         IReadOnlyDictionary<string, DocumentExcerpt>? withoutTopic = null;
