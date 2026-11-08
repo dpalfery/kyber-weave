@@ -52,7 +52,7 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
     {
         AddLines(relativePath, suppression);
 
-        CliRun run = Cli("review", "suppressions", ".");
+        CliRun run = Cli("review", "suppressions", _repo);
 
         AssertExitCode(1, run);
     }
@@ -63,7 +63,7 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
     {
         AddLines("src/a.cs", "#pragma warning disable CS0168 // reason: the analyzer cannot see generated code");
 
-        CliRun run = Cli("review", "suppressions", ".");
+        CliRun run = Cli("review", "suppressions", _repo);
 
         AssertExitCode(0, run);
     }
@@ -77,7 +77,7 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
             "// reason: the analyzer cannot see the generated code it guards",
             "#pragma warning disable CS0168");
 
-        CliRun run = Cli("review", "suppressions", ".");
+        CliRun run = Cli("review", "suppressions", _repo);
 
         AssertExitCode(0, run);
     }
@@ -93,7 +93,7 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
     {
         AddLines("src/a.cs", "// an unrelated change beside a committed suppression");
 
-        CliRun run = Cli("review", "suppressions", ".");
+        CliRun run = Cli("review", "suppressions", _repo);
 
         AssertExitCode(0, run);
     }
@@ -126,7 +126,7 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
         return command;
     }
 
-    private static CliRun Cli(params string[] arguments)
+    private CliRun Cli(params string[] arguments)
     {
         CommandApp app = new();
         app.Configure(config =>

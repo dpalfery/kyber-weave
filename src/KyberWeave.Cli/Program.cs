@@ -283,6 +283,12 @@ app.Configure(config =>
             .WithExample("review", "catalogue", ".")
             .WithExample("review", "catalogue", ".", "--technology", "go");
 
+        review.AddCommand<ReviewSuppressionsCommand>("suppressions")
+            .WithDescription("Refuse a warning suppression the change adds unless it states a reason, judging " +
+                             "added lines only.")
+            .WithExample("review", "suppressions", ".")
+            .WithExample("review", "suppressions", ".", "--base", "origin/main");
+
         review.AddCommand<ReviewDuplicatesCommand>("duplicates")
             .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
             .WithExample("review", "duplicates", ".")

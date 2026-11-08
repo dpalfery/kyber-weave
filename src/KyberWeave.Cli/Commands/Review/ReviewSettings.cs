@@ -63,6 +63,15 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
 }
 
+/// <summary>Settings for <c>review suppressions</c>.</summary>
+public sealed class ReviewSuppressionsSettings : AnalysisSettings
+{
+    [CommandOption("--base <REF>")]
+    [Description("Git ref the working tree is diffed against. Defaults to HEAD, so only this change's added " +
+                 "lines are judged.")]
+    public string? BaseRef { get; set; }
+}
+
 /// <summary>Settings for <c>review duplicates</c>.</summary>
 public sealed class ReviewDuplicatesSettings : AnalysisSettings
 {
