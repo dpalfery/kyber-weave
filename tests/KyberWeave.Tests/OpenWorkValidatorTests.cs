@@ -186,4 +186,94 @@ public sealed class OpenWorkValidatorTests
         Assert.Equal(expectedExit, execution.Result);
         Assert.Equal(mergeReady, execution.Output.Contains(OpenWorkValidator.OpenWork, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// The worker prompts are duplicated from the plan into a tracked task file, and the plan is
+    /// the authority, so the file has a shelf life of exactly one plan: the commit that archives
+    /// the plan deletes it. One left behind describes work nobody is doing any more, and the
+    /// next architect reads it as live.
+    /// </summary>
+    /// <remarks>
+    /// The gate placement is part of the rule. An open plan is correct while the build runs, so
+    /// this is a merge gate: the same corpus passes <c>docs validate</c> and fails
+    /// <c>docs validate --merge-ready</c>.
+    /// </remarks>
+    [Fact]
+    public void ALeftoverTaskFileFailsMergeReadyAsKWDOCCLIFECYCLE005()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, """
+                ---
+                id: plans/index
+                title: Plans
+                doc-type: index
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-09-24
+                ---
+
+                # Plans
+
+                - [Kilo](2026-09-14-kilo.md)
+                """)
+            .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"))
+            .Write(
+                "6-Docs/plans/2026-09-14-kilo.tasks.json",
+                """{ "schema-version": 1, "plan": "6-Docs/plans/2026-09-14-kilo.md", "tasks": [] }""");
+
+        MergedRun withoutTheGate = ValidateThroughTheCommand(fixture, mergeReady: false);
+        Assert.DoesNotContain(LeftoverTaskFile, withoutTheGate.Output, StringComparison.Ordinal);
+
+        MergedRun withTheGate = ValidateThroughTheCommand(fixture, mergeReady: true);
+        Assert.True(
+            withTheGate.Output.Contains(LeftoverTaskFile, StringComparison.Ordinal),
+            $"a merge carrying a leftover task file must report {LeftoverTaskFile}; it reported: {withTheGate.Output}");
+
+        // The fixture is a plain directory, not a git repository, so the archive-closeout gate
+        // also fails here. What this pins is that the leftover file is an error and not a
+        // warning: it alone would already make the merge gate exit 1.
+        Assert.Equal(1, withTheGate.Exit);
+    }
+
+    /// <summary>
+    /// A specification's task file lives in the specification folder, so the closeout moves it
+    /// with the folder. Looking only in the active folders would let a file ride into the
+    /// archive beside its specification, where it stays readable and forever stale.
+    /// </summary>
+    [Fact]
+    public void ATaskFileArchivedWithItsSpecificationIsStillCaught()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(SpecIndex, Index("specs/index"))
+            .Write(
+                "6-Docs/archive/specs/tray/tasks.json",
+                """{ "schema-version": 1, "plan": "6-Docs/archive/specs/tray/design.md", "tasks": [] }""");
+
+        MergedRun run = ValidateThroughTheCommand(fixture, mergeReady: true);
+
+        Assert.True(
+            run.Output.Contains(LeftoverTaskFile, StringComparison.Ordinal),
+            $"an archived specification carrying its task file must report {LeftoverTaskFile}; " +
+            $"it reported: {run.Output}");
+    }
+
+    /// <summary>A task file left behind when the change merges (<c>KW-DOC-LIFECYCLE-005</c>).</summary>
+    private const string LeftoverTaskFile = "KW-DOC-LIFECYCLE-005";
+
+    private static MergedRun ValidateThroughTheCommand(DocFixture fixture, bool mergeReady)
+    {
+        DocsValidateSettings settings = new()
+        {
+            Path = fixture.Root,
+            Format = "json",
+            MergeReady = mergeReady
+        };
+
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+        return new MergedRun(execution.Result, execution.Output);
+    }
+
+    /// <summary>What one <c>docs validate</c> child-in-process returned.</summary>
+    private sealed record MergedRun(int Exit, string Output);
 }

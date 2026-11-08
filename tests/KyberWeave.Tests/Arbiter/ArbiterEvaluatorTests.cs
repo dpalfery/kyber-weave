@@ -490,4 +490,60 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         Assert.Equal(2, result.Dispatches.Count);
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
     }
+
+    /// <summary>
+    /// The shipped plan-read rule, evaluated the way a run evaluates it: the dispatch carries
+    /// the routing header, the prompt's body names the plan, and the conductor is escalated
+    /// instead of dispatching a worker who would open it. Only that rule is configured, so the
+    /// verdict is its own and not another delegate rule's.
+    /// </summary>
+    [Fact]
+    public async Task Evaluator_EscalatesADispatchWhosePromptNamesThePlan()
+    {
+        const string Prompt =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\n" +
+            "Read docs/plans/plan.md and implement the task it describes.";
+        ArbiterRule planRead = Assert.Single(
+            ArbiterConfig.ProductDefaults.Rules,
+            rule => string.Equals(rule.Id, "KW-ARB-PLANREAD-001", StringComparison.Ordinal));
+        ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider());
+        KyberWeaveConfig config = ConfigWith([planRead]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.False(result.IsError, result.ErrorMessage);
+        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+    }
+
+    /// <summary>
+    /// A per-task commit is now the normal case, so the scope-drift rule must still see what a
+    /// finished task changed. It reads the paths changed since the ledger's pre-dispatch
+    /// snapshot, and that set has to include a path whose change is committed while the tree is
+    /// clean — otherwise every committed task looks as though it changed nothing, and
+    /// <c>KW-ARB-DIFF-001</c> cannot see drift at all.
+    /// </summary>
+    /// <remarks>
+    /// The repository is built through <see cref="RunStartProbe" />, the suite's allow-listed
+    /// driver of a real git repository, because the proof needs two commits: a snapshot taken
+    /// on a clean tree, then one commit on top with the tree clean again.
+    /// </remarks>
+    [Fact]
+    public void PerTaskCommitsDoNotHideScopeDrift()
+    {
+        using RunStartProbe probe = RunStartProbe.Create();
+        GitSnapshot? snapshot = GitFacts.CaptureSnapshot(probe.Root);
+        Assert.NotNull(snapshot);
+
+        probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
+        string committed = Path.Combine(probe.Root, "src", "OneTask.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(committed)!);
+        File.WriteAllText(committed, "// one task's work\n", System.Text.Encoding.UTF8);
+        probe.Git("add", "-A");
+        probe.Git("commit", "-m", "test(squad): one task, one commit");
+        Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
+
+        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
+
+        Assert.Contains("src/OneTask.cs", changed);
+    }
 }
