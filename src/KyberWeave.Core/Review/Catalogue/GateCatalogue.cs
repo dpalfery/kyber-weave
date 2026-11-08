@@ -463,8 +463,7 @@ public static class GateCatalogue
             renderer.AgentLines[agent] = lines;
         }
 
-        string labelTech = AgentTechnology.TryGetValue(agent, out string? aTech) ? aTech : technologies;
-        lines.Add($"      # {labelTech}: {entry.Role} ({context.Label})");
+        lines.Add($"      # {technologies}: {entry.Role} ({context.Label})");
         AddNoteComment(lines, entry, "      ");
         lines.AddRange(TaskGateLines(gate, "      "));
         renderer.AgentsWithLive.Add(agent);
@@ -491,8 +490,7 @@ public static class GateCatalogue
             renderer.AgentLines[agent] = lines;
         }
 
-        string labelTech = AgentTechnology.TryGetValue(agent, out string? aTech) ? aTech : technologies;
-        lines.Add($"      # {labelTech}: {entry.Role} ({context.Label})");
+        lines.Add($"      # {technologies}: {entry.Role} ({context.Label})");
         lines.Add($"      # {reason}");
         foreach (string line in TaskGateLines(SubstituteTaskGate(entry, fullId, context), "      "))
             lines.Add($"      # {line.TrimStart()}");
