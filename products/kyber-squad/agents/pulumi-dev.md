@@ -42,7 +42,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Workflow
 
-1. Read the path declared as **<pulumi-coding-standard>** before writing any infrastructure. Apply language-level C# decisions from the path declared as **<csharp-coding-standard>**.
+1. Fetch **<pulumi-coding-standard>** and **<csharp-coding-standard>** before writing any infrastructure through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Construct every Azure resource name through the `azure-naming` skill. Do not improvise a name.
 3. Use Context7 to resolve library ids and fetch current docs for Pulumi, `azure-native`, and any helper package you configure — do not wait to be asked. Pin registry docs to the package version in use when behavior matters.
 4. Implement the change. Match the host repository's existing project/stack layout unless the standard says otherwise.

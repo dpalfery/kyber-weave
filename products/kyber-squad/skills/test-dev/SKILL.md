@@ -8,8 +8,9 @@ license: MIT
 
 Test policy lives in the path declared as **<test-coding-standard>** in the repository
 root `AGENTS.md`. Language-level C# decisions live in the path declared as
-**<csharp-coding-standard>**. Read those before the references below — this skill is
-procedure, not policy.
+**<csharp-coding-standard>**. Fetch those with `docs_get_coding_standard_for_technology`
+before the references below, naming each technology and the topic you need; read a file only
+when the tool is missing — this skill is procedure, not policy.
 
 Identify your sub-task and read ONLY the relevant reference before proceeding.
 

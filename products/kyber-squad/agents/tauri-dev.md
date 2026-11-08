@@ -44,8 +44,9 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Operating workflow
 
-1. **Read the standard.** Read the path declared as **<tauri-coding-standard>** before
-   writing any Rust.
+1. **Fetch the standard.** Fetch **<tauri-coding-standard>** before writing any Rust through
+   `docs_get_coding_standard_for_technology` — name the technology, and the topic when you
+   need one. Read the file only when the tool is missing.
 2. **Locate the boundary.** Is this a Rust-core task, a frontend task, or both? Keep to
    your half and hand off the rest.
 3. **Verify the API.** Confirm the relevant Tauri v2 command/config/permission against the
