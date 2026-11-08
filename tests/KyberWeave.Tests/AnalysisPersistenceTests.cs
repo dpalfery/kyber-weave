@@ -824,6 +824,25 @@ public sealed class AnalysisPersistenceTests
         Assert.False(IsStandardInputOpen(process));
     }
 
+    [Fact]
+    public void IsStandardInputOpen_WhenPipeBroken_ReturnsFalse()
+    {
+        ProcessStartInfo startInfo = new("git", ["version"])
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        using Process process = Process.Start(startInfo)!;
+        process.WaitForExit(5000);
+
+        // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
+        process.StandardInput.AutoFlush = false;
+        process.StandardInput.Write(' ');
+
+        Assert.False(IsStandardInputOpen(process));
+    }
+
     private static string QuerySqlite(string databasePath, string input)
     {
         ProcessResult result = RunSqlite(databasePath, input);

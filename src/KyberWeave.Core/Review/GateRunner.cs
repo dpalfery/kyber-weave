@@ -186,7 +186,7 @@ public static class GateRunner
                     gate.Id,
                     gate.Blocking,
                     -1,
-                    MissingRequirementSummary(path),
+                    $"required path '{path}' could not be resolved ({ex.Message}), so the gate did not start.",
                     0,
                     Outcome: GateOutcome.NotStarted);
             }

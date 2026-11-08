@@ -279,7 +279,7 @@ public static class ReviewConfigLoader
             string trimmed = path.Trim();
             // Both separators are accepted on every host; the stored form uses '/' only.
             string spelled = trimmed.Replace('\\', '/');
-            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || spelled.StartsWith('~') || LooksLikeWindowsDriveAbsolute(spelled))
+            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || IsHomeDirectoryPath(spelled) || LooksLikeWindowsDriveAbsolute(spelled))
             {
                 throw new YamlException(
                     $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
@@ -288,16 +288,17 @@ public static class ReviewConfigLoader
             List<string> segments = [];
             foreach (string segment in spelled.Split('/'))
             {
-                if (segment is "" or ".")
+                string clean = segment.Trim();
+                if (clean is "" or ".")
                     continue;
 
-                if (segment == "..")
+                if (clean == "..")
                 {
                     throw new YamlException(
                         $"{where} '{path}' contains '..' and would leave the repository root. Name a path inside it.");
                 }
 
-                segments.Add(segment);
+                segments.Add(clean);
             }
 
             if (segments.Count == 0)
@@ -316,6 +317,9 @@ public static class ReviewConfigLoader
         path.Length >= 2
         && char.IsAsciiLetter(path[0])
         && path[1] == ':';
+
+    private static bool IsHomeDirectoryPath(string path) =>
+        path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal);
 
     /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
     private static string? ParseOs(string? os, string gateWhere)

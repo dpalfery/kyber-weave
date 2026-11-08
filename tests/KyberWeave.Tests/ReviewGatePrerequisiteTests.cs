@@ -149,7 +149,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                             review:
                               gates:
                                 - id: dash-typecheck
-                                  requires-paths: ["  ./dash/node_modules/  "]
+                                  requires-paths: ["  ./dash/ node_modules/  "]
                                   run: [npm, run, --prefix, dash, typecheck]
                             """;
 
@@ -158,9 +158,26 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
         Assert.Equal(["dash/node_modules"], gate.RequiresPaths);
     }
 
+    [Fact]
+    public void CouncilGateRequiresPaths_AllowsTildeInRelativeDirectoryName()
+    {
+        const string yaml = """
+                            review:
+                              gates:
+                                - id: dash-typecheck
+                                  requires-paths: ["~cache/deps"]
+                                  run: [npm, run, --prefix, dash, typecheck]
+                            """;
+
+        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
+        ReviewGate gate = Assert.Single(config.Gates);
+        Assert.Equal(["~cache/deps"], gate.RequiresPaths);
+    }
+
     [Theory]
     [InlineData("/dash/node_modules")]
     [InlineData("~/dash/node_modules")]
+    [InlineData("~")]
     [InlineData("C:/dash/node_modules")]
     [InlineData("c:dash/node_modules")]
     [InlineData("dash/../../node_modules")]
@@ -191,6 +208,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
         Assert.False(result.Passed);
+        Assert.Contains("could not be resolved", result.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
