@@ -39,6 +39,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-11-07-conductor-run-speed-shared-execution.md](2026-11-07-conductor-run-speed-shared-execution.md) | Ready — approved for execution under AP1, autonomy `autonomous`; child plan of the conductor run-speed parent design (D12), on a branch cut from slice 3's unmerged branch at `095c72ca` (D51) | 2026-11-07 | Slice 4 of the conductor run-speed parent design: bug-crusher on the shared rules — move the conductor's execution contract into a canonical `delivery-execution` skill that both entry points load so bug-crusher keeps no second copy of the worker rules, widen bug-crusher's delegates so its escalated path can start the specialists, and verify the Claude conductor entry point live, closing the open live-verification todo. |
 
 ## Archived Plans
 
