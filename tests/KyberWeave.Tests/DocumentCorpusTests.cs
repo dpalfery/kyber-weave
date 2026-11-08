@@ -278,6 +278,17 @@ public sealed class DocumentIndexHostTests : IDisposable
     }
 
     [Fact]
+    public void DocumentCount_WhenNonIoExceptionThrown_Propagates()
+    {
+        DocumentIndexHost host = new(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () => throw new InvalidOperationException("unexpected non-IO failure"));
+
+        Assert.Throws<InvalidOperationException>(() => host.DocumentCount);
+    }
+
+    [Fact]
     public void DocumentCount_WhenCorpusAlreadyBuilt_DoesNotCallLoaderAgain()
     {
         int loadCalls = 0;

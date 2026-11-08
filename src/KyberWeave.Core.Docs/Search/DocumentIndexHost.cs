@@ -117,7 +117,7 @@ public sealed class DocumentIndexHost
                     CorpusBuilds++;
                     return _corpus.Documents.Count;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     return null;
                 }
