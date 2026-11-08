@@ -153,24 +153,34 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         if (resume is not null)
         {
             string remotePrefix = RunStartPlanner.Remote + "/";
-            string stripped = resume.StartsWith(remotePrefix, StringComparison.Ordinal)
+            bool isExplicitRemote = resume.StartsWith(remotePrefix, StringComparison.Ordinal);
+            string stripped = isExplicitRemote
                 ? resume[remotePrefix.Length..]
                 : resume;
 
-            if (runner.HasLocalBranch(resume))
+            if (isExplicitRemote)
+            {
+                if (runner.HasRemoteBranch(stripped))
+                {
+                    resumeRef = remotePrefix + stripped;
+                    resumeTarget = stripped;
+                }
+                else
+                {
+                    return Refuse(
+                        $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
+                        "branch a plan or pull request already owns.");
+                }
+            }
+            else if (runner.HasLocalBranch(resume))
             {
                 resumeRef = resume;
                 resumeTarget = resume;
             }
-            else if (runner.HasLocalBranch(stripped))
+            else if (runner.HasRemoteBranch(resume))
             {
-                resumeRef = stripped;
-                resumeTarget = stripped;
-            }
-            else if (runner.HasRemoteBranch(stripped))
-            {
-                resumeRef = remotePrefix + stripped;
-                resumeTarget = stripped;
+                resumeRef = remotePrefix + resume;
+                resumeTarget = resume;
             }
             else
             {

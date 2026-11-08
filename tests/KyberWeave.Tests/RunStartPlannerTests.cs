@@ -195,6 +195,38 @@ public sealed class RunStartPlannerTests : IDisposable
     }
 
     /// <summary>
+    ///     When the user explicitly passes <c>--resume origin/&lt;branch&gt;</c>, the remote branch is
+    ///     preferred even if a stale local branch of the same name exists, comparing divergence against
+    ///     the remote revision.
+    /// </summary>
+    [Fact]
+    public void PrefersRemoteBranchWhenExplicitlyQualifiedWithOriginPrefix()
+    {
+        const string Resumed = "claude/fix/diverged-fix";
+        _probe.CreateBranchWithCommit(Resumed, "local stale commit");
+        string localRevision = _probe.GitOutput("rev-parse", "HEAD").Trim();
+
+        _probe.Git("switch", "main");
+        _probe.CreateBranchWithCommit("temp-remote", "remote commit");
+        _probe.Git("push", "origin", "temp-remote:" + Resumed);
+        string remoteRevision = _probe.GitOutput("rev-parse", "origin/" + Resumed).Trim();
+        _probe.Git("switch", "main");
+        _probe.Git("branch", "-D", "temp-remote");
+
+        Assert.NotEqual(localRevision, remoteRevision);
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude",
+            "--type", "fix",
+            "--slug", "tighten-the-gate",
+            "--resume", "origin/" + Resumed,
+            "--json");
+
+        Assert.True(result.ExitCode == 0, $"run start must exit 0: {result.Output}");
+        Assert.Contains(remoteRevision, result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     When the base is origin/HEAD and neither origin/HEAD nor an origin default branch can be resolved,
     ///     the command fails rather than guessing 'main'.
     /// </summary>
