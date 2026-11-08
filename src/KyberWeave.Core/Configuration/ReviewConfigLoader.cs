@@ -14,7 +14,7 @@ public static class ReviewConfigLoader
     /// misspelt token would otherwise reach the runner as a literal argument and fail far from the
     /// line that caused it.
     /// </summary>
-    private static readonly string[] KnownTokens = ["changed", "task"];
+    private static readonly string[] KnownTokens = ["changed", "task", "tests"];
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
@@ -55,6 +55,7 @@ public static class ReviewConfigLoader
             TaskGates = section.TaskGates is null
                 ? defaults.TaskGates
                 : ParseTaskGates(section.TaskGates, repositoryRoot),
+            TestMap = section.TestMap is null ? defaults.TestMap : ParseTestMap(section.TestMap),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
             MaxConcurrentWorkers =
@@ -177,6 +178,82 @@ public static class ReviewConfigLoader
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
+    }
+
+    /// <summary>
+    /// Validates <c>review.test-map</c>: a source glob to the fully qualified test classes that cover it.
+    /// </summary>
+    /// <remarks>
+    /// Entries are checked where the operator wrote them, for the same reason the gates are: a value that is
+    /// not a fully qualified class name reaches the runner as a filter that matches nothing, and a filter
+    /// that matches nothing exits zero.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseTestMap(
+        Dictionary<string, List<string>?> declared)
+    {
+        Dictionary<string, IReadOnlyList<string>> parsed = new(declared.Count, StringComparer.Ordinal);
+
+        foreach (KeyValuePair<string, List<string>?> entry in declared)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                throw new YamlException(
+                    "review.test-map has an empty path pattern. Name the source glob the classes cover, such as " +
+                    "\"src/KyberWeave.Core/Review/**\".");
+            }
+
+            if (entry.Value is null || entry.Value.Count == 0)
+            {
+                throw new YamlException(
+                    $"review.test-map '{entry.Key}' declares no test classes. Name at least one, or remove the entry.");
+            }
+
+            List<string> classes = new(entry.Value.Count);
+            foreach (string? name in entry.Value)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new YamlException(
+                        $"review.test-map '{entry.Key}' has an empty class name. Name a fully qualified test class, " +
+                        "such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
+                }
+
+                string trimmed = name.Trim();
+                if (!IsClassName(trimmed))
+                {
+                    throw new YamlException(
+                        $"review.test-map '{entry.Key}' has '{name}', which is not a fully qualified class name. " +
+                        "Give the class's namespace and name, such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
+                }
+
+                classes.Add(trimmed);
+            }
+
+            parsed[entry.Key] = classes;
+        }
+
+        return new ReadOnlyDictionary<string, IReadOnlyList<string>>(parsed);
+    }
+
+    /// <summary>Whether the value has the shape of a fully qualified type name: dot-separated identifiers.</summary>
+    private static bool IsClassName(string name)
+    {
+        if (name.Length == 0)
+            return false;
+
+        foreach (string segment in name.Split('.'))
+        {
+            if (segment.Length == 0 || (!char.IsLetter(segment[0]) && segment[0] != '_'))
+                return false;
+
+            foreach (char character in segment)
+            {
+                if (!char.IsLetterOrDigit(character) && character != '_')
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(
@@ -574,7 +651,7 @@ public static class ReviewConfigLoader
     /// <summary>
     /// Refuses a brace token that the runner would not expand. <c>{changed}</c> is expanded only as a
     /// whole argument, because splicing a file list into a larger string would hand the runner a string
-    /// it cannot reason about. <c>{task}</c> may sit inside an argument.
+    /// it cannot reason about. <c>{task}</c> and <c>{tests}</c> may sit inside an argument.
     /// </summary>
     private static void ValidateTokens(string element, string where)
     {
@@ -596,7 +673,7 @@ public static class ReviewConfigLoader
             string token = element[open..(i + 1)];
             open = -1;
 
-            if (name == "task")
+            if (name is "task" or "tests")
                 continue;
 
             if (name == "changed")
@@ -613,7 +690,7 @@ public static class ReviewConfigLoader
 
             throw new YamlException(
                 $"{where} has unknown token '{token}' in '{element}'. Did you mean '{{" +
-                NearestKnownToken(name) + "}'? Known tokens are {changed} (whole argument only) and {task}.");
+                NearestKnownToken(name) + "}'? Known tokens are {changed} (whole argument only), {task} and {tests}.");
         }
     }
 

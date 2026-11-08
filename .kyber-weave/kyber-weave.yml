@@ -311,6 +311,18 @@ review:
   # cargo-fmt, cargo-clippy, and dotnet-build are of that kind. Another worker's concurrent edit
   # can therefore fail one of them on a file this task never touched. The task-gate skill re-runs
   # such a failure once after the other change settles, before it counts as rework.
+  # Which test classes cover which source paths, for the `{tests}` token the task gates below
+  # expand. A declared entry is read before the `<Stem>Tests` name convention: an operator who maps
+  # a source area knows which classes exercise it, and a file name does not. Every name is checked
+  # against the tree before it is used, and a change nothing covers skips the gate with
+  # KW-REVIEW-026 rather than running a filter that matches nothing and exits 0.
+  test-map:
+    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+    "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
+      - KyberWeave.Tests.ReviewTaskGatesConfigTests
+      - KyberWeave.Tests.ReviewGateKeysConfigTests
+
   task-gates:
     # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
     # is the form `--fix` applies first; the verify form then decides, so a fix that does not
@@ -335,6 +347,16 @@ review:
         # nothing and exits 0.
         include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
         run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
+      - &dotnet-tests
+        id: tests
+        # The classes this change covers, resolved by `review gates` from `review.test-map` and the
+        # `<Stem>Tests` name convention. Declared after `dotnet-build` because `--no-build` reuses the
+        # artifacts directory that gate writes, so these classes run against the binaries it produced.
+        # A change no class covers skips this gate with KW-REVIEW-026: a filter that matches nothing
+        # exits 0, and would afterwards read as tests that ran and passed.
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
@@ -409,6 +431,7 @@ review:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *dotnet-tests
       - *dash-typecheck
       - *dash-lint
       - *cargo-fmt

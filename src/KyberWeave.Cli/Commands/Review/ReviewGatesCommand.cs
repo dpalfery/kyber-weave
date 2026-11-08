@@ -287,7 +287,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 return RefuseInput(report, settings, gitRefusals);
         }
 
-        TaskGatePlan plan = TaskGateSelection.Plan(agentGates, changed, settings.TaskSlug, CurrentOs());
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            agentGates, changed, settings.TaskSlug, CurrentOs(), root, config.Review.TestMap);
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
