@@ -457,8 +457,8 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
-    /// its canonical-skill counts, and it must state the count the tree actually holds: 28 once the retired
-    /// <c>response-format</c> skill is gone.
+    /// its canonical-skill counts, and it must state the count the tree actually holds: 29, the 28 left after
+    /// the retired <c>response-format</c> skill plus <c>delivery-execution</c>.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -466,8 +466,8 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1347,10 +1347,16 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("superseded", contract, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The conductor's iteration circuit-breaker: the failure-cluster key and tally, the two-dispatch
+    /// retry limit, oscillation detection, and the closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary.
+    /// The rules live in the shared execution contract both entry points load, so that skill is the
+    /// surface asserted here rather than the conductor's own body.
+    /// </summary>
     [Fact]
     public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
@@ -1421,12 +1427,13 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// Task sessions are worker-only: the deterministic <c>task-gate</c> is not a session-bearing
-    /// agent, so the conductor records and resumes exactly one session per task.
+    /// agent, so the conductor records and resumes exactly one session per task. The session rules
+    /// live in the shared execution contract, so that skill is the surface asserted here.
     /// </summary>
     [Fact]
     public void ConductorRetainsOnlyWorkerSessionsForTaskRework()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("original worker session", contract, StringComparison.Ordinal);
         Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);

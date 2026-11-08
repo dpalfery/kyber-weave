@@ -76,11 +76,16 @@ public sealed class ArbiterConductorContractTests
         // Review 20.1, item a: the references stated the header unconditionally while
         // conductor.md allows the arbiter_evaluate_agent_dispatch_or_return fallback to replace it.
         string referencesRoot = Path.Combine(ProductRoot, "agents", "conductor", "references");
-        foreach (string file in new[] { "execution-and-review.md", "plan-path.md", "spec-path.md", "intake-path.md" })
+        foreach (string file in new[] { "plan-path.md", "spec-path.md", "intake-path.md" })
         {
             string text = File.ReadAllText(Path.Combine(referencesRoot, file));
             Assert.Contains("Unless you hold `arbiter_evaluate_agent_dispatch_or_return`", text, StringComparison.Ordinal);
         }
+
+        // The execution rules moved into the shared skill; it states the same override.
+        string execution = File.ReadAllText(
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"));
+        Assert.Contains("Unless you hold `arbiter_evaluate_agent_dispatch_or_return`", execution, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -113,10 +118,10 @@ public sealed class ArbiterConductorContractTests
         string[] files =
         [
             principal,
-            Path.Combine(referencesRoot, "execution-and-review.md"),
             Path.Combine(referencesRoot, "plan-path.md"),
             Path.Combine(referencesRoot, "spec-path.md"),
             Path.Combine(referencesRoot, "intake-path.md"),
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"),
         ];
 
         return string.Join("\n", files.Select(path => StripFrontmatter(File.ReadAllText(path))));

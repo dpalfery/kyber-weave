@@ -27,7 +27,6 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         "plan-path.md",
         "spec-path.md",
         "intake-path.md",
-        "execution-and-review.md",
         "autonomy.md"
     ];
 

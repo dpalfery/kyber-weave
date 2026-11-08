@@ -74,7 +74,7 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePackFixture>, IDisposable
 {
     /// <summary>The Squad canonical roster: one <c>SKILL.md</c> per directory under <c>products/kyber-squad/skills</c>.</summary>
-    private const int SquadCanonicalSkillCount = 28;
+    private const int SquadCanonicalSkillCount = 29;
 
     private const string PackedVersion = SquadKyberWeavePackFixture.PackedVersion;
 
@@ -730,7 +730,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
     /// <summary>
     /// Asserts that an archive carries each Kyber-Weave skill tree at <c>skills/&lt;name&gt;/&lt;relative&gt;</c> with
-    /// the same text, keeps the 28 Squad skills, and holds exactly one <c>SKILL.md</c> per skill.
+    /// the same text, keeps the 29 Squad skills, and holds exactly one <c>SKILL.md</c> per skill.
     /// </summary>
     private static void AssertArchiveCarriesSkillTrees(ZipArchive archive)
     {

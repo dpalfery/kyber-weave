@@ -18,9 +18,13 @@ public sealed class SquadAutonomyRemediationTests
         return File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
     }
 
+    /// <summary>
+    /// The council remediation loop lives in the shared execution contract both entry points load,
+    /// so that skill is the surface these pins read.
+    /// </summary>
     private static string ExecutionAndReview()
     {
-        return Read("agents", "conductor", "references", "execution-and-review.md");
+        return Read("skills", "delivery-execution", "SKILL.md");
     }
 
     private static string CodeReviewer()

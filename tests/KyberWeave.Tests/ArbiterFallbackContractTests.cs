@@ -190,6 +190,16 @@ public sealed class ArbiterFallbackContractTests
         Assert.Contains(marker, FallbackSection(ConductorContract), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The fallback names every contract whose markers it replaces, so a reader can find the rule
+    /// the call stands in for. The execution rules moved into the shared <c>delivery-execution</c>
+    /// skill; the path contracts keep their own references beside the conductor.
+    /// </summary>
+    /// <remarks>
+    /// Each contract is named, not linked by a path into another directory: the conductor's
+    /// body ships to targets that mount it away from this tree, so a relative link out of
+    /// <c>agents/</c> would break there. The names are what a reader follows.
+    /// </remarks>
     [Fact]
     public void ConductorFallback_PointsAtTheContractThatDefinesTheMarkers()
     {
@@ -198,10 +208,10 @@ public sealed class ArbiterFallbackContractTests
         Assert.DoesNotContain("section above", section, StringComparison.Ordinal);
         foreach (string contract in new[]
         {
-            "conductor/references/execution-and-review.md",
-            "conductor/references/intake-path.md",
-            "conductor/references/plan-path.md",
-            "conductor/references/spec-path.md",
+            "`delivery-execution` skill",
+            "intake-path contract",
+            "plan-path contract",
+            "spec-path contract",
         })
         {
             Assert.Contains(contract, section, StringComparison.Ordinal);
