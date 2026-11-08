@@ -2,7 +2,7 @@
 id: plans/2026-11-07-conductor-run-speed-code-index
 title: Code index where workers run (conductor run-speed, slice 2)
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-07
@@ -17,7 +17,9 @@ impact-components:
 
 # Code index where workers run (conductor run-speed, slice 2)
 
-This plan is **Ready and approved for execution under AP1**, with resolved autonomy `autonomous`. It is the child plan of the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 2's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children; this plan is archived in this slice's own pull request.
+**Status: Archived.** Closed 2026-11-07; see the Closeout and Closeout mapping sections at the end.
+
+This plan is **Ready and approved for execution under AP1**, with resolved autonomy `autonomous`. It is the child plan of the parent design for the conductor run-speed work, which lives on its own branch (`claude/docs/conductor-bug-crusher-run-speed`) and is deliberately not in this tree. Per the parent's D12, each slice gets one child plan on the slice's branch, carved from the parent's section and complete on its own: this plan restates only slice 2's decision rows, design, harvest rows, ADR disposition and tasks. The parent design is archived by the last slice's pull request with a mapping to the children; this plan was archived in this slice's own pull request.
 
 ## Problem and goal
 
@@ -40,7 +42,7 @@ The goal of this slice: make CodeGraph work in the tree the worker is actually i
 | D23 | How does the docs server refresh safely? | First tool call, then at most once every 60 seconds (the interval is a suggestion, tunable by a constant). A 30-second bound. Lock busy means another process is refreshing, so answer with a one-line note, not a failure. Binary missing or `sync` failure: the tool returns `STATUS: TOOL_FAILURE` with the reason and fix under stop, or a warning line under `false`. `docs_get_source_repository_and_revision` always answers, so the failure can be diagnosed. `kyber-weave-mcp --no-codegraph-refresh` lets `doctor --check` keep its promise. | `AcquireLock` waits up to `IndexTimeout`, 600 seconds by default, far too long for a tool call, so this path takes a zero-wait lock. `doctor --check` promises it "Never runs init or index" but `McpLiveProbe` makes a real docs call. Child output cannot reach stdout because `ProcessRunner` captures it. `.codegraph/` is gitignored, so the tools stay read-only for documents. | autonomous: low-confidence, no authoritative source |
 | D24 | How is a server bound to the main checkout handled when a worker is in a worktree on another branch? | See "The worktree limitation" under fix 1. Shell roles query the worktree's own index with `codegraph explore`. Shell-less roles get the worktree path in their packet and read it directly. Run start branches in place when the checkout is clean, so the server and the work align. Provenance gains `branch=` and `repo=`, and agents compare the repository, not the path. [Issue 221](https://github.com/dpalfery/kyber-weave/issues/221) stays open. | The canonical binding is deliberate and stays. A session started inside a worktree is already covered, because `--repo-root .` resolves there. | autonomous: recommendation accepted |
 | D25 | Does a worktree still share the main checkout's index? | No. Every new worktree indexes itself with `doctor --ensure` at about 8 seconds. This replaces "Conditional worktree indexing". The ban on symlinking `.codegraph/` stays. | The shared index returned the wrong code: `codegraph explore "StoredDeploymentIdentity"` found the new method from the worktree in 0.37 s and did not find it from the main checkout. Disk cost is about 223 MB per worktree until cleanup removes it. | autonomous: recommendation accepted |
-| D26 | Which server does the renderer grant? | `codegraph` only, to agents the existing `GrantsOrchestratorExcludedMcpServers` predicate entitles, so the orchestrator stays excluded. `context7` is not widened here. | Scope is the measured failure. Amends [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) in place. | autonomous: recommendation accepted |
+| D26 | Which server does the renderer grant? | `codegraph` only, to agents the existing `GrantsOrchestratorExcludedMcpServers` predicate entitles, so the orchestrator stays excluded. `context7` is not widened here. | Scope is the measured failure. Amends [ADR 0050](../../adr/0050-universal-kyber-weave-mcp-grant.md) in place. | autonomous: recommendation accepted |
 | AP1 | Is the Test contract approved, and may this plan execute? | Approved as written, as recommended. Execution follows the parent design's D12. | Not a planning decision. Resolved by the conductor carrying `AUTONOMOUS_APPROVAL: AP1` under resolved autonomy `autonomous`. | autonomous: recommendation accepted |
 | D20 | How does this slice read `stop-on-tool-failure` while slice 1's pull request is still open? | This slice carries the setting itself, with the same name, the same type and the same default as slice 1's: `stop-on-tool-failure` is a boolean on the repository configuration, absent means stop, and the resolved value is read as `StopsOnToolFailure`. Slice 1's pull request #538 adds the same setting; when the two pull requests are merged the second one drops its copy and keeps the first, because they are one setting with one meaning. | The setting does not exist on this branch: `rg stop-on-tool-failure src/ .kyber-weave/` returns nothing here and returns the property on slice 1's branch. D22's `doctor --ensure` reads it, and `McpToolFailureTests` writes `stop-on-tool-failure: false` into a scaffolded repository and expects the docs server to honour it, so the setting cannot be deferred to the merge. | autonomous: recommendation accepted |
 | D45 | Which files does T14's edit invalidate beyond its task list? | The migration reports under `products/kyber-squad/migration/`. Every report whose agent body this slice edits carries that agent's new `final-body-sha256`, so the reports are in T14's scope. | The migration directory records one event: reconciling the live harness copies at a locked source commit, and `final-body-sha256` covers the evolved, LF-normalized instruction body after the YAML frontmatter. `SquadCanonicalContentTests` compares the digest the Squad loader computes from the agent body with the one the report records, so an edited body without an updated report fails the suite. Slice 6 found the same trap in its reviewer and conductor bodies and recorded it as its D19. | autonomous: recommendation accepted |
@@ -219,7 +221,7 @@ The policy project's classes keep the `KyberWeave.Tests` namespace, so a fully-q
 - The parent's other seven slices — each has its own child plan on its own branch and its own pull request.
 - [Issue 221](https://github.com/dpalfery/kyber-weave/issues/221), a read-only fact-finder for the architect: it stays open, and the architect still cannot query a worktree's index.
 - The server refresh does not cover a worktree created after the server starts, and does not grant `codegraph_explore` to subagents (D11, D23, D24).
-- `context7` is not widened (D26); [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) is amended in place, not replaced.
+- `context7` is not widened (D26); [ADR 0050](../../adr/0050-universal-kyber-weave-mcp-grant.md) is amended in place, not replaced.
 - `doctor` never installs the `codegraph` binary; exit 3 remains a human decision in every mode (D1, D22).
 - The canonical MCP binding stays: the servers stay bound to the canonical checkout on purpose; only the per-role rules around that fact change.
 
@@ -235,10 +237,96 @@ This slice's pull request goes through **one `code-reviewer` council over its wh
 
 ## Closeout
 
-Placeholder — filled at closeout, not now; this plan is Ready, not closed. At closeout this section records: the harvest rows H1–H4 landed at their targets, the two new ADRs written at the next free number (including the reversal of "never block a run") and ADR 0050 amended in place, this child plan `git mv`'d to `docs/archive/plans/` with its index row moved to **Archived Plans**, `docs validate` and `docs drift` at zero findings, and the rebase against slice 6 recorded.
+**Closed 2026-11-07 by `docs-dev`. Status: Archived.**
+
+### Verification
+
+Verified against this tree on branch `factory/feat/conductor-run-speed-code-index`, by reading the
+delivered code and the canonical documents, not by trusting a task's summary:
+
+- **`doctor --ensure` exists with the D22 contract.** `DoctorMode.Ensure`
+  (`src/KyberWeave.Core/Doctor/DoctorMode.cs`), `DoctorSettings.Ensure`
+  (`src/KyberWeave.Cli/Commands/Doctor/DoctorSettings.cs`), and `CodeGraphProvisioner.Ensure`
+  (`:180`), which records the dirty tracked set before the index work, restores only what appeared
+  after it, proves the index with one `codegraph explore README`, and repairs once with
+  `codegraph index`. `Provision` now runs `sync` when the index directory exists (`:167`) and takes
+  a lock-wait argument (`:144`). Check ids `codegraph.restore` and `codegraph.explore` are declared
+  beside `codegraph.index`.
+- **The stop rule is enforced in code, not prose.** `RepositoryDoctor` reads
+  `StopsOnToolFailure` and applies it to the `Ensure` mode only (`:73`), leaving `--check` a
+  verdict. `KyberWeaveConfig.StopsOnToolFailure` defaults to `true`, and
+  `KyberWeaveConfigLoader.ParseStopOnToolFailure` refuses a non-boolean by naming the setting and
+  both values.
+- **The docs server refreshes CodeGraph and fails its tools.** `CodeGraphFreshness` holds
+  `RefreshBound` = 30 s and `RefreshInterval` = 60 s, takes the provisioner's lock with a zero
+  wait, returns the one-line `BusyNote` on contention, and formats `STATUS: TOOL_FAILURE` with
+  `tool:`/`reason:`/`fix:` or the `warning:` advisory under `stop-on-tool-failure: false`. It gates
+  on `McpConfig.DeclaresCodeGraph`. `DocsTools.CheckCodeGraph` runs at the top of each tool;
+  `DocsStatus` never blocks and `DocsDrift` answers with the failure. `Program.cs` carries
+  `--no-codegraph-refresh`.
+- **Provenance carries `branch=` and `repo=`.** `CorpusProvenance.Line` emits
+  `root=`/`branch=`/`repo=`/`rev=`/`dirty=`/`documents=`, reading `branch=` from the checkout's
+  `HEAD` and `repo=` from `commondir`, with no child process for either.
+- **The code graph is granted through the shared predicate.** `CapabilityDegradations` declares
+  `CodeGraphMcpServer = McpConfig.CodeGraphServer` and derives `CodeGraphMcpToolNames` and
+  `CodeGraphMcpServerNames`; `CommandCodeRenderer` (`:407`), `OpenCodeRenderer` (`:388`) and
+  `KiloRenderer` (`:213`) consume them, and Kilo gates the key on
+  `GrantsOrchestratorExcludedMcpServers` (`:158`). `context7` is not widened and `PiRenderer` is
+  unchanged.
+- **The agent instructions carry the rule.** `conductor.md:62` states `doctor --ensure` and the
+  `STATUS: TOOL_FAILURE` stop, `:73` states the per-worktree index and the shell/shell-less split,
+  and `bug-crusher/SKILL.md:43` states that a failure is a stop.
+- **The five RED classes exist:** `DoctorEnsureTests`, `McpCodeGraphRefreshTests`,
+  `McpToolFailureTests`, `CorpusProvenanceTests`, `SquadCodeGraphGrantContractTests`.
+- **Not claimed here.** This closeout did not run the product or policy test classes the Test
+  contract names; the run's council and CI are that evidence. Two acceptance lines are carried by
+  another slice and are recorded as such below: the run-start surface (`run start`, its tool-test
+  step and its exit codes) lives on slice 1's open pull request and is absent from this tree, so
+  `cli-command-surface.md` documents no `run start` verb here.
+- **This documentation task's own evidence** is the two gates at the end of this section.
+
+### Gates
+
+`kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` were run from the
+repository root after the archive move; both report zero findings. The run's results are recorded in
+the slice's pull request.
 
 ## Closeout mapping
 
-Placeholder — filled at closeout: one row per decision (D1, D8, D10–D13, D21–D26, AP1) and per harvest row (H1–H4), each naming its destination document or ADR and its evidence, in the shape the archived plans' Closeout mapping sections use.
+Every durable decision D1, D8, D10–D13, D20–D26, AP1, D45 and D46, every Design harvest row H1–H4,
+and the deferred work this slice found map to a destination below. Documentation-impact for every
+mapped row: `extends-component`. Last reviewed: 2026-11-07. Status: archived.
 
-STATUS: PLAN_READY
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [ADR 0060](../../adr/0060-code-editing-runs-stop-on-unusable-tools.md) decisions 1, 2 and 5; [kyber-squad/architecture.md, run-start documentation check](../../kyber-squad/architecture.md#run-start-documentation-check); [configuration.md, stop on tool failure](../../configuration.md#stop-on-tool-failure); `products/kyber-squad/agents/conductor.md` and `products/kyber-squad/skills/bug-crusher/SKILL.md` | extends-component | KyberSquad | 2026-11-07 | archived |
+| D8 | Carried by slice 1's pull request: the run-start surface lands there, so [CLI command surface](../../cli-command-surface.md) cannot describe it from this branch. Tracked in [run-start is undocumented](../../todo/run-start-command-undocumented.md) | extends-component | KyberSquad | 2026-11-07 | archived |
+| D10 | [MCP runbook, the worktree limitation per role](../../docgraph/mcp-runbook.md#the-worktree-limitation-per-role); [ADR 0060](../../adr/0060-code-editing-runs-stop-on-unusable-tools.md) decision 3; [onboarding, worktree MCP setup](../../kyber-squad/onboarding.md#worktree-mcp-setup-and-canonical-binding) | extends-component | KyberSquad, DocGraph | 2026-11-07 | archived |
+| D11 | [ADR 0061](../../adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md) decisions 1–10; [MCP runbook, the server refreshes CodeGraph](../../docgraph/mcp-runbook.md#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot); [DocGraph architecture](../../docgraph/architecture.md#the-server-keeps-the-index-fresh-and-fails-its-tools-when-it-cannot) | extends-component | DocGraph | 2026-11-07 | archived |
+| D12 | [Plans index, "one plan never spans several pull requests"](../../plans/README.md#plan-decisions-and-closeout-policy) | extends-component | DocGraph | 2026-11-07 | archived |
+| D13 | Documentation waiver: build-order sequencing for this run — a scheduling decision with no surviving architectural, operational or behavioural invariant. The five reorderings it names have all landed | extends-component | KyberSquad | 2026-11-07 | archived |
+| D20 | [configuration.md, stop on tool failure](../../configuration.md#stop-on-tool-failure) — the name, the boolean type and the absent-means-stop default, read as `StopsOnToolFailure`. The duplicate-carrier coordination with slice 1 is merge provenance | extends-component | KyberSquad | 2026-11-07 | archived |
+| D21 | Carried by slice 1's pull request, as D8: the command, its flags and its `0/1/2/3` exit contract land with the run-start surface. Tracked in [run-start is undocumented](../../todo/run-start-command-undocumented.md) | extends-component | KyberSquad | 2026-11-07 | archived |
+| D22 | [MCP runbook, the worker's first command](../../docgraph/mcp-runbook.md#the-workers-first-command-doctor---ensure); [CLI command surface, `doctor`](../../cli-command-surface.md#doctor--repository-documentation-tooling) (the `--ensure` flag, the mode rule and the exit codes); [DocGraph architecture, provisioning the index](../../docgraph/architecture.md#provisioning-the-index) | extends-component | DocGraph, KyberSquad | 2026-11-07 | archived |
+| D23 | [ADR 0061](../../adr/0061-the-docs-server-refreshes-codegraph-and-fails-its-tools.md) decisions 2–10; [MCP runbook, the refresh section](../../docgraph/mcp-runbook.md#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot); `src/KyberWeave.Mcp/AGENTS.md` | extends-component | DocGraph | 2026-11-07 | archived |
+| D24 | [MCP runbook, the worktree limitation per role](../../docgraph/mcp-runbook.md#the-worktree-limitation-per-role) and [provenance](../../docgraph/mcp-runbook.md#provenance-on-every-answer); [onboarding, the per-role table](../../kyber-squad/onboarding.md#the-worktree-limitation-per-role); `src/KyberWeave.Mcp/AGENTS.md` (compare `repo=`) | extends-component | KyberSquad, DocGraph | 2026-11-07 | archived |
+| D25 | [ADR 0060](../../adr/0060-code-editing-runs-stop-on-unusable-tools.md) decision 6; [kyber-squad/architecture.md, a worktree keeps its own index](../../kyber-squad/architecture.md#9-conductor-execution-circuit-breaker); [onboarding, item 3](../../kyber-squad/onboarding.md#worktree-mcp-setup-and-canonical-binding) | extends-component | KyberSquad | 2026-11-07 | archived |
+| D26 | [ADR 0050](../../adr/0050-universal-kyber-weave-mcp-grant.md) amended in place (decision 2, the per-target table and an `Amended 2026-11-07` note) with its [ADR index row](../../adr/README.md); [kyber-squad/requirements.md, capability matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix); [onboarding, the code-graph paragraph](../../kyber-squad/onboarding.md#mcp-access-across-harnesses) | extends-component | KyberSquad | 2026-11-07 | archived |
+| AP1 | Documentation waiver: execution-approval provenance, transient, with no surviving invariant | extends-component | KyberSquad | 2026-11-07 | archived |
+| D45 | Documentation waiver: implementation bookkeeping for the migration reports' `final-body-sha256` reconciliation. The rule it protects is already canonical in [kyber-squad architecture §9](../../kyber-squad/architecture.md#9-conductor-execution-circuit-breaker) and pinned by `SquadCanonicalContentTests`; the reports themselves are regenerated source, not documentation | extends-component | KyberSquad | 2026-11-07 | archived |
+| D46 | [MCP runbook, the worktree limitation per role](../../docgraph/mcp-runbook.md#the-worktree-limitation-per-role) — the Discovery order every role and every skill file states, so a skill read without an agent body still carries the rule | extends-component | KyberSquad | 2026-11-07 | archived |
+| H1 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md) — the refresh section, the `doctor --ensure` section, the mutated check-id table, `sync` in the provisioning rules, the new provenance fields with the `repo=` comparison rule, and the troubleshooting rows; [docgraph/architecture.md](../../docgraph/architecture.md) — the provisioning rules and the server-freshness section | extends-component | DocGraph | 2026-11-07 | archived |
+| H2 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#worktree-mcp-setup-and-canonical-binding) — "a worktree indexes itself" and the per-role limitation table; [mcp-runbook.md, the worktree limitation per role](../../docgraph/mcp-runbook.md#the-worktree-limitation-per-role) | extends-component | KyberSquad, DocGraph | 2026-11-07 | archived |
+| H3 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) — the Claude, OpenCode, Kilo, ZCode, Devin and Command Code rows state the code-graph grant and the surviving orchestrator carve-out | extends-component | KyberSquad | 2026-11-07 | archived |
+| H4 | [kyber-squad/architecture.md, run-start documentation check](../../kyber-squad/architecture.md#run-start-documentation-check) — the stop rule, its boundaries and the recorded reversal, with a [requirements](../../kyber-squad/requirements.md#conductor-execution-and-worker-invariants) row and [ADR 0060](../../adr/0060-code-editing-runs-stop-on-unusable-tools.md) | extends-component | KyberSquad | 2026-11-07 | archived |
+| Deferred work: `docs-dev` has no `review.task-gates` entry | [todo/docs-dev-task-gate-entry.md](../../todo/docs-dev-task-gate-entry.md) | extends-component | ReviewCouncil | 2026-11-07 | archived |
+| Deferred work: the Pi renderer grants no code graph | [todo/pi-grants-no-code-graph.md](../../todo/pi-grants-no-code-graph.md); [ADR 0050](../../adr/0050-universal-kyber-weave-mcp-grant.md) consequences state it | extends-component | KyberSquad | 2026-11-07 | archived |
+| Deferred work: no test proves two worktrees share `repo=` | [todo/repo-provenance-second-worktree-unpinned.md](../../todo/repo-provenance-second-worktree-unpinned.md) | extends-component | DocGraph | 2026-11-07 | archived |
+| Deferred work: the run-start command is undocumented | [todo/run-start-command-undocumented.md](../../todo/run-start-command-undocumented.md), reached from D8 and D21 | extends-component | KyberSquad | 2026-11-07 | archived |
+
+### Gates
+
+`kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` were run from the
+repository root after the archive move; both report zero findings. The run's results are recorded in
+the slice's pull request.
+

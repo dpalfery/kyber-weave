@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-07
 ---
 
 # Todos
@@ -101,6 +101,10 @@ last-reviewed: YYYY-MM-DD
 | [fast-loop-default-tray-cargo-test.md](fast-loop-default-tray-cargo-test.md) | ReviewCouncil | draft | The default `scripts/fast-loop.sh` path runs an unfiltered `cargo test` of the tray crate for a tray Rust change and bypasses proc-guard; decide whether to filter it, route it through proc-guard, or keep it as a documented exception. |
 | [docs-init-emit-full-suite-gate-key.md](docs-init-emit-full-suite-gate-key.md) | DocGraph | draft | `kyber-weave docs init` writes whole-suite test gates without the `full-suite: true` key, so a scaffolded host's test gate runs without the ADR 0059 refusal; the catalogue should emit the key. |
 | [task-gates-workflow-and-shell-edits.md](task-gates-workflow-and-shell-edits.md) | ReviewCouncil | draft | A task that edits only workflow YAML, `.kyber-weave/kyber-weave.yml` or `scripts/*.sh` runs no task gate (`NONE_APPLICABLE`); decide a workflow linter, a review-config check and task-level `shellcheck`. |
+| [docs-dev-task-gate-entry.md](docs-dev-task-gate-entry.md) | ReviewCouncil | draft | `review.task-gates` declares no `docs-dev` entry, so a documentation change runs zero gates and reports `KW-REVIEW-027`/`TASK_GATE: NONE_DECLARED`, which reads like a pass but is no executed evidence at all. |
+| [pi-grants-no-code-graph.md](pi-grants-no-code-graph.md) | KyberSquad | draft | The code graph is granted on Command Code, OpenCode, Kilo, Claude, ZCode and Devin but not on Pi, whose grant vehicle is a per-server adapter overlay whose second-server namespace mapping is identity by inference rather than by probe. |
+| [repo-provenance-second-worktree-unpinned.md](repo-provenance-second-worktree-unpinned.md) | DocGraph | draft | `repo=` exists to tell a second worktree of this repository apart from a foreign one, and no test creates a linked worktree to prove the different-`root=`/same-`repo=` pair. |
+| [run-start-command-undocumented.md](run-start-command-undocumented.md) | KyberSquad | draft | `kyber-weave run start` is described by two conductor run-speed decisions and appears in no canonical page, because the surface lands with a pull request that is still open. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

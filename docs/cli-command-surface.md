@@ -361,14 +361,22 @@ and is unrelated.
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision the CodeGraph index when asked. `--check` and `--provision` are mutually exclusive (exit `2`). |
+| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision` and `--ensure` are mutually exclusive (exit `2`). |
 
 Mode rule:
 
 - `--check` is always read-only. It detects the `codegraph` binary and the index and runs the
-  MCP proof. It never runs `codegraph init` or `codegraph index`.
+  MCP proof. It never runs `codegraph init`, `codegraph sync` or `codegraph index`.
 - `--provision` always provisions: `codegraph init .` when `.codegraph/` is absent,
-  `codegraph index .` otherwise, both at the git root.
+  `codegraph sync .` otherwise, both at the git root.
+- `--ensure` is the one command a worker runs first, in the tree it will work in. It runs
+  `sync` (or `init`), restores any tracked file that preparation rewrote — never a file that was
+  already dirty — proves the index with one `codegraph explore` call and the docs server with one
+  call, and repairs **once** with `codegraph index .` and retries once when a step fails. It
+  reads `stop-on-tool-failure` itself: under the default a failed check exits `1`; under
+  `stop-on-tool-failure: false` the same checks are reported as warnings and the exit is `0`,
+  except a missing binary, which stays `3`. Its steps and check ids are in the
+  [MCP runbook](docgraph/mcp-runbook.md#the-workers-first-command-doctor---ensure).
 - A bare run provisions only when stdin is a terminal and `CI` is unset. Otherwise it behaves
   as `--check` and prints `provisioning skipped: non-interactive; rerun with --provision`. The
   hint is suppressed with `--json`, so stdout stays valid JSON.
@@ -377,10 +385,10 @@ Exit codes for `doctor` (the `kyber-weave` binary):
 
 | Exit | Meaning |
 |---|---|
-| `0` | Every check passed. |
-| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. |
-| `2` | A client-input error: `--check` with `--provision`, a non-positive timeout, a path that is not inside a git repository, or a root that is the home directory. |
-| `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed. |
+| `0` | Every check passed, or `--ensure` ran with `stop-on-tool-failure: false` and only reported failures. |
+| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, the `--ensure` explore proof still failed after its one repair, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. |
+| `2` | A client-input error: two modes at once, a non-positive timeout, a path that is not usable or not inside a git repository, or a root that is the home directory. |
+| `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed, in any mode. |
 
 The failure output contract, the check ids, and the provisioning rules are in the
 [MCP runbook](docgraph/mcp-runbook.md#the-live-check-doctor---check).
