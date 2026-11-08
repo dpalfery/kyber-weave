@@ -37,7 +37,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| _None — no plan is open. The pull request that finishes a plan archives it._ | — | — | — |
+| [2026-11-07-conductor-run-speed-standards-tool.md](2026-11-07-conductor-run-speed-standards-tool.md) | Ready — approved for execution under AP1, autonomy `autonomous`; child plan of the conductor run-speed parent design (D12), on branch `factory/feat/conductor-run-speed-standards-tool` off slice 2's unmerged branch (D47) | 2026-11-07 | Slice 3 of the conductor run-speed parent design: make `docs_get_coding_standard_for_technology` the only route to a coding standard — repair the topic match (words, not the fused phrase), return the standard under budget with a one-line note on a miss, make the size cut safe by saying what it dropped and that the cut is expected, and route all 13 code-writing agents and the six dev skills through the tool with a file read only when the tool is missing. |
 
 ## Archived Plans
 
