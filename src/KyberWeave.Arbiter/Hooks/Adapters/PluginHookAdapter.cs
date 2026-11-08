@@ -187,6 +187,9 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.AllowWithRewrite => RenderAllowWithRewritten(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                     "Hook engine returned allow-with-rewrite without rewritten input.")),
+            HookOutcomeKind.AllowWithNote => RenderAllowNote(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderBlock(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine denied without a reason.")),
@@ -219,6 +222,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.PostAnnotation => RenderBlock(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine annotated without a note.")),
+            HookOutcomeKind.AllowWithNote => LogNoteAndAllow(outcome, context),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
@@ -262,6 +266,23 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    private static string RenderAllowNote(string note) =>
+        new JsonObject
+        {
+            ["decision"] = "allow",
+            ["note"] = note,
+        }.ToJsonString();
+
+    private static string LogNoteAndAllow(HookOutcome outcome, HookContext context)
+    {
+        // The shim preserves no annotation shape: the note goes to the diagnostics
+        // sink and the outcome allows.
+        context.Log.WriteLine(
+            outcome.Reason ?? throw new InvalidOperationException(
+                "Hook engine allowed with a note but wrote none."));
+        return RenderAllow();
+    }
 
     private static string RenderAllow() =>
         new JsonObject

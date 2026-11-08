@@ -42,6 +42,23 @@ public sealed class RunStartCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A ready run records the base it branched from under the operator's home, keyed by the
+    /// new branch: a later dispatch hook measures the review from that base instead of
+    /// guessing it.
+    /// </summary>
+    [Fact]
+    public void AReadyRunRecordsItsBaseForLaterHooks()
+    {
+        ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
+
+        Assert.True(result.ExitCode == 0, $"A ready run must exit 0, not {result.ExitCode}. {result.Output}");
+        Assert.True(
+            RunBaseState.TryReadBaseRef(_probe.Home, "claude/fix/tighten-the-gate", out string? baseRef),
+            "a ready run must record the base its branch was created from.");
+        Assert.Equal("origin/main", baseRef);
+    }
+
+    /// <summary>
     ///     A harness token outside the catalogue is refused with <c>2</c> before anything is fetched or
     ///     branched: the caller supplied input the command cannot act on.
     /// </summary>

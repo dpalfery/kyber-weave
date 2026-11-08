@@ -7,12 +7,18 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Contract for task 1.2 (shipped rules): the 18 rules in the embedded
+/// Contract for task 1.2 (shipped rules): the shipped rules in the embedded
 /// <c>default-rules.yml</c> equal the catalogue, validate with zero errors, and carry
 /// the <c>OWNER-001</c> map, the <c>LENS-001</c> path table and the tuned thresholds.
 /// Also covers <c>KW-ARB-CONFIG-002/-003/-004/-006/-007/-008</c>.
 /// RED: the embedded rules resource and <c>RuleValidator</c> do not exist yet.
 /// </summary>
+/// <remarks>
+/// The catalogue below is ordered, so it pins two things at once: the ids, which are
+/// permanent, and their position in the file, which keeps a new rule out of the middle of
+/// <c>rules:</c> where a reader would take it for a renumbering. A new id is therefore
+/// appended, never inserted.
+/// </remarks>
 public sealed class ArbiterDefaultRulesTests
 {
     private static readonly string[] ExpectedRuleIds =
@@ -35,6 +41,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-CLAIM-001",
         "KW-ARB-GATE-CORROBORATED-001",
         "KW-ARB-GATE-001",
+        "KW-ARB-PLANREAD-001",
     ];
 
     [Fact]

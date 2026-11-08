@@ -1787,6 +1787,115 @@ public sealed class SquadCanonicalContentTests
             "The architect plan-authoring reference must not name the retired task-reviewer.");
     }
 
+    /// <summary>
+    /// The architect writes each worker's prompt, and the conductor pastes it unchanged. The
+    /// authoring contract is therefore the only place a prompt's quality is decided, so it has
+    /// to ask for the three things this programme kept shipping prompts without: a file named
+    /// by path plus symbol rather than a guess at a path, the fully qualified test class the
+    /// filter must match, and the exact command to run. A filter naming a class that does not
+    /// exist runs zero tests and exits success.
+    /// </summary>
+    [Fact]
+    public void PlanAuthoringRequiresPathPlusSymbolTestClassNamesAndExactCommands()
+    {
+        string planAuthoring = ReadProductFile("agents/architect/references/plan-authoring.md");
+
+        Assert.Matches(@"(?i)\bpath\s+(?:plus|and)\s+(?:a\s+)?symbol\b", planAuthoring);
+        Assert.Matches(@"(?i)\bfull(?:y\s+qualified)?\s+test\s+class\s+names?\b", planAuthoring);
+        Assert.Matches(@"(?i)\bexact\s+commands?\b", planAuthoring);
+    }
+
+    /// <summary>
+    /// Changing one assertion took a fresh worker eleven minutes because it had to rebuild the
+    /// context an earlier worker already had. A `session` group is how the architect says that a
+    /// follow-on fix belongs in the session that did the work — never a RED folded into its own
+    /// GREEN, which stays two workers.
+    /// </summary>
+    [Fact]
+    public void PlanAuthoringRequiresASessionGroupForFollowOnWork()
+    {
+        string planAuthoring = ReadProductFile("agents/architect/references/plan-authoring.md");
+
+        Assert.Matches(@"(?i)\bsession\s+group\b", planAuthoring);
+    }
+
+    /// <summary>
+    /// The task file is written at finalization, so the conductor learns it exists from the
+    /// marker that ends the architect's turn. The instruction has to say both halves: save the
+    /// file, and return the path the conductor will validate.
+    /// </summary>
+    [Fact]
+    public void ArchitectFinalizationSavesTheTaskFileAndReturnsItsPath()
+    {
+        string[] surfaces =
+        [
+            "agents/architect.md",
+            "agents/architect/references/plan-authoring.md"
+        ];
+        string[] paragraphs = [.. surfaces.SelectMany(surface => Paragraphs(ReadProductFile(surface)))];
+
+        string? saving = paragraphs.FirstOrDefault(paragraph =>
+            paragraph.Contains(".tasks.json", StringComparison.Ordinal)
+            && Regex.IsMatch(paragraph, @"(?i)\bsav(?:e|es|ed|ing)\b")
+            && Regex.IsMatch(paragraph, @"(?i)\b(?:return|report|hand)s?\b")
+            && Regex.IsMatch(paragraph, @"(?i)\bpath\b"));
+
+        Assert.True(
+            saving is not null,
+            "the architect's finalization text must say it saves <plan>.tasks.json and returns its path, " +
+            "so the conductor can validate the file before dispatching from it. Read: " +
+            string.Join(" / ", surfaces));
+    }
+
+    /// <summary>
+    /// `docs-dev` runs a closed list of commands, and the task file has to be deleted in the same
+    /// commit that archives its plan. Without `git rm` on that list the only role that may archive
+    /// a plan could not remove the file its own contract says it deletes.
+    /// </summary>
+    [Fact]
+    public void DocsDevCommandListIncludesGitRmForTheTaskFile()
+    {
+        string docsDev = ReadProductFile("agents/docs-dev.md");
+
+        int start = docsDev.IndexOf("## Commands you run", StringComparison.Ordinal);
+        Assert.True(start >= 0, "docs-dev must carry a '## Commands you run' section.");
+
+        int end = docsDev.IndexOf("\n## ", start + 1, StringComparison.Ordinal);
+        string commands = end < 0 ? docsDev[start..] : docsDev[start..end];
+
+        Assert.Contains("git rm", commands, StringComparison.Ordinal);
+        Assert.Contains("Run nothing else", commands, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A specification's task file lives in the specification folder
+    /// (<c>&lt;spec-folder&gt;/tasks.json</c>), removed before the folder is moved to the archive,
+    /// so the closeout the owner text describes and the rule that catches a leftover file agree.
+    /// </summary>
+    [Fact]
+    public void ProductOwnerTextFollowsTheSpecificationTaskFileForm()
+    {
+        string ownerBody = Path.Combine(ProductRoot, "agents", "product-owner.md");
+        string ownerSkill = Path.Combine(ProductRoot, "skills", "product-owner");
+
+        Assert.True(File.Exists(ownerBody), $"expected the product-owner body at '{ownerBody}'.");
+        Assert.True(Directory.Exists(ownerSkill), $"expected the product-owner skill at '{ownerSkill}'.");
+
+        string[] surfaces =
+        [
+            ownerBody,
+            .. Directory.EnumerateFiles(ownerSkill, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+        ];
+
+        string? carrier = surfaces.FirstOrDefault(
+            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.json", StringComparison.Ordinal));
+
+        Assert.True(
+            carrier is not null,
+            "the product-owner text must name `<spec-folder>/tasks.json` as the specification form of the " +
+            "tracked task file. Searched: " + string.Join(", ", surfaces));
+    }
+
     private static string RelativeSourcePath(string path)
     {
         return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');

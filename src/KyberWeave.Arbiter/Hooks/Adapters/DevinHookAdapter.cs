@@ -207,6 +207,9 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.Deny => RenderPreDeny(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine denied without a reason.")),
+            HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
         };
@@ -251,6 +254,11 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         {
             case HookOutcomeKind.PassThrough:
             case HookOutcomeKind.Allow:
+                break;
+            case HookOutcomeKind.AllowWithNote:
+                context.Log.WriteLine(
+                    outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine allowed with a note but wrote none."));
                 break;
             default:
                 context.Log.WriteLine(
@@ -347,6 +355,13 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
 
     private static bool IsDispatchTool(string? tool) =>
         string.Equals(tool, DispatchTool, StringComparison.Ordinal);
+
+    private static string RenderPreAllowNote(string note) =>
+        new JsonObject
+        {
+            ["decision"] = "allow",
+            ["reason"] = note,
+        }.ToJsonString();
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject

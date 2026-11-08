@@ -173,6 +173,9 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                     "Hook engine returned allow-with-rewrite without rewritten input.")),
+            HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDeny(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine denied without a reason.")),
@@ -221,6 +224,9 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.PostAnnotation => RenderPostAnnotation(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine annotated without a note.")),
+            HookOutcomeKind.AllowWithNote => RenderPostAnnotation(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
@@ -290,6 +296,17 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 
     private static bool IsDispatchTool(string? tool) =>
         !string.IsNullOrEmpty(tool) && DispatchRegex().IsMatch(tool);
+
+    private static string RenderPreAllowNote(string note) =>
+        new JsonObject
+        {
+            ["hookSpecificOutput"] = new JsonObject
+            {
+                ["hookEventName"] = "PreToolUse",
+                ["permissionDecision"] = "allow",
+                ["permissionDecisionReason"] = note,
+            },
+        }.ToJsonString();
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject

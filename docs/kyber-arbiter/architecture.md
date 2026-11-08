@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -100,7 +100,7 @@ appends; the CLI only reads. Prompts and code are logged as digests, never in fu
 
 ## The rules
 
-Eighteen rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Nineteen rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids.
 
 | Rule | Trigger | Step | Question |
@@ -113,6 +113,7 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? |
 | `KW-ARB-MODE-001` | `delegate` | 0 | In test-first mode, does RED evidence exist first? |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? |
+| `KW-ARB-PLANREAD-001` | `delegate` | 0 | Does the dispatch send the worker into a plan, specification or todo path? |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Did the delegation change only its task's files? |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Is this a recognised planner invocation? |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? |
@@ -123,6 +124,28 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? |
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
+
+**The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
+packet as their whole context and do not open plan or specification files, and until this rule the
+only enforcement was a Read guard — advisory wherever a harness's hooks are. On a `delegate` trigger
+the rule removes the routing header block, then asks whether what remains names a path under
+`config.planning-dirs`; if it does, the dispatch escalates. The header is removed first because that
+block names the plan by design, so a rule reading the raw prompt would fire on every dispatch. A
+documentation-profile target answers `closeout` and is allowed, because a `docs-dev` dispatch that
+names the plan while archiving it is the correct behaviour. The rule shares one detector with the
+authoring-time prompt check (`KW-DOC-TASKS-005`), so the two cannot drift apart, and it may not fire
+where dispatch hooks are unconfirmed: a harness with no hook runs no rule, and a decision claiming
+otherwise would report a check that never executed ([ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md),
+decision 23).
+
+**Changed paths are committed plus dirty, and an empty set is not Markdown-only.** `review.changed-paths`
+is the review base against the working tree — the committed diff plus the dirty tree, computed by
+`GitFacts.GetChangedPathsSinceBase` — not the dirty list alone. Per-task commits are the normal case
+in a Squad run, and a dirty-only basis made a committed change invisible, so `KW-ARB-LENS-001` saw an
+empty set, treated it as "no code to judge", and skipped `correctness` and `test-adequacy` exactly
+when the run started committing each task. The rule now skips those two lenses only when the set is
+non-empty **and** positively Markdown-only, so a tree the Arbiter cannot read is judged rather than
+skipped (ADR 0053, decision 9).
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
 (today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer

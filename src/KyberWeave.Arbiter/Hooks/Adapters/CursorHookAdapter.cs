@@ -168,6 +168,9 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                     "Hook engine returned allow-with-rewrite without rewritten input.")),
+            HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDenyFor(outcome.Reason),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
@@ -226,6 +229,9 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.PostAnnotation => RenderPostAnnotation(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine annotated without a note.")),
+            HookOutcomeKind.AllowWithNote => RenderPostAnnotation(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
@@ -317,6 +323,14 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
 
         return RenderPreDeny(reason, FirstLine(reason));
     }
+
+    private static string RenderPreAllowNote(string note) =>
+        new JsonObject
+        {
+            ["permission"] = "allow",
+            ["agent_message"] = note,
+            ["user_message"] = FirstLine(note),
+        }.ToJsonString();
 
     private static string RenderPreDeny(string agentMessage, string userMessage) =>
         new JsonObject

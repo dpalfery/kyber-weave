@@ -732,6 +732,95 @@ public sealed class SquadPerformanceContractTests
         Assert.DoesNotContain("path.agent_scratchpad", content, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The conductor holds the docs tools and no shell, so the task file is checked by a tool it
+    /// can call: a file that disagrees with its plan, or one whose digest is stale, has to be
+    /// refused before a worker is dispatched from it.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillRequiresTheTaskFileToBeValidatedBeforeDispatch()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        string? checking = BlockContainingBoth(content, "task file", "validat");
+        Assert.True(
+            checking is not null,
+            $"{SharedExecutionSkillPath} must say the conductor validates the plan's task file before it " +
+            "dispatches from it.");
+    }
+
+    /// <summary>
+    /// The conductor pastes each prompt unchanged and fills two slots and nothing else. A
+    /// conductor that rewrote a prompt would reintroduce the 128 KB of conductor-authored text
+    /// this work replaces, and the plan would no longer describe what the worker was told.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillPastesPromptsUnchangedAndFillsOnlyTheTwoSlots()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        Assert.Contains("{worktree}", content, StringComparison.Ordinal);
+        Assert.Contains("{prior_results}", content, StringComparison.Ordinal);
+
+        string? pasting = BlockContainingBoth(content, "paste", "unchanged");
+        Assert.True(
+            pasting is not null,
+            $"{SharedExecutionSkillPath} must say each prompt is pasted unchanged.");
+
+        string? slots = BlockContainingBoth(content, "{worktree}", "{prior_results}");
+        Assert.True(slots is not null, $"{SharedExecutionSkillPath} must name both slots in one instruction.");
+        Assert.Matches(@"(?i)\b(?:only|nothing else|exclusively)\b", slots);
+    }
+
+    /// <summary>
+    /// Resuming carried nothing because the prompts said "Do not commit", so a mid-run push held
+    /// no record of a finished task. A finished task commits with a <c>Task: &lt;id&gt;</c> line
+    /// and its report, which is what a later run reads to learn where the work stopped.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillTellsWorkersToCommitWithATaskLine()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        string? committing = BlockContaining(content, block =>
+            block.Contains("Task:", StringComparison.Ordinal)
+            && Regex.IsMatch(block, @"(?i)\bcommit\w*\b"));
+
+        Assert.True(
+            committing is not null,
+            $"{SharedExecutionSkillPath} must tell a finished task to commit with a 'Task: <id>' line.");
+    }
+
+    /// <summary>The first blank-line separated block that contains every one of <paramref name="needles"/>.</summary>
+    private static string? BlockContainingBoth(string content, string first, string second)
+    {
+        return BlockContaining(
+            content,
+            block => block.Contains(first, StringComparison.OrdinalIgnoreCase)
+                     && block.Contains(second, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The first blank-line separated block satisfying <paramref name="match"/>: a rule is read
+    /// from the paragraph that states it, not from words that happen to sit near each other in a
+    /// long document.
+    /// </summary>
+    private static string? BlockContaining(string content, Func<string, bool> match)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(match);
+
+        foreach (string block in content
+                     .Replace("\r\n", "\n", StringComparison.Ordinal)
+                     .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (match(block))
+                return block;
+        }
+
+        return null;
+    }
+
     private static string ReadRepoFile(string relativePath)
     {
         string fullPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath);

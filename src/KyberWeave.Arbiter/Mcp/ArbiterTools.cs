@@ -249,7 +249,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                     $"{HookCommand.FailClosedCode}: the evaluation failed before a decision: {OneLine(ex.Message)}");
             }
 
-            if (outcome.Kind is not (HookOutcomeKind.Allow or HookOutcomeKind.PassThrough or HookOutcomeKind.AllowWithRewrite))
+            if (outcome.Kind is not (HookOutcomeKind.Allow or HookOutcomeKind.PassThrough or HookOutcomeKind.AllowWithRewrite or HookOutcomeKind.AllowWithNote))
             {
                 string named = item.Refute is null ? string.Empty : $"finding: {item.Refute}\n";
                 return provenance + "\noutcome: " + OutcomeName(outcome.Kind) + "\n" + named + outcome.Reason;

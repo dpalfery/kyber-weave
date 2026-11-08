@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-08
 ---
 
 # Rule reference
@@ -47,6 +47,29 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
+
+### Plan task files — `docs validate` and the docs MCP validate tool
+
+A plan's task file is the tracked file the architect writes at finalization so the conductor can
+dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. (The merge-time rule
+`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
+authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
+that cannot be acted on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not
+behind a flag, because the orchestrator has the docs tools and no shell.
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-TASKS-001` | Error | The file is not the JSON this build reads, or declares a schema version it does not read |
+| `KW-DOC-TASKS-002` | Error | The file's plan, tasks, files or dependencies disagree with the plan's |
+| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does |
+| `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
+| `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
+| `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
+
+`KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
+removes the file, and the walk looks under the archive too, so a specification folder that carried
+its `tasks.json` into the archive is caught rather than kept as dead weight.
 
 ### Drift — `docs drift`
 
@@ -235,11 +258,12 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task |
 | `KW-ARB-MODE-001` | `delegate` | 0 | RED evidence exists before an implementation dispatch in test-first mode |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to` |
+| `KW-ARB-PLANREAD-001` | `delegate` | 0 | Prompt names no planning path once the routing header is removed; a documentation-profile target is exempt |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Delegation changed only its task's files |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Recognised planner invocation |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |
-| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change |
+| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Finding excerpt present at its `file:line` |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Excerpt inside a changed hunk |
 | `KW-ARB-CLAIM-001` | `refute.spawn` | 1 | Quoted code supports the finding's claim |

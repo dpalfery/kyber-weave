@@ -20,11 +20,27 @@ When dispatching concurrent workers up to `review.max-concurrent-workers`, isola
 
 Bundle same-role micro-tasks within a single dispatch where appropriate to minimize dispatch latency, while strictly preserving adversarial separation between RED test authorship and GREEN implementation. Never collapse RED and GREEN into a single worker dispatch: `test-dev` authors the failing test contract and proves it RED; the implementation specialist delivers GREEN and automated verification without weakening that contract, preserving the independent verification pass at task completion.
 
+## Task file and dispatch
+
+A Ready plan or a Ready specification task artifact carries a task file beside it: `<plan>.tasks.json` under the plans directory, or `<spec-folder>/tasks.json` for a specification. It holds the schema version, the artifact path, the execution digest, and one entry per task — id, role, dependencies, file scope, `session` group and the full prompt.
+
+Before dispatching from it, the conductor validates the task file. A file whose tasks, file scopes or dependencies disagree with the artifact, or one whose execution digest is stale, is refused rather than dispatched from: a stale prompt describes work the artifact no longer asks for, and the run reports that finding instead of starting the task.
+
+Each dispatch pastes the task's prompt unchanged and fills only `{worktree}` and `{prior_results}`. Nothing else in it is substituted, reworded or summarized, because a prompt the conductor rewrote makes the plan stop describing what the worker was told. The two slots exist because no plan can know them: the worktree is chosen at dispatch, and `{prior_results}` carries earlier worker reports unchanged, so a later prompt can build on a cause an earlier worker found.
+
+The conductor dispatches from the task file. It does not reopen the plan to write a packet or decide what a worker should read; the plan stays the owner's approved record and the Arbiter's input.
+
+## Task commits and resumption
+
+A finished task commits on the feature branch with a `Task: <id>` line, so a resumed run can tell which tasks completed and where the work stopped. The worker's report goes in the commit message body — its completion digest and the message that explains it — and the `Task:` line sits in the trailer area beneath, which is what `kyber-weave run start --resume` reads back.
+
+Commit per task, and push after each integrated task. A run that stops early then leaves a record of everything it finished, where a run that committed once at the end leaves nothing to resume from.
+
 ## Task session continuity
 
 Record the task id, owning specialist type, and `worker-session-id` on the execution artifact. Store actual handles returned by the harness; when none is available, record that fact and the reason rather than inventing one. Keep a recovery brief containing the task packet, completion evidence, rejected gate results, decisions, failed approaches, and persisted failure-cluster tallies.
 
-Reuse the original worker session for implementation, task-gate rework, verification, and any final-council findings in its scope. Use the harness's continuation or follow-up operation with the recorded handle. Append the findings and current scope/evidence updates without rewriting earlier conversation history. A fresh invocation of the same specialist type is a replacement, not continuation. Keep the task session available until its exit gate and any run-level findings are settled; do not repurpose it for an unrelated task while it awaits rework.
+Reuse the original worker session for implementation, task-gate rework, verification, and any final-council findings in its scope. The task file's `session` group is how the plan records that grouping: follow-on fixes and later same-role tasks on one change share a session, while a RED task never shares one with its GREEN. Use the harness's continuation or follow-up operation with the recorded handle. Append the findings and current scope/evidence updates without rewriting earlier conversation history. A fresh invocation of the same specialist type is a replacement, not continuation. Keep the task session available until its exit gate and any run-level findings are settled; do not repurpose it for an unrelated task while it awaits rework.
 
 Start a replacement only when continuation is unavailable, the original session cannot be recovered, or its context is unreliable (for example, it repeatedly acts on superseded requirements after correction). Record the replacement reason, pass the recovery brief, and update the handle. A busy session is queued, not replaced merely to avoid waiting. Separate unrelated tasks use separate sessions.
 

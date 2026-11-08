@@ -1260,15 +1260,46 @@ of `architect` with the gate id, not an edit by the orchestrating session.
 
 ### Inlined task packets (zero plan context hunting)
 
-Conductor task packets are self-contained. Rather than pointing workers to large plan or
-specification documents under `<plan-index>` or `<specification-index>` (which workers are
-forbidden from reading), the conductor inlines five essential items directly into each dispatch packet:
+Conductor task packets are self-contained, and the conductor no longer writes them. `architect` saves
+one prompt per task in the plan's tracked task file at finalization — `docs/plans/<plan>.tasks.json`
+beside a plan, `<spec-folder>/tasks.json` inside a specification — and commits it with the plan, so
+a push carries it to whichever machine resumes the run
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
+the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:
+`{worktree}`, and `{prior_results}` with the earlier workers' reports as they were written. Nothing
+else is edited, added or re-derived, because a prompt the conductor rewrites is a prompt nobody
+validated.
+
+Rather than pointing workers to large plan or specification documents under `<plan-index>` or
+`<specification-index>` (which workers are forbidden from reading), each prompt carries five
+essential items:
 
 1. **Objective and strict boundary**: Explicit statement of what to change and what must not be touched.
 2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
 3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
 4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
 5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+
+`docs validate` and the docs MCP validate tool check the file before a run relies on it: it must
+agree with its plan (`KW-DOC-TASKS-002`), carry a digest that still describes the plan (`-003`), hold
+a command and acceptance criteria in every prompt (`-004`), and send no worker into a plan
+(`-005`). A Ready plan with no task file warns (`-006`), and `docs validate --merge-ready` fails when
+a file is left behind (`KW-DOC-LIFECYCLE-005`) — which is why closeout removes it with `git rm` in
+the commit that archives the plan. The plan stays the authority: it is what the owner approved, and
+the Arbiter reads its tasks.
+
+**The `session` group keeps related work in one worker session.** Each task's `session` value is the
+architect's decision, not the conductor's. Tasks that share one continue a single worker session
+where the harness allows continuation, so a follow-up fix does not pay to rediscover context a
+previous worker already had. **RED and GREEN never share a group**: the adversarial split between
+test authorship and implementation is the reason those are two dispatches, and bundling them removes
+the independence the split exists for. The architect may merge two RED tasks into one group when the
+later one needs no earlier GREEN.
+
+**Each finished task commits with `Task: <id>` and its report in the commit body**, and the branch
+is pushed after each integrated task, so `kyber-weave run start --resume <branch>` lists what is done
+and what each worker found. That is also the reason a worker prompt may not say "do not commit": a
+mid-run push that carries nothing leaves a resumed run with nothing to read.
 
 ### Fast assembly runner invocation
 
