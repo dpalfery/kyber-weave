@@ -188,6 +188,10 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 case HookOutcomeKind.Allow:
                 case HookOutcomeKind.AllowWithRewrite:
                     break;
+                case HookOutcomeKind.AllowWithNote:
+                    scoped.Log.WriteLine(outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine allowed with a note but wrote none."));
+                    break;
                 case HookOutcomeKind.Deny:
                     denial ??= outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine denied without a reason.");
@@ -232,6 +236,7 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
                 case HookOutcomeKind.Deny:
                 case HookOutcomeKind.PostBlock:
                 case HookOutcomeKind.PostAnnotation:
+                case HookOutcomeKind.AllowWithNote:
                     scoped.Log.WriteLine(outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine returned a post-dispatch note without text."));
                     break;
