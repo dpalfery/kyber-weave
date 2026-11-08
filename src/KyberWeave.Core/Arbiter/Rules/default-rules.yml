@@ -1,4 +1,4 @@
-# The 18 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 19 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -199,10 +199,15 @@ rules:
     trigger: lens.spawn
     question: Does the lens apply to this change?
     answers: [applies, not-applicable]
+    # A Markdown-only change has no code for these two lenses to judge, which is what
+    # their Applicability text says. The set has to be positively Markdown-only to skip:
+    # an empty or unreadable set satisfies subset-of vacuously, and on a committed tree
+    # the set was empty, so both lenses vanished exactly when per-task commits made a
+    # clean tree the normal case. The non-empty clause makes the skip need evidence.
     decide:
-      - when: { all: [{ fact: lens.name, equals: correctness }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+      - when: { all: [{ fact: lens.name, equals: correctness }, { not: { fact: review.changed-paths, count: 0 } }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
         answer: not-applicable
-      - when: { all: [{ fact: lens.name, equals: test-adequacy }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+      - when: { all: [{ fact: lens.name, equals: test-adequacy }, { not: { fact: review.changed-paths, count: 0 } }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
         answer: not-applicable
     ask:
       type: noul
@@ -264,6 +269,26 @@ rules:
       - when: { fact: review.changed-paths, exists: true }
         answer: not-applicable
     effects: { applies: applies, not-applicable: not-applicable }
+
+  # The read guard is advisory wherever a harness has hooks, so on a harness whose
+  # dispatch hook fires this rule is the enforcement the guard cannot be. The fact it
+  # reads is the dispatch body with the routing header already removed, because
+  # PLAN_FILE names the plan by design and a rule reading the raw prompt would escalate
+  # every dispatch in a run. Closeout is the one dispatch that must read the plan, so a
+  # documentation-profile target is exempt. Where no dispatch hook runs, no rule runs:
+  # that is an install property, and no predicate here can state it.
+  - id: KW-ARB-PLANREAD-001
+    trigger: delegate
+    question: Does the dispatch send the worker into a plan, specification or todo path?
+    answers: [names-plan, no-plan, closeout]
+    decide:
+      - when: { fact: delegation.target-profile, equals: documentation }
+        answer: closeout
+      - when: { fact: delegation.planning-paths, count: 0 }
+        answer: no-plan
+      - when: { fact: delegation.planning-paths, exists: true }
+        answer: names-plan
+    effects: { names-plan: escalate, no-plan: allow, closeout: allow }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.
