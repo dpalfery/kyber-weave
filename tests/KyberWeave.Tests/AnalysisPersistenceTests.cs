@@ -803,10 +803,25 @@ public sealed class AnalysisPersistenceTests
             process.StandardInput.Flush();
             return true;
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex) when (ex is ObjectDisposedException or IOException)
         {
             return false;
         }
+    }
+
+    [Fact]
+    public void IsStandardInputOpen_WhenDisposed_ReturnsFalse()
+    {
+        ProcessStartInfo startInfo = new("git", ["version"])
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        using Process process = Process.Start(startInfo)!;
+        process.StandardInput.Dispose();
+
+        Assert.False(IsStandardInputOpen(process));
     }
 
     private static string QuerySqlite(string databasePath, string input)
