@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -40,6 +41,11 @@ public static class SquadWorkerBaselineInjector
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
 
+    private static readonly ConcurrentDictionary<string, string?> CachedBlocks = new(StringComparer.Ordinal);
+
+    /// <summary>Empties the baseline block cache.</summary>
+    public static void ClearCache() => CachedBlocks.Clear();
+
     /// <summary>
     /// Reads the injection block from <paramref name="sourceDirectory"/>, or returns null when the
     /// tree carries no baseline file.
@@ -53,7 +59,11 @@ public static class SquadWorkerBaselineInjector
     public static string? ReadBlock(string sourceDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
+        return CachedBlocks.GetOrAdd(sourceDirectory, ReadBlockUncached);
+    }
 
+    private static string? ReadBlockUncached(string sourceDirectory)
+    {
         string path = Path.Combine(sourceDirectory, RelativePath.Replace('/', Path.DirectorySeparatorChar));
 
         string text;
