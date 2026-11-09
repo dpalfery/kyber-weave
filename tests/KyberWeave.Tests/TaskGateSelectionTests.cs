@@ -173,6 +173,46 @@ public sealed class TaskGateSelectionTests
         Assert.Contains("test", skip.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void TestClassMappingInvalidRootReturnsEmptyWithoutThrowing()
+    {
+        IReadOnlyList<string> resolved = TestClassMapping.Resolve("non_existent_directory_xyz", Changed);
+        Assert.Empty(resolved);
+    }
+
+    [Fact]
+    public void TestClassMappingMatchesDirectoryIgnoringCase()
+    {
+        IReadOnlyList<string> resolved = TestClassMapping.Resolve(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
+        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, resolved);
+    }
+
+    [Fact]
+    public void TestsTokenResolvesOnlyFromFilesMatchingGateInclude()
+    {
+        ReviewTaskGate propsGate = new(
+            "props-tests",
+            ["**/*.props"],
+            null,
+            ["dotnet", "test", "--filter", "{tests}"],
+            [],
+            true,
+            900);
+
+        // Changed contains both a .props file (no covering test) and a .cs file (has covering test)
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [propsGate],
+            ["Directory.Build.props", "src/KyberWeave.Core/Review/TaskGateSelection.cs"],
+            null,
+            "unix");
+
+        // propsGate matches only Directory.Build.props, which has no tests, so it skips
+        Assert.Empty(plan.Gates);
+        SkippedTaskGate skip = Assert.Single(plan.Skipped);
+        Assert.Equal("props-tests", skip.Id);
+        Assert.Contains("no test class covers", skip.Reason, StringComparison.Ordinal);
+    }
+
     private static ReviewTaskGate TestsGate()
     {
         return new ReviewTaskGate(

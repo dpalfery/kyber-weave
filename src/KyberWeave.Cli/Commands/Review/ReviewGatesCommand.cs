@@ -287,8 +287,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 return RefuseInput(report, settings, gitRefusals);
         }
 
+        string repoRoot = EnclosingRepositoryRoot(root);
         TaskGatePlan plan = TaskGateSelection.Plan(
-            agentGates, changed, settings.TaskSlug, CurrentOs(), root, config.Review.TestMap);
+            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap);
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
@@ -447,6 +448,16 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// </summary>
     internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
         gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
+
+    private static string EnclosingRepositoryRoot(string path)
+    {
+        for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, ".git")))
+                return dir.FullName;
+        }
+        return path;
+    }
 
     private static string CurrentOs()
     {

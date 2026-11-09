@@ -54,7 +54,20 @@ public static class TestClassMapping
         if (!AnyPossibleCoverage(changed, declared))
             return [];
 
-        string repository = Path.GetFullPath(root ?? DefaultRepositoryRoot());
+        string repository;
+        try
+        {
+            string candidate = root ?? DefaultRepositoryRoot();
+            if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
+                return [];
+
+            repository = Path.GetFullPath(candidate);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return [];
+        }
+
         IReadOnlyDictionary<string, string> sources = SourceFilesByName(repository);
         List<string> resolved = [];
         HashSet<string> seen = new(StringComparer.Ordinal);
@@ -83,7 +96,11 @@ public static class TestClassMapping
             foreach (string candidate in CandidateClassNames(path))
             {
                 if (sources.TryGetValue(candidate, out string? file))
-                    Add(FullyQualifiedName(repository, file, candidate));
+                {
+                    string fqn = FullyQualifiedName(repository, file, candidate);
+                    if (fqn.Contains('.', StringComparison.Ordinal))
+                        Add(fqn);
+                }
             }
         }
 
@@ -188,7 +205,8 @@ public static class TestClassMapping
 
         foreach (string segment in normalizedPath.Split('/'))
         {
-            if (segment is "tests" or "test")
+            if (string.Equals(segment, "tests", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(segment, "test", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 

@@ -62,6 +62,7 @@ public static class TaskGateSelection
     private const string ChangedToken = "{changed}";
     private const string TaskToken = "{task}";
     private const string TestsToken = "{tests}";
+    public const int MaxTestClassesInFilter = 100;
 
     /// <summary>
     /// Refuses a <c>--task</c> value that is not a lookup name, because it is substituted into argv
@@ -149,10 +150,6 @@ public static class TaskGateSelection
         if (currentOs is not ("windows" or "unix"))
             throw new ArgumentException($"currentOs must be 'windows' or 'unix', not '{currentOs}'.", nameof(currentOs));
 
-        // Resolved once, and only when a gate names the token: resolution reads the source tree.
-        IReadOnlyList<string>? testClasses = null;
-        IReadOnlyList<string> TestClasses() => testClasses ??= TestClassMapping.Resolve(root, changed, testMap);
-
         // Matching uses the separator-normalized form. What reaches argv is the path as it was given,
         // because on unix a backslash is part of a file name and rewriting it would name another file.
         // Windows reads either separator, so there argv keeps the forward-slash form it has always had.
@@ -215,12 +212,19 @@ public static class TaskGateSelection
             string testsFilter = string.Empty;
             if (NamesTests(gate))
             {
-                IReadOnlyList<string> classes = TestClasses();
+                IReadOnlyList<string> classes = TestClassMapping.Resolve(root, matches, testMap);
                 if (classes.Count == 0)
                 {
                     skipped.Add(new SkippedTaskGate(
                         gate.Id,
                         "no test class covers the changed files, so its filter would select nothing"));
+                    continue;
+                }
+
+                if (classes.Count > MaxTestClassesInFilter)
+                {
+                    refusals.Add(
+                        $"Task gate '{gate.Id}' resolved {classes.Count} test classes, exceeding the filter limit of {MaxTestClassesInFilter}. Run a scoped check instead.");
                     continue;
                 }
 
@@ -298,13 +302,15 @@ public static class TaskGateSelection
     }
 
     /// <summary>
-    /// The filter that selects exactly the resolved classes: one <c>FullyQualifiedName~</c> clause per class,
+    /// The filter that selects the resolved classes: one <c>FullyQualifiedName~</c> clause per class,
     /// joined by <c>|</c>, which is the form <c>dotnet test --filter</c> reads as "any of these".
     /// </summary>
     /// <remarks>
-    /// The name is fully qualified because a short one runs zero tests and exits zero, and the prefix is
-    /// spelled out on every clause because <c>|</c> binds to the whole expression: a bare name after it would
-    /// be a syntax error rather than a second selector.
+    /// The operator is <c>~</c> (contains) rather than <c>=</c> because VSTest test names include
+    /// the method name (such as <c>Namespace.Class.Method</c>), so an exact equality filter against a
+    /// class name matches zero tests. The prefix is spelled out on every clause because <c>|</c>
+    /// binds to the whole expression: a bare name after it would be a syntax error rather than a
+    /// second selector.
     /// </remarks>
     private static string TestsFilter(IReadOnlyList<string> classes)
     {
