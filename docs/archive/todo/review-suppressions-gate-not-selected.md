@@ -13,7 +13,8 @@ impact-components: [ReviewCouncil]
 # No task gate runs review suppressions
 
 **Status: Archived — closed 2026-11-08.** Both halves landed. `.kyber-weave/kyber-weave.yml` declares a
-`suppressions` task gate under `csharp-dev` and aliases it into `test-dev`; the catalogue family file
+`suppressions` task gate under `csharp-dev` and aliases it across the other .NET developer roles
+(`dal-dev`, `maui-dev`, `pulumi-dev`, `test-dev`); the catalogue family file
 `products/kyber-squad/standards/csharp/gates.yml` carries the same gate so an installing repository
 receives it from `docs init`, and its golden fixture was regenerated through the real code path — the
 diff is the five gate entries and nothing else. Verified by running the gate for real: it passes on a

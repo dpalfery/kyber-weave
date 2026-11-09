@@ -202,6 +202,8 @@ public static class ReviewConfigLoader
                     "\"src/KyberWeave.Core/Review/**\".");
             }
 
+            string pattern = entry.Key.Trim();
+
             if (entry.Value is null || entry.Value.Count == 0)
             {
                 throw new YamlException(
@@ -229,7 +231,7 @@ public static class ReviewConfigLoader
                 classes.Add(trimmed);
             }
 
-            parsed[entry.Key] = classes;
+            parsed[pattern] = classes;
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<string>>(parsed);
@@ -238,7 +240,7 @@ public static class ReviewConfigLoader
     /// <summary>Whether the value has the shape of a fully qualified type name: dot-separated identifiers.</summary>
     private static bool IsClassName(string name)
     {
-        if (name.Length == 0)
+        if (name.Length == 0 || !name.Contains('.', StringComparison.Ordinal))
             return false;
 
         foreach (string segment in name.Split('.'))

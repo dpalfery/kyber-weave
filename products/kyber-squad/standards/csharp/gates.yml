@@ -93,7 +93,7 @@ task-gates:
     # `sql-database-architect` also adds suppressions, but the catalogue's developer-slug
     # vocabulary does not list it, so naming it here fails the render. Recorded as a todo
     # rather than worked around by widening the vocabulary.
-    include: ["**/*.cs", "**/*.csproj"]
+    include: ["{{root-glob}}**/*.cs", "{{root-glob}}**/*.csproj", "{{root-glob}}**/*.props", "{{root-glob}}**/*.targets"]
     # No `os` restriction, unlike the plumbing gates: a .NET authoring role writes a suppression on
     # any platform, and `kyber-weave` is a dotnet tool that resolves the way `dotnet` does, so
     # restricting it would leave a Windows host with every other csharp gate and not this one.

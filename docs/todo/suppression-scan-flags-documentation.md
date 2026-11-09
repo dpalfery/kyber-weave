@@ -16,7 +16,8 @@ path and every path is scanned, so a Markdown document that *shows* a pragma to 
 as if the document had added one.
 
 Found while closing the todo that wired the gate into the task gates: the closing note for that todo
-quoted the pragma it is about, and the gate failed the change with `KW-REVIEW-022` on
+quoted the pragma it is about, and the task gate failed the change with `KW-REVIEW-022` (caused by
+the suppressions gate reporting `KW-REVIEW-036`) on
 `docs/archive/todo/...:18`. The note was reworded to describe the pragma rather than quote it, which
 makes this tree pass, but the next governed document that needs the literal will hit the same thing.
 
