@@ -125,23 +125,127 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     }
 
     /// <summary>
-    /// A lock held past the best-effort bound must fail closed: the post cannot take the
-    /// pre-dispatch snapshot, so the fact stays absent instead of falling back to a
-    /// <c>HEAD</c> diff the dispatch's commits never appear in.
+    /// A pre-dispatch record lost to lock contention must fail closed: with no baseline the
+    /// post cannot isolate the dispatch delta, so the fact stays absent.
     /// </summary>
     [Fact]
-    public void LockContentionLeavesSinceDispatchAbsent()
+    public void RecordLostUnderContentionLeavesSinceDispatchAbsent()
     {
-        Pre(prompt: PlannerPrompt, callId: "call-locked");
+        using (File.Open(LockPath(), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            Pre(prompt: PlannerPrompt, callId: "call-locked");
+        }
+
+        ArbiterFactSet facts = PostFacts(prompt: PlannerPrompt, callId: "call-locked");
+
+        Assert.False(
+            facts.IsPresent(SinceDispatchFact),
+            "a snapshot that cannot be recorded under contention is unobservable and must stay absent.");
+    }
+
+    /// <summary>
+    /// The post-dispatch read never waits on the lock: pairing a recorded baseline is a
+    /// read of a whole document, so a held lock must not turn a good baseline absent.
+    /// </summary>
+    [Fact]
+    public void PeekPairsWithoutTheLock()
+    {
+        const string callId = "call-peek-locked";
+        Pre(prompt: PlannerPrompt, callId: callId);
+
+        Write("src/Peeked.cs", "// dispatch write\n");
+        _probe.Git("add", "-A");
+        _probe.Git("commit", "-m", "feat: dispatch write");
 
         using (File.Open(LockPath(), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {
-            ArbiterFactSet facts = PostFacts(prompt: PlannerPrompt, callId: "call-locked");
-
-            Assert.False(
-                facts.IsPresent(SinceDispatchFact),
-                "a snapshot that cannot be taken under contention is unobservable and must stay absent.");
+            IReadOnlyList<string> paths = SinceDispatch(prompt: PlannerPrompt, callId: callId);
+            Assert.Contains("src/Peeked.cs", paths);
         }
+    }
+
+    /// <summary>
+    /// A pre with no pairing key stores nothing: no tool-call id and no prompt can never
+    /// match a post, so keeping the entry only evicts baselines that could still pair.
+    /// </summary>
+    [Fact]
+    public void UnpairablePreStoresNothing()
+    {
+        Pre(prompt: string.Empty, callId: null);
+
+        Assert.False(
+            File.Exists(SnapshotsPath()),
+            "an entry no post can pair with must not occupy the store.");
+
+        ArbiterFactSet facts = PostFacts(prompt: string.Empty, callId: null);
+
+        Assert.False(
+            facts.IsPresent(SinceDispatchFact),
+            "without a pairing key the dispatch delta is unobservable and must stay absent.");
+    }
+
+    /// <summary>
+    /// Baselines expire: a new pre prunes entries older than the retention window, so
+    /// completed dispatches cannot pin the store full and evict a pending baseline.
+    /// </summary>
+    [Fact]
+    public void ExpiredBaselinesArePrunedOnRecord()
+    {
+        const string staleHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        File.WriteAllText(
+            SnapshotsPath(),
+            "[{\"CallId\":\"call-stale\",\"Target\":\"architect\",\"PromptHash\":\"" + staleHash + "\"," +
+            "\"Head\":\"abc123\",\"BlobIds\":{},\"Statuses\":{},\"RecordedAt\":\"2020-01-01T00:00:00Z\"}]",
+            Encoding.UTF8);
+
+        Pre(prompt: PlannerPrompt, callId: "call-fresh");
+
+        string store = File.ReadAllText(SnapshotsPath(), Encoding.UTF8);
+        Assert.DoesNotContain(staleHash, store, StringComparison.Ordinal);
+
+        ArbiterFactSet paired = PostFacts(prompt: PlannerPrompt, callId: "call-fresh");
+        Assert.True(
+            paired.IsPresent(SinceDispatchFact),
+            "pruning stale entries must not disturb the fresh baseline.");
+    }
+
+    /// <summary>
+    /// A crashed write leaves no debris behind: the next record sweeps stray temp files.
+    /// </summary>
+    [Fact]
+    public void StrayTempFilesAreCleanedOnRecord()
+    {
+        File.WriteAllText(
+            Path.Combine(_arbiter.Path, ".snapshots.crashed.tmp"),
+            "{\"truncated",
+            Encoding.UTF8);
+
+        Pre(prompt: PlannerPrompt, callId: "call-sweep");
+
+        Assert.Empty(Directory.GetFiles(_arbiter.Path, ".snapshots.*.tmp"));
+        Assert.True(
+            PostFacts(prompt: PlannerPrompt, callId: "call-sweep").IsPresent(SinceDispatchFact),
+            "sweeping debris must not disturb the fresh baseline.");
+    }
+
+    /// <summary>
+    /// The match key hashes a bounded prompt prefix plus its length: a very long prompt
+    /// still pairs with itself, while two prompts sharing a prefix but not a length do not.
+    /// </summary>
+    [Fact]
+    public void LongPromptsPairByBoundedHash()
+    {
+        string head = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/big.md\n\n";
+        string big = head + new string('p', 100_000);
+        string bigOtherLength = big + "extra";
+        Pre(prompt: big, callId: null);
+
+        Assert.True(
+            PostFacts(prompt: big, callId: null).IsPresent(SinceDispatchFact),
+            "a long prompt must still pair with itself.");
+        Assert.False(
+            PostFacts(prompt: bigOtherLength, callId: null).IsPresent(SinceDispatchFact),
+            "a prompt sharing only a prefix must not pair with another dispatch's baseline.");
     }
 
     /// <summary>
