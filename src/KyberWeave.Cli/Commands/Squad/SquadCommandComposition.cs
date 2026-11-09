@@ -734,22 +734,27 @@ internal static class SquadCommandComposition
         SquadDeploymentScope scope,
         string homeDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        if (string.IsNullOrWhiteSpace(targetRoot) || string.IsNullOrWhiteSpace(homeDirectory))
+            return KyberWeaveConfigLoadResult.Fail("The target root and the home directory must not be empty.", null);
 
-        StringComparison comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        bool anchoredAtHome = scope == SquadDeploymentScope.Global &&
-                              string.Equals(
-                                  Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot)),
-                                  Path.TrimEndingDirectorySeparator(Path.GetFullPath(homeDirectory)),
-                                  comparison);
+        if (scope != SquadDeploymentScope.Global)
+            return KyberWeaveConfigLoader.TryLoad(targetRoot);
 
-        // A home without the user-level file keeps the project loader's fallback to a legacy root-level file.
-        return anchoredAtHome && File.Exists(UserHostConfig.GetPath(homeDirectory))
-            ? KyberWeaveConfigLoader.TryLoadUserConfig(homeDirectory)
-            : KyberWeaveConfigLoader.TryLoad(targetRoot);
+        // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or the
+        // root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
+        try
+        {
+            string home = Path.GetFullPath(homeDirectory);
+
+            // A home without the user-level file keeps the project loader's fallback to a legacy root-level file.
+            return File.Exists(UserHostConfig.GetPath(home))
+                ? KyberWeaveConfigLoader.TryLoadUserConfig(home)
+                : KyberWeaveConfigLoader.TryLoad(home);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, null);
+        }
     }
 
     /// <summary>

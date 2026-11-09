@@ -84,6 +84,22 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
+    public void UpdateGlobalFailsOnAMalformedHomeConfigProvingTheHomeFileIsActuallyRead()
+    {
+        using Harness h = NewHarness("home-config-is-read");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        WriteHomeConfig(h, "arbiter: [unclosed");
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        Assert.NotEqual(0, execution.ExitCode);
+    }
+
+    [Fact]
     public void InstallGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
     {
         using Harness h = NewHarness("install-user-level-arbiter-global");
