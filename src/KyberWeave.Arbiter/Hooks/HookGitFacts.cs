@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -23,9 +25,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <c>git.changed-paths.since-dispatch</c>, the hook captures a <see cref="GitSnapshot"/>
 /// before the subagent runs and records it under the arbiter directory. When the matching
 /// post-dispatch return arrives, <see cref="GitFacts.GetChangedPathsSinceSnapshot"/> diffs
-/// the working tree and <c>HEAD</c> against that pre-dispatch snapshot (or against current
-/// <c>HEAD</c> when no pre-dispatch snapshot was recorded), isolating the dispatch's own
-/// changes from earlier branch commits and <c>artifacts/**</c> output.
+/// the working tree and <c>HEAD</c> against that pre-dispatch snapshot, isolating the dispatch's own
+/// changes from earlier branch commits and <c>artifacts/**</c> output. When no pre-dispatch
+/// snapshot was recorded, the fact stays absent (<c>null</c>) so the rule answers
+/// <c>undecidable</c> instead of mistaking an unobservable dispatch for an empty diff.
 /// </para>
 /// <para>
 /// On review triggers declaring <c>review.changed-paths</c>, the hook measures the
@@ -49,9 +52,6 @@ internal sealed class HookGitFacts(
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
     private const int MaxStoredSnapshots = 64;
-
-    private static readonly IReadOnlyDictionary<string, string> EmptyMap =
-        new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <inheritdoc/>
     public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev)
@@ -94,10 +94,12 @@ internal sealed class HookGitFacts(
 
         if (needsSinceDispatch)
         {
-            GitSnapshot baseline = TakePreSnapshot(ResolveArbiterDirectory(cwd), classification.Target, ev)
-                ?? new GitSnapshot(head, EmptyMap, EmptyMap);
-            IReadOnlyList<string> sinceDispatch = [.. GitFacts.GetChangedPathsSinceSnapshot(cwd, baseline)];
-            facts = facts.With("git.changed-paths.since-dispatch", sinceDispatch, ArbiterFactLabel.Derived);
+            GitSnapshot? baseline = FindPreSnapshot(ResolveArbiterDirectory(cwd), classification.Target, ev);
+            if (baseline is not null)
+            {
+                IReadOnlyList<string> sinceDispatch = [.. GitFacts.GetChangedPathsSinceSnapshot(cwd, baseline)];
+                facts = facts.With("git.changed-paths.since-dispatch", sinceDispatch, ArbiterFactLabel.Derived);
+            }
         }
 
         if (needsReviewChangedPaths)
@@ -132,7 +134,7 @@ internal sealed class HookGitFacts(
             entries.Add(new StoredSnapshot(
                 ev.ToolCallId,
                 target,
-                ev.Prompt,
+                HashPrompt(ev.Prompt),
                 snapshot.Head,
                 new Dictionary<string, string>(snapshot.BlobIds, StringComparer.Ordinal),
                 new Dictionary<string, string>(snapshot.Statuses, StringComparer.Ordinal)));
@@ -145,11 +147,13 @@ internal sealed class HookGitFacts(
         });
     }
 
-    private static GitSnapshot? TakePreSnapshot(
+    private static GitSnapshot? FindPreSnapshot(
         string directory,
         string? target,
         ArbiterEvent ev)
     {
+        // Peek, never consume: a retry carrying the same tool-call id must see the same
+        // baseline instead of falling back to a diff the dispatch's commits never appear in.
         GitSnapshot? matched = null;
         WithSnapshotStore(directory, entries =>
         {
@@ -160,12 +164,11 @@ internal sealed class HookGitFacts(
             }
 
             StoredSnapshot entry = entries[index];
-            entries.RemoveAt(index);
             matched = new GitSnapshot(
                 entry.Head,
-                entry.BlobIds ?? EmptyMap,
-                entry.Statuses ?? EmptyMap);
-            return true;
+                entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+            return false;
         });
         return matched;
     }
@@ -188,26 +191,25 @@ internal sealed class HookGitFacts(
 
         if (!string.IsNullOrWhiteSpace(ev.Prompt))
         {
+            string promptHash = HashPrompt(ev.Prompt);
             for (int i = entries.Count - 1; i >= 0; i--)
             {
                 if (string.Equals(entries[i].Target, target, StringComparison.Ordinal)
-                    && string.Equals(entries[i].Prompt, ev.Prompt, StringComparison.Ordinal))
+                    && string.Equals(entries[i].PromptHash, promptHash, StringComparison.Ordinal))
                 {
                     return i;
                 }
             }
         }
 
-        for (int i = entries.Count - 1; i >= 0; i--)
-        {
-            if (string.Equals(entries[i].Target, target, StringComparison.Ordinal))
-            {
-                return i;
-            }
-        }
-
+        // No target-only fallback: without a tool-call id or a prompt there is no pairing
+        // key, and handing a dispatch another dispatch's baseline is a guess. The fact
+        // stays absent so the rule stops and asks instead of judging the wrong change.
         return -1;
     }
+
+    private static string HashPrompt(string prompt) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prompt)));
 
     private static void WithSnapshotStore(
         string directory,
@@ -239,8 +241,25 @@ internal sealed class HookGitFacts(
                     List<StoredSnapshot> entries = ReadSnapshots(filePath);
                     if (mutate(entries))
                     {
+                        // Write aside and move into place: a crash mid-write leaves the previous
+                        // whole document behind, never a truncated one that reads back as [].
                         string json = JsonSerializer.Serialize(entries);
-                        File.WriteAllText(filePath, json);
+                        string tempPath = Path.Combine(directory, ".snapshots." + Guid.NewGuid().ToString("N") + ".tmp");
+                        try
+                        {
+                            File.WriteAllText(tempPath, json);
+                            File.Move(tempPath, filePath, overwrite: true);
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                File.Delete(tempPath);
+                            }
+                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                            {
+                            }
+                        }
                     }
 
                     return;
@@ -249,8 +268,8 @@ internal sealed class HookGitFacts(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            // Snapshot persistence is best-effort; on failure the post hook falls back
-            // to diffing against current HEAD.
+            // Snapshot persistence is best-effort; on failure the fact stays absent so the
+            // rule stops and asks instead of judging a diff the dispatch never appeared in.
         }
     }
 
@@ -297,10 +316,15 @@ internal sealed class HookGitFacts(
         return ReviewBase;
     }
 
+    /// <summary>
+    /// One pre-dispatch snapshot. <see cref="PromptHash"/> carries the SHA-256 hex of the
+    /// host prompt, never the prompt itself, so the store holds no host payload. Entries
+    /// written before hashing carry a null hash and simply never match.
+    /// </summary>
     private sealed record StoredSnapshot(
         string? CallId,
         string? Target,
-        string? Prompt,
+        string? PromptHash,
         string Head,
         Dictionary<string, string>? BlobIds,
         Dictionary<string, string>? Statuses);
