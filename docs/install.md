@@ -523,10 +523,15 @@ a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc
 
 **If an update ends with an error after the binaries were installed.** The message begins with
 `kyber-weave <version> is installed, but ...`, which means the binaries are already updated and only the
-final steps did not finish. Run `kyber-weave update <version>` to finish them. That run takes the "already
-on" path and re-renders the hooks. A hook warning `warning: arbiter hooks were not refreshed: ...` exits 0
-and says the same thing. If you updated from a build older than this change, its own updater can show
-`Could not load file or assembly` once. The binaries are installed; run `kyber-weave update` once more.
+final steps did not finish. Run `kyber-weave update <version>` with the version you are on (for example
+`kyber-weave update 0.1.8-rc.21`) to finish them. That pinned run takes the "already on" path and finishes the
+post-update steps. It re-renders the hooks when the KyberDash steps succeed, because a failed engine step ends
+the run before the hook refresh. Do not use bare `kyber-weave update` for this: it resolves the latest stable
+release, not the build you run, so on a pre-release build it can install an older stable release that predates
+`--finish-update`. A hook warning `warning: arbiter hooks were not refreshed: ...` exits 0 and says the same
+thing. If you updated from a build older than this change, its own updater can show
+`Could not load file or assembly` once. The binaries are installed; run `kyber-weave update <version>` with
+that same version once more.
 
 Global `kyber-weave --version` still prints the running binary; pinning is a positional
 argument so the two do not collide.

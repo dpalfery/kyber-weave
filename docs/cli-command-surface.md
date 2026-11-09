@@ -88,6 +88,8 @@ SHA-256 verification. It does not wrap `install.sh`, and it refuses `dotnet run`
 The updating process swaps the binaries and then does nothing else: it starts the installed
 kyber-weave as `kyber-weave update <version> --finish-update` and relays that process's exit code.
 The finishing process runs everything after the swap, so the steps below run in the new release.
+When the version is already installed ("already on"), nothing is swapped, and the updating process runs the
+same steps itself.
 Its wait is 15 minutes, and the process tree is killed on expiry. See
 [distribution](distribution.md#the-self-update-sequence) for the full sequence.
 
@@ -100,7 +102,7 @@ any work, in three cases:
 - combined with `--release-candidate`: `--finish-update cannot be combined with --release-candidate. It finishes one named version.`
 
 It downloads nothing and commits nothing. On success it prints no outcome line; the updating process
-prints the single line `updated kyber-weave <version> -> <path>`.
+prints the single line `updated kyber-weave <version> → <path>`.
 
 The finishing process runs the KyberDash steps as a changed release. It runs
 `kyberdash engine ensure --if-running`, relaunches the tray when needed, then runs `kyberdash kyber

@@ -98,9 +98,9 @@ internal static class BinaryInstaller
     /// <summary>Strips <c>com.apple.quarantine</c> from a staged binary.</summary>
     /// <remarks>
     /// Call this before the staged file is moved over its destination, never after. This is
-    /// the first code in an update to touch <c>System.Diagnostics.Process</c>, and a
-    /// single-file host resolves a bundled assembly by re-opening its own executable by
-    /// path. Once the destination is the running <c>kyber-weave</c>, that path holds the
+    /// not the first code in an update to touch <c>System.Diagnostics.Process</c>, because the
+    /// hand-off rehearsal starts a process before the first commit. A single-file host resolves
+    /// a bundled assembly by re-opening its own executable by path. Once the destination is the running <c>kyber-weave</c>, that path holds the
     /// newly installed image and the load fails with "Could not load file or assembly
     /// 'System.Diagnostics.Process'" — aborting an update that had already written the new
     /// binary. Running before the move also warms the assembly for anything after it.

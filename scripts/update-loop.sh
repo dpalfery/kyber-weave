@@ -8,9 +8,10 @@
 # a real Squad install against it. Everything runs against published single-file
 # binaries, because that is the only shape in which either failure reproduces.
 #
-# The `--from` side matters more than it looks. A self-updater is always executed by
-# the *old* binary, so a fix to the updater cannot be proven by the release that
-# contains it — only by updating away from a build that predates it.
+# The `--from` side matters more than it looks. An update is always started by the
+# *old* binary, and the steps after its swap run in the new one, so a fix to the update
+# path cannot be proven by the release that contains it — only by updating away from a
+# build that predates it.
 #
 # There is a limit to how far back `--from` can reach: redirecting a build at all
 # requires it to honour KYBER_WEAVE_RELEASE_ORIGIN, so any ref older than that support
@@ -577,7 +578,8 @@ expect_logged "predates the KyberDash tray" "the tray skip is logged"
 
 # `kyber-weave update` re-renders arbiter hooks once the binaries have moved, for every
 # registered project that enables the arbiter and for the global targets. That reads YAML,
-# and it runs in the OLD process, whose single-file bundle was replaced underneath it. Every
+# and it now runs in the NEW process, which the hand-off starts after the swap. Before the
+# hand-off it ran in the OLD process, whose single-file bundle was replaced underneath it. Every
 # case above updates under an empty home, where nothing is registered and no YAML is read,
 # so the loop stayed green while the real update crashed with "Could not load file or
 # assembly YamlDotNet" after every binary was installed.

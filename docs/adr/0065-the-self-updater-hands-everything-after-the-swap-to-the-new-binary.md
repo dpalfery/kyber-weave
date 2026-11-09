@@ -43,14 +43,17 @@ updating process prints the one outcome line on success.
 - **Pre-load every referenced assembly in the old process.** The stale-template defect remains,
   and the approach depends on a runtime loading mechanism that cannot be enumerated in advance.
 - **Make the refresh failure non-fatal only.** Hooks would stay stale after an update reported
-  success. This is kept as the backstop: any failure after the install still exits 1 and names
-  the command that finishes the update.
+  success. This is kept as the backstop: a failed hand-off, a non-zero exit from the finishing
+  process, or a failed KyberDash engine or tray step exits 1 and names the command that finishes
+  the update. A failed arbiter hook refresh is a warning with exit 0.
 - **Let the new binary perform the swap.** This is a larger change, and the old process would
   still have to spawn it.
 
 ## Consequences
 
-- Any new post-update step belongs in the finishing process, never in the updating process.
+- On the swap path, any new post-update step belongs in the finishing process, never in the
+  updating process. The "already on" path swaps nothing, so it runs those steps in the updating
+  process itself.
 - The hand-off adds one process start and a 15-minute bound that stops the whole process tree
   on expiry. Before the first commit, the old process rehearses the start path once with
   `--version` under a 30-second bound, so the code that starts the hand-off is loaded while the
@@ -58,5 +61,7 @@ updating process prints the one outcome line on success.
 - A pinned older release that does not know `--finish-update` fails the hand-off. The message
   then gives the pinned retry, `kyber-weave update <version>`.
 - The first update away from a build that predates this decision is still run by that old
-  build's updater, so it can show the old error once. The binaries are installed; running
-  `kyber-weave update` once more refreshes the hooks.
+  build's updater, so it can show the old error once. The binaries are installed. Run
+  `kyber-weave update <version>` with the version you are on, once more, to refresh the hooks.
+  Do not use the bare form: it resolves the latest stable release, not the build you run, so on a
+  pre-release build it can install an older stable release that predates `--finish-update`.

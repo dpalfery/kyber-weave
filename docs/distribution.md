@@ -497,19 +497,23 @@ path for Windows users until signing is implemented.
 the binaries, then does nothing but the hand-off. Every later step runs in the new kyber-weave,
 so its assemblies and its hook templates come from the release being installed
 ([ADR 0065](adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md)).
+When the release is already installed ("already on"), nothing is swapped, and the same post-update
+steps run in the updating process itself.
 
 1. **Stage and verify.** Downloads the Release assets and checks each against `SHA256SUMS.txt`
    before installing anything.
 2. **Rehearse.** Once, before the first binary is committed, the installed `kyber-weave --version`
    runs with its output discarded, under a 30-second bound. This loads the code that starts the
-   hand-off while the old image is still whole. A rehearsal failure is logged as `the hand-off
-   rehearsal did not complete (<message>); the hand-off will report any failure` and does not stop
-   the update.
+   hand-off while the old image is still whole. A rehearsal that cannot start, or that outlasts
+   its bound, is logged as `the hand-off rehearsal did not complete (<message>); the hand-off will
+   report any failure` and does not stop the update. A rehearsal that starts and exits non-zero is
+   not logged, and does not stop the update either.
 3. **Commit.** Each binary is swapped in. The hand-off starts only after the last one is committed.
 4. **Hand off.** The updating process starts the installed `kyber-weave update <version>
    --finish-update`, passing on `--no-kyberdash`, `--no-menubar`, `--no-arbiter` and `--no-restart`
-   when they were given. Its output is inherited, and the first line it prints is `finishing the
-   update in the new kyber-weave…`. The wait is 15 minutes. On expiry the whole process tree is
+   when they were given. The updating process prints `finishing the
+   update in the new kyber-weave…` before it starts the child, so that line comes from the old
+   process. The child's output is inherited. The wait is 15 minutes. On expiry the whole process tree is
    killed. The updating process exits with the child's exit code.
 5. **Finish.** The new process runs the KyberDash steps as a changed release, then the arbiter hook
    refresh, in its own image. It downloads nothing and never starts another hand-off. On success it
@@ -524,7 +528,7 @@ Finish mode refuses before doing any work, with these messages:
 `--finish-update` is a hidden option. Only the updater passes it.
 
 **One outcome line.** The updating process prints the only outcome line on success:
-`updated kyber-weave <version> -> <path>`. A failure after the install is reported without rolling
+`updated kyber-weave <version> → <path>`. A failure after the install is reported without rolling
 anything back, in one of these forms:
 
 - An IO, access, process or timeout failure after the install: `kyber-weave <version> is installed,
@@ -543,12 +547,14 @@ the global hooks.
 A pinned older release does not know `--finish-update`, so its hand-off fails. The message then
 gives the pinned retry, `kyber-weave update <version>`. The first update away from a build that
 predates this design (rc.21) is still run by that build's own updater, so it can show the old
-`Could not load file or assembly YamlDotNet` error once. The binaries are installed; running
-`kyber-weave update` once more takes the "already on" path and refreshes the hooks.
+`Could not load file or assembly YamlDotNet` error once. The binaries are installed. Run
+`kyber-weave update <version>` with the version you are on, once more, and it takes the "already on"
+path and refreshes the hooks. Do not use the bare form: it resolves the latest stable release, which on
+a pre-release build can be an older one that predates `--finish-update`.
 
 ## Verifying a release locally
 
-A self-updater is always executed by the **old** binary. A fix to the update path therefore
+An update is always started by the **old** binary, and the steps after its swap run in the new one. A fix to the update path therefore
 cannot be proven by the release that contains it — only by updating away from a build that
 predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
 reappears, and the fix looks broken when it was simply never the code that ran.
@@ -596,8 +602,8 @@ because it means the binaries already on this machine. The loop serves
 `http://127.0.0.1` with the port the server printed, so that staging needs curl.
 
 Run against a **published single-file binary**, never `dotnet run`. The failures this exists
-to catch are a hand-off that does not start the new binary, and a finishing process that cannot
-load an assembly the new bundle lays out at a different offset. Only a published single-file
+to catch are a hand-off that does not start the new binary, and an old updating process that, after the
+swap, cannot load an assembly the new bundle lays out at a different offset. Only a published single-file
 bundle has that layout, so neither failure exists in any other shape.
 
 The loop unpacks the `kyber-weave` and `kyber-weave-mcp` archives that `release-local.sh` publishes,
