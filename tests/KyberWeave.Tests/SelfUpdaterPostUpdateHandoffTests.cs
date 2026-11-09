@@ -181,6 +181,36 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     }
 
     /// <summary>
+    /// With forwarded opt-outs the retry command has to carry them, or the retry re-runs KyberDash and the arbiter
+    /// refresh the owner explicitly opted out of. The existing test above proves the version still appears; this one
+    /// proves the flags do too.
+    /// </summary>
+    [Fact]
+    public void HandOffThatExitsOneCarriesTheForwardedOptOutsInTheRetryCommand()
+    {
+        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        SelfUpdateHost host = CreateHost("0.1.0");
+        HandOffRecord record = new();
+
+        SelfUpdateOutcome outcome = RunUpdate(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true, NoRestart: true),
+            record,
+            handOff: (_, arguments, _) => arguments[0] == "update" ? 1 : 0);
+
+        Assert.Single(record.SeamCalls, call => call.Arguments[0] == "update");
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains(
+            "kyber-weave update 0.2.0 --no-arbiter --no-restart",
+            outcome.Message,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("--no-kyberdash", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>
     /// A hand-off that cannot start (here, Windows refusing to launch the new image) is an honest failure: the cause
     /// and the retry command, never the bare exception text, and never the project registry, which it did not touch.
     /// </summary>
@@ -226,6 +256,32 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
 
         Assert.Single(record.SeamCalls, call => call.Arguments[0] == "update");
         AssertHonestHandOffFailure(outcome, host, "System.Text.Encoding.Extensions", failure.Message);
+    }
+
+    /// <summary>
+    /// The tree-kill of a hung child can throw <see cref="AggregateException"/> (its per-process results are
+    /// collected into one). The hand-off's catch must translate it into the honest installed-plus-retry message,
+    /// never the bare wrapper text, and never a registry-failure claim.
+    /// </summary>
+    [Fact]
+    public void HandOffThatThrowsAnAggregateReportsTheBinariesInstalledAndTheRetryCommand()
+    {
+        AggregateException failure = new(
+            "one or more tree members refused to terminate",
+            new InvalidOperationException("Process 1234 still running after Kill."));
+        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        SelfUpdateHost host = CreateHost("0.1.0");
+        HandOffRecord record = new();
+
+        SelfUpdateOutcome outcome = RunUpdate(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false),
+            record,
+            handOff: (_, arguments, _) => ThrowOnHandOff(failure, arguments));
+
+        Assert.Single(record.SeamCalls, call => call.Arguments[0] == "update");
+        AssertHonestHandOffFailure(outcome, host, failure.Message, failure.Message);
     }
 
     /// <summary>

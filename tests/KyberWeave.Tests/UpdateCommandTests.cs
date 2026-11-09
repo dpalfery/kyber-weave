@@ -413,6 +413,31 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Finish mode is reachable from <c>dotnet run</c> when the hidden <c>--finish-update</c> flag is passed
+    /// explicitly, so the same releases-channel refusal that protects the normal path applies here too.
+    /// </summary>
+    [Fact]
+    public void FinishUpdateWithDotnetHostIsRefused()
+    {
+        SelfUpdateHost host = new(
+            Path.Combine(_install.Path, "dotnet"),
+            "0.1.0",
+            "osx-arm64",
+            false,
+            false);
+        File.WriteAllText(host.ProcessPath, "shim");
+
+        using MapHandler handler = new();
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.1.0", false, false, FinishUpdate: true));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RunDotnetToolInstallIsRefused()
     {

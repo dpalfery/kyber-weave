@@ -485,7 +485,8 @@ EOF
 update_case() {
     log "${CASE_NAME}: kyber-weave update $*"
     set +e
-    CASE_OUT="$(HOME="$CASE_HOME" "${CASE_BIN}/kyber-weave" update "$@" 2>&1)"
+    CASE_OUT="$(env -u CURSOR_CONFIG_DIR -u XDG_CONFIG_HOME -u XDG_CONFIG_DIRS -u APPDATA \
+        HOME="$CASE_HOME" "${CASE_BIN}/kyber-weave" update "$@" 2>&1)"
     CASE_CODE=$?
     set -e
     printf '%s\n' "$CASE_OUT" | sed 's/^/    /' >&2
@@ -680,9 +681,11 @@ else
     fi
 
     case_setup "installed the global cursor arbiter hook" \
-        env HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --target cursor --provider "" --yes
+        env -u CURSOR_CONFIG_DIR -u XDG_CONFIG_HOME -u XDG_CONFIG_DIRS -u APPDATA \
+            HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --target cursor --provider "" --yes
     case_setup "installed the project arbiter hooks, which registers the project" \
-        env HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --project --path "$CASE_PROJECT" \
+        env -u CURSOR_CONFIG_DIR -u XDG_CONFIG_HOME -u XDG_CONFIG_DIRS -u APPDATA \
+            HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --project --path "$CASE_PROJECT" \
             --target copilot --provider "" --yes
 
     if [ -n "$CASE_READY" ]; then

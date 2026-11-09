@@ -334,7 +334,9 @@ internal sealed class SelfUpdater : IDisposable
         // arbiter hook refresh and their messages. A failed hand-off is reported with its retry and is not rolled back.
         int handOffExit = HandOff(options, version, windows);
         if (handOffExit != 0)
-            return new SelfUpdateOutcome(handOffExit, UnfinishedHandOffMessage(version, handOffExit));
+            return new SelfUpdateOutcome(
+                handOffExit,
+                UnfinishedHandOffMessage(version, handOffExit, RetryFlags(options)));
 
         string installed = Path.Combine(
             _host.InstallDirectory,
@@ -369,6 +371,10 @@ internal sealed class SelfUpdater : IDisposable
                 $"--finish-update finishes the update to the version that runs it. This kyber-weave is {current}, but {version} was asked for.");
         }
 
+        // Finish mode is reachable from `dotnet run` or a `dotnet tool` install when the hidden flag
+        // is passed explicitly, so it runs the same releases-channel check every other path enforces.
+        EnsureReleaseInstallChannel();
+
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         ReconcileKyberDash(options, version, windows, true);
         RefreshArbiterHooks(options, version, windows);
@@ -402,12 +408,13 @@ internal sealed class SelfUpdater : IDisposable
             return StartChild(installed, arguments, false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception
-                                       or InvalidOperationException or TimeoutException)
+                                       or InvalidOperationException or TimeoutException
+                                       or AggregateException)
         {
             // The binaries are already committed, so this names the state and the one command that finishes it.
             throw new SelfUpdateException(
                 $"kyber-weave {version} is installed, but the last steps did not finish: {EndSentence(DescribeFailure(ex))} " +
-                $"Run kyber-weave update {version} to finish them.");
+                $"Run kyber-weave update {version}{RetryFlags(options)} to finish them.");
         }
     }
 
@@ -486,9 +493,11 @@ internal sealed class SelfUpdater : IDisposable
             if (!started.HasExited)
                 started.Kill(true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or AggregateException)
         {
-            // It exited between the check and the kill. The timeout below still reports the step.
+            // It exited between the check and the kill, or the tree kill itself failed (Process.Kill(true)
+            // aggregates the per-process results into one exception when any member refuses to die). The
+            // timeout below still reports the step.
         }
 
         started.WaitForExit(TimeSpan.FromSeconds(5));
@@ -496,11 +505,27 @@ internal sealed class SelfUpdater : IDisposable
             $"The process did not exit within {(int)timeout.TotalSeconds} seconds, and its process tree was stopped.");
     }
 
-    private static string UnfinishedHandOffMessage(string version, int exitCode)
+    /// <summary>The forwarded opt-outs as a single leading-space token, empty when none were forwarded.</summary>
+    /// <remarks>
+    /// The hand-off passes the owner's <c>--no-*</c> flags to the finishing child. A retry, whether this CLI prints it
+    /// or the user types it, has to carry the same flags, or the retry re-runs the steps the owner explicitly opted
+    /// out of.
+    /// </remarks>
+    internal static string RetryFlags(SelfUpdateOptions options)
+    {
+        List<string> flags = new(capacity: 4);
+        if (options.NoKyberDash) flags.Add("--no-kyberdash");
+        if (options.NoMenubar) flags.Add("--no-menubar");
+        if (options.NoArbiter) flags.Add("--no-arbiter");
+        if (options.NoRestart) flags.Add("--no-restart");
+        return flags.Count == 0 ? string.Empty : " " + string.Join(' ', flags);
+    }
+
+    private static string UnfinishedHandOffMessage(string version, int exitCode, string retryFlags)
     {
         return $"kyber-weave {version} is installed, but the post-update steps did not finish: the new kyber-weave exited " +
                $"{exitCode}, and its output above says why. The binaries are already updated. " +
-               $"Run kyber-weave update {version} to finish them.";
+               $"Run kyber-weave update {version}{retryFlags} to finish them.";
     }
 
     /// <summary>Whether to delegate to <c>kyberdash menubar --update</c>.</summary>
@@ -628,7 +653,10 @@ internal sealed class SelfUpdater : IDisposable
             catch (Exception ex) when (IsRegistryReadFailure(ex))
             {
                 registryRead = false;
-                WarnArbiterHooksNotRefreshed($"the project registry could not be read: {ex.Message}", version);
+                WarnArbiterHooksNotRefreshed(
+                    $"the project registry could not be read: {ex.Message}",
+                    version,
+                    options);
             }
 
             string? home = _readEnvironment("HOME");
@@ -661,7 +689,7 @@ internal sealed class SelfUpdater : IDisposable
             or TimeoutException
             or OperationCanceledException)
         {
-            WarnArbiterHooksNotRefreshed(DescribeFailure(ex), version);
+            WarnArbiterHooksNotRefreshed(DescribeFailure(ex), version, options);
         }
     }
 
@@ -698,10 +726,10 @@ internal sealed class SelfUpdater : IDisposable
                && !IsComponentLoadFailure(ex, out _);
     }
 
-    private void WarnArbiterHooksNotRefreshed(string cause, string version)
+    private void WarnArbiterHooksNotRefreshed(string cause, string version, SelfUpdateOptions options)
     {
         _log($"warning: arbiter hooks were not refreshed: {EndSentence(cause)} " +
-             $"The binaries are already updated; run kyber-weave update {version} to retry.");
+             $"The binaries are already updated; run kyber-weave update {version}{RetryFlags(options)} to retry.");
     }
 
     /// <summary>The cause a user reads: a component that could not load is named by its assembly, anything else is its own message.</summary>

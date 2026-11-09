@@ -3267,6 +3267,12 @@ public sealed class ReleaseTests
         Assert.Contains("cmp", body, StringComparison.Ordinal);
         Assert.Contains("update_case", body, StringComparison.Ordinal);
         Assert.Contains("--no-kyberdash", body, StringComparison.Ordinal);
+
+        // The size guard fails the case if the layout-shifted build stops growing kyber-weave by at least one
+        // page, which would put every assembly at the same offset and hide the post-swap YamlDotNet defect.
+        Assert.Contains("4096", body, StringComparison.Ordinal);
+        // The pinned layout release is the one whose kyber-weave file moves every assembly's offset.
+        Assert.Contains("LAYOUT_VERSION", body, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------- Sandbox
