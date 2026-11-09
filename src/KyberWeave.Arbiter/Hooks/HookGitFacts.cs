@@ -182,44 +182,46 @@ internal sealed class HookGitFacts(
             return null;
         }
 
-        // Re-read only while the file is actively changing: a static store cannot gain
-        // the entry, so genuine absence resolves after two reads instead of a budget.
+        StoredSnapshot? entry = PeekUntilSettled(
+            () => ReadStoreText(filePath),
+            text =>
+            {
+                List<StoredSnapshot> entries = ParseSnapshots(text);
+                int index = FindMatchingIndex(entries, target, ev);
+                return index >= 0 ? entries[index] : null;
+            },
+            PeekRetryBudget);
+        return entry is null
+            ? null
+            : new GitSnapshot(
+                entry.Head,
+                entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+    }
+
+    internal static T? PeekUntilSettled<T>(Func<string> read, Func<string, T?> find, TimeSpan budget)
+        where T : class
+    {
+        // Contents, not timestamps: a save inside one timestamp tick of a coarse
+        // filesystem still counts as a change, so it still pairs.
         Stopwatch elapsed = Stopwatch.StartNew();
-        DateTime observed = GetLastWriteTimeUtc(filePath);
+        string seen = read();
         while (true)
         {
-            List<StoredSnapshot> entries = ReadSnapshots(filePath);
-            int index = FindMatchingIndex(entries, target, ev);
-            if (index >= 0)
+            T? match = find(seen);
+            if (match is not null || elapsed.Elapsed >= budget)
             {
-                StoredSnapshot entry = entries[index];
-                return new GitSnapshot(
-                    entry.Head,
-                    entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
-                    entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+                return match;
             }
 
-            DateTime current = GetLastWriteTimeUtc(filePath);
-            if (current <= observed || elapsed.Elapsed >= PeekRetryBudget)
+            string next = read();
+            if (string.Equals(next, seen, StringComparison.Ordinal))
             {
                 return null;
             }
 
-            observed = current;
+            seen = next;
             Thread.Sleep(TimeSpan.FromMilliseconds(20));
-        }
-    }
-
-    private static DateTime GetLastWriteTimeUtc(string filePath)
-    {
-        try
-        {
-            return File.GetLastWriteTimeUtc(filePath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Unstatable means unreadable: the read below resolves it as absent.
-            return DateTime.MinValue;
         }
     }
 
@@ -354,24 +356,32 @@ internal sealed class HookGitFacts(
         }
     }
 
-    private static List<StoredSnapshot> ReadSnapshots(string filePath)
+    private static List<StoredSnapshot> ReadSnapshots(string filePath) => ParseSnapshots(ReadStoreText(filePath));
+
+    private static string ReadStoreText(string filePath)
     {
-        if (!File.Exists(filePath))
+        try
+        {
+            return File.Exists(filePath) ? File.ReadAllText(filePath) : string.Empty;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static List<StoredSnapshot> ParseSnapshots(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
         {
             return [];
         }
 
         try
         {
-            string json = File.ReadAllText(filePath);
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return [];
-            }
-
             return JsonSerializer.Deserialize<List<StoredSnapshot>>(json) ?? [];
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException)
         {
             return [];
         }

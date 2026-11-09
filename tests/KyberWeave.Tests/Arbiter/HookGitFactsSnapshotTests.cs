@@ -166,8 +166,8 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     }
 
     /// <summary>
-    /// Genuine absence resolves promptly: unpaired posts never wait out a retry budget
-    /// for a baseline no record can produce.
+    /// Unpaired posts stay absent through the real path. The time bound only catches a
+    /// hang: git process time dominates it. The read-count tests below pin the speed.
     /// </summary>
     [Fact]
     public void GenuineAbsenceResolvesPromptly()
@@ -182,6 +182,63 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         Assert.True(
             elapsed.Elapsed < TimeSpan.FromSeconds(15),
             $"five absent posts took {elapsed.Elapsed}, the absence path must stay fast.");
+    }
+
+    /// <summary>
+    /// An unchanged store cannot gain the entry, so absence costs exactly two reads and
+    /// no wait.
+    /// </summary>
+    [Fact]
+    public void UnchangedStoreResolvesAbsentAfterTwoReads()
+    {
+        int reads = 0;
+
+        string? found = HookGitFacts.PeekUntilSettled<string>(
+            () =>
+            {
+                reads++;
+                return "same document";
+            },
+            _ => null,
+            TimeSpan.FromMinutes(5));
+
+        Assert.Null(found);
+        Assert.Equal(2, reads);
+    }
+
+    /// <summary>
+    /// A store that changed between reads is read again however coarse the filesystem's
+    /// timestamps are: the comparison is of the contents, so a save inside one timestamp
+    /// tick still pairs.
+    /// </summary>
+    [Fact]
+    public void ChangedContentIsReadAgainAndPairs()
+    {
+        Queue<string> documents = new(["before the save", "after the save"]);
+
+        string? found = HookGitFacts.PeekUntilSettled(
+            documents.Dequeue,
+            text => text == "after the save" ? text : null,
+            TimeSpan.FromMinutes(5));
+
+        Assert.Equal("after the save", found);
+    }
+
+    /// <summary>
+    /// A store that never stops changing cannot hold the hook past the budget.
+    /// </summary>
+    [Fact]
+    public void ChurningStoreStopsAtTheBudget()
+    {
+        int reads = 0;
+
+        string? found = HookGitFacts.PeekUntilSettled<string>(
+            () => (++reads).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => null,
+            TimeSpan.Zero);
+
+        Assert.Null(found);
+        Assert.Equal(1, reads);
     }
 
     /// <summary>
