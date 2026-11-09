@@ -81,3 +81,24 @@ maintains it.
 Do not query or manipulate the DOM directly (`document.getElementById` and the like); use state
 and effects. A React ref is allowed where accessibility requires moving focus, and for nothing
 else.
+
+## Completion
+
+```bash
+npm ci
+npm run typecheck                        # tsc --noEmit
+npm run lint                             # eslint
+npx prettier --check <path>              # prettier check (keep prettier or lint, as the repository declares)
+npm test -- <path>                       # the tests covering the components you changed
+npm run build                            # the build, when the package builds
+```
+
+`npm run typecheck` is what catches a prop or a hook typed wrong. `npx prettier --check` is the
+format check where the repository uses Prettier; one that formats by ESLint rule gets the same
+answer from `npm run lint`, and says so here. The `npm test` line is filtered to the files the
+change touches — the unfiltered suite is the gate the review council and CI run, and a dev agent
+never runs it. `npm run build` is the build, and it is the last check: a component that type-checks
+and tests green but does not bundle is not finished.
+
+A change to a component's rendered output also gets a manual look in a browser, keyboard-only for
+anything interactive; this standard cannot test that for you.

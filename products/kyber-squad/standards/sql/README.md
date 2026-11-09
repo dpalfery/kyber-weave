@@ -139,3 +139,22 @@ and pipeline connections.
 
 Sensitive columns are encrypted, hashed, or masked, and a query selects only the columns it
 needs rather than whatever `*` expands to.
+
+## Completion
+
+The schema is code, so it is built, tested and formatted like code:
+
+```bash
+dotnet build -c Release                                 # the build: the .dacpac, with SQL code analysis on
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # the tests covering your change
+sqlfluff lint <path> --dialect tsql                     # the format check, where the repository uses it
+```
+
+`dotnet build` is the build gate: SQL code analysis runs inside it, so a naming or type rule the
+project declares fails here rather than in review. The formatter is the one § Naming and layout
+names for this repository — `sqlfluff lint` (or `sqlfluff fix` for the pass that rewrites) where it
+adopts that tool, another formatter otherwise — and it is the format check: run it and commit what
+it produces. The `dotnet test` line is the integration tests covering the change, run against a
+real SQL Server instance as the test standard requires; the unfiltered suite belongs to the review
+council and CI. A change to a migration or a deploy script is also exercised against a throwaway
+database, because the build proves the schema compiles and not that the change applies.

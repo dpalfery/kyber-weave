@@ -18,6 +18,7 @@ review:
     # python: test (.)
     - id: python-test
       run: ['pytest']
+      full-suite: true
   task-gates:
     python-dev:
       # python: format (.)

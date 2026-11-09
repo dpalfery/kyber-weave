@@ -14,7 +14,7 @@ required-features: []
 # `docs_get_source_repository_and_revision`) post-date it, so it still speaks for those two
 # servers and not for this one. kw-docs is pinned mechanically instead, by
 # SquadToolchainRosterGuardTests.ShippedToolchainRosterGrantsEveryToolTheKyberWeaveMcpServerExposes
-# in tests/KyberWeave.Tests/SquadToolchainRosterGuardTests.cs: the guard reads the exposed
+# in that class: the guard reads the exposed
 # `[McpServerTool]` names off DocsTools and fails when any of them is missing here. A roster
 # that is merely short reports nothing on its own, which is why the absence of
 # `docs_get_source_repository_and_revision` went unnoticed until the guard existed.

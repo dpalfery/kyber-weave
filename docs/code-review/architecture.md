@@ -6,12 +6,13 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-08
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
   - adr/0005-task-level-fast-review
   - adr/0053-kyber-arbiter-three-step-decision-gates
+  - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -473,6 +474,13 @@ it under the others. This repository does so for:
 - .NET: `format-whitespace`, `format-style` and `dotnet-build`, anchored under `csharp-dev`. `format-analyzers` was removed because `dotnet-build` immediately follows it and already runs all Roslyn analyzers under `AnalysisMode=all` with `TreatWarningsAsErrors=true` (D3), eliminating ~24s of redundant overhead per task completion with no loss of analyzer enforcement.
 - TypeScript: `dash-typecheck` and `dash-lint`, anchored under `react-dev`; `tray-ui-typecheck` is anchored there too.
 - Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under `tauri-dev`.
+- SQL: `sql-format` (`sqlfluff lint`), declared under `sql-database-architect`. A migration or a schema file is frequently the one thing a build never touches, so a change to `*.sql` needs a gate of its own.
+- Repository plumbing: `workflow-lint` (`actionlint`), `shellcheck` and `review-config` (`kyber-weave review catalogue .`), anchored under `github-devops`. `review-config` is aliased under `sql-database-architect` and `docs-dev` too, so a configuration change made in any of the three roles selects it.
+
+The three plumbing gates exist because `include` alone decides whether a gate is selected, and no
+gate covered those file kinds: a task that edited only a workflow, a shell script or the review
+configuration selected nothing and reported `NONE_APPLICABLE`, which a reader of a completion
+digest cannot tell apart from a change that was checked and passed.
 
 `typescript-dev` aliases the dash gates and `rust-dev` the cargo format and lint gates. `test-dev`
 runs the .NET format and build gates, the dash gates and the cargo format and lint gates, because
@@ -480,12 +488,27 @@ its tests span all three. `go-dev` and `python-dev` declare no task gates, becau
 has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
 only, because a whole-crate test run per task would fail on another worker's concurrent edit.
 
+`docs-dev` declares one gate, and it selects one file: `.kyber-weave/kyber-weave.yml`. A change
+that touches only governed Markdown still selects nothing and still reports `NONE_APPLICABLE`, which
+is why `docs-dev`'s entry is a configuration check rather than the documentation check
+[the docs-dev task gate todo](../todo/docs-dev-task-gate-entry.md) asks for. `NONE_APPLICABLE` is
+reported as a gate that did not apply, never as a pass; the difference between it and
+`NONE_DECLARED` is that the agent has gates and none of them matched this change.
+
 The shipped Go format gate (`gofmt -l`, council and task) sets `fail-on-output: true`. `gofmt -l` exits 0
 on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff only from Go 1.26, so a
 gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
 on all of them.
 
 ### Council gates
+
+The council does not choose its own gates. They are declared in the `review.gates` list of the
+repository's configuration, and the council runs the declared ones. What varies per review is which of
+them *apply*: a gate whose `os` does not match the host is skipped, a gate whose `include` matches no
+changed file is skipped (`KW-REVIEW-026`), a gate named by `requires-paths` whose paths are absent does
+not start, and a `full-suite` gate is refused to any caller that is not the council or CI or a person at
+a terminal (`KW-REVIEW-033`). Adding or removing a gate is an edit to the configuration, never a decision
+the model makes during a review.
 
 `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and, since the
 shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full-suite` and
@@ -629,9 +652,12 @@ exit-code meanings and the local commands are in the
 `--timeout` at or below 540 when a run comes from an agent tool. Changing a `review.gates` entry in
 `.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
 
-No task gate covers a change that touches only workflow YAML, the review config or a shell
-script; such a task runs no gate. That residual is tracked in
-[the task-gates todo](../todo/task-gates-workflow-and-shell-edits.md).
+Every file kind this repository's agents edit now selects at least one task gate: a workflow, a
+shell script, the review configuration and a `*.sql` file each have a gate whose `include` matches
+them (`workflow-lint`, `shellcheck`, `review-config` and `sql-format`, described under
+[Task gates](#task-gates)), and `TaskGatesRepositoryConfigTests` pins the three plumbing kinds by
+file kind rather than by agent, so the next file kind to appear is a failing test rather than a
+silently unchecked change.
 
 #### Fast test git repository fixture template
 
@@ -665,6 +691,29 @@ one repository can differ — one `package.json` may define a `lint` script whil
 does not. Entries sharing an id pick one form per root. Every command is argv, and every
 gate id has a source URL in its family file.
 
+**A gate whose `role` is `test` is rendered with `full-suite: true`, and no other gate is.** The
+role is the catalogue's own definition of a whole-suite run, so a family that later ships a second
+one — a separate integration or end-to-end suite — carries the key without a row being added
+anywhere, and a single check keeps running for a developer agent. The key is what makes
+`review gates` refuse the gate for a caller that is not the council or CI
+([ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md)), so a host
+scaffolded by `docs init` cannot hand a developer agent the whole suite. The generated command is
+**not** wrapped in `scripts/proc-guard.sh`: the guard is this repository's own file and does not
+ship to a host, while the key is the half that travels; host repositories rely on the gate runner's
+`timeout-seconds` rather than repository-specific process tree caps or slot queuing.
+`GateCatalogueRenderTests` pins both
+directions of the rule in one comparison, so a scaffold that marked every gate full-suite and one
+that marked none both fail.
+
+**Three of the entries cover repository plumbing rather than a language.** `workflow-lint`
+(`actionlint` over `.github/workflows/*.yml`), `shellcheck` (over `**/*.sh`) and `review-config`
+(`kyber-weave review catalogue .`, which fails when the configuration no longer loads) live in the
+csharp family but are written for `github-devops` and `docs-dev`, the two agents that edit those
+files. Those two agents map to the `github-actions` technology, so a host that declares it receives
+their gates and a host that does not receives none of them. Each of the three carries `os: unix`,
+and the family's `sources` map carries the download or install page for its tool; a gate skipped
+outside that restriction is reported rather than read as a pass.
+
 Root detection (`ProjectRootDetector`) skips dependency, build-output and ignored
 directories, orders roots by ordinal path so the same tree always yields the same
 output, and writes one copy of each root-bound gate per root: the id is the family
@@ -682,7 +731,9 @@ with the root list to pick from. Either way the render names the reason per gate
 reasons, and the technologies with no gates shipped for them.
 
 Developer task gates are written per agent slug: `csharp-dev`, `dal-dev`, `maui-dev`
-and `pulumi-dev` from the csharp family; `typescript-dev` and `react-dev` from
+and `pulumi-dev` from the csharp family; `github-devops` from that family's plumbing entries
+(the workflow linter, `shellcheck` and the review-config load check); `docs-dev` from the
+review-config entry alone; `typescript-dev` and `react-dev` from
 typescript; `rust-dev` and `tauri-dev` from rust; `go-dev` from go; `python-dev` from
 python. `test-dev` gets a copy of every written format and lint gate. The written block
 is host-owned from then on: re-running `docs init` never edits an existing `review:`
@@ -777,3 +828,4 @@ pass in particular is unmeasured and may exceed the council itself on a findings
 - [The review council plan](../archive/plans/2026-08-20-code-review-council.md) — why it is shaped this way
 - [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) — three-layer review council and verdict engine
 - [ADR 0003](../adr/0003-cross-file-duplication-and-prior-art-lenses.md) — cross-file duplication and prior art
+- [ADR 0064](../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) — why a repository's checks live in its gate configuration and its standards, and never in a portable agent or skill

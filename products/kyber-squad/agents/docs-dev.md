@@ -41,7 +41,7 @@ Your packet is your whole scope, with one exception: a plan or spec closeout tas
 The only processes you run are these five command classes:
 - `git mv` of the plan or spec you close out: a plan file moves to `<docs-root>/archive/plans/`, and a specification directory moves to `<docs-root>/archive/specs/`. Archive only the artifact named by the packet, and only after its closeout steps are complete.
 - `git rm` of that artifact's task file — `<plan>.tasks.json` beside a plan, or `<spec-folder>/tasks.json` in a specification folder — in the same commit that archives the artifact, so the file never reaches the main branch. Nothing durable is lost: the archived plan keeps its decisions, tasks and test contract.
-- `kyber-weave docs validate . --merge-ready` (or `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` where the host's AGENTS.md declares that form). Run it after every corpus edit and every archival move.
+- `kyber-weave docs validate . --merge-ready`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate . --merge-ready`). Run it after every corpus edit and every archival move.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - Run the targeted tests that pin documentation, named by the packet.
 

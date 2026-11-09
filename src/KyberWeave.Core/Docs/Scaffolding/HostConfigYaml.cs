@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -327,6 +328,9 @@ public static partial class HostConfigYaml
     /// </summary>
     private static (string Value, string Suffix) SplitScalarAndSuffix(string rest)
     {
+        if (rest.Length > 0 && rest[0] == '#')
+            return (string.Empty, rest);
+
         char quote = rest.Length > 0 && rest[0] is '\'' or '"' ? rest[0] : '\0';
         int start = quote == '\0' ? 0 : 1;
         for (int i = start; i < rest.Length; i++)
@@ -505,6 +509,108 @@ public static partial class HostConfigYaml
         lines.Add("arbiter:");
         lines.Add(DefaultIndent + "enabled: true");
         return lines;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="yaml"/> with the top-level <c>onboarding:</c> answer set to
+    /// <paramref name="answer"/>. A key the file already declares has only its value
+    /// rewritten, and an inline comment on that line survives; a key it does not have is
+    /// appended.
+    /// </summary>
+    /// <param name="yaml">The host configuration as the operator wrote it.</param>
+    /// <param name="answer">
+    /// The value to record. This editor does not judge it: the vocabulary is
+    /// <see cref="ConfigRegConfig.OnboardingAnswers"/>, and the caller refuses anything else
+    /// before the file is touched, so a rejected answer is a file left alone rather than one
+    /// written and repaired.
+    /// </param>
+    /// <remarks>
+    /// Like the other editors on this type the change is done as text, so comments, key
+    /// order, and line endings are returned verbatim — this is the file an operator explains
+    /// their choices in.
+    /// </remarks>
+    public static string WithOnboarding(string yaml, string answer)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentException.ThrowIfNullOrWhiteSpace(answer);
+        if (answer.Contains('\n', StringComparison.Ordinal) || answer.Contains('\r', StringComparison.Ordinal))
+            throw new ArgumentException("An onboarding answer must not contain newline characters.", nameof(answer));
+
+        HostConfigLines lines = HostConfigLines.Read(yaml);
+        string recorded = answer.Trim();
+
+        int existing = IndexOfTopLevelSetting(lines, ConfigRegConfig.OnboardingProperty);
+        if (existing < 0)
+        {
+            if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+                lines.Add(string.Empty);
+
+            lines.Add(ConfigRegConfig.OnboardingProperty + ": " + recorded);
+            return lines.ToText();
+        }
+
+        for (int i = existing + 1; i < lines.Count; i++)
+        {
+            string l = lines[i];
+            if (l.Length == 0 || l.TrimStart().StartsWith('#'))
+                continue;
+
+            if (char.IsWhiteSpace(l[0]))
+            {
+                throw new InvalidDataException(
+                    "onboarding holds a block mapping or sequence, not a scalar. " +
+                    "Replace it with a scalar before setting onboarding.");
+            }
+
+            break;
+        }
+
+        // The byte-order mark is a character of the line, not of the key: take it off, split
+        // the key, and put it back, so a file saved with one keeps it.
+        string line = lines[existing];
+        bool hasBom = line.Length > 0 && line[0] == '\uFEFF';
+        string text = hasBom ? line[1..] : line;
+
+        if (!TrySplitKeyedLine(text, ConfigRegConfig.OnboardingProperty, out _, out string prefix, out string rest))
+            return yaml;
+
+        (string? current, string? suffix) = SplitScalarAndSuffix(rest);
+        if (ScalarEquals(current, recorded))
+            return yaml;
+
+        if (prefix.EndsWith(':'))
+            prefix += " ";
+
+        if (suffix.Length > 0 && !suffix.StartsWith(' ') && !suffix.StartsWith('\t'))
+            suffix = " " + suffix;
+
+        lines[existing] = (hasBom ? "\uFEFF" : string.Empty) + prefix + recorded + suffix;
+        return lines.ToText();
+    }
+
+    /// <summary>
+    /// Index of a top-level key that carries a value, or -1.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IsTopLevelKey"/> answers a different question — whether a line opens a block,
+    /// which it does only when the key has no value — so it cannot find the setting this type
+    /// rewrites in place. Writing a key beside one that already holds a value gives the file a
+    /// duplicate, which is a document YAML refuses to load.
+    /// </remarks>
+    private static int IndexOfTopLevelSetting(HostConfigLines lines, string name)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            string text = line.Length > 0 && line[0] == '\uFEFF' ? line[1..] : line;
+            if (text.Length == 0 || text[0] == ' ' || text[0] == '\t' || text[0] == '#')
+                continue;
+
+            if (TrySplitKeyedLine(text, name, out string indent, out _, out _) && indent.Length == 0)
+                return i;
+        }
+
+        return -1;
     }
 
     /// <summary>Returns <paramref name="yaml"/> with <c>arbiter.global.targets</c> merged in without duplicates.</summary>
@@ -1538,10 +1644,22 @@ public static partial class HostConfigYaml
             return false;
 
         indent = line[..(line.Length - trimmed.Length)];
-        if (!trimmed.StartsWith(name, StringComparison.Ordinal))
+        int keyLength;
+        if (trimmed.StartsWith("\"" + name + "\"", StringComparison.Ordinal) ||
+            trimmed.StartsWith("'" + name + "'", StringComparison.Ordinal))
+        {
+            keyLength = name.Length + 2;
+        }
+        else if (trimmed.StartsWith(name, StringComparison.Ordinal))
+        {
+            keyLength = name.Length;
+        }
+        else
+        {
             return false;
+        }
 
-        int i = name.Length;
+        int i = keyLength;
         if (i < trimmed.Length && trimmed[i] != ' ' && trimmed[i] != '\t' && trimmed[i] != ':')
             return false;
 

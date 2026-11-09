@@ -19,10 +19,12 @@ public static class ConfigRegConfigLoader
         Dictionary<string, string>? section,
         string? autonomy = null,
         RunYamlSection? run = null,
-        string? stopOnToolFailure = null)
+        string? stopOnToolFailure = null,
+        string? onboarding = null)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         string? setting = ParseAutonomy(autonomy) ?? defaults.Autonomy;
+        string? answer = ParseOnboarding(onboarding) ?? defaults.Onboarding;
 
         // Absence stays null rather than becoming the default here: the resolved config is
         // what publishes a mode property, and a default nobody wrote must not be published as
@@ -42,6 +44,7 @@ public static class ConfigRegConfigLoader
         string? baseBranch = ParseBaseBranch(run?.BaseBranch) ?? defaults.RunBaseBranch;
 
         bool unchanged = setting == defaults.Autonomy
+                         && answer == defaults.Onboarding
                          && toolFailure == defaults.StopOnToolFailure
                          && baseBranch == defaults.RunBaseBranch
                          && harnessNames == defaults.RunHarnessNames;
@@ -52,6 +55,7 @@ public static class ConfigRegConfigLoader
         {
             Additions = section is null ? defaults.Additions : ReadAdditions(section),
             Autonomy = setting,
+            Onboarding = answer,
             StopOnToolFailure = toolFailure,
             RunBaseBranch = baseBranch,
             RunHarnessNames = harnessNames
@@ -71,6 +75,7 @@ public static class ConfigRegConfigLoader
             string? owningSetting = property switch
             {
                 ConfigRegConfig.AutonomyProperty => "the top-level 'autonomy:' setting",
+                ConfigRegConfig.OnboardingProperty => "the top-level 'onboarding:' setting",
                 ConfigRegConfig.IntakeAssessmentProperty => "the 'ontology.intake:' setting",
                 ConfigRegConfig.StopOnToolFailureProperty => "the top-level 'stop-on-tool-failure:' setting",
                 ConfigRegConfig.RunBaseBranchProperty => "the 'run.base-branch:' setting",
@@ -129,6 +134,31 @@ public static class ConfigRegConfigLoader
             $"{ConfigRegConfig.AutonomyProperty} '{value}' is not a known setting. Use " +
             $"'{ConfigRegConfig.SupervisedAutonomy}' or '{ConfigRegConfig.AutonomousAutonomy}', " +
             "or remove the key; agents treat an absent setting as supervised.");
+    }
+
+    /// <summary>
+    /// Reads the top-level <c>onboarding:</c> answer, refusing a third word.
+    /// </summary>
+    /// <remarks>
+    /// The value decides whether a run stops to offer the onboarding skill, so a typo that
+    /// was accepted silently would leave a repository that believes it answered being asked
+    /// again on every start, with nothing in the file to show why. Blank counts as absent:
+    /// <c>onboarding:</c> with no value is the unanswered state, not a third answer.
+    /// </remarks>
+    private static string? ParseOnboarding(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        string answer = value.Trim();
+        if (ConfigRegConfig.OnboardingAnswers.Contains(answer, StringComparer.Ordinal))
+            return answer;
+
+        throw new YamlException(
+            $"{ConfigRegConfig.OnboardingProperty} '{value}' is not a known setting. Use " +
+            $"'{ConfigRegConfig.OnboardingDone}' once this repository has answered the onboarding step, " +
+            $"or '{ConfigRegConfig.OnboardingDeclined}' to record that it chose not to, or remove the key; " +
+            "a run stops to offer the step while the setting is absent.");
     }
 
     /// <summary>

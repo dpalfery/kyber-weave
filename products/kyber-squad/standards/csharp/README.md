@@ -207,14 +207,20 @@ shipped with them.
 Test authorship follows `<test-coding-standard>`. Language-level C# in test files
 follows this document. New behaviour ships with the test that would fail without it.
 
-## Commands
+## Completion
+
+A finishing worker proves its change with three commands: the build, the tests covering the
+change, and the formatter check. Build first — a format pass against a stale binary proves
+nothing, and the build is also where the analyzers run.
 
 ```bash
-dotnet watch              # hot reload
-dotnet build -c Release   # production build
-dotnet test               # test run
-dotnet run                # local run
+dotnet build -c Release                                 # the build; warnings are errors
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # the tests covering your change
+dotnet format --verify-no-changes                       # the formatter check
 ```
 
-The test line is the gate the review council and CI run. A dev agent never runs the full suite;
-it runs the tests covering its change (`dotnet test --filter "FullyQualifiedName~<TestClass>"`).
+`dotnet build` is the build gate, and where `TreatWarningsAsErrors` is on a warning fails it.
+The `dotnet test` line above is filtered to the classes your change covers: the unfiltered run is
+the gate the review council and CI run, and a dev agent never runs it. `dotnet format
+--verify-no-changes` is the format check — it reports a whitespace or style difference the build
+does not, and prints nothing when the tree is formatted.

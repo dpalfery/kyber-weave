@@ -55,6 +55,7 @@ public sealed class ConfigRegValidator
         string agentsFile = Path.Combine(_repoRoot, AgentsFilePath);
         bool adopted = _config.ConfigReg.Additions.Count > 0
                        || _config.ConfigReg.Autonomy is not null
+                       || !string.IsNullOrWhiteSpace(_config.ConfigReg.Onboarding)
                        || _config.ConfigReg.StopOnToolFailure is not null
                        || _config.ConfigReg.RunBaseBranch is not null
                        || _config.ConfigReg.RunHarnessNames is not null

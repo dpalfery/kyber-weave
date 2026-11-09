@@ -118,7 +118,7 @@ states, and the bundle targets in `tauri.conf.json` are macOS and Windows instal
 - Test authorship follows the [test coding standard](../test/README.md) and belongs to
   `test-dev`.
 
-## Commands
+## Completion
 
 The gates a Rust change must pass, run from the repository root:
 
@@ -128,8 +128,12 @@ scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Ca
 scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
-A dev agent runs `cargo test` with a name filter, as above. The whole crate's
-run is the `cargo-test` council gate. That gate is marked `full-suite: true`, so `kyber-weave review
+`cargo fmt --check` is the format check: it reports the files it would rewrite and writes nothing.
+There is no separate build command here, because `cargo clippy ... -D warnings` is the build — it
+compiles every crate and target in the workspace and denies a warning, so a build failure surfaces
+in the clippy line. The test line names the tests covering your change; a dev agent runs `cargo
+test` with a name filter, as above. The whole crate's run is the `cargo-test` council gate. That
+gate is marked `full-suite: true`, so `kyber-weave review
 gates` refuses it unless `--council` is passed, and its command is not wrapped by the watchdog
 (`scripts/proc-guard.sh`). The council and CI are the only callers that run it.
 

@@ -575,7 +575,7 @@ public sealed class SquadDocsHarvestContractTests
         string[] allowedCommands =
         [
             "dotnet run",
-            "dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready",
+            "dotnet run --project <the CLI project> -- docs validate . --merge-ready",
             "git mv",
             "git rm",
             "kyber-weave docs drift .",

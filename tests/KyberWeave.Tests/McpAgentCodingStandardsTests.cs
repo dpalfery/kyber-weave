@@ -730,10 +730,10 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     }
 
     /// <summary>
-    /// The test standard is 21,354 characters, so the 12,000-character default cuts it, and what
-    /// the cut drops is <c>Tests that start processes</c> and <c>Commands</c>. The response names
-    /// them, and says the cut is expected: a standard larger than the budget is the ordinary case
-    /// and the reader is not missing anything the tool failed to find.
+    /// The test standard is larger than the 12,000-character default, so what the cut drops names
+    /// sections the reader is not getting. The response names them, and says the cut is expected: a
+    /// standard larger than the budget is the ordinary case and the reader is not missing anything
+    /// the tool failed to find.
     /// </summary>
     /// <remarks>
     /// Both halves are load-bearing and only one of them is there today. Naming what was omitted
@@ -749,8 +749,23 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         string response = Ask(RepositorySurface.Value, "test");
 
         string omission = Assert.Single(OmissionLines(response));
-        Assert.Contains("Tests that start processes", omission, StringComparison.Ordinal);
-        Assert.Contains("Commands", omission, StringComparison.Ordinal);
+
+        // The sections the cut drops are asserted from the standard itself rather than by name:
+        // a renamed heading (slice 7 renamed `## Commands` to `## Completion`) would otherwise make
+        // this pin fail for the rename rather than for a lost omission line. What must hold is that
+        // every omitted section is named, whatever the headings are called today.
+        string standard = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "README.md"));
+        int namesAt = omission.IndexOf(':', StringComparison.Ordinal);
+        string named = namesAt >= 0 ? omission[(namesAt + 1)..] : omission;
+        named = named.TrimEnd(']', '\r', '\n', ' ');
+        string[] omitted = named
+            .Split(" · ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToArray();
+        Assert.NotEmpty(omitted);
+        Assert.All(
+            omitted,
+            section => Assert.Contains($"## {section}", standard, StringComparison.Ordinal));
         Assert.DoesNotContain("not matching this topic", omission, StringComparison.Ordinal);
 
         AssertTheCutIsSaidToBeExpected(response);

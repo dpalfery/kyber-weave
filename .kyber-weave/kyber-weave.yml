@@ -23,6 +23,10 @@ ontology:
     - go
     - github-actions
 
+# This repository has answered the onboarding step, so `run start` does not stop to offer it.
+# An absent value is the unanswered state, which stops every start until someone records one.
+onboarding: done
+
 # The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
 # cites their output as evidence rather than restating a claim that they passed.
 #
@@ -347,14 +351,41 @@ review:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
-    sql-database-architect:
-      - *fmt-whitespace
-      - *fmt-style
-      - *dotnet-build
+    # The three file kinds no language gate selects. A task that edits only a workflow, a shell
+    # script, or this file used to select zero gates and report NONE_APPLICABLE — a valid result
+    # that is no evidence anything ran. `include` alone decides selection, so these are defined
+    # once here, at the first role that needs them, and referenced elsewhere by alias.
     github-devops:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - &workflow-lint
+        id: workflow-lint
+        include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
+        # actionlint is the build for a workflow: it parses the file against the schema GitHub
+        # uses and fails on an expression or a runner that cannot resolve.
+        run: [actionlint, "{changed}"]
+      - &shellcheck
+        id: shellcheck
+        include: ["scripts/*.sh", "scripts/**/*.sh", "dash/scripts/*.sh", "dash/scripts/**/*.sh"]
+        run: [shellcheck, "{changed}"]
+      - &review-config
+        id: review-config
+        include: [".kyber-weave/kyber-weave.yml"]
+        # The loader is the check: a config this command cannot render is one no gate or run reads.
+        run: [kyber-weave, review, catalogue, "."]
+
+    sql-database-architect:
+      - *fmt-whitespace
+      - *fmt-style
+      - *dotnet-build
+      # The migration and schema edits this role makes are frequently the ones a `dotnet build`
+      # never touches: a `.sql` file that is not a compiled resource still reaches production.
+      - &sql-format
+        id: sql-format
+        include: ["**/*.sql"]
+        run: [sqlfluff, lint, "{changed}"]
+      - *review-config
 
     # TypeScript and the tray UI. The dash include lists directories instead of `dash/**`,
     # because the tray is a separate project under dash/tray with its own gates below, and an
@@ -413,6 +444,16 @@ review:
       - *dash-lint
       - *cargo-fmt
       - *cargo-clippy
+      # test-dev reads a failed workflow run, so it carries the workflow and shell checks too.
+      - *workflow-lint
+      - *shellcheck
+
+    # Config-only edits are docs-dev's work, and until this entry existed docs-dev ran zero gates
+    # and reported KW-REVIEW-027 — "no task gates are declared for this agent". The review config
+    # is the one artifact a docs-dev change is most likely to break silently, because breaking it
+    # turns every other gate off rather than failing one.
+    docs-dev:
+      - *review-config
 
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —

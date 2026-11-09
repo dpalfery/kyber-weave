@@ -145,15 +145,26 @@ migrations break. Use a real SQL Server instance.
 Unit tests cover domain logic and service classes only — no infrastructure, no DB, no
 HTTP.
 
-## Commands
+## Completion
+
+A finishing worker runs the build once, then the targeted test command for its stack, then the
+formatter check. Nothing wider: the whole-suite commands belong to the review council and CI, and
+no dev agent runs them, even for a cross-cutting change.
 
 ```bash
-dotnet test --filter <TestClass>
-pytest tests/<module>
-cargo nextest run -E 'test(<name>)'      # or: cargo test -p <crate> '<name>'
-go test -race -run '<TestName>' ./<package>
-npx vitest run <path>
+dotnet build -c Release                                 # the build, once
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # C#
+pytest tests/<module>                                   # Python
+cargo nextest run -E 'test(<name>)'                     # Rust, or: cargo test -p <crate> '<name>'
+go test -race -run '<TestName>' ./<package>             # Go
+npx vitest run <path>                                   # TypeScript
 ```
 
-These are targeted runs. The whole-suite commands belong to the review council and CI: no dev
-agent runs them, even for a cross-cutting change.
+The format check is the stack's own: `dotnet format --verify-no-changes` for C#, `ruff format
+--check .` for Python, `cargo fmt --check` for Rust, `gofmt -l .` for Go, and `npx prettier --check
+.` (or the package's `lint` script) for TypeScript. A test file that fails it is a finding the
+council raises and no test catches, so run it before you report.
+
+These are targeted runs, named by the class, module or path the change touches. Build once and
+reuse the build — `--no-build` or the compiled assembly — rather than rebuilding per iteration,
+and say which classes you ran and which you did not.

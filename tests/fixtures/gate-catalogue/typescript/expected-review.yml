@@ -21,6 +21,7 @@ review:
     # typescript, react: test (.)
     - id: typescript-test
       run: ['npm', 'run', '--prefix', '.', 'test']
+      full-suite: true
       os: 'unix'
   task-gates:
     typescript-dev:

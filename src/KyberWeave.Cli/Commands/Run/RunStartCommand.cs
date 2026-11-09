@@ -22,7 +22,9 @@ namespace KyberWeave.Cli.Commands.Run;
 ///     </para>
 ///     <para>
 ///         Exit codes are a contract a caller branches on: <c>0</c> ready, <c>1</c> a tool failed under
-///         <c>stop-on-tool-failure</c>, <c>2</c> refused input, <c>3</c> the CodeGraph binary is missing.
+///         <c>stop-on-tool-failure</c> or the repository has not answered onboarding, <c>2</c> refused input,
+///         <c>3</c> the CodeGraph binary is missing. Onboarding is checked before the tool checks, so <c>1</c>
+///         reported for a missing tool never masks it.
 ///     </para>
 /// </remarks>
 public sealed class RunStartCommand : Command<RunStartSettings>
@@ -95,10 +97,18 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         RunStartRunner runner = new(executor, repositoryRoot);
 
         DiagnosticReport report = new();
-        if (!CommandHelpers.TryLoadConfig(repositoryRoot, null, report, out KyberWeaveConfig config))
+        if (!CommandHelpers.TryLoadConfig(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
         {
             WriteDiagnostics(report);
             return ToolFailure;
+        }
+
+        // Before the tool checks, on purpose. A worker that cannot reach the standards and gates this
+        // repository chose cannot use the tools anyway, and a tool failure reported first would send the
+        // operator to repair a remote that was never the thing standing in the way.
+        if (RunStartPlanner.NeedsOnboarding(config, configPath is not null))
+        {
+            return StopForOnboarding(config, configPath, repositoryRoot);
         }
 
         if (!RunStartRunner.CodeGraphBinaryIsAvailable())
@@ -576,6 +586,41 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     {
         AnsiConsole.MarkupLine(
             $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message)}");
+        return ToolFailure;
+    }
+
+    /// <summary>
+    /// Reports that the repository never answered the onboarding question, and what answers it.
+    /// </summary>
+    /// <param name="config">The configuration the run loaded, read for the autonomy setting only.</param>
+    /// <remarks>
+    /// The message names the skill and the verb rather than only the missing key: a stop that says
+    /// "onboarding is unset" leaves the operator to find both. In autonomous mode it also says that this run
+    /// will neither ask nor record an answer, because the setting stays exactly as it was found.
+    /// </remarks>
+    private static int StopForOnboarding(KyberWeaveConfig config, string? configPath, string repoRoot)
+    {
+        string location = configPath is not null
+            ? Path.GetRelativePath(repoRoot, configPath).Replace('\\', '/')
+            : ".kyber-weave/kyber-weave.yml";
+
+        AnsiConsole.MarkupLine(
+            $"[red]{Markup.Escape(CommandName)}: error:[/] this repository has not completed onboarding: " +
+            $"{Markup.Escape(location)} sets no 'onboarding:' value, so a run would plan against " +
+            "gates and standards that nobody chose for it.");
+        AnsiConsole.MarkupLine(
+            $"[grey]→ run the {Markup.Escape(RunStartPlanner.OnboardingSkill)} skill to choose this " +
+            "repository's technologies, gates and standards, then record the answer with " +
+            "'kyber-weave docs onboarding done' — or 'kyber-weave docs onboarding declined' to record " +
+            "that you chose not to.[/]");
+
+        if (string.Equals(config.ConfigReg.Autonomy, ConfigRegConfig.AutonomousAutonomy, StringComparison.Ordinal))
+        {
+            AnsiConsole.MarkupLine(
+                "[grey]  This run is autonomous, so it has asked nothing and written nothing: record the " +
+                "answer once, and every later run reads it.[/]");
+        }
+
         return ToolFailure;
     }
 

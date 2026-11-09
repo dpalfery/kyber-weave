@@ -1799,7 +1799,8 @@ A run does not investigate, plan, or write a file until it is on the branch its 
 `kyber-weave run start` is that step, and both entry points `conductor` and `bug-crusher` run it
 before anything else. The verb's flags, `--json` keys and exit codes are in
 [`run start`](../cli-command-surface.md#run--run-start); the settings it reads are in
-[Run controls](../configuration.md#run-controls). What follows is why it is shaped that way
+[Onboarding](../configuration.md#onboarding) and [Run controls](../configuration.md#run-controls).
+What follows is why it is shaped that way
 ([ADR 0060](../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md)).
 
 - **Fetch first, then branch from the remote base.** The step runs `git fetch origin --prune` and
@@ -1831,9 +1832,22 @@ before anything else. The verb's flags, `--json` keys and exit codes are in
   that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
   `TriggerClassifier` classifies the marker as `investigate` and the roster check and
   `KW-ARB-READONLY-001` still apply to the dispatch.
+- **The onboarding answer is checked first after configuration loads, ahead of tool checks and fetch.** A configured repository whose
+  configuration carries no `onboarding:` value has never chosen the technologies, gates and
+  standards the run will be held to, so the run stops there — before the CodeGraph probe and before
+  the fetch — creates no branch, and names the `kyber-docs-onboarding-and-assessment` skill and the
+  `docs onboarding` verb. Putting it first is the point: a failing fetch reported first would send
+  the operator to repair a remote that was never what stood in the way. An autonomous run stops
+  here too, asking nothing and writing nothing, because a run that wrote `declined` on the
+  operator's behalf would record a decision nobody made. A repository with no configuration is
+  never stopped: nothing there has opted into being configured. `RunStartPlanner.NeedsOnboarding`
+  holds the rule, `RunStartCommand` applies it, and the setting is in
+  [Configuration § Onboarding](../configuration.md#onboarding).
 
-Its two prerequisites are checked in the order that decides the exit code: the repository's
-configuration must load (a failure is exit `1`), and the `codegraph` binary must resolve on `PATH`
+Its prerequisites are checked in the order that decides the exit code: branch naming and arguments
+must be valid (bad input is exit `2`, outranking prerequisite failures), the repository's
+configuration must load (a failure is exit `1`), the onboarding answer must be recorded (unset is
+also exit `1`), and the `codegraph` binary must resolve on `PATH`
 (absent is exit `3`, whose remedy is an install rather than a repair).
 
 ### Delivery: draft first, ready on CI

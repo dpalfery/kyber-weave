@@ -676,4 +676,42 @@ public sealed class HostConfigYamlTests
     {
         return (YamlMappingNode)ReadArbiter(yaml).Children[new YamlScalarNode("provider")];
     }
+
+    [Fact]
+    public void WithOnboarding_RewritesBareOnboardingWithTrailingSpace()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding:\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "done");
+        Assert.Equal("ontology:\n  docs-root: docs\nonboarding: done\n", result);
+    }
+
+    [Fact]
+    public void WithOnboarding_PreservesInlineCommentWhenRewritingBareOnboarding()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding: # keep this comment\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "done");
+        Assert.Equal("ontology:\n  docs-root: docs\nonboarding: done # keep this comment\n", result);
+    }
+
+    [Fact]
+    public void WithOnboarding_RejectsNewlinesInAnswer()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\n";
+        Assert.Throws<ArgumentException>(() => HostConfigYaml.WithOnboarding(yaml, "done\ninjected: true"));
+    }
+
+    [Fact]
+    public void WithOnboarding_ThrowsInvalidDataExceptionOnBlockChildren()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding:\n  - done\n";
+        Assert.Throws<InvalidDataException>(() => HostConfigYaml.WithOnboarding(yaml, "done"));
+    }
+
+    [Fact]
+    public void WithOnboarding_RewritesQuotedKeyInPlaceWithoutDuplicating()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\n\"onboarding\": done\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "declined");
+        Assert.Equal("ontology:\n  docs-root: docs\n\"onboarding\": declined\n", result);
+    }
 }

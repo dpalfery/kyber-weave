@@ -56,6 +56,33 @@ task-gates:
     role: build
     agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev]
     run: [dotnet, build, "{{marker}}", -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+  # Repository plumbing. The three kinds below are edited on their own and belong to no language: a
+  # workflow, a shell script, and the review configuration those two are declared in. They render only
+  # for a host that declares the github-actions technology, which is what covers those files, so a host
+  # that has none of them is left alone. Each names the platform its tool's install path covers, and a
+  # gate skipped outside that restriction is reported rather than read as a pass.
+  - id: workflow-lint
+    role: lint
+    agents: [github-devops]
+    include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
+    os: "unix"
+    run: [actionlint, "{changed}"]
+  - id: shellcheck
+    role: lint
+    agents: [github-devops]
+    include: ["scripts/*.sh", "scripts/**/*.sh"]
+    os: "unix"
+    note: "Narrow to scripts/**/*.sh if the repository carries shell fixtures or vendored scripts."
+    run: [shellcheck, "{changed}"]
+  # `review catalogue` loads `.kyber-weave/kyber-weave.yml` through the same loader `review gates` uses
+  # and fails with KW-CONFIG-001 when the file no longer loads, which is the whole check: a config the
+  # product cannot read declares gates that never run.
+  - id: review-config
+    role: typecheck
+    agents: [docs-dev]
+    include: [".kyber-weave/kyber-weave.yml", "kyber-weave.yml"]
+    os: "unix"
+    run: [kyber-weave, review, catalogue, "."]
 sources:
   # Test (VSTest form). The MTP form is documented at https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-mtp
   format-whitespace: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
@@ -63,3 +90,6 @@ sources:
   format-analyzers: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
   build: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build
   test: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest
+  workflow-lint: https://github.com/rhysd/actionlint#download
+  shellcheck: https://github.com/koalaman/shellcheck#installing
+  review-config: https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh

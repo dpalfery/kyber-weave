@@ -49,9 +49,30 @@ public static class CommandHelpers
         string repoRoot,
         string? configPath,
         DiagnosticReport report,
-        out KyberWeaveConfig config)
+        out KyberWeaveConfig config) =>
+        TryLoadConfig(repoRoot, configPath, report, out config, out _);
+
+    /// <summary>
+    /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands, reporting the file it read.
+    /// </summary>
+    /// <param name="repoRoot">The repository root the configuration is resolved under.</param>
+    /// <param name="configPath">An explicit <c>--config</c> path, or null for the repository's own.</param>
+    /// <param name="report">The report a load failure is recorded in.</param>
+    /// <param name="config">The loaded configuration, or the product defaults on failure.</param>
+    /// <param name="resolvedConfigPath">
+    /// The configuration file that was read, or null when the repository has none. A command that reads a
+    /// setting the file itself decides whether the repository opted into — onboarding is one — needs the
+    /// difference between "unset" and "not configured".
+    /// </param>
+    public static bool TryLoadConfig(
+        string repoRoot,
+        string? configPath,
+        DiagnosticReport report,
+        out KyberWeaveConfig config,
+        out string? resolvedConfigPath)
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repoRoot, configPath);
+        resolvedConfigPath = result.ConfigPath;
         if (!result.Success)
         {
             report.Add(new Diagnostic(

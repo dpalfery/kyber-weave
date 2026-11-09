@@ -195,6 +195,45 @@ public class ConfigRegLoadingTests
     }
 
     /// <summary>
+    /// A value outside <c>done</c> and <c>declined</c> is refused, naming both, the way <c>autonomy:</c> refuses a
+    /// value outside its two words.
+    /// </summary>
+    /// <remarks>
+    /// The setting decides whether <c>run start</c> stops to offer onboarding, so a typo that was silently accepted
+    /// would leave a repository that believes it onboarded asking again on every run — or one that declined never
+    /// recording it. The refusal has to name the two words, or the operator has no way to write the line correctly.
+    /// </remarks>
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("Done")]
+    [InlineData("true")]
+    public void RejectsAnOnboardingValueThatIsNotOneOfTheTwo(string value)
+    {
+        string message = AssertInvalid($"onboarding: {value}\n").Message;
+
+        Assert.Contains("onboarding", message, StringComparison.Ordinal);
+        Assert.Contains("done", message, StringComparison.Ordinal);
+        Assert.Contains("declined", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>onboarding</c> publishes a mode property of its own, so a host may not declare that name as a path.
+    /// </summary>
+    /// <remarks>
+    /// The loader's reserved names and the resolved registry share one namespace. A path entry under
+    /// <c>onboarding</c> would render a second, contradictory lookup: one saying <c>done</c>, one naming a file no
+    /// portable skill reads.
+    /// </remarks>
+    [Fact]
+    public void OnboardingIsAReservedNameInTheConfigRegPathMap()
+    {
+        string message = AssertInvalid("config-reg:\n  onboarding: docs/x.md\n").Message;
+
+        Assert.Contains("reserved", message, StringComparison.Ordinal);
+        Assert.Contains("onboarding", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The intake assessment publishes a mode property of its own, so a host may not declare that name
     /// as a path either. The loader's map and the resolved registry share one namespace: a path entry
     /// under the reserved name would render a second, contradictory lookup that resolves to a file no
@@ -399,6 +438,64 @@ public sealed class ConfigRegValidatorTests : IDisposable
 
         Assert.Contains(wrong.Items, i => i.Code == ConfigRegValidator.StaleRendering);
         Assert.Contains(removed.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+    }
+
+    /// <summary>
+    /// An onboarding value that was chosen publishes as a mode property, the way <c>autonomy</c> does, and the
+    /// validator accepts the block that carries it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AGENTS.md</c>'s Config Reg block is the only place a portable agent can read a setting, so a repository
+    /// that has onboarded has to say so there: a run-start check the worker cannot read is one it cannot honour.
+    /// The value is a mode word, not a path, so it must not be path-checked — there is no <c>done</c> file, and
+    /// reporting one would make the repository fail its own gate for having onboarded.
+    /// </para>
+    /// <para>
+    /// The setting is loaded from YAML rather than set on a type on purpose: the contract is that an operator's
+    /// <c>kyber-weave.yml</c> reaches the rendered registry, which is the only part a portable skill can see.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnOnboardingSettingPublishesAModePropertyTheValidatorAccepts()
+    {
+        Write(
+            Path.Combine(".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\nonboarding: done\n");
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        string agents = File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md"));
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        DiagnosticReport report = Validate(config);
+
+        Assert.Contains("- **<onboarding>**: `done`", agents, StringComparison.Ordinal);
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+    }
+
+    /// <summary>
+    /// A repository that set no onboarding value publishes no line for it.
+    /// </summary>
+    /// <remarks>
+    /// Absence is the setting's default — "not done" — and a property that published a default would tell a
+    /// reader the repository had answered when it never did. This case passes before the setting exists and
+    /// guards the one direction an implementation is most likely to get wrong by publishing
+    /// <c>onboarding: none</c> or an empty value.
+    /// </remarks>
+    [Fact]
+    public void AnUnsetOnboardingSettingPublishesNoRegistryLine()
+    {
+        Write(
+            Path.Combine(".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\n");
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.DoesNotContain(
+            "onboarding",
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            StringComparison.Ordinal);
     }
 
     [Fact]

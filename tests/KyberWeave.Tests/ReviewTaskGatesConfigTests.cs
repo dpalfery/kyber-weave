@@ -373,13 +373,20 @@ public sealed class ReviewTaskGatesConfigTests
             "sql-database-architect",
             "github-devops",
             "typescript-dev",
-            "rust-dev"
+            "rust-dev",
+
+            // docs-dev joined this set when the conductor run-speed programme gave it its first
+            // gate (that programme's D60): a config-only edit in this repository is a docs-dev
+            // edit, so the one role that most often touches the file deciding every other gate was
+            // the one role with nothing checking it. Its single gate is `review-config`.
+            "docs-dev"
         ];
 
         Assert.Equal(developers.Order(StringComparer.Ordinal), taskGates.Keys.Order(StringComparer.Ordinal));
         Assert.All(developers, agent => Assert.NotEmpty(taskGates[agent]));
         Assert.Equal(["dash-typecheck", "dash-lint"], taskGates["typescript-dev"].Select(gate => gate.Id));
         Assert.Equal(["cargo-fmt", "cargo-clippy"], taskGates["rust-dev"].Select(gate => gate.Id));
+        Assert.Equal(["review-config"], taskGates["docs-dev"].Select(gate => gate.Id));
     }
 
     /// <summary>
@@ -398,7 +405,6 @@ public sealed class ReviewTaskGatesConfigTests
             "architect",
             "conductor",
             "research-agent",
-            "docs-dev",
             "code-reviewer"
         ];
 

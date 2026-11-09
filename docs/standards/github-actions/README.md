@@ -215,3 +215,32 @@ which selects on the same paths as `build`.
   reported done; the project's `AGENTS.md` gives the filtered command.
 - A new structural invariant gets a test there rather than a paragraph here. A rule this document
   states without a test behind it is a rule a future edit can remove silently.
+
+## Completion
+
+A workflow change is proved the way a code change is — a build, the tests covering it, and a
+format check — and the three are not optional because the file is YAML:
+
+```bash
+scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<TestClass>"
+git diff --check
+actionlint .github/workflows/<file>.yml
+```
+
+- **The tests are the policy classes.** `CiLeftoverStepTests`, `ReviewGateWorkflowTemplateTests`,
+  `ReviewGateFullSuiteConfigTests`, `ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read the
+  workflow files; a change to one of them runs that class by name, filtered, before the change is
+  reported. `test-policy` is the gate that runs the whole class set, and the unfiltered product
+  suite stays with the review council and CI.
+- **The build check is the linter where the repository declares one.** `actionlint` parses the
+  file, resolves expressions and shellchecks every `run:` block, so a workflow that does not parse
+  fails there the way a build fails. Where the repository declares a workflow-linter task gate,
+  that gate is the check; where it declares none, run the linter by hand and say so.
+- **The format check is `git diff --check` plus the shape of the files beside it.** This
+  repository declares no YAML formatter gate, so the mechanical part is that the diff carries no
+  trailing whitespace and no mixed indentation; the rest is the structure this document requires.
+  A repository that declares a YAML formatter runs it instead, and says which one here.
+- **The workflow's own commands are run by hand.** Every test, build or lint step is a command a
+  contributor can run locally; run the ones the change touches and put the result in the pull
+  request. A step whose command was never exercised is untested whatever the YAML says.
