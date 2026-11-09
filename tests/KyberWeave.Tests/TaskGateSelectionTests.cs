@@ -129,6 +129,30 @@ public sealed class TaskGateSelectionTests
         Assert.Contains(typeof(TaskGateSelectionTests).FullName!, argv, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AnArgumentContainingBothTaskAndTestsExpandsBothTokens()
+    {
+        ReviewTaskGate gate = new(
+            "tests-task",
+            ["**/*.cs"],
+            null,
+            ["dotnet", "test", "--filter", "{tests}-for-{task}"],
+            [],
+            true,
+            900);
+
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [gate], ["src/KyberWeave.Core/Review/TaskGateSelection.cs"], "my-task", "unix");
+
+        PlannedTaskGate plannedGate = Assert.Single(plan.Gates);
+        string filterArg = plannedGate.Run[3];
+
+        Assert.DoesNotContain("{task}", filterArg, StringComparison.Ordinal);
+        Assert.DoesNotContain("{tests}", filterArg, StringComparison.Ordinal);
+        Assert.Contains("my-task", filterArg, StringComparison.Ordinal);
+        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, filterArg, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// A change no test class covers is skipped rather than passed, and skipped rather than turned
     /// into a filter that matches nothing: the gate would exit zero on an empty filter, which reads

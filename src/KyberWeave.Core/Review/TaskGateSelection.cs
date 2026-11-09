@@ -272,7 +272,8 @@ public static class TaskGateSelection
                 continue;
             }
 
-            if (element.Contains(TaskToken, StringComparison.Ordinal))
+            string current = element;
+            if (current.Contains(TaskToken, StringComparison.Ordinal))
             {
                 if (task is null)
                 {
@@ -282,17 +283,15 @@ public static class TaskGateSelection
                     return null;
                 }
 
-                expanded.Add(element.Replace(TaskToken, task, StringComparison.Ordinal));
-                continue;
+                current = current.Replace(TaskToken, task, StringComparison.Ordinal);
             }
 
-            if (UsesTestsToken(element))
+            if (UsesTestsToken(current))
             {
-                expanded.Add(element.Replace(TestsToken, testsFilter, StringComparison.Ordinal));
-                continue;
+                current = current.Replace(TestsToken, testsFilter, StringComparison.Ordinal);
             }
 
-            expanded.Add(element);
+            expanded.Add(current);
         }
 
         return expanded;
