@@ -9,9 +9,11 @@
 # binaries, because that is the only shape in which either failure reproduces.
 #
 # The `--from` side matters more than it looks. An update is always started by the
-# *old* binary, and the steps after its swap run in the new one, so a fix to the update
-# path cannot be proven by the release that contains it — only by updating away from a
-# build that predates it.
+# *old* binary, which stages, rehearses, swaps and starts the hand-off. A fix to those
+# steps cannot be proven by the release that contains it — only by updating away from a
+# build that predates it. The steps after the swap (the KyberDash reconcile and the arbiter
+# hook refresh) run in the new binary, so the release that contains a fix to them does
+# exercise it.
 #
 # There is a limit to how far back `--from` can reach: redirecting a build at all
 # requires it to honour KYBER_WEAVE_RELEASE_ORIGIN, so any ref older than that support

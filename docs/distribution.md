@@ -554,9 +554,9 @@ a pre-release build can be an older one that predates `--finish-update`.
 
 ## Verifying a release locally
 
-An update is always started by the **old** binary, and the steps after its swap run in the new one. A fix to the update path therefore
+An update is always started by the **old** binary. The old binary runs the staging, the rehearsal, the swap and the hand-off; the steps after the swap (the KyberDash reconcile and the arbiter hook refresh) run in the new binary. A fix to what the old binary runs therefore
 cannot be proven by the release that contains it — only by updating away from a build that
-predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
+predates it. A fix to the finish-mode steps is exercised by the release that contains it, because the new binary runs them. Tag-and-wait cycles get the first kind wrong silently: the release ships, the same failure
 reappears, and the fix looks broken when it was simply never the code that ran.
 
 Changes to the self-updater, `install.sh`, the Squad release path, or how `kyberdash` is built
