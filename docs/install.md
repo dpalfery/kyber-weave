@@ -585,6 +585,19 @@ still starts a server — it starts one the repository no longer declares. The r
 is a **minor** tag: the automatic version bump is patch-only, and a patch tag would understate
 what an operator has to do.
 
+#### Which MCP server answers which question
+
+Documentation lookup tools and KyberDash analytics are **different servers**. Do not wire one
+when you mean the other.
+
+| Client key | Launch | Answers |
+|---|---|---|
+| `kw-docs` | `kyber-weave-mcp --repo-root <repo>` | Governed documentation for a repository — [DocGraph MCP runbook](docgraph/mcp-runbook.md) |
+| `kw-dash` | `kyberdash mcp` | Read-only KyberDash analytics against a **running** engine — [KyberDash MCP setup](dash/mcp.md) |
+| `kw-arbiter` | `kyber-weave-arbiter serve` | Arbiter gates when enabled — [Kyber Arbiter](kyber-arbiter/README.md) |
+
+Prerequisite for `kw-dash`: run `kyberdash web --no-open` before `kyberdash mcp` can attach.
+
 | Old server key | New server key | Executable (unchanged) |
 |---|---|---|
 | `kyber-weave` | `kw-docs` | `kyber-weave-mcp` |

@@ -932,6 +932,10 @@ node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 
 ### 2j. Conversational analytics over MCP (`kyberdash mcp`)
 
+Client setup — `kw-dash`, repository declaration, and user-scope harness files — is on
+[KyberDash MCP (`kw-dash`)](mcp.md). This section covers operator flags and runtime
+behaviour.
+
 `kyberdash mcp` serves the eight read-only analytics tools over stdio for an MCP
 client registered under the configuration key `kw-dash`. `runMcpCommand`
 (`dash/src/cli/mcp.ts`) builds the adapter
@@ -1028,7 +1032,7 @@ the route allowlist.
 executable and its argv are unchanged, so `kyberdash mcp` still starts it. The eight tools
 were renamed once, when that key changed, to purpose-shaped names that say what each
 operation does; this runbook uses only the current names, and
-[the adoption guide](onboarding.md#ask-kyberdash-from-an-mcp-client) carries the old-to-new
+[the install guide](../install.md#renamed-mcp-servers-and-tools) and [KyberDash MCP setup](mcp.md) carry the old-to-new
 mapping beside the full list. The records are not part of the rename. Past sessions keep
 the tool names they were recorded with — the old names, for anything captured before the
 rename — and per-tool statistics split at the rename boundary: a window that spans it
@@ -1052,7 +1056,7 @@ lists exactly the eight tools, calls `dash_list_available_analytics_operations` 
 isolated loopback fixture, then closes the child and asserts a clean exit. It runs beside
 the web smoke in `scripts/release-local.sh` and `.github/workflows/release.yml`. It proves
 protocol, tool list, and the attach-only boundary — not host-client compatibility (see the
-[adoption guide](onboarding.md#3-what-is-and-is-not-validated)).
+[adoption guide](onboarding.md#what-is-and-is-not-validated)).
 
 ### 3. Raw Content Backfill and Re-normalization
 
