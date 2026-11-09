@@ -68,6 +68,71 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     }
 
     /// <summary>
+    /// The <c>--no-arbiter</c> opt-out must reach the finishing child, which then skips the arbiter hook refresh. Without
+    /// the forwarding line the child re-renders hooks the owner opted out of, and no other test sees it.
+    /// </summary>
+    [Fact]
+    public void NoArbiterOptOutReachesTheFinishingProcessAndTheChildRefreshesNoHooks()
+    {
+        InstallKyberDash();
+        InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0");
+        HandOffRecord record = new();
+        TrackingRefresher refresher = new(record);
+
+        SelfUpdateOutcome outcome = RunUpdate(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true),
+            record,
+            refresher: refresher);
+
+        SeamCall handOff = Assert.Single(
+            record.SeamCalls,
+            call => call.Arguments.Count > 0 && call.Arguments[0] == "update");
+        Assert.Equal(host.ProcessPath, handOff.File);
+        Assert.Equal<string>(["update", "0.2.0", "--finish-update", "--no-arbiter"], handOff.Arguments);
+        Assert.Single(handOff.Arguments, argument => argument == "--no-arbiter");
+        Assert.DoesNotContain("--no-mcp", handOff.Arguments);
+        Assert.DoesNotContain("--release-candidate", handOff.Arguments);
+        Assert.Empty(record.Refreshes);
+        Assert.Equal(0, outcome.ExitCode);
+    }
+
+    /// <summary>
+    /// The control for the opt-out above: with no <c>NoArbiter</c>, the hand-off does not carry <c>--no-arbiter</c>, and
+    /// the finishing child runs the arbiter hook refresh once, inside the hand-off. This proves the refresh the opt-out
+    /// suppresses is real and reachable.
+    /// </summary>
+    [Fact]
+    public void WithoutNoArbiterTheHandOffCarriesNoOptOutAndTheChildRefreshesArbiterHooksOnce()
+    {
+        InstallKyberDash();
+        InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0");
+        HandOffRecord record = new();
+        TrackingRefresher refresher = new(record);
+
+        SelfUpdateOutcome outcome = RunUpdate(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false),
+            record,
+            refresher: refresher);
+
+        SeamCall handOff = Assert.Single(
+            record.SeamCalls,
+            call => call.Arguments.Count > 0 && call.Arguments[0] == "update");
+        Assert.Equal<string>(["update", "0.2.0", "--finish-update"], handOff.Arguments);
+        Assert.DoesNotContain("--no-arbiter", handOff.Arguments);
+        bool onlyRefreshInsideHandOff = Assert.Single(record.Refreshes);
+        Assert.True(onlyRefreshInsideHandOff);
+        Assert.Equal(0, outcome.ExitCode);
+    }
+
+    /// <summary>
     /// Before the first commit the old image rehearses the hand-off once, with <c>--version</c> and its output
     /// discarded, so a broken installed binary is found before anything is replaced. The result is ignored.
     /// </summary>
