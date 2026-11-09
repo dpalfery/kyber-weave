@@ -223,6 +223,28 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     [Fact]
+    public void ConflictingStatusesOnSameReportPathWithUnnormalizedSpellingDoNotCorroboratePass()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-unnormalized-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string report = Path.Combine(tempDir, "gates.json");
+            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(report, ReviewJson.Write(pass));
+
+            string unnormalized = Path.Combine(tempDir, ".", "gates.json");
+            string returned = $"TASK_GATE: FAIL report={unnormalized}\nTASK_GATE: PASS report={report}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.False(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public void AbsoluteReportPathOutsideRepositoryRootIsRefused()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-path-" + Guid.NewGuid().ToString("N"));

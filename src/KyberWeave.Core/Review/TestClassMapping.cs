@@ -54,19 +54,20 @@ public static class TestClassMapping
         if (!AnyPossibleCoverage(changed, declared))
             return [];
 
+        string candidateRoot = root ?? DefaultRepositoryRoot();
+        if (string.IsNullOrWhiteSpace(candidateRoot) || !Directory.Exists(candidateRoot))
+            return [];
+
         string repository;
         try
         {
-            string candidate = root ?? DefaultRepositoryRoot();
-            if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
-                return [];
-
-            _ = Directory.EnumerateFileSystemEntries(candidate).FirstOrDefault();
-            repository = Path.GetFullPath(candidate);
+            _ = Directory.EnumerateFileSystemEntries(candidateRoot).FirstOrDefault();
+            repository = Path.GetFullPath(candidateRoot);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            throw new InvalidOperationException($"The repository root '{root}' is not accessible: {ex.Message}", ex);
+            string target = root ?? candidateRoot;
+            throw new InvalidOperationException($"The repository root '{target}' is not accessible: {ex.Message}", ex);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {

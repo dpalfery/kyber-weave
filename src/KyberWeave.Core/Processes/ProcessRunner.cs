@@ -240,8 +240,12 @@ public static class ProcessRunner
         if (maxBytes is null)
             return await reader.ReadToEndAsync().ConfigureAwait(false);
 
+        if (maxBytes.Value < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxBytes), maxBytes.Value, "maxBytes cannot be negative.");
+
         long max = maxBytes.Value;
-        char[] buffer = new char[Math.Min((int)Math.Min(max + 1, 16384), 16384)];
+        int bufferSize = (int)Math.Clamp(max > 16383 ? 16384 : max + 1, 1, 16384);
+        char[] buffer = new char[bufferSize];
         StringBuilder sb = new();
         long totalBytes = 0;
         int read;

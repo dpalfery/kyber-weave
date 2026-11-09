@@ -41,7 +41,9 @@ public static class SquadWorkerBaselineInjector
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
 
-    private sealed record CacheEntry(DateTime LastWriteTimeUtc, string? Block);
+    private const int MaxCacheEntries = 64;
+
+    private sealed record CacheEntry(DateTime LastWriteTimeUtc, long FileLength, string? Block);
 
     private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -65,13 +67,41 @@ public static class SquadWorkerBaselineInjector
         string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
         string path = Path.Combine(normalized, RelativePath.Replace('/', Path.DirectorySeparatorChar));
 
-        DateTime lastWrite = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
-        if (CachedBlocks.TryGetValue(normalized, out CacheEntry? entry) && entry.LastWriteTimeUtc == lastWrite)
-            return entry.Block;
+        try
+        {
+            FileInfo info = new(path);
+            if (!info.Exists)
+            {
+                if (CachedBlocks.TryGetValue(normalized, out CacheEntry? missing) && missing.LastWriteTimeUtc == DateTime.MinValue)
+                    return missing.Block;
 
-        string? block = ReadBlockUncached(path);
-        CachedBlocks[normalized] = new CacheEntry(lastWrite, block);
-        return block;
+                if (CachedBlocks.Count >= MaxCacheEntries)
+                    CachedBlocks.Clear();
+
+                CachedBlocks[normalized] = new CacheEntry(DateTime.MinValue, 0, null);
+                return null;
+            }
+
+            DateTime lastWrite = info.LastWriteTimeUtc;
+            long length = info.Length;
+            if (CachedBlocks.TryGetValue(normalized, out CacheEntry? entry)
+                && entry.LastWriteTimeUtc == lastWrite
+                && entry.FileLength == length)
+            {
+                return entry.Block;
+            }
+
+            string? block = ReadBlockUncached(path);
+            if (CachedBlocks.Count >= MaxCacheEntries)
+                CachedBlocks.Clear();
+
+            CachedBlocks[normalized] = new CacheEntry(lastWrite, length, block);
+            return block;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ReadBlockUncached(path);
+        }
     }
 
     private static string? ReadBlockUncached(string path)

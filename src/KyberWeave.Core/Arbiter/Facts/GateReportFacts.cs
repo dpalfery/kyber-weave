@@ -157,15 +157,29 @@ public static class GateReportFacts
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
+        string finalCanonical = CanonicalReportPath(finalClaim.ReportPath);
+
         // Any claim for the final report path that says non-PASS invalidates a PASS on the same report.
         if (string.Equals(finalClaim.Claimed, PassedStatus, StringComparison.Ordinal) &&
-            claims.Any(c => string.Equals(c.ReportPath.Replace('\\', '/'), finalClaim.ReportPath.Replace('\\', '/'), pathComparison) &&
+            claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
             return new DigestClaim("FAIL", finalClaim.ReportPath);
         }
 
         return finalClaim;
+    }
+
+    private static string CanonicalReportPath(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path.Replace('\\', '/'));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path.Replace('\\', '/');
+        }
     }
 
     private static string? Resolve(string reportPath, string? repositoryRoot)
@@ -215,7 +229,12 @@ public static class GateReportFacts
 
             return resolved;
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        catch (Exception ex) when (ex is ArgumentException
+            or NotSupportedException
+            or PathTooLongException
+            or IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
             return null;
         }

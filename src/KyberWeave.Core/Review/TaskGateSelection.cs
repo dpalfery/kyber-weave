@@ -236,7 +236,17 @@ public static class TaskGateSelection
             string testsFilter = string.Empty;
             if (NamesTests(gate))
             {
-                IReadOnlyList<string> classes = TestClassMapping.Resolve(root, matches, testMap);
+                IReadOnlyList<string> classes;
+                try
+                {
+                    classes = TestClassMapping.Resolve(root, matches, testMap);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException)
+                {
+                    refusals.Add(ex.Message);
+                    return new TaskGatePlan([], skipped, refusals);
+                }
+
                 if (classes.Count == 0)
                 {
                     skipped.Add(new SkippedTaskGate(
