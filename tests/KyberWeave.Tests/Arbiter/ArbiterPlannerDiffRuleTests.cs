@@ -295,12 +295,15 @@ public sealed class ArbiterPlannerDiffRuleTests
         HookGitFacts gitFacts = new(probe.Root, home.Path);
         ArbiterRule rule = ShippedRule();
 
-        // 1. Unpaired PostToolUse with no planner edits: earlier branch commits and artifacts/ do not contaminate.
-        ArbiterFactSet emptyUnpaired = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: null);
-        IReadOnlyList<string> emptyPaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
-            emptyUnpaired.Facts[SinceDispatchFact].Value);
-        Assert.Empty(emptyPaths);
-        Assert.Equal("inside", RuleEngine.Decide(rule, emptyUnpaired));
+        // 1. Unpaired PostToolUse with no pre-dispatch snapshot: the dispatch delta is
+        // unobservable, so the fact stays absent. Falling back to a diff against HEAD would
+        // read a committed dispatch write as an empty diff (inside/allow) and leave the
+        // outside branch dead, so the rule stops and asks instead.
+        ArbiterFactSet unpairedReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: null);
+        Assert.True(unpairedReturn.Facts.TryGetValue(SinceDispatchFact, out ArbiterFact? unpairedFact));
+        Assert.Null(unpairedFact!.Value);
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(rule, unpairedReturn));
+        Assert.Equal(RuleEffects.Escalate, EffectFor(rule, RuleEngine.Undecidable));
 
         // 2. Pre-existing dirty file before PreToolUse + planner writes only docs/plans/plan.md during dispatch.
         WriteRepoFile(probe.Root, "src/PreExistingDirty.cs", "// dirty before planner dispatch\n");
