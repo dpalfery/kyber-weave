@@ -429,7 +429,9 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
             tools.Add("list_dir");
 
         // filesystem.write - D4/D10: narrowed by XOR with process.execute
-        // Note: replace_file_content and multi_replace_file_content are withheld per D12 pending live verification.
+        // replace_file_content is live-verified: it gives the agent the CLI's edit_file, so a writer
+        // changes a few lines instead of emitting the whole file. multi_replace_file_content stays
+        // withheld per D12: listing it alone grants no tool.
         bool processExecuteAllow =
             profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
             execDecision == SquadPermissionDecision.Allow;
@@ -441,12 +443,14 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         {
             // filesystem.write allowed, process.execute not: emit write tools
             tools.Add("write_to_file");
+            tools.Add("replace_file_content");
         }
         else if (filesystemWriteAllow && processExecuteAllow)
         {
             // Both allowed: emit execute and write tools
             tools.Add("run_command");
             tools.Add("write_to_file");
+            tools.Add("replace_file_content");
         }
         else if (!filesystemWriteAllow && processExecuteAllow)
         {

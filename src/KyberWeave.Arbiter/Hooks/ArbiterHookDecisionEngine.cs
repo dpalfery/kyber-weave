@@ -33,7 +33,7 @@ namespace KyberWeave.Arbiter.Hooks;
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
 {
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;
-    private readonly Func<string, IArbiterGitFacts> _gitFactsFactory;
+    private readonly Func<string, IArbiterGitFacts>? _gitFactsFactory;
     private readonly Func<string, IArbiterPlanReader> _planReaderFactory;
     private readonly Func<string> _homeDirectory;
     private readonly Func<ICredentialStore> _credentialStoreFactory;
@@ -57,7 +57,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         _homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         Func<string> home = _homeDirectory;
         _providerFactory = providerFactory ?? (config => CreateProvider(ApplyUserProvider(config, home)));
-        _gitFactsFactory = gitFactsFactory ?? (root => new HookGitFacts(root));
+        _gitFactsFactory = gitFactsFactory;
         _planReaderFactory = planReaderFactory ?? (root => new HookPlanReader(root));
         _clock = clock ?? TimeProvider.System;
         _credentialStoreFactory = credentialStoreFactory ?? CreateCredentialStore;
@@ -164,12 +164,15 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         IDisposable? owned = provider as IDisposable;
         try
         {
+            IArbiterGitFacts gitFacts = _gitFactsFactory is not null
+                ? _gitFactsFactory(repoRoot)
+                : new HookGitFacts(repoRoot, _homeDirectory(), arbiterDirectory);
             ArbiterEvaluator evaluator = new(
                 provider,
                 KeyResolverFor(effective),
                 new InFlightLedger(arbiterDirectory),
                 new DecisionLog(arbiterDirectory),
-                _gitFactsFactory(repoRoot),
+                gitFacts,
                 _planReaderFactory(repoRoot),
                 _clock);
             ArbiterEvent ev = new()

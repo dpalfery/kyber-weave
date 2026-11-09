@@ -13,6 +13,7 @@ internal static class IndexSectionCatalog
     [
         new("plans/README.md", "Active Plans"),
         new("plans/README.md", "Archived Plans"),
+        new("archive/plans/README.md", "Archived Plans"),
         new("adr/README.md", "Inventory"),
         new("todo/README.md", "Todo inventory"),
         new("kyber-squad/skill-resource-dispositions.md", "Policy-line ledger"),
