@@ -26,6 +26,15 @@
 # recovery cases make release-local.sh's KyberDash build fail on purpose, and check that
 # it puts dash/package.json back and throws away a bad cached Node download.
 #
+# The arbiter-hooks-after-swap case covers the step the other cases never reach. After a real
+# swap, `kyber-weave update` re-renders arbiter hooks for the registered projects and the
+# global targets, and that reads YAML. The self-update above runs under an empty home, so its
+# old process never reads YAML and stays green while a product that crashes with "Could not
+# load file or assembly YamlDotNet" ships. The case builds global and project arbiter state
+# with the new binaries, updates from the old one, and expects the hooks refreshed and exit 0.
+# That is only a real swap if the two builds are laid out differently, as two real releases are,
+# so the case updates to its own release, published with padded metadata, not to the main one.
+#
 # Options:
 #   --from <source>   working (default) | installed | <git ref>
 #   --to <version>    version to publish and update to (default: 99.0.0-local)
@@ -66,7 +75,7 @@ while [ $# -gt 0 ]; do
         --no-kyberdash) NO_KYBERDASH=1; shift ;;
         --keep) KEEP=1; shift ;;
         --reuse) REUSE=1; shift ;;
-        -h|--help) sed -n '2,36p' "$0" >&2; exit 0 ;;
+        -h|--help) sed -n '2,45p' "$0" >&2; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
 done
@@ -97,6 +106,7 @@ installer() {
         helper=("$@")
         set --
         # shellcheck source=scripts/install.sh
+        # shellcheck disable=SC1091  # not followed without -x; the gate runs shellcheck bare
         KYBER_WEAVE_INSTALL_LIB=1 . "${REPO_ROOT}/scripts/install.sh"
         "${helper[@]}"
     )
@@ -114,6 +124,7 @@ FROM_BIN="${SANDBOX}/from"
 TO_BIN="${SANDBOX}/to"
 SERVER_PID=""
 
+# shellcheck disable=SC2329  # run by the trap below, which shellcheck does not follow
 cleanup() {
     [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
     if [ -n "$KEEP" ]; then
@@ -561,6 +572,176 @@ expect_reports kyber-weave-mcp "kyber-weave-mcp ${FLOOR_VERSION}" "a release wit
 expect_reports kyberdash "$STUB_KYBERDASH_VERSION" "kyberdash is left alone below the floor"
 expect_logged "predates KyberDash" "the kyberdash skip is logged"
 expect_logged "predates the KyberDash tray" "the tray skip is logged"
+
+# --------------------------------------------------------- arbiter hooks after a swap
+
+# `kyber-weave update` re-renders arbiter hooks once the binaries have moved, for every
+# registered project that enables the arbiter and for the global targets. That reads YAML,
+# and it runs in the OLD process, whose single-file bundle was replaced underneath it. Every
+# case above updates under an empty home, where nothing is registered and no YAML is read,
+# so the loop stayed green while the real update crashed with "Could not load file or
+# assembly YamlDotNet" after every binary was installed.
+#
+# The state is built with the product, never by hand, under the case home and with the NEW
+# binaries: `arbiter install` for a global cursor hook (global is the default scope, and
+# `--provider ""` is no provider), then `arbiter install --project` for a throwaway git
+# project, which is what registers it. The global hook's command is then rewritten to a path
+# that does not exist, so the refresh has real work and its result is visible in the file.
+# `arbiter.enabled: true` is checked in the project's config after its install, and written
+# only if the install left it out, so the case does not rest on that side effect. --yes keeps
+# a run in a terminal from stopping at the install's confirmation prompt. Both installs fetch
+# the Squad assets from the loopback release, so the case is skipped under --skip-squad; it
+# needs no kyberdash build.
+#
+# The swap has to be real. The from and to kyber-weave files are compared byte for byte
+# first: two builds that are identical replace nothing and prove nothing. They also have to
+# differ in layout, not just in bytes. A single-file bundle puts each assembly at a page-aligned
+# offset that depends only on the sizes of the files before it, and the old process finds an
+# assembly it has not loaded yet by re-opening its executable by path at the offset it
+# recorded at startup. Two builds of this one tree lay every assembly out identically, so the
+# old process found YamlDotNet in the new file at the same offset, and this case passed on its
+# first version with the product still broken. Two real releases differ, so the new file holds
+# something else there.
+#
+# So the case updates to a release of its own, published from the same tree with 6000 bytes of
+# padding in the Copyright metadata. kyber-weave.dll is the first assembly in the bundle, so
+# the padding moves every assembly after it (YamlDotNet among them) by at least a page, and
+# the file only grows, so the old offsets still lie inside it. A smaller file would end before
+# them, and the process would die of SIGBUS and say nothing, not fail to load an assembly. The
+# padding goes in a release of its own, not in the main "to" release, so that no other case
+# changes: with the layouts shifted the self-update above would crash after its swap as well.
+# The size check below fails the case if that padding ever stops reaching the bundle.
+
+# Runs one step that builds the case's starting state. A step that fails marks the case not
+# ready, and the update below runs only on state that was built.
+case_setup() {
+    setup_what="$1"
+    shift
+    [ -n "$CASE_READY" ] || return 0
+    set +e
+    SETUP_OUT="$("$@" 2>&1)"
+    SETUP_CODE=$?
+    set -e
+    if [ "$SETUP_CODE" -eq 0 ]; then
+        log "${CASE_NAME}: ${setup_what}"
+    else
+        fail "${CASE_NAME}: ${setup_what} exited ${SETUP_CODE}"
+        printf '%s\n' "$SETUP_OUT" | sed 's/^/    /' >&2
+        CASE_READY=""
+    fi
+}
+
+# True when the config has an `arbiter:` block whose `enabled:` is true.
+config_enables_arbiter() {
+    awk '/^arbiter:/ { block = 1; next } /^[^[:space:]#]/ { block = 0 }
+         block && /^[[:space:]]+enabled:[[:space:]]*true/ { found = 1 }
+         END { exit !found }' "$1"
+}
+
+if [ -n "$SKIP_SQUAD" ]; then
+    log "--skip-squad given; skipping arbiter-hooks-after-swap, which needs the Squad assets"
+else
+    # The case's own release. It carries the Squad assets, because the new process renders
+    # hooks from the bundle of its own version, and no kyberdash.
+    LAYOUT_VERSION="${TO_VERSION}.layout"
+    LAYOUT_TAG="v${LAYOUT_VERSION}"
+    LAYOUT_BIN="${SANDBOX}/layout"
+    mkdir -p "$LAYOUT_BIN"
+    if [ -n "$REUSE" ] && [ -f "${RELEASE_TREE}/${LAYOUT_TAG}/SHA256SUMS.txt" ]; then
+        log "reusing existing release tree for ${LAYOUT_TAG}"
+    else
+        log "publishing ${LAYOUT_TAG} from the working tree, with padded metadata"
+        Copyright="$(printf '%6000s' '' | tr ' ' x)" "${REPO_ROOT}/scripts/release-local.sh" \
+            --version "$LAYOUT_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-kyberdash
+    fi
+    unpack_published_binaries "$LAYOUT_TAG" "$LAYOUT_BIN"
+
+    begin_case arbiter-hooks-after-swap "$FROM_BIN"
+    CASE_READY=1
+    CASE_PROJECT="${SANDBOX}/cases/${CASE_NAME}/project"
+    CASE_HOOKS="${CASE_HOME}/.cursor/hooks.json"
+    CASE_CONFIG="${CASE_PROJECT}/.kyber-weave/kyber-weave.yml"
+    CASE_REGISTRY="${CASE_HOME}/.kyber-weave/squad/registry.json"
+    mkdir -p "$CASE_PROJECT"
+    git -C "$CASE_PROJECT" init -q .
+
+    from_size="$(wc -c < "${FROM_BIN}/kyber-weave" | tr -d ' ')"
+    to_size="$(wc -c < "${LAYOUT_BIN}/kyber-weave" | tr -d ' ')"
+    if cmp -s "${FROM_BIN}/kyber-weave" "${LAYOUT_BIN}/kyber-weave"; then
+        fail "${CASE_NAME}: the from and to kyber-weave files are byte-identical, so the swap would prove nothing"
+        CASE_READY=""
+    elif [ $((to_size - from_size)) -lt 4096 ]; then
+        fail "${CASE_NAME}: the to kyber-weave (${to_size} bytes) is not a page larger than the from (${from_size}), so every assembly would sit at the same offset in both"
+        CASE_READY=""
+    fi
+
+    case_setup "installed the global cursor arbiter hook" \
+        env HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --target cursor --provider "" --yes
+    case_setup "installed the project arbiter hooks, which registers the project" \
+        env HOME="$CASE_HOME" "${LAYOUT_BIN}/kyber-weave" arbiter install --project --path "$CASE_PROJECT" \
+            --target copilot --provider "" --yes
+
+    if [ -n "$CASE_READY" ]; then
+        if ! config_enables_arbiter "$CASE_CONFIG"; then
+            printf '\narbiter:\n  enabled: true\n' >> "$CASE_CONFIG"
+            log "${CASE_NAME}: wrote arbiter.enabled: true to the project config"
+        fi
+        if ! config_enables_arbiter "$CASE_CONFIG"; then
+            fail "${CASE_NAME}: the project config does not enable the arbiter"
+            CASE_READY=""
+        fi
+        # The tail of the path only: a macOS temp directory is a symlink the product may resolve.
+        if ! grep -qF -- "/cases/${CASE_NAME}/project" "$CASE_REGISTRY" 2>/dev/null; then
+            fail "${CASE_NAME}: the project install did not register the project in ${CASE_REGISTRY}"
+            CASE_READY=""
+        fi
+        if [ ! -f "$CASE_HOOKS" ]; then
+            fail "${CASE_NAME}: the global install left no hook file at ${CASE_HOOKS}"
+            CASE_READY=""
+        fi
+    fi
+
+    if [ -n "$CASE_READY" ]; then
+        sed 's#"command": "kyber-weave-arbiter hook#"command": "/legacy/kyber-weave-arbiter hook#' \
+            "$CASE_HOOKS" > "${CASE_HOOKS}.legacy"
+        mv "${CASE_HOOKS}.legacy" "$CASE_HOOKS"
+        if grep -qF -- "/legacy/kyber-weave-arbiter hook --harness cursor --scope global" "$CASE_HOOKS"; then
+            log "${CASE_NAME}: pointed the global cursor hook at /legacy/kyber-weave-arbiter"
+        else
+            fail "${CASE_NAME}: the global cursor hook has no command to point at /legacy/kyber-weave-arbiter"
+            CASE_READY=""
+        fi
+    fi
+
+    if [ -n "$CASE_READY" ]; then
+        update_case "$LAYOUT_VERSION" --no-kyberdash --no-menubar
+        expect_exit_zero
+        for unwanted in "Could not load file or assembly" "kyber-weave: error:" \
+            "could not be checked because the project registry"; do
+            if printf '%s' "$CASE_OUT" | grep -qF -- "$unwanted"; then
+                fail "${CASE_NAME}: the output has '${unwanted}'"
+            else
+                pass "${CASE_NAME}: the output has no '${unwanted}'"
+            fi
+        done
+        if printf '%s' "$CASE_OUT" | grep -qF -e "refreshed arbiter hooks for" -e "arbiter hooks are checked"; then
+            pass "${CASE_NAME}: the update reports the arbiter hook refresh"
+        else
+            fail "${CASE_NAME}: the output reports no arbiter hook refresh (no 'refreshed arbiter hooks for' or 'arbiter hooks are checked')"
+        fi
+        if [ -f "$CASE_HOOKS" ] && ! grep -qF -- "/legacy/kyber-weave-arbiter" "$CASE_HOOKS"; then
+            pass "${CASE_NAME}: the global cursor hook no longer names the legacy path"
+        else
+            fail "${CASE_NAME}: the global cursor hook still names /legacy/kyber-weave-arbiter"
+        fi
+        if [ -f "$CASE_HOOKS" ] && grep -qF -- "kyber-weave-arbiter hook --harness cursor --scope global" "$CASE_HOOKS"; then
+            pass "${CASE_NAME}: the global cursor hook runs kyber-weave-arbiter again"
+        else
+            fail "${CASE_NAME}: the global cursor hook has no 'kyber-weave-arbiter hook --harness cursor --scope global'"
+        fi
+        expect_reports kyber-weave "kyber-weave ${LAYOUT_VERSION}" "the update replaced the CLI"
+    fi
+fi
 
 # ------------------------------------------------------- release-local.sh recovery
 
