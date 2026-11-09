@@ -44,6 +44,8 @@ public sealed partial class ArchiveCloseoutValidator
 
     private const string ResidualMarker = "RESIDUAL";
 
+    private const string InventoryFileName = "README.md";
+
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
     private readonly Func<DocumentLoader> _loaderFactory;
@@ -149,7 +151,7 @@ public sealed partial class ArchiveCloseoutValidator
                 continue;
 
             string relative = change.Path.Replace('\\', '/');
-            if (!IsUnderArchive(relative))
+            if (!IsUnderArchive(relative) || IsArchiveInventory(relative))
                 continue;
 
             string absolute = Path.Combine(_repoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -168,6 +170,29 @@ public sealed partial class ArchiveCloseoutValidator
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// True for the inventory a kind keeps directly in its archive folder, such as
+    /// <c>docs/archive/plans/README.md</c>. It lists archived entries and is not one; a
+    /// specification folder's own <c>README.md</c> sits one level deeper and stays an entry.
+    /// </summary>
+    private bool IsArchiveInventory(string relativePath)
+    {
+        foreach (string root in _config.Ontology.DocsRoots)
+        {
+            string prefix = root == "."
+                ? OntologyConfig.ArchiveSegment + "/"
+                : root + "/" + OntologyConfig.ArchiveSegment + "/";
+            if (!relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string[] rest = relativePath[prefix.Length..].Split('/');
+            if (rest.Length == 2 && rest[1].Equals(InventoryFileName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>True when <paramref name="relativePath"/> sits under an archive container.</summary>
