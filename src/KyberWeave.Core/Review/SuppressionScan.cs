@@ -101,6 +101,10 @@ public static partial class SuppressionScan
         if (!diffRead)
             return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diff}");
 
+        const int maxDiffBytes = 10 * 1024 * 1024;
+        if (diff.Length > maxDiffBytes)
+            return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
+
         SortedDictionary<string, List<AddedLine>> added = ParseAddedLines(diff);
 
         (bool untrackedRead, string untracked) = RunGit(
@@ -136,9 +140,9 @@ public static partial class SuppressionScan
         bool inHunk = false;
         int lineNumber = 0;
 
-        foreach (string raw in diff.Split('\n'))
+        foreach (ReadOnlySpan<char> raw in diff.AsSpan().EnumerateLines())
         {
-            string line = raw.TrimEnd('\r');
+            ReadOnlySpan<char> line = raw.TrimEnd('\r');
 
             if (line.StartsWith("diff --git ", StringComparison.Ordinal))
             {
@@ -151,18 +155,18 @@ public static partial class SuppressionScan
             {
                 if (line.StartsWith("@@", StringComparison.Ordinal))
                 {
-                    inHunk = TryParseFirstAddedLine(line, out lineNumber);
+                    inHunk = TryParseFirstAddedLine(line.ToString(), out lineNumber);
                     continue;
                 }
 
-                if (line.StartsWith('+'))
+                if (line.StartsWith("+", StringComparison.Ordinal))
                 {
                     if (path is { } file)
-                        AddLine(added, file, new AddedLine(lineNumber, line[1..].Trim()));
+                        AddLine(added, file, new AddedLine(lineNumber, line[1..].Trim().ToString()));
 
                     lineNumber++;
                 }
-                else if (line.StartsWith(' '))
+                else if (line.StartsWith(" ", StringComparison.Ordinal))
                 {
                     lineNumber++;
                 }
@@ -172,12 +176,12 @@ public static partial class SuppressionScan
 
             if (line.StartsWith("+++ ", StringComparison.Ordinal))
             {
-                path = DiffPath(line[4..]);
+                path = DiffPath(line[4..].ToString());
                 continue;
             }
 
             if (line.StartsWith("@@", StringComparison.Ordinal))
-                inHunk = path is not null && TryParseFirstAddedLine(line, out lineNumber);
+                inHunk = path is not null && TryParseFirstAddedLine(line.ToString(), out lineNumber);
         }
 
         return added;
@@ -224,14 +228,28 @@ public static partial class SuppressionScan
     /// cannot be read as text.</summary>
     private static List<AddedLine>? ReadAddedFile(string fullPath)
     {
-        byte[] bytes;
+        const int maxBytes = 10 * 1024 * 1024;
+        byte[] buffer = new byte[maxBytes + 1];
+        int totalRead = 0;
         try
         {
-            FileInfo fileInfo = new(fullPath);
-            if (!fileInfo.Exists || fileInfo.Length > 10 * 1024 * 1024)
+            if (!File.Exists(fullPath))
                 return null;
 
-            bytes = File.ReadAllBytes(fullPath);
+            using FileStream stream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (stream.Length > maxBytes)
+                return null;
+
+            while (totalRead <= maxBytes)
+            {
+                int read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+                if (read == 0)
+                    break;
+                totalRead += read;
+            }
+
+            if (totalRead > maxBytes)
+                return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                                        or NotSupportedException or System.Security.SecurityException)
@@ -239,15 +257,16 @@ public static partial class SuppressionScan
             return null;
         }
 
-        if (Array.IndexOf(bytes, (byte)0) >= 0)
+        if (Array.IndexOf(buffer, (byte)0, 0, totalRead) >= 0)
             return null;
 
         List<AddedLine> lines = [];
         int number = 0;
-        foreach (string raw in Encoding.UTF8.GetString(bytes).Split('\n'))
+        string text = Encoding.UTF8.GetString(buffer, 0, totalRead);
+        foreach (ReadOnlySpan<char> raw in text.AsSpan().EnumerateLines())
         {
             number++;
-            lines.Add(new AddedLine(number, raw.TrimEnd('\r').Trim()));
+            lines.Add(new AddedLine(number, raw.TrimEnd('\r').Trim().ToString()));
         }
 
         return lines;
