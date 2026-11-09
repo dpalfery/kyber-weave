@@ -3226,6 +3226,49 @@ public sealed class ReleaseTests
         Assert.Contains("--version", loop, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The running binary replaces its own file, then re-renders arbiter hooks.
+    /// The update must finish in the new binary and must not crash with
+    /// "Could not load file or assembly YamlDotNet" after the swap. The case runs
+    /// under a real home, so YAML is read after the swap, and the stale hook path
+    /// under /legacy/ must be gone afterwards.
+    /// </summary>
+    [Fact]
+    public void UpdateLoopRunsTheArbiterRefreshAfterARealSwap()
+    {
+        string loop = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
+
+        const string caseHeader = "begin_case arbiter-hooks-after-swap";
+        Assert.Contains(caseHeader, loop, StringComparison.Ordinal);
+        Assert.Contains("/legacy/kyber-weave-arbiter", loop, StringComparison.Ordinal);
+
+        int start = loop.IndexOf(caseHeader, StringComparison.Ordinal);
+        int bodyStart = start + caseHeader.Length;
+        int end = loop.Length;
+
+        int nextCase = loop.IndexOf("begin_case", bodyStart, StringComparison.Ordinal);
+        if (nextCase >= 0)
+        {
+            end = Math.Min(end, nextCase);
+        }
+
+        int nextDivider = loop.IndexOf("# ----", bodyStart, StringComparison.Ordinal);
+        if (nextDivider >= 0)
+        {
+            end = Math.Min(end, nextDivider);
+        }
+
+        string body = loop.Substring(start, end - start);
+
+        Assert.Contains("Could not load file or assembly", body, StringComparison.Ordinal);
+        Assert.Contains("arbiter install", body, StringComparison.Ordinal);
+        Assert.Contains("--project", body, StringComparison.Ordinal);
+        Assert.Contains("cmp", body, StringComparison.Ordinal);
+        Assert.Contains("update_case", body, StringComparison.Ordinal);
+        Assert.Contains("--no-kyberdash", body, StringComparison.Ordinal);
+    }
+
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
