@@ -76,6 +76,7 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
+    private readonly Func<string, IReadOnlyList<string>, bool, int>? _finishingProcess;
 
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
@@ -94,7 +95,8 @@ internal sealed class SelfUpdater : IDisposable
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
         Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null)
+        IArbiterHookRefresher? arbiterHookRefresher = null,
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
@@ -103,6 +105,7 @@ internal sealed class SelfUpdater : IDisposable
         _runProcess = runProcess ?? RunProcess;
         _captureProcess = captureProcess ?? RunCapture;
         _arbiterHookRefresher = arbiterHookRefresher;
+        _finishingProcess = finishingProcess;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
@@ -120,9 +123,15 @@ internal sealed class SelfUpdater : IDisposable
     internal static SelfUpdater Create(
         SelfUpdateHost host,
         Action<string>? log = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null)
+        IArbiterHookRefresher? arbiterHookRefresher = null,
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
     {
-        return new SelfUpdater(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log, arbiterHookRefresher: arbiterHookRefresher);
+        return new SelfUpdater(
+            new SocketsHttpHandler { AllowAutoRedirect = true },
+            host,
+            log,
+            arbiterHookRefresher: arbiterHookRefresher,
+            finishingProcess: finishingProcess);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)

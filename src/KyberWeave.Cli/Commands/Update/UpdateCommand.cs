@@ -14,6 +14,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
 
     internal IArbiterHookRefresher? ArbiterHookRefresher { get; init; }
 
+    internal Func<string, IReadOnlyList<string>, bool, int>? FinishingProcess { get; init; }
+
     public override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -23,8 +25,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
             SelfUpdateHost host = Host ?? SelfUpdateHost.FromCurrentProcess();
             IArbiterHookRefresher refresher = ArbiterHookRefresher ?? new ArbiterHookRefresher(Log, ReadEnvironment);
             using SelfUpdater updater = Handler is null
-                ? SelfUpdater.Create(host, Log, refresher)
-                : new SelfUpdater(Handler, host, Log, ReadEnvironment, arbiterHookRefresher: refresher);
+                ? SelfUpdater.Create(host, Log, refresher, FinishingProcess)
+                : new SelfUpdater(Handler, host, Log, ReadEnvironment, arbiterHookRefresher: refresher, finishingProcess: FinishingProcess);
             SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
                 settings.Version,
                 settings.ReleaseCandidate,
@@ -32,7 +34,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                 settings.NoKyberDash,
                 settings.NoMenubar,
                 settings.NoArbiter,
-                settings.NoRestart));
+                settings.NoRestart,
+                settings.FinishUpdate));
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }

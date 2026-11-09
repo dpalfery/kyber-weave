@@ -48,6 +48,7 @@ internal readonly record struct SelfUpdateOptions(
     bool NoKyberDash = false,
     bool NoMenubar = false,
     bool NoArbiter = false,
-    bool NoRestart = false);
+    bool NoRestart = false,
+    bool FinishUpdate = false);
 
 internal sealed record SelfUpdateOutcome(int ExitCode, string Message);
