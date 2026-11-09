@@ -170,8 +170,22 @@ internal sealed class HookGitFacts(
         // A rename landing mid-read serves the previous whole document, which may lack a
         // just-recorded entry. Re-read briefly before calling the dispatch unobservable:
         // a transient miss then still pairs, while genuine absence resolves absent.
+        // Without a pairing key no record can match: certain absence, no disk reads.
+        if (string.IsNullOrWhiteSpace(ev.ToolCallId) && string.IsNullOrWhiteSpace(ev.Prompt))
+        {
+            return null;
+        }
+
         string filePath = Path.Combine(directory, SnapshotFileName);
+        if (!File.Exists(filePath))
+        {
+            return null;
+        }
+
+        // Re-read only while the file is actively changing: a static store cannot gain
+        // the entry, so genuine absence resolves after two reads instead of a budget.
         Stopwatch elapsed = Stopwatch.StartNew();
+        DateTime observed = GetLastWriteTimeUtc(filePath);
         while (true)
         {
             List<StoredSnapshot> entries = ReadSnapshots(filePath);
@@ -185,12 +199,27 @@ internal sealed class HookGitFacts(
                     entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
             }
 
-            if (elapsed.Elapsed >= PeekRetryBudget)
+            DateTime current = GetLastWriteTimeUtc(filePath);
+            if (current <= observed || elapsed.Elapsed >= PeekRetryBudget)
             {
                 return null;
             }
 
+            observed = current;
             Thread.Sleep(TimeSpan.FromMilliseconds(20));
+        }
+    }
+
+    private static DateTime GetLastWriteTimeUtc(string filePath)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(filePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unstatable means unreadable: the read below resolves it as absent.
+            return DateTime.MinValue;
         }
     }
 
