@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
@@ -162,6 +163,25 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
             IReadOnlyList<string> paths = SinceDispatch(prompt: PlannerPrompt, callId: callId);
             Assert.Contains("src/Peeked.cs", paths);
         }
+    }
+
+    /// <summary>
+    /// Genuine absence resolves promptly: unpaired posts never wait out a retry budget
+    /// for a baseline no record can produce.
+    /// </summary>
+    [Fact]
+    public void GenuineAbsenceResolvesPromptly()
+    {
+        Stopwatch elapsed = Stopwatch.StartNew();
+        for (int i = 0; i < 5; i++)
+        {
+            ArbiterFactSet facts = PostFacts(prompt: PlannerPrompt, callId: $"call-never-recorded-{i}");
+            Assert.False(facts.IsPresent(SinceDispatchFact), "an unrecorded dispatch must stay absent.");
+        }
+
+        Assert.True(
+            elapsed.Elapsed < TimeSpan.FromSeconds(15),
+            $"five absent posts took {elapsed.Elapsed}, the absence path must stay fast.");
     }
 
     /// <summary>
