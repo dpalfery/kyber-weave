@@ -61,6 +61,8 @@ public static partial class SuppressionScan
     /// <summary>The ref the working tree is compared with when the caller names none.</summary>
     public const string DefaultBase = "HEAD";
 
+    private const int MaxDiffBytes = 10 * 1024 * 1024;
+
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>Finds every suppression the change under <paramref name="workingDirectory"/> adds without a reason.</summary>
@@ -97,13 +99,15 @@ public static partial class SuppressionScan
 
         (bool diffRead, string diff) = RunGit(
             root,
+            MaxDiffBytes,
             "diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--relative", "--diff-filter=ACMRT", baseRef, "--");
         if (!diffRead)
-            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diff}");
+        {
+            if (diff.Contains("exceeded the limit", StringComparison.OrdinalIgnoreCase))
+                return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
 
-        const int maxDiffBytes = 10 * 1024 * 1024;
-        if (diff.Length > maxDiffBytes)
-            return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
+            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diff}");
+        }
 
         SortedDictionary<string, List<AddedLine>> added = ParseAddedLines(diff);
 
@@ -349,7 +353,13 @@ public static partial class SuppressionScan
     /// Runs git with argv, never a shell, and returns its output or the reason it produced none. A missing git, a
     /// timeout, and a non-zero exit are all the same fact to the caller: the change was not read.
     /// </summary>
-    private static (bool Succeeded, string Output) RunGit(string workingDirectory, params string[] arguments)
+    private static (bool Succeeded, string Output) RunGit(string workingDirectory, params string[] arguments) =>
+        RunGit(workingDirectory, null, arguments);
+
+    private static (bool Succeeded, string Output) RunGit(
+        string workingDirectory,
+        int? maxOutputCharacters,
+        params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -366,7 +376,7 @@ public static partial class SuppressionScan
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputCharacters);
             return result.ExitCode == 0
                 ? (true, result.StandardOutput)
                 : (false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +

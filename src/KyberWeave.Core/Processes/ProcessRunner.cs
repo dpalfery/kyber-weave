@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 
 namespace KyberWeave.Core.Processes;
 
@@ -33,7 +34,16 @@ public static class ProcessRunner
     ///     if the child has not finished within this limit. Unbounded waits are how a hung gate
     ///     takes the whole review with it.
     /// </param>
-    public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput, TimeSpan? timeout = null)
+    /// <param name="maxOutputCharacters">
+    ///     When set, bounds standard output reading to this many characters. If the child process
+    ///     produces more output, its process tree is killed and an <see cref="InvalidOperationException" />
+    ///     is thrown before the full output is buffered in memory.
+    /// </param>
+    public static ProcessResult Run(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout = null,
+        int? maxOutputCharacters = null)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
@@ -61,7 +71,7 @@ public static class ProcessRunner
 
         // Reads start before the write because a child may produce more than one pipe
         // buffer of output before it consumes any stdin.
-        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardOutput = ReadBoundedAsync(process.StandardOutput, maxOutputCharacters);
         Task<string> standardError = process.StandardError.ReadToEndAsync();
         Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
 
@@ -85,12 +95,19 @@ public static class ProcessRunner
                 io.GetAwaiter().GetResult();
             }
         }
+        catch (Exception ex) when (ex is not TimeoutException)
+        {
+            TryKillTree(process);
+            if (ex is AggregateException ae)
+                throw ae.Flatten().InnerExceptions[0];
+            throw;
+        }
         finally
         {
-            // After a timeout kill, an unbounded WaitForExit can hang if the tree did not
+            // After a timeout kill or fault, an unbounded WaitForExit can hang if the tree did not
             // actually die. The success path still waits without a cap: WhenAll already
             // drained both pipes, so the child cannot be blocked on write.
-            if (timedOut)
+            if (timedOut || !process.HasExited)
                 process.WaitForExit(TimeSpan.FromSeconds(5));
             else
                 process.WaitForExit();
@@ -208,6 +225,27 @@ public static class ProcessRunner
                 safe.Environment[pair.Key] = pair.Value;
 
         return safe;
+    }
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, int? maxCharacters)
+    {
+        if (maxCharacters is null)
+            return await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        int max = maxCharacters.Value;
+        char[] buffer = new char[Math.Min(max + 1, 16384)];
+        StringBuilder sb = new();
+        int totalRead = 0;
+        int read;
+        while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+        {
+            totalRead += read;
+            if (totalRead > max)
+                throw new InvalidOperationException($"The process output exceeded the limit of {max.ToString(CultureInfo.InvariantCulture)} characters.");
+
+            sb.Append(buffer, 0, read);
+        }
+        return sb.ToString();
     }
 
     private static async Task WriteAndCloseAsync(StreamWriter writer, string input)
