@@ -95,6 +95,50 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Before the global path was fixed, the installer recorded the Antigravity block at
+    /// <c>.agents/hooks.json</c> beneath the global root, a file Antigravity never reads. That
+    /// stale record must stay removable, so <c>arbiter uninstall --target antigravity</c> clears
+    /// it and the operator can reinstall; no migration code repairs it.
+    /// </summary>
+    [Fact]
+    public void CreateUninstall_StaleAntigravityRecordAtAgentsHooksJson_RemovesTheStaleGroup()
+    {
+        using TempDirectory fixture = new();
+        FakeSquadUserPaths userPaths = new(fixture.Path);
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        SquadStateStore store = new(userPaths);
+
+        SquadRenderedBlock current = CreateBlock(SquadTarget.Antigravity, SquadHookBlockFormat.Antigravity);
+        SquadRenderedBlock stale = current with { RelativePath = ".agents/hooks.json" };
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+            home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            globalRoots: globalRoots,
+            blocks: [stale]));
+
+        string staleFile = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Antigravity), ".agents", "hooks.json");
+        Assert.Contains("kyber-arbiter", File.ReadAllText(staleFile), StringComparison.Ordinal);
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal(".agents/hooks.json", Assert.Single(receipt.Blocks).RelativePath);
+
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+            home,
+            SquadDeploymentScope.Global,
+            receipt,
+            globalRoots));
+
+        Assert.False(File.Exists(staleFile), "Uninstall left the stale kyber-arbiter group behind.");
+        Assert.Null(store.ReadReceipt(home, SquadDeploymentScope.Global));
+    }
+
     private static SquadRenderedBlock CreateBlock(SquadTarget target, SquadHookBlockFormat format) =>
         format switch
         {

@@ -465,6 +465,15 @@ public sealed class SquadHookFormatResolutionTests
         Assert.Equal(SquadHookBlockFormat.Codex, format);
     }
 
+    [Theory]
+    [InlineData("hooks.json")]
+    [InlineData(".agents/hooks.json")]
+    public void AntigravityResolvesBothTheGlobalPathAndTheStaleGlobalRecordFromBeforeTheFix(string relativePath)
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(relativePath, "antigravity"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Antigravity, format);
+    }
+
     [Fact]
     public void PrefixedProjectPathResolvesByRecordedTarget()
     {

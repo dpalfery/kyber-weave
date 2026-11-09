@@ -13,8 +13,8 @@ namespace KyberWeave.Tests;
 /// <see cref="SquadRenderedBlock"/> whose splice sets the top-level <c>kyber-arbiter</c>
 /// group of <c>.agents/hooks.json</c> to <c>PreToolUse</c> and <c>PostToolUse</c> matcher
 /// groups matching <c>invoke_subagent</c> with one command hook; the render records the
-/// <c>no-post-dispatch-feedback</c> degradation; and nothing renders when disabled or
-/// under Global scope (Req 6.3, 8.1, 8.2, 22.2).
+/// <c>no-post-dispatch-feedback</c> degradation; under Global scope the block targets
+/// <c>hooks.json</c> beneath the global root; and nothing renders when disabled (Req 6.3, 8.1, 8.2, 22.2).
 /// </summary>
 public sealed class ArbiterAntigravityRenderingTests : IDisposable
 {
@@ -55,6 +55,24 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
             Assert.Equal(Command, hook["command"]!.GetValue<string>());
             Assert.Equal(HookTimeoutSeconds, hook["timeout"]!.GetValue<int>());
         }
+    }
+
+    /// <summary>
+    /// Antigravity reads global hooks only from <c>hooks.json</c> directly under its global root
+    /// (<c>~/.gemini/config</c>); <c>.agents/hooks.json</c> is the project path and is never read
+    /// from the global root, so a global block recorded there would never run.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_EnabledAtGlobalScope_TargetsHooksJsonUnderTheGlobalRoot()
+    {
+        SquadRenderResult result = await RenderAsync(
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
+            SquadDeploymentScope.Global);
+
+        SquadRenderedBlock block = Assert.Single(result.Blocks ?? []);
+        Assert.Equal("antigravity", block.Target);
+        Assert.Equal("hooks.json", block.RelativePath);
+        Assert.Equal(SquadHookBlockFormat.Antigravity, block.Format);
     }
 
     /// <summary>
