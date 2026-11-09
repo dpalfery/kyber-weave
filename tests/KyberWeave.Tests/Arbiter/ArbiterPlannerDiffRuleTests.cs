@@ -1,3 +1,5 @@
+using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
@@ -8,14 +10,15 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract tests for rule <c>KW-ARB-PLANNER-DIFF-001</c>: a planner return must write only inside
-/// the plan, spec and todo directories. Absent changed paths (such as when git facts are uncomputed)
-/// answer <c>undecidable</c> (<c>escalate</c>); empty changed paths answer <c>inside</c> (<c>allow</c>);
-/// writes exclusively within planning directories answer <c>inside</c> (<c>allow</c>); writes outside
-/// planning directories answer <c>outside</c> (<c>escalate</c>).
+/// the plan, spec and todo directories. Absent changed paths (such as when git cannot observe the
+/// repository) answer <c>undecidable</c> (<c>escalate</c>); empty changed paths answer <c>inside</c>
+/// (<c>allow</c>); writes exclusively within planning directories answer <c>inside</c> (<c>allow</c>);
+/// writes outside planning directories answer <c>outside</c> (<c>escalate</c>).
 /// </summary>
 public sealed class ArbiterPlannerDiffRuleTests
 {
     private const string RuleId = "KW-ARB-PLANNER-DIFF-001";
+    private const string SinceDispatchFact = "git.changed-paths.since-dispatch";
 
     private const string PlannerPrompt =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt";
@@ -57,18 +60,18 @@ public sealed class ArbiterPlannerDiffRuleTests
     {
         ArbiterFactSet facts = BuildRealPlannerReturnedFacts(DocsConfig());
 
-        if (facts.Facts.TryGetValue("review.changed-paths", out ArbiterFact? declaredFact))
-        {
-            Assert.Null(declaredFact.Value);
-        }
+        Assert.True(
+            facts.Facts.TryGetValue(SinceDispatchFact, out ArbiterFact? declaredFact),
+            "delegate.planner.returned fact bag must declare git.changed-paths.since-dispatch.");
+        Assert.Null(declaredFact!.Value);
 
         if (includeChangedPaths)
         {
-            return facts.With("review.changed-paths", changedPaths, ArbiterFactLabel.Derived);
+            return facts.With(SinceDispatchFact, changedPaths, ArbiterFactLabel.Derived);
         }
 
         Dictionary<string, ArbiterFact> dict = facts.Facts
-            .Where(pair => !string.Equals(pair.Key, "review.changed-paths", StringComparison.Ordinal))
+            .Where(pair => !string.Equals(pair.Key, SinceDispatchFact, StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         return new ArbiterFactSet(dict);
     }
@@ -87,17 +90,18 @@ public sealed class ArbiterPlannerDiffRuleTests
     }
 
     [Fact]
-    public void TheTriggerCatalogDeclaresReviewChangedPathsForDelegatePlannerReturned()
+    public void TheTriggerCatalogDeclaresSinceDispatchChangedPathsForDelegatePlannerReturned()
     {
         Assert.True(
             ArbiterTriggerCatalog.TryGetFacts("delegate.planner.returned", out IReadOnlySet<string>? declared),
             "delegate.planner.returned must be catalogued in ArbiterTriggerCatalog.");
-        Assert.Contains("review.changed-paths", declared);
+        Assert.Contains(SinceDispatchFact, declared);
+        Assert.DoesNotContain("review.changed-paths", declared);
 
         ArbiterFactSet facts = BuildRealPlannerReturnedFacts(DocsConfig());
         Assert.True(
-            facts.Facts.TryGetValue("review.changed-paths", out ArbiterFact? fact),
-            "delegate.planner.returned fact bag must declare review.changed-paths.");
+            facts.Facts.TryGetValue(SinceDispatchFact, out ArbiterFact? fact),
+            "delegate.planner.returned fact bag must declare git.changed-paths.since-dispatch.");
         Assert.Null(fact!.Value);
     }
 
@@ -221,5 +225,150 @@ public sealed class ArbiterPlannerDiffRuleTests
 
         Assert.Equal("outside", answer);
         Assert.Equal(RuleEffects.Escalate, effect);
+    }
+
+    [Fact]
+    public void HookGitFactsOutsideARepositoryLeavesChangedPathsAbsentAndEscalates()
+    {
+        using TempDirectory nonRepo = new();
+        using TempDirectory home = new();
+        HookGitFacts gitFacts = new(nonRepo.Path, home.Path);
+
+        ArbiterEvent postEvent = new()
+        {
+            Harness = "claude",
+            Phase = "post",
+            Target = "architect",
+            HarnessCaller = "conductor",
+            Cwd = nonRepo.Path,
+            IsDispatch = true,
+            Prompt = PlannerPrompt,
+        };
+        TriggerClassification postClassification = TriggerClassifier.ClassifySingle(
+            postEvent, "architect", PlannerPrompt);
+        ArbiterFactSet postFacts = TriggerFactBuilder.Build(postClassification, PlannerPrompt, DocsConfig());
+        ArbiterFactSet enrichedPost = gitFacts.Enrich(postFacts, postClassification, postEvent);
+
+        Assert.True(enrichedPost.Facts.TryGetValue(SinceDispatchFact, out ArbiterFact? sinceDispatch));
+        Assert.Null(sinceDispatch!.Value);
+
+        ArbiterRule rule = ShippedRule();
+        string answer = RuleEngine.Decide(rule, enrichedPost);
+        Assert.Equal(RuleEngine.Undecidable, answer);
+        Assert.Equal(RuleEffects.Escalate, EffectFor(rule, answer));
+
+        const string lensPrompt = "KYBER-ARBITER: true\nLENS: correctness\n\nApply the lens.";
+        ArbiterEvent lensEvent = new()
+        {
+            Harness = "claude",
+            Phase = "pre",
+            Target = "review-lens",
+            HarnessCaller = "code-reviewer",
+            Cwd = nonRepo.Path,
+            IsDispatch = true,
+            Prompt = lensPrompt,
+        };
+        TriggerClassification lensClassification = TriggerClassifier.ClassifySingle(
+            lensEvent, "review-lens", lensPrompt);
+        ArbiterFactSet lensFacts = TriggerFactBuilder.Build(lensClassification, lensPrompt, DocsConfig());
+        ArbiterFactSet enrichedLens = gitFacts.Enrich(lensFacts, lensClassification, lensEvent);
+
+        Assert.True(enrichedLens.Facts.TryGetValue("review.changed-paths", out ArbiterFact? reviewChanged));
+        Assert.Null(reviewChanged!.Value);
+        Assert.True(enrichedLens.Facts.TryGetValue("review.base-ref", out ArbiterFact? baseRef));
+        Assert.Null(baseRef!.Value);
+    }
+
+    [Fact]
+    public void HookGitFactsInsideARepositoryMeasuresPlannerDispatchDeltaNotWholeBranchDiff()
+    {
+        using RunStartProbe probe = RunStartProbe.Create();
+        using TempDirectory home = new();
+        probe.Git("switch", "-c", "claude/feat/planner-delta", "origin/main");
+
+        // Commit an earlier implementation change on the branch and leave artifacts/ dirty.
+        WriteRepoFile(probe.Root, "src/EarlierTask.cs", "// committed by an earlier task\n");
+        probe.Git("add", "-A");
+        probe.Git("commit", "-m", "feat: earlier task implementation");
+        WriteRepoFile(probe.Root, "artifacts/gates.json", "{}\n");
+
+        HookGitFacts gitFacts = new(probe.Root, home.Path);
+        ArbiterRule rule = ShippedRule();
+
+        // 1. Unpaired PostToolUse with no planner edits: earlier branch commits and artifacts/ do not contaminate.
+        ArbiterFactSet emptyUnpaired = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: null);
+        IReadOnlyList<string> emptyPaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            emptyUnpaired.Facts[SinceDispatchFact].Value);
+        Assert.Empty(emptyPaths);
+        Assert.Equal("inside", RuleEngine.Decide(rule, emptyUnpaired));
+
+        // 2. Pre-existing dirty file before PreToolUse + planner writes only docs/plans/plan.md during dispatch.
+        WriteRepoFile(probe.Root, "src/PreExistingDirty.cs", "// dirty before planner dispatch\n");
+        EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-1");
+        WriteRepoFile(probe.Root, "docs/plans/2026-11-09-feature-plan.md", "# Plan\n");
+
+        ArbiterFactSet planOnlyReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-1");
+        IReadOnlyList<string> planOnlyPaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            planOnlyReturn.Facts[SinceDispatchFact].Value);
+        Assert.Equal(["docs/plans/2026-11-09-feature-plan.md"], planOnlyPaths);
+        Assert.Equal("inside", RuleEngine.Decide(rule, planOnlyReturn));
+
+        // 3. Planner writes outside planning directories during dispatch: escalates as outside.
+        EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-2");
+        WriteRepoFile(probe.Root, "src/Rogue.cs", "// rogue planner edit\n");
+
+        ArbiterFactSet rogueReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-2");
+        IReadOnlyList<string> roguePaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            rogueReturn.Facts[SinceDispatchFact].Value);
+        Assert.Contains("src/Rogue.cs", roguePaths);
+        Assert.Equal("outside", RuleEngine.Decide(rule, rogueReturn));
+        Assert.Equal(RuleEffects.Escalate, EffectFor(rule, "outside"));
+    }
+
+    private static void EnrichPlannerPre(HookGitFacts gitFacts, string repoRoot, string? toolCallId)
+    {
+        ArbiterEvent preEvent = new()
+        {
+            Harness = "claude",
+            Phase = "pre",
+            Target = "architect",
+            HarnessCaller = "conductor",
+            Cwd = repoRoot,
+            ToolCallId = toolCallId,
+            IsDispatch = true,
+            Prompt = PlannerPrompt,
+        };
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(
+            preEvent, "architect", PlannerPrompt);
+        Assert.Equal("delegate.planner", classification.Trigger);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, PlannerPrompt, DocsConfig());
+        _ = gitFacts.Enrich(facts, classification, preEvent);
+    }
+
+    private static ArbiterFactSet EnrichPlannerReturn(HookGitFacts gitFacts, string repoRoot, string? toolCallId)
+    {
+        ArbiterEvent postEvent = new()
+        {
+            Harness = "claude",
+            Phase = "post",
+            Target = "architect",
+            HarnessCaller = "conductor",
+            Cwd = repoRoot,
+            ToolCallId = toolCallId,
+            IsDispatch = true,
+            Prompt = PlannerPrompt,
+        };
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(
+            postEvent, "architect", PlannerPrompt);
+        Assert.Equal("delegate.planner.returned", classification.Trigger);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, PlannerPrompt, DocsConfig());
+        return gitFacts.Enrich(facts, classification, postEvent);
+    }
+
+    private static void WriteRepoFile(string repoRoot, string relativePath, string content)
+    {
+        string fullPath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content, Encoding.UTF8);
     }
 }
