@@ -105,7 +105,7 @@ reference.
 Wire repository-scope files after you declare the server:
 
 ```bash
-kyber-weave docs mcp-wire . --target cursor,claude,factory,opencode
+kyber-weave docs mcp-wire . --target cursor,claude-code,factory,opencode
 ```
 
 Flags, refusals, dry-run, and symlink rules are in the [MCP runbook — checking and
