@@ -60,7 +60,9 @@ public sealed class UpdateCommand : Command<UpdateSettings>
     {
         if (outcome.ExitCode == 0)
         {
-            AnsiConsole.MarkupLine($"[bold]{Markup.Escape(outcome.Message)}[/]");
+            // A finish-mode run has no outcome of its own: the process that started it prints the one line.
+            if (outcome.Message.Length > 0)
+                AnsiConsole.MarkupLine($"[bold]{Markup.Escape(outcome.Message)}[/]");
             return;
         }
 

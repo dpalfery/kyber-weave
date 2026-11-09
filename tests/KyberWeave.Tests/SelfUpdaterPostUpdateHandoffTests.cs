@@ -6,6 +6,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
@@ -374,7 +375,70 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             line => line.Contains("project registry could not be read", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A corrupt project registry leaves no project to refresh, but the global targets do not depend on it. The global
+    /// hook is still rewritten, and the registry is the one thing named as not refreshed.
+    /// </summary>
+    [Fact]
+    public void FinishUpdateWithACorruptRegistryStillRefreshesTheGlobalHook()
+    {
+        InstallArbiter();
+        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "corrupt-with-globals"));
+        Directory.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = new(userPaths);
+        string stateDirectory = store.ResolveHomeStateDirectory();
+        Directory.CreateDirectory(stateDirectory);
+        File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
+        UserHostConfig.WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
+        string hookPath = WriteLegacyCursorHook(userPaths.HomeDirectory, "/legacy/kyber-weave-arbiter hook");
+        using MapHandler handler = new();
+        SelfUpdateHost host = CreateHost("0.2.0");
+        HandOffRecord record = new();
+        Func<string, string?> environment = HomeAndAppData(userPaths);
+
+        SelfUpdateOutcome outcome = RunUpdate(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
+            record,
+            environment: environment,
+            refresher: new ArbiterHookRefresher(record.Log.Add, environment));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(
+            record.Log,
+            line => line.Contains("project registry could not be read", StringComparison.Ordinal));
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+    }
+
     // ---- helpers ----
+
+    /// <summary>Writes a Cursor global hook file that still names the old arbiter command, and returns its path.</summary>
+    private static string WriteLegacyCursorHook(string home, string legacyCommand)
+    {
+        string hookPath = Path.Combine(
+            new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor),
+            "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        string token = SquadTargetCatalog.GetToken(SquadTarget.Cursor);
+        string content = $$"""
+            {
+              "preToolUse": [
+                {
+                  "command": "{{legacyCommand}} --harness {{token}} --scope global",
+                  "matcher": "Task",
+                  "timeout": 5,
+                  "failClosed": true
+                }
+              ],
+              "postToolUse": []
+            }
+            """;
+        File.WriteAllText(hookPath, content);
+        return hookPath;
+    }
 
     /// <summary>One seam call: what the old process asked for, and what the installed file held at that moment.</summary>
     private sealed record SeamCall(

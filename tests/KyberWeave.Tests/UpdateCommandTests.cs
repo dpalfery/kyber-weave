@@ -565,8 +565,10 @@ public sealed class UpdateCommandTests : IDisposable
             }
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, new UpdateSettings { Version = "0.2.0" }));
+        // The error line names the retry at the end of a long message; a width that fits it keeps the line whole.
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => command.Execute(null!, new UpdateSettings { Version = "0.2.0" }),
+            width: 240);
 
         Assert.Equal(1, execution.Result);
         Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
