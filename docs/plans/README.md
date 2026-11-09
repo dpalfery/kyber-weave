@@ -57,7 +57,11 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to **Archived Plans** below and its file moves to `docs/archive/plans/`.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-08-self-update-finishes-in-the-new-binary.md](2026-11-08-self-update-finishes-in-the-new-binary.md) | Ready | 2026-11-08 | Stop `kyber-weave update` from failing after it replaces itself: once the new binaries are in place, the new `kyber-weave` runs the KyberDash steps and the arbiter hook refresh, and any failure after the install says the binaries are installed and how to retry. |
+
+A plan is registered here when execution starts and removed at closeout, when it moves to **Archived Plans** below and its file moves to `docs/archive/plans/`.
 
 ## Archived Plans
 
