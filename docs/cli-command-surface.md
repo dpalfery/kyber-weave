@@ -84,15 +84,41 @@ kyberdash --version
 
 `kyber-weave update` replaces the running Release binaries — the CLI, the sibling
 `kyber-weave-mcp`, an installed `kyber-weave-arbiter`, the installed `kyberdash`, and an installed KyberDash tray — after
-SHA-256 verification. It delegates the tray step to `kyberdash menubar --update`. It does not
-wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. After replacing
-binaries it re-renders the arbiter hooks/scripts for global targets registered under
-`arbiter.global.targets` and each registered project with `arbiter.enabled` (reusing the
-Squad update path; `--no-arbiter` or an absent arbiter skips it). After the binaries
-commit, it reconciles KyberDash in one run: `kyberdash engine ensure --if-running`, the tray
-relaunch when needed, then `kyberdash kyber capture plugin install --harness opencode --preserve
---if-installed` and `kyberdash kyber capture plugin install --harness factory --preserve
---if-installed`. The reconciliation also runs when the release is unchanged ("already on").
+SHA-256 verification. It does not wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs.
+The updating process swaps the binaries and then does nothing else: it starts the installed
+kyber-weave as `kyber-weave update <version> --finish-update` and relays that process's exit code.
+The finishing process runs everything after the swap, so the steps below run in the new release.
+Its wait is 15 minutes, and the process tree is killed on expiry. See
+[distribution](distribution.md#the-self-update-sequence) for the full sequence.
+
+`--finish-update` is a hidden option. Only the updater passes it, with the owner's `--no-kyberdash`,
+`--no-menubar`, `--no-arbiter` and `--no-restart` forwarded. A person does not run it. It refuses, before
+any work, in three cases:
+
+- no version named: `usage: kyber-weave update <version> --finish-update. Name the version the update installed.`
+- a version other than the one running: `--finish-update finishes the update to the version that runs it. This kyber-weave is <current>, but <version> was asked for.`
+- combined with `--release-candidate`: `--finish-update cannot be combined with --release-candidate. It finishes one named version.`
+
+It downloads nothing and commits nothing. On success it prints no outcome line; the updating process
+prints the single line `updated kyber-weave <version> -> <path>`.
+
+The finishing process runs the KyberDash steps as a changed release. It runs
+`kyberdash engine ensure --if-running`, relaunches the tray when needed, then runs `kyberdash kyber
+capture plugin install --harness opencode --preserve --if-installed` and `kyberdash kyber capture
+plugin install --harness factory --preserve --if-installed`. These steps also run when the release is
+unchanged ("already on"). It then re-renders the arbiter hooks/scripts for global targets registered
+under `arbiter.global.targets` and each registered project with `arbiter.enabled`, using the Squad
+update path and this release's hook source. `--no-arbiter` or an absent arbiter skips that.
+A failed refresh is a warning with exit 0: `warning: arbiter hooks were not refreshed: <cause>. The
+binaries are already updated; run kyber-weave update <version> to retry.`
+
+A failure after the install exits 1 with `kyber-weave <version> is installed, but the last steps did not
+finish: <cause>. Run kyber-weave update <version> to finish them.` When the finishing process exits
+non-zero, the message reads `kyber-weave <version> is installed, but the post-update steps did not finish:
+the new kyber-weave exited <code>, and its output above says why. The binaries are already updated. Run
+kyber-weave update <version> to finish them.` A pinned older release that does not know `--finish-update`
+fails the hand-off, and the retry it names is `kyber-weave update <version>`.
+
 When the plugin file changed, it prints a line saying to restart OpenCode if new OpenCode sessions do not
 appear. See [Updating](install.md#updating).
 
@@ -493,7 +519,7 @@ Owned by [Updating](install.md#updating).
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` and registered projects with `arbiter.enabled` (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. |
+| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then hand the post-swap steps to the new binary: restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` and registered projects with `arbiter.enabled`, using the new release's hook source (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. A hidden `--finish-update` option, passed only by the updater, runs those steps in the finishing process; it refuses a version other than its own, `--release-candidate`, and a missing version, and the failure messages and the pinned retry `kyber-weave update <version>` are in [Update](#update). |
 
 ### `doctor` — repository documentation tooling
 

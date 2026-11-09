@@ -509,7 +509,9 @@ KyberDash is **replaced, never introduced**: update touches `kyberdash` only whe
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
 arbiter and reports an absent one rather than creating it. After replacing binaries, update
 also re-renders the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml` and for each registered project with `arbiter.enabled`
-(reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render.
+(reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render. The re-render
+runs in the new release after the swap, so it writes the hook source that release ships, not the source of
+the release you updated from.
 `--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
 logged. To add it later, re-run `install.sh`. Updating to a release below the version floor
@@ -518,6 +520,13 @@ leaves `kyberdash` alone for the same reason the install skips it.
 `--release-candidate` matches `install.sh --prerelease`: it reads the GitHub Releases
 list (not `/releases/latest`) and takes the newest non-draft tag. Do not combine it with
 a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc.1`).
+
+**If an update ends with an error after the binaries were installed.** The message begins with
+`kyber-weave <version> is installed, but ...`, which means the binaries are already updated and only the
+final steps did not finish. Run `kyber-weave update <version>` to finish them. That run takes the "already
+on" path and re-renders the hooks. A hook warning `warning: arbiter hooks were not refreshed: ...` exits 0
+and says the same thing. If you updated from a build older than this change, its own updater can show
+`Could not load file or assembly` once. The binaries are installed; run `kyber-weave update` once more.
 
 Global `kyber-weave --version` still prints the running binary; pinning is a positional
 argument so the two do not collide.
