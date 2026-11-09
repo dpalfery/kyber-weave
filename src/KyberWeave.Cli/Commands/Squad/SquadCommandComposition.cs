@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -716,6 +717,39 @@ internal static class SquadCommandComposition
                 $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
 
         return home;
+    }
+
+    /// <summary>
+    ///     Loads the host configuration a Squad verb reads for <paramref name="targetRoot" />. A global run is
+    ///     anchored at the home directory, where <c>.kyber-weave/kyber-weave.yml</c> is the user-level file that
+    ///     records <c>arbiter.global.targets</c>; reading it as a project config would reject that block as
+    ///     <c>KW-ARB-CONFIG-011</c>. Any other root, including the recorded root of a legacy single-root global
+    ///     receipt, is a project and loads as one.
+    /// </summary>
+    /// <param name="targetRoot">The root the run is anchored at.</param>
+    /// <param name="scope">Whether the run is global or project scope.</param>
+    /// <param name="homeDirectory">The home directory the run's user paths name.</param>
+    public static KyberWeaveConfigLoadResult TryLoadScopeConfig(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        string homeDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        bool anchoredAtHome = scope == SquadDeploymentScope.Global &&
+                              string.Equals(
+                                  Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot)),
+                                  Path.TrimEndingDirectorySeparator(Path.GetFullPath(homeDirectory)),
+                                  comparison);
+
+        // A home without the user-level file keeps the project loader's fallback to a legacy root-level file.
+        return anchoredAtHome && File.Exists(UserHostConfig.GetPath(homeDirectory))
+            ? KyberWeaveConfigLoader.TryLoadUserConfig(homeDirectory)
+            : KyberWeaveConfigLoader.TryLoad(targetRoot);
     }
 
     /// <summary>
