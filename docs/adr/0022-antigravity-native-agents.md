@@ -4,7 +4,7 @@ title: Native per-agent Antigravity rendering and cross-target capability-not-is
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-11-09
 component: KyberSquad
 ---
 
@@ -124,9 +124,13 @@ However, live verification also surfaced critical security and governance findin
 
 8. **Inconclusive tool mappings are withheld pending further live validation.**
    Per D12, tools whose capability mappings could not be fully exercised live during C0
-   (`grep_search`, `replace_file_content`, `multi_replace_file_content`, `search_web`, `read_url_content`)
+   (`grep_search`, `multi_replace_file_content`, `search_web`, `read_url_content`)
    are withheld from emitted `tools:` lists in this pass. `model` emits only confirmed tiers (`inherit`,
-   `flash`, `pro`); the unconfirmed `FLASH_LITE` tier is omitted.
+   `flash`, `pro`); the unconfirmed `FLASH_LITE` tier is omitted. Amended 2026-11-09: a live probe
+   showed `replace_file_content` gives an agent the CLI's `edit_file`, and `multi_replace_file_content`
+   alone gives it nothing. Every profile with `filesystem.write: allow` therefore emits
+   `replace_file_content` beside `write_to_file`, so a writer changes a few lines of a large file
+   instead of emitting the whole file.
 
 9. **Existing deployment receipts migrate automatically.**
    `SquadDeploymentPlan.CreateUpdate` diffs previous receipt files against fresh native renders. When
