@@ -748,10 +748,13 @@ internal static class SquadCommandComposition
             string home = Path.GetFullPath(homeDirectory);
             KyberWeaveConfigLoadResult user = KyberWeaveConfigLoader.TryLoadUserConfig(home);
 
-            // Only a home with no user-level file falls back to the project loader's legacy root-level file.
-            return user.ConfigPath is not null && File.Exists(user.ConfigPath)
-                ? user
-                : KyberWeaveConfigLoader.TryLoad(home);
+            // Only a home with no user-level file falls back, and only to the explicit legacy root-level file, so a
+            // user file created meanwhile is never re-probed and read as a project config.
+            if (user.ConfigPath is not null && File.Exists(user.ConfigPath))
+                return user;
+
+            string legacy = Path.Combine(home, "kyber-weave.yml");
+            return File.Exists(legacy) ? KyberWeaveConfigLoader.TryLoad(home, legacy) : user;
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
