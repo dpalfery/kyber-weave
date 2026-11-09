@@ -78,7 +78,7 @@ public static class SquadWorkerBaselineInjector
                 "worker render receives, so text outside it never reaches a worker.");
         }
 
-        if (text.IndexOf(BlockOpen, closeIndex + BlockClose.Length, StringComparison.Ordinal) >= 0 ||
+        if (text.IndexOf(BlockOpen, openIndex + BlockOpen.Length, StringComparison.Ordinal) >= 0 ||
             text.IndexOf(BlockClose, closeIndex + BlockClose.Length, StringComparison.Ordinal) >= 0)
         {
             throw new SquadRenderValidationException(
@@ -133,6 +133,11 @@ public static class SquadWorkerBaselineInjector
         int closeIndex = openIndex < 0
             ? -1
             : body.IndexOf(BlockClose, openIndex + BlockOpen.Length, StringComparison.Ordinal);
+
+        if (openIndex >= 0 && closeIndex < 0)
+        {
+            return string.Concat(body[..openIndex].TrimEnd(), "\n\n", block, "\n");
+        }
 
         return closeIndex < 0
             ? string.Concat(body.TrimEnd(), "\n\n", block, "\n")

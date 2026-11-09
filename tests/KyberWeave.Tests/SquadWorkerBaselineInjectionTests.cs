@@ -1,6 +1,7 @@
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -131,5 +132,45 @@ public sealed class SquadWorkerBaselineInjectionTests
         }
 
         return count;
+    }
+
+    [Fact]
+    public void NestedBlockOpenThrowsSquadRenderValidationException()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-baseline-" + Guid.NewGuid().ToString("N"));
+        string sharedDir = Path.Combine(tempDir, "shared");
+        Directory.CreateDirectory(sharedDir);
+        try
+        {
+            string baselinePath = Path.Combine(sharedDir, "worker-baseline.md");
+            File.WriteAllText(
+                baselinePath,
+                "<worker-baseline>\n<worker-baseline>\ntext\n</worker-baseline>");
+
+            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineInjector.ReadBlock(tempDir));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void UnclosedBlockInInstructionBodyIsReplacedWithoutDuplicateBlock()
+    {
+        SquadAgent sample = TestSquadCorpus.CanonicalSource.Agents.First(a => a.Invocation == SquadInvocation.Subagent);
+        SquadSource source = TestSquadCorpus.CanonicalSource with
+        {
+            Agents = [sample with { InstructionBody = "body <worker-baseline> unclosed" }]
+        };
+
+        string block = "<worker-baseline>\nclean\n</worker-baseline>";
+        SquadSource applied = SquadWorkerBaselineInjector.Apply(source, block);
+
+        string body = applied.Agents[0].InstructionBody;
+        Assert.Equal(1, Occurrences(body, "<worker-baseline>"));
+        Assert.Equal(1, Occurrences(body, "</worker-baseline>"));
+        Assert.StartsWith("body", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("unclosed", body, StringComparison.Ordinal);
     }
 }
