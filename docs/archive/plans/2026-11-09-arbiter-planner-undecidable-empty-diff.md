@@ -2,7 +2,7 @@
 id: plans/2026-11-09-arbiter-planner-undecidable-empty-diff
 title: Arbiter planner diff rule handles absent changed paths without escalating
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 created: 2026-11-09
@@ -14,7 +14,7 @@ documentation-impact: no-design-change
 
 # Arbiter planner diff rule handles absent changed paths without escalating
 
-**Status: Ready.**
+**Status: Archived — complete 2026-11-09.**
 Development mode `test-first`; autonomy `autonomous`; scale `no-design-change` on component `KyberArbiter`.
 
 **Bottom line.** When an `architect` planner dispatch returns, the Arbiter's `PostToolUse` hook evaluates rule `KW-ARB-PLANNER-DIFF-001` on trigger `delegate.planner.returned`. Because the hook execution model in `HookGitFacts` does not take a pre-dispatch git snapshot, `git.changed-paths.since-dispatch` is intentionally absent (`null`). `KW-ARB-PLANNER-DIFF-001` only defined `subset-of: config.planning-dirs` and `exists: true`, both of which evaluate to `false` when the fact is absent. This caused `RuleEngine.Decide` to return `undecidable`, which the `Conductor` trigger family maps to `escalate`, triggering repeated Arbiter escalations (`STATUS: ARBITER_ESCALATION`, `REPEAT: 2`) on valid planner returns. The fix adds `exists: false` and `count: 0` clauses to `KW-ARB-PLANNER-DIFF-001` answering `inside`, updates the pinned rule set in `tests/KyberWeave.Tests/Arbiter/ArbiterExistsFalseRuleTests.cs`, and adds comprehensive test coverage in `tests/KyberWeave.Tests/Arbiter/ArbiterPlannerDiffRuleTests.cs`.
@@ -72,6 +72,12 @@ In `RulePredicate.cs` (lines 220-228, 306-312), `ResolveFact` treats a null-valu
 
 - **Declared scale:** `no-design-change` on `KyberArbiter`.
 - **Documentation waiver:** Defect fix for `KW-ARB-PLANNER-DIFF-001` rule definition in `default-rules.yml` and updating test assertions; no architectural changes, new components, or documentation updates required.
+
+## Design harvest
+
+| Item | Target component | Doc type | Disposition |
+|---|---|---|---|
+| D1–D3, AP1 | KyberArbiter | — | Documentation waiver: defect fix in default-rules.yml and test assertions that leaves no architectural or operational invariant. The rationale lives in this archived plan. No ADR — ADR waiver: bug fix for an incomplete rule definition with no new direct dependency, boundary, or schema. |
 
 ## Investigation findings
 
@@ -171,3 +177,27 @@ graph TD
   - Documentation schema and drift validation (`docs validate` and `docs drift`).
 - **Review:** Full review council verification before PR merge.
 - **Docs-dev closeout:** Upon completion, this plan file moves to `docs/archive/plans/` and its entry in `docs/plans/README.md` moves from **Active Plans** to **Archived Plans** with the documentation waiver and test evidence recorded.
+
+## Closeout mapping
+
+**Completed 2026-11-09.** Archived under `docs/archive/plans/`. Every decision D1 to D3 and AP1 maps to a destination below.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| Reproduction command | `dotnet run --project src/KyberWeave.Arbiter --no-build -- hook --harness factory <<< '{"hook_event_name":"PostToolUse","tool_name":"Task","tool_input":{"subagent_type":"architect","prompt":"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan the upgrade"},"tool_response":"done"}'` exits 0 with no escalation. |
+| Targeted tests | `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests --filter "FullyQualifiedName~ArbiterPlannerDiffRuleTests\|FullyQualifiedName~ArbiterExistsFalseRuleTests"` passes: 18 passed, 0 failed. |
+| `docs validate --merge-ready`, `docs drift` | 0 findings after archive. |
+
+### Mapping
+
+Documentation-impact is `no-design-change`, impact component is KyberArbiter, last-reviewed is 2026-11-09 for every row, and status is archived.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | Documentation waiver: defect fix in default-rules.yml adding exists: false and count: 0 clauses to KW-ARB-PLANNER-DIFF-001. No architectural change; rationale recorded in this plan. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+| D2 | Documentation waiver: test assertions updated in ArbiterExistsFalseRuleTests.cs and ArbiterPlannerDiffRuleTests.cs. Test-scoped only. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+| D3 | Documentation waiver: no-design-change on KyberArbiter. No ADR — ADR waiver: defect fix for rule definition in default-rules.yml. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+| AP1 | Documentation waiver: autonomous approval of plan and test-first execution. Operational dispatch record only. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+
