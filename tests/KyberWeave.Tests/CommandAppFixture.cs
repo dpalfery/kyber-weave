@@ -62,6 +62,12 @@ internal static class CommandAppFixture
     public static CommandApp ReviewCatalogue() => Build(strictParsing: true, ReviewCatalogueBranch);
 
     /// <summary>
+    /// The <c>review suppressions</c> boundary: the <c>review</c> branch and its single
+    /// <c>suppressions</c> command, strict for the same reason as <see cref="ReviewGates"/>.
+    /// </summary>
+    public static CommandApp ReviewSuppressions() => Build(strictParsing: true, ReviewSuppressionsBranch);
+
+    /// <summary>
     /// Both branches at once, strict: <c>docs init</c> and the council <c>review gates</c> in one
     /// app, which is what a case needs when it scaffolds a repository and then gates it.
     /// </summary>
@@ -97,4 +103,7 @@ internal static class CommandAppFixture
 
     private static void ReviewCatalogueBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewCatalogueCommand>("catalogue"); });
+
+    private static void ReviewSuppressionsBranch(IConfigurator config) =>
+        config.AddBranch("review", review => { review.AddCommand<ReviewSuppressionsCommand>("suppressions"); });
 }

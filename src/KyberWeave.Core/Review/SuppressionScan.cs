@@ -227,6 +227,10 @@ public static partial class SuppressionScan
         byte[] bytes;
         try
         {
+            FileInfo fileInfo = new(fullPath);
+            if (!fileInfo.Exists || fileInfo.Length > 10 * 1024 * 1024)
+                return null;
+
             bytes = File.ReadAllBytes(fullPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
@@ -305,7 +309,10 @@ public static partial class SuppressionScan
     }
 
     private static bool CarriesReason(string text) =>
-        text.Contains(ReasonToken, StringComparison.OrdinalIgnoreCase);
+        ReasonPattern().IsMatch(text);
+
+    [GeneratedRegex(@"\breason\s*:", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex ReasonPattern();
 
     /// <summary>The C# pragma that disables a compiler warning.</summary>
     [GeneratedRegex(@"#\s*pragma\s+warning\s+disable\b", RegexOptions.CultureInvariant)]

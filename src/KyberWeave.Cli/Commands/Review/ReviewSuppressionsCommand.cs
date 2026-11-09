@@ -49,14 +49,14 @@ public sealed class ReviewSuppressionsCommand : Command<ReviewSuppressionsSettin
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
         {
-            report.Add(new Diagnostic(
-                ChangeUnreadable,
-                Severity.Error,
-                $"Cannot resolve path '{settings.Path}': {ex.Message}",
-                "review suppressions",
-                settings.Path));
-            CommandHelpers.Finish(report, settings, "review suppressions", "Suppression");
-            return 1;
+            WriteClientInputError($"{InvalidInput}: Cannot resolve path '{settings.Path}': {ex.Message}");
+            return ClientInputExitCode;
+        }
+
+        if (!Directory.Exists(root))
+        {
+            WriteClientInputError($"{InvalidInput}: '{root}' is not a directory");
+            return ClientInputExitCode;
         }
 
         string baseRef = settings.BaseRef ?? SuppressionScan.DefaultBase;

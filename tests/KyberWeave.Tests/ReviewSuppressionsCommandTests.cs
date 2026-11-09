@@ -82,6 +82,25 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
         AssertExitCode(0, run);
     }
 
+    [Fact]
+    public void AnUnreasonSubstringDoesNotSatisfyTheGate()
+    {
+        AddLines("src/a.cs", "#pragma warning disable CS0168 // unreason: not a real reason");
+
+        CliRun run = Cli("review", "suppressions", _repo);
+
+        AssertExitCode(1, run);
+    }
+
+    [Fact]
+    public void AnInvalidOrMissingPathIsRefusedWithExit2AndKwReview028()
+    {
+        CliRun run = Cli("review", "suppressions", Path.Combine(_repo, "does-not-exist"));
+
+        AssertExitCode(2, run);
+        Assert.Contains("KW-REVIEW-028", run.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The suppression this repository already carries in a committed file is not the change's to
     /// judge. The file is changed — so it is in the scan's set — and the suppression line is context,
@@ -128,15 +147,8 @@ public sealed class ReviewSuppressionsCommandTests : IDisposable
 
     private CliRun Cli(params string[] arguments)
     {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("review", review => review.SafetyOff().AddCommand("suppressions", SuppressionCommandType()));
-        });
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => app.Run(arguments));
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CommandAppFixture.ReviewSuppressions().Run(arguments));
         return new CliRun(execution.Result, execution.Output);
     }
 

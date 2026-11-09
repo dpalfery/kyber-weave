@@ -1301,7 +1301,7 @@
       "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
-      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; git argv only (`diff`, `ls-files`, `show`), with stdin closed by ProcessRunner so the child exits at EOF."
+      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
     }
   ]
 }
