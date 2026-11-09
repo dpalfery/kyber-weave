@@ -21,6 +21,9 @@ public sealed class UpdateCommandTests : IDisposable
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();
 
+    /// <summary>The loopback the last helper run used, so a test can read the child's own outcome.</summary>
+    private LoopbackFinishingProcess? _lastChild;
+
     public void Dispose()
     {
         _install.Dispose();
@@ -1021,6 +1024,7 @@ public sealed class UpdateCommandTests : IDisposable
             runProcess,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);
+        _lastChild = loopback;
         return updater.Run(options);
     }
 
@@ -1066,8 +1070,13 @@ public sealed class UpdateCommandTests : IDisposable
             trayExitCode: 3);
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash tray step", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 3", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash tray step", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 3", child.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1169,6 +1178,7 @@ public sealed class UpdateCommandTests : IDisposable
             runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
+        _lastChild = loopback;
         return updater.Run(options);
     }
 
@@ -1403,8 +1413,13 @@ public sealed class UpdateCommandTests : IDisposable
             engineResult: new ProcessResult(2, string.Empty, "engine did not answer"));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash engine step", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 2", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash engine step", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 2", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
@@ -1671,7 +1686,12 @@ public sealed class UpdateCommandTests : IDisposable
             engineException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash engine step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash engine step could not start", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
@@ -1694,7 +1714,12 @@ public sealed class UpdateCommandTests : IDisposable
             trayException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash tray step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash tray step could not start", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 

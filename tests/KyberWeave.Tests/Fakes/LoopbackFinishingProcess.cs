@@ -23,6 +23,13 @@ internal sealed class LoopbackFinishingProcess
     private readonly Func<string, IReadOnlyList<string>, ProcessResult>? _captureProcess;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
 
+    /// <summary>
+    /// The outcome the finish-mode child returned on its last hand-off, with its own message. The parent only receives
+    /// the exit code through the seam, because the real child prints its message on the inherited console; this keeps
+    /// the child's text reachable to a test without a static.
+    /// </summary>
+    internal SelfUpdateOutcome? LastChildOutcome { get; private set; }
+
     internal LoopbackFinishingProcess(
         HttpMessageHandler handler,
         SelfUpdateHost parentHost,
@@ -84,6 +91,7 @@ internal sealed class LoopbackFinishingProcess
             NoArbiter: arguments.Contains("--no-arbiter"),
             NoRestart: arguments.Contains("--no-restart"),
             FinishUpdate: true));
+        LastChildOutcome = outcome;
         return outcome.ExitCode;
     }
 }
