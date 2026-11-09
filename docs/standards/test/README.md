@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---

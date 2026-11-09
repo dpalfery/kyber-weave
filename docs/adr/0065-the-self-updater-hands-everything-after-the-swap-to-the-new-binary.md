@@ -4,7 +4,7 @@ title: The self-updater hands everything after the swap to the new binary
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 component: Distribution
 decided-by: []
 supersedes: []

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 ---
 
 # Distribution and release flow

@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-09
 ---
 
 # CLI command surface

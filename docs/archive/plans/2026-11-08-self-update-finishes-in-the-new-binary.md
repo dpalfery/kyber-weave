@@ -2,11 +2,11 @@
 id: plans/2026-11-08-self-update-finishes-in-the-new-binary
 title: Finish a self-update in the new binary, not in the one that was just replaced
 doc-type: plan
-status: current
+status: archived
 component: Distribution
 owner: dpalfery
 created: 2026-11-08
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 development-mode: test-first
 autonomy: autonomous
 documentation-impact: extends-component
@@ -15,8 +15,9 @@ impact-components: [Distribution, KyberArbiter]
 
 # Finish a self-update in the new binary, not in the one that was just replaced
 
-**Status: Ready.** Approved and ready to execute (decision `AP1`). Worker prompts are in the sibling
-`2026-11-08-self-update-finishes-in-the-new-binary.tasks.json`; this Markdown plan stays the authority.
+**Status: Archived.** Closed 2026-11-09. The change shipped in draft pull request 548. The sibling task
+file was removed at closeout; the Closeout mapping at the end of this plan is the record of where each
+decision and harvest item now lives.
 **Development mode:** `test-first` (packet input).
 **Autonomy:** `autonomous` (packet input; every open item is decided and recorded below).
 **Scale:** `extends-component`, components `Distribution` and `KyberArbiter`.
@@ -427,3 +428,60 @@ the fix on the owner's machine.
 | H3 | Distribution | reference | The hidden `--finish-update` option, who passes it, its refusal rules; the failure wording for steps after the install and the pinned retry command; `kyber-weave update` after an error | `docs/cli-command-surface.md` (Update section and the `update` row) and `docs/install.md` (Updating) |
 | H4 | KyberArbiter | runbook | The update-time refresh runs in the new release and so renders the new release's hook source; how its failure reads | `docs/kyber-arbiter/runbook.md` (Hooks) |
 | H5 | Distribution | standard | The hand-off's 15-minute bound and the quiet rehearsal as production process starts | `docs/standards/test/README.md` ("Production .NET starts carry bounds too") |
+
+## Closeout mapping
+
+Closed 2026-11-09. Every decision D1 to D15 and AP1, and every Design harvest item H1 to H5, maps to a
+destination below. Documentation-impact for every row: `extends-component`. Last reviewed: 2026-11-09.
+
+**Evidence.** Draft pull request 548 against `dpalfery/kyber-weave`. On macOS: 145 targeted update unit
+tests, 29 repo-policy tests, and `scripts/update-loop.sh --no-kyberdash` (22 checks, including
+`arbiter-hooks-after-swap`) all green. CI `update-loop` legs passed on macOS and Ubuntu. Not live-verified
+on Windows or the owner's real home (gaps G2 and the `[NOT LIVE-VERIFIED]` list above).
+
+**Circuit-breaker.** The step-naming assertions of four `UpdateCommandTests` moved onto the child's
+recorded outcome (commit `73b908a0`). Assertions were not weakened.
+
+**Autonomous low-confidence decisions for human review:** D1, D3, D4 and D11 (listed in the pull request
+body).
+
+**ADR number.** The decision record is ADR 0065, not the 0061 this plan guessed at D11.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [ADR 0065, the rejected alternatives and the re-exec choice](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md); [distribution.md, the update sequence](../../distribution.md) | extends-component | Distribution, KyberArbiter | 2026-11-09 | archived |
+| D2 | [ADR 0065](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md); [distribution.md, the update sequence](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D3 | [cli-command-surface.md, the hidden `update --finish-update` option and its refusal rules](../../cli-command-surface.md); [distribution.md, the hand-off contract](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D4 | [distribution.md, the quiet rehearsal before the first commit](../../distribution.md); [standards/test, production process starts carry bounds](../../standards/test/README.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D5 | [distribution.md, the hand-off runs on every real update](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D6 | [install.md, Updating: the failure wording and the pinned retry](../../install.md); [distribution.md, the failure messages](../../distribution.md); [kyber-arbiter runbook, Hooks](../../kyber-arbiter/runbook.md) | extends-component | Distribution, KyberArbiter | 2026-11-09 | archived |
+| D7 | [install.md, Updating: steps after the install that did not finish](../../install.md); [distribution.md, the failure messages](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D8 | [standards/test, RED is observed before the fix](../../standards/test/README.md). Nearest rule: the inert-declaration step is specific to this plan and is not described in the standard | extends-component | Distribution | 2026-11-09 | archived |
+| D9 | [distribution.md, the local loop and the `arbiter-hooks-after-swap` case](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D10 | [ADR 0065](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md); [distribution.md](../../distribution.md); [kyber-arbiter runbook, Hooks](../../kyber-arbiter/runbook.md) | extends-component | Distribution, KyberArbiter | 2026-11-09 | archived |
+| D11 | [ADR 0065](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md) and its row in the [ADR index](../../adr/README.md) | extends-component | Distribution | 2026-11-09 | archived |
+| D12 | [distribution.md](../../distribution.md); [install.md](../../install.md); [cli-command-surface.md](../../cli-command-surface.md); [kyber-arbiter runbook](../../kyber-arbiter/runbook.md); [standards/test](../../standards/test/README.md); [ADR 0065](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md) and the [ADR index](../../adr/README.md) | extends-component | Distribution, KyberArbiter | 2026-11-09 | archived |
+| D13 | [ADR 0060, runs start from the fetched remote and carry the harness name](../../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md) (existing record, unchanged) | extends-component | Distribution | 2026-11-09 | archived |
+| D14 | [plans index, Plan Decisions and Closeout Policy](../../plans/README.md#plan-decisions-and-closeout-policy). Nearest rule on plan frontmatter and provenance; development mode and autonomy are not named there | extends-component | Distribution | 2026-11-09 | archived |
+| D15 | [install.md, Updating: the first update away from the old release](../../install.md); [distribution.md, a self-updater is always run by the old binary](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| AP1 | [plans index, Plan Decisions and Closeout Policy](../../plans/README.md#plan-decisions-and-closeout-policy), which defines the Status / approval provenance column where this approval is recorded | extends-component | Distribution, KyberArbiter | 2026-11-09 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0065](../../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md) and its [ADR index row](../../adr/README.md) | extends-component | Distribution | 2026-11-09 | archived |
+| H2 | [distribution.md, the self-updater and local-loop sections](../../distribution.md) | extends-component | Distribution | 2026-11-09 | archived |
+| H3 | [cli-command-surface.md, the update section and row](../../cli-command-surface.md); [install.md, Updating](../../install.md) | extends-component | Distribution | 2026-11-09 | archived |
+| H4 | [kyber-arbiter runbook, Hooks](../../kyber-arbiter/runbook.md) | extends-component | KyberArbiter | 2026-11-09 | archived |
+| H5 | [standards/test, "Production .NET starts carry bounds too"](../../standards/test/README.md) | extends-component | Distribution | 2026-11-09 | archived |
+
+**Waivers.** The plan states no documentation waiver and no ADR waiver, so none is recorded here. D8, D14
+and AP1 map to the nearest live rule above, which does not describe them directly. Open owner decision:
+keep those nearest mappings, or record documentation waivers for these process-only items.
+
+**Out of scope, filed as todos:** [ReadGlobalTargets turns a YAML problem into no targets](../../todo/read-global-targets-yaml-failure-is-silent.md);
+[ResolveGlobalTimeout has a bare catch](../../todo/arbiter-hook-refresher-global-timeout-bare-catch.md);
+[a failed KyberDash engine step ends the update before the hook refresh](../../todo/kyberdash-engine-failure-skips-hook-refresh.md).

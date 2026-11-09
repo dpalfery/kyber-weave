@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 ---
 
 # Installing Kyber-Weave
