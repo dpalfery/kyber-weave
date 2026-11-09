@@ -57,7 +57,10 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to **Archived Plans** below and its file moves to `docs/archive/plans/`.
+| Plan | Status | Date | Scope / Scale | Goal |
+|---|---|---|---|---|
+| [2026-11-09-arbiter-planner-undecidable-empty-diff.md](2026-11-09-arbiter-planner-undecidable-empty-diff.md) | Draft | 2026-11-09 | no-design-change (KyberArbiter) | Prevent false-positive Arbiter escalations on planner returns by handling absent/empty changed paths in KW-ARB-PLANNER-DIFF-001 |
+
 
 ## Archived Plans
 
