@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -52,6 +53,8 @@ internal sealed class HookGitFacts(
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
     private const int MaxStoredSnapshots = 64;
+    private const int MaxHashedPromptBytes = 16_384;
+    private static readonly TimeSpan SnapshotRetention = TimeSpan.FromHours(4);
 
     /// <inheritdoc/>
     public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev)
@@ -129,13 +132,22 @@ internal sealed class HookGitFacts(
         ArbiterEvent ev,
         GitSnapshot snapshot)
     {
+        // Without a tool-call id or a prompt there is no pairing key: no post can ever
+        // match this entry, so storing it only evicts baselines that could still pair.
+        if (string.IsNullOrWhiteSpace(ev.ToolCallId) && string.IsNullOrWhiteSpace(ev.Prompt))
+        {
+            return;
+        }
+
         WithSnapshotStore(directory, entries =>
         {
+            entries.RemoveAll(entry => DateTimeOffset.UtcNow - entry.RecordedAt > SnapshotRetention);
             entries.Add(new StoredSnapshot(
                 ev.ToolCallId,
                 target,
                 HashPrompt(ev.Prompt),
                 snapshot.Head,
+                DateTimeOffset.UtcNow,
                 new Dictionary<string, string>(snapshot.BlobIds, StringComparer.Ordinal),
                 new Dictionary<string, string>(snapshot.Statuses, StringComparer.Ordinal)));
             while (entries.Count > MaxStoredSnapshots)
@@ -154,23 +166,20 @@ internal sealed class HookGitFacts(
     {
         // Peek, never consume: a retry carrying the same tool-call id must see the same
         // baseline instead of falling back to a diff the dispatch's commits never appear in.
-        GitSnapshot? matched = null;
-        WithSnapshotStore(directory, entries =>
+        // Lock-free: atomic renames mean readers only ever see whole documents, so pairing
+        // a recorded baseline never waits on — or blocks — a concurrent record.
+        List<StoredSnapshot> entries = ReadSnapshots(Path.Combine(directory, SnapshotFileName));
+        int index = FindMatchingIndex(entries, target, ev);
+        if (index < 0)
         {
-            int index = FindMatchingIndex(entries, target, ev);
-            if (index < 0)
-            {
-                return false;
-            }
+            return null;
+        }
 
-            StoredSnapshot entry = entries[index];
-            matched = new GitSnapshot(
-                entry.Head,
-                entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
-                entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
-            return false;
-        });
-        return matched;
+        StoredSnapshot entry = entries[index];
+        return new GitSnapshot(
+            entry.Head,
+            entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
+            entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
     }
 
     private static int FindMatchingIndex(
@@ -208,8 +217,22 @@ internal sealed class HookGitFacts(
         return -1;
     }
 
-    private static string HashPrompt(string prompt) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prompt)));
+    // Bounded input: only the first bytes enter the hash, mixed with the total length,
+    // so two prompts sharing a prefix but not a length still key differently.
+    private static string HashPrompt(string prompt)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(prompt);
+        if (bytes.Length <= MaxHashedPromptBytes)
+        {
+            return Convert.ToHexString(SHA256.HashData(bytes));
+        }
+
+        byte[] suffix = Encoding.UTF8.GetBytes(":" + bytes.Length.ToString(CultureInfo.InvariantCulture));
+        byte[] head = new byte[MaxHashedPromptBytes + suffix.Length];
+        Buffer.BlockCopy(bytes, 0, head, 0, MaxHashedPromptBytes);
+        Buffer.BlockCopy(suffix, 0, head, MaxHashedPromptBytes, suffix.Length);
+        return Convert.ToHexString(SHA256.HashData(head));
+    }
 
     private static void WithSnapshotStore(
         string directory,
@@ -238,6 +261,7 @@ internal sealed class HookGitFacts(
                 using (lockFile)
                 {
                     string filePath = Path.Combine(directory, SnapshotFileName);
+                    SweepTempFiles(directory);
                     List<StoredSnapshot> entries = ReadSnapshots(filePath);
                     if (mutate(entries))
                     {
@@ -316,16 +340,34 @@ internal sealed class HookGitFacts(
         return ReviewBase;
     }
 
+    // Crash debris from an interrupted write-aside: swept on the next locked record,
+    // before the fresh document moves into place.
+    private static void SweepTempFiles(string directory)
+    {
+        foreach (string temp in Directory.GetFiles(directory, ".snapshots.*.tmp"))
+        {
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
     /// <summary>
     /// One pre-dispatch snapshot. <see cref="PromptHash"/> carries the SHA-256 hex of the
     /// host prompt, never the prompt itself, so the store holds no host payload. Entries
-    /// written before hashing carry a null hash and simply never match.
+    /// written before hashing carry a null hash and simply never match; entries older
+    /// than the retention window are pruned on the next record.
     /// </summary>
     private sealed record StoredSnapshot(
         string? CallId,
         string? Target,
         string? PromptHash,
         string Head,
+        DateTimeOffset RecordedAt,
         Dictionary<string, string>? BlobIds,
         Dictionary<string, string>? Statuses);
 }
