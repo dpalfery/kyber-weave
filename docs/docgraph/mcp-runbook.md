@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -37,7 +37,12 @@ code-refs:
 
 `kyber-weave-mcp` serves [the documentation graph](architecture.md) to an agent over stdio
 MCP. It is the delivery surface for the whole feature: everything else produces the corpus,
-this hands it to a model.
+this hands it to a model. Clients register it as **`kw-docs`**.
+
+**KyberDash MCP (`kw-dash`)** is a different server: `kyberdash mcp` exposes read-only
+analytics against a running KyberDash engine. What it is, how it differs from `kw-docs`, and
+how to set it up in every harness are documented on [KyberDash MCP
+(`kw-dash`)](../dash/mcp.md), not on this page.
 
 ## Why it is a separate binary
 

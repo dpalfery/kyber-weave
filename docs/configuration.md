@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-09
 code-refs:
   - KyberWeaveConfig
   - KyberWeaveConfigLoader
@@ -693,7 +693,17 @@ mcp:
       provenance: third-party
       level: recommended
       install: codegraph init .
+    kw-dash:
+      command: [kyberdash, mcp]
+      provenance: third-party
+      level: recommended
+      install: curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh -s -- --prerelease
 ```
+
+**`kw-dash`** is the read-only KyberDash analytics server (`kyberdash mcp`), not
+`kyber-weave-mcp`. Declare it when this repository's agents should use KyberDash analytics
+from checked-in harness wiring; setup for every harness is
+[KyberDash MCP (`kw-dash`)](dash/mcp.md). `docs init` never adds `kw-dash` automatically.
 
 `docs init` scaffolds the section with exactly one server — `kw-docs`, launched
 `kyber-weave-mcp --repo-root .`, first-party — when it creates a host configuration, and
