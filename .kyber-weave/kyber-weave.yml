@@ -326,6 +326,14 @@ review:
     "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
       - KyberWeave.Tests.ReviewTaskGatesConfigTests
       - KyberWeave.Tests.ReviewGateKeysConfigTests
+    "src/KyberWeave.Core/Review/SuppressionScan.cs":
+      - KyberWeave.Tests.ReviewSuppressionsCommandTests
+    "src/KyberWeave.Core/Review/TestClassMapping.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+    "src/KyberWeave.Core/Arbiter/Facts/GateReportFacts.cs":
+      - KyberWeave.Tests.Arbiter.ArbiterGateReportRuleTests
+    "src/KyberWeave.Core.Squad/Deployment/SquadWorkerBaselineInjector.cs":
+      - KyberWeave.Tests.SquadWorkerBaselineInjectionTests
 
   task-gates:
     # .NET. The format gates are the review.gates format checks in their per-change form. `fix`

@@ -907,6 +907,22 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlEmptyClassName));
     }
 
+    [Fact]
+    public void TestMapRejectsDuplicateTrimmedPatterns()
+    {
+        string yaml = """
+            review:
+              test-map:
+                "src/**":
+                  - Namespace.FirstTest
+                "  src/**  ":
+                  - Namespace.SecondTest
+            """;
+
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.Contains("duplicate pattern 'src/**'", ex.Message, StringComparison.Ordinal);
+    }
+
     private static bool HasFlag(IReadOnlyList<string> run, string flag)
     {
         foreach (string element in run)

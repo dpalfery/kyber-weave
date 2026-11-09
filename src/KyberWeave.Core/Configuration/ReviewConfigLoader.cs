@@ -207,7 +207,7 @@ public static class ReviewConfigLoader
             if (entry.Value is null || entry.Value.Count == 0)
             {
                 throw new YamlException(
-                    $"review.test-map '{entry.Key}' declares no test classes. Name at least one, or remove the entry.");
+                    $"review.test-map '{pattern}' declares no test classes. Name at least one, or remove the entry.");
             }
 
             List<string> classes = new(entry.Value.Count);
@@ -216,7 +216,7 @@ public static class ReviewConfigLoader
                 if (string.IsNullOrWhiteSpace(name))
                 {
                     throw new YamlException(
-                        $"review.test-map '{entry.Key}' has an empty class name. Name a fully qualified test class, " +
+                        $"review.test-map '{pattern}' has an empty class name. Name a fully qualified test class, " +
                         "such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
                 }
 
@@ -224,14 +224,18 @@ public static class ReviewConfigLoader
                 if (!IsClassName(trimmed))
                 {
                     throw new YamlException(
-                        $"review.test-map '{entry.Key}' has '{name}', which is not a fully qualified class name. " +
+                        $"review.test-map '{pattern}' has '{name}', which is not a fully qualified class name. " +
                         "Give the class's namespace and name, such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
                 }
 
                 classes.Add(trimmed);
             }
 
-            parsed[pattern] = classes;
+            if (!parsed.TryAdd(pattern, classes))
+            {
+                throw new YamlException(
+                    $"review.test-map declares duplicate pattern '{pattern}'. Consolidate its test classes under one key.");
+            }
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<string>>(parsed);
