@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -162,7 +162,7 @@ in a Squad run, and a dirty-only basis made a committed change invisible, so `KW
 empty set, treated it as "no code to judge", and skipped `correctness` and `test-adequacy` exactly
 when the run started committing each task. The rule now skips those two lenses only when the set is
 non-empty **and** positively Markdown-only, so a tree the Arbiter cannot read is judged rather than
-skipped (ADR 0053, decision 9).
+skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed-paths.since-dispatch` on `delegate.planner.returned` — computed by `HookGitFacts` against the pre-dispatch snapshot via `GitFacts.GetChangedPathsSinceSnapshot` and left absent when git cannot observe the repository — so an empty planner diff allows while out-of-scope writes or unobservable git state escalate.
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
 (today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
