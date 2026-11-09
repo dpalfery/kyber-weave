@@ -2631,6 +2631,11 @@ All `/api/kyber/*` responses return standard headers (`content-type: application
 
 ### Conversational analytics over MCP (`kyberdash mcp`)
 
+**Setup and harness wiring** — client key `kw-dash`, repository `required-servers`, and
+user-scope files for every harness — live on [KyberDash MCP (`kw-dash`)](mcp.md). This
+section is the **tool contract**. It is not the Kyber-Weave documentation server
+([`kw-docs`](../docgraph/mcp-runbook.md)).
+
 An assistant can interrogate the same engine through a read-only MCP surface instead of
 the dashboard. `kyberdash mcp` speaks stdio with the installed MCP SDK
 (`createAnalyticsMcpServer` in `dash/src/mcp/server.ts`) and reaches the engine only
