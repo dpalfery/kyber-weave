@@ -1,7 +1,7 @@
 {
   "schema-version": 1,
   "plan": "docs/plans/2026-11-09-arbiter-planner-undecidable-empty-diff.md",
-  "execution-digest": "",
+  "execution-digest": "4e33e3774aaf42eb357cf8a92adeb0e8e10b00e440eb82e28793c967ac369fd1",
   "tasks": [
     {
       "id": "T1",
