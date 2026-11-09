@@ -8,20 +8,17 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract tests for rule <c>KW-ARB-PLANNER-DIFF-001</c>: a planner return must write only inside
-/// the plan, spec and todo directories. Absent changed paths (such as when git facts are uncomputed or clean)
-/// and empty changed paths answer <c>inside</c> (<c>allow</c>); writes exclusively within planning directories
-/// answer <c>inside</c> (<c>allow</c>); writes outside planning directories answer <c>outside</c> (<c>escalate</c>).
+/// the plan, spec and todo directories. Absent changed paths (such as when git facts are uncomputed)
+/// answer <c>undecidable</c> (<c>escalate</c>); empty changed paths answer <c>inside</c> (<c>allow</c>);
+/// writes exclusively within planning directories answer <c>inside</c> (<c>allow</c>); writes outside
+/// planning directories answer <c>outside</c> (<c>escalate</c>).
 /// </summary>
 public sealed class ArbiterPlannerDiffRuleTests
 {
     private const string RuleId = "KW-ARB-PLANNER-DIFF-001";
 
-    private static readonly string[] DefaultPlanningDirs =
-    [
-        "docs/plans/**",
-        "docs/specs/**",
-        "docs/todo/**",
-    ];
+    private const string PlannerPrompt =
+        "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt";
 
     private static KyberWeaveConfig DocsConfig() => new()
     {
@@ -35,35 +32,43 @@ public sealed class ArbiterPlannerDiffRuleTests
             rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
     }
 
-    private static ArbiterFactSet Facts(object? changedPaths = null, bool includeChangedPaths = true)
+    private static ArbiterFactSet BuildRealPlannerReturnedFacts(KyberWeaveConfig config)
     {
-        ArbiterFactSet facts = new();
-        facts = facts.With("config.planning-dirs", DefaultPlanningDirs, ArbiterFactLabel.Derived);
-        if (includeChangedPaths)
-        {
-            facts = facts.With("git.changed-paths.since-dispatch", changedPaths, ArbiterFactLabel.Derived);
-        }
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(
+            new ArbiterEvent
+            {
+                Harness = "claude",
+                Phase = "post",
+                Target = "architect",
+                HarnessCaller = "conductor",
+                IsDispatch = true,
+                Prompt = PlannerPrompt,
+            },
+            "architect",
+            PlannerPrompt);
 
-        return facts;
+        Assert.Equal("delegate.planner.returned", classification.Trigger);
+        return TriggerFactBuilder.Build(classification, PlannerPrompt, config);
     }
 
-    private static ArbiterFactSet PlannerReturnedFacts(object? changedPaths = null, bool includeChangedPaths = true)
+    private static ArbiterFactSet PlannerReturnedFacts(
+        IReadOnlyList<string>? changedPaths = null,
+        bool includeChangedPaths = true)
     {
-        ArbiterFactSet facts = TriggerFactBuilder.Build(
-            "delegate.planner.returned",
-            "architect",
-            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt",
-            "conductor",
-            "harness",
-            DocsConfig());
+        ArbiterFactSet facts = BuildRealPlannerReturnedFacts(DocsConfig());
+
+        if (facts.Facts.TryGetValue("review.changed-paths", out ArbiterFact? declaredFact))
+        {
+            Assert.Null(declaredFact.Value);
+        }
 
         if (includeChangedPaths)
         {
-            return facts.With("git.changed-paths.since-dispatch", changedPaths, ArbiterFactLabel.Derived);
+            return facts.With("review.changed-paths", changedPaths, ArbiterFactLabel.Derived);
         }
 
         Dictionary<string, ArbiterFact> dict = facts.Facts
-            .Where(pair => !string.Equals(pair.Key, "git.changed-paths.since-dispatch", StringComparison.Ordinal))
+            .Where(pair => !string.Equals(pair.Key, "review.changed-paths", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         return new ArbiterFactSet(dict);
     }
@@ -82,20 +87,46 @@ public sealed class ArbiterPlannerDiffRuleTests
     }
 
     [Fact]
-    public void AbsentChangedPathsFactAnswersInsideAndAllows()
+    public void TheTriggerCatalogDeclaresReviewChangedPathsForDelegatePlannerReturned()
+    {
+        Assert.True(
+            ArbiterTriggerCatalog.TryGetFacts("delegate.planner.returned", out IReadOnlySet<string>? declared),
+            "delegate.planner.returned must be catalogued in ArbiterTriggerCatalog.");
+        Assert.Contains("review.changed-paths", declared);
+
+        ArbiterFactSet facts = BuildRealPlannerReturnedFacts(DocsConfig());
+        Assert.True(
+            facts.Facts.TryGetValue("review.changed-paths", out ArbiterFact? fact),
+            "delegate.planner.returned fact bag must declare review.changed-paths.");
+        Assert.Null(fact!.Value);
+    }
+
+    [Fact]
+    public void FactBagCarriesPlanningDirsDerivedFromConfigRegistry()
+    {
+        ArbiterFactSet facts = BuildRealPlannerReturnedFacts(DocsConfig());
+
+        IReadOnlyList<string> dirs = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            facts.Facts["config.planning-dirs"].Value);
+        Assert.Equal(["docs/plans/**", "docs/specs/**", "docs/todo/**"], dirs);
+        Assert.Equal(ArbiterFactLabel.Derived, facts.Facts["config.planning-dirs"].Label);
+    }
+
+    [Fact]
+    public void AbsentChangedPathsFactAnswersUndecidableAndEscalates()
     {
         ArbiterRule rule = ShippedRule();
-        ArbiterFactSet facts = Facts(includeChangedPaths: false);
+        ArbiterFactSet facts = PlannerReturnedFacts(includeChangedPaths: false);
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
 
-        Assert.Equal("inside", answer);
-        Assert.Equal(RuleEffects.Allow, effect);
+        Assert.Equal(RuleEngine.Undecidable, answer);
+        Assert.Equal(RuleEffects.Escalate, effect);
     }
 
     [Fact]
-    public void NullValuedChangedPathsFactAnswersInsideAndAllows()
+    public void NullValuedChangedPathsFactAnswersUndecidableAndEscalates()
     {
         ArbiterRule rule = ShippedRule();
         ArbiterFactSet facts = PlannerReturnedFacts(changedPaths: null, includeChangedPaths: true);
@@ -103,15 +134,15 @@ public sealed class ArbiterPlannerDiffRuleTests
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
 
-        Assert.Equal("inside", answer);
-        Assert.Equal(RuleEffects.Allow, effect);
+        Assert.Equal(RuleEngine.Undecidable, answer);
+        Assert.Equal(RuleEffects.Escalate, effect);
     }
 
     [Fact]
     public void EmptyChangedPathsAnswersInsideAndAllows()
     {
         ArbiterRule rule = ShippedRule();
-        ArbiterFactSet facts = Facts(Array.Empty<string>());
+        ArbiterFactSet facts = PlannerReturnedFacts(Array.Empty<string>());
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
@@ -128,7 +159,7 @@ public sealed class ArbiterPlannerDiffRuleTests
     {
         ArbiterRule rule = ShippedRule();
         string[] paths = [path];
-        ArbiterFactSet facts = Facts(paths);
+        ArbiterFactSet facts = PlannerReturnedFacts(paths);
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
@@ -147,7 +178,7 @@ public sealed class ArbiterPlannerDiffRuleTests
             "docs/specs/planner/requirements.md",
             "docs/todo/deferred-task.md",
         ];
-        ArbiterFactSet facts = Facts(paths);
+        ArbiterFactSet facts = PlannerReturnedFacts(paths);
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
@@ -160,11 +191,12 @@ public sealed class ArbiterPlannerDiffRuleTests
     [InlineData("src/KyberWeave.Core/Arbiter/Rules/ArbiterRule.cs")]
     [InlineData("docs/adr/0001-install.md")]
     [InlineData("README.md")]
+    [InlineData("src/payload.cs")]
     public void ChangedPathsOutsidePlanningDirectoriesAnswersOutsideAndEscalates(string path)
     {
         ArbiterRule rule = ShippedRule();
         string[] paths = [path];
-        ArbiterFactSet facts = Facts(paths);
+        ArbiterFactSet facts = PlannerReturnedFacts(paths);
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
@@ -182,7 +214,7 @@ public sealed class ArbiterPlannerDiffRuleTests
             "docs/plans/2026-11-09-feature-plan.md",
             "src/KyberWeave.Core/Arbiter/Rules/ArbiterRule.cs",
         ];
-        ArbiterFactSet facts = Facts(paths);
+        ArbiterFactSet facts = PlannerReturnedFacts(paths);
 
         string answer = RuleEngine.Decide(rule, facts);
         string effect = EffectFor(rule, answer);
