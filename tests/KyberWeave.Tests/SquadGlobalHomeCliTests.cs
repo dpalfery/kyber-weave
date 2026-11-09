@@ -96,7 +96,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor)));
 
-        Assert.NotEqual(0, execution.ExitCode);
+        AssertExit(execution, 1);
+        Assert.Contains("kyber-weave squad: error:", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]

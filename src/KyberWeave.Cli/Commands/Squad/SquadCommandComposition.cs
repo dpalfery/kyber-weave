@@ -720,11 +720,10 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>
-    ///     Loads the host configuration a Squad verb reads for <paramref name="targetRoot" />. A global run is
-    ///     anchored at the home directory, where <c>.kyber-weave/kyber-weave.yml</c> is the user-level file that
-    ///     records <c>arbiter.global.targets</c>; reading it as a project config would reject that block as
-    ///     <c>KW-ARB-CONFIG-011</c>. Any other root, including the recorded root of a legacy single-root global
-    ///     receipt, is a project and loads as one.
+    ///     Loads the host configuration a Squad verb reads. A global run always reads the home directory's
+    ///     <c>.kyber-weave/kyber-weave.yml</c> as the user-level file that records <c>arbiter.global.targets</c>,
+    ///     whatever root its receipt anchors at; reading it as a project config would reject that block as
+    ///     <c>KW-ARB-CONFIG-011</c>. Only a project-scope run loads <paramref name="targetRoot" /> as a project.
     /// </summary>
     /// <param name="targetRoot">The root the run is anchored at.</param>
     /// <param name="scope">Whether the run is global or project scope.</param>
@@ -734,21 +733,24 @@ internal static class SquadCommandComposition
         SquadDeploymentScope scope,
         string homeDirectory)
     {
-        if (string.IsNullOrWhiteSpace(targetRoot) || string.IsNullOrWhiteSpace(homeDirectory))
-            return KyberWeaveConfigLoadResult.Fail("The target root and the home directory must not be empty.", null);
+        if (string.IsNullOrWhiteSpace(targetRoot))
+            return KyberWeaveConfigLoadResult.Fail("The target root must not be empty.", null);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            return KyberWeaveConfigLoadResult.Fail("The home directory must not be empty.", null);
 
-        if (scope != SquadDeploymentScope.Global)
-            return KyberWeaveConfigLoader.TryLoad(targetRoot);
-
-        // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or the
-        // root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
         try
         {
-            string home = Path.GetFullPath(homeDirectory);
+            if (scope != SquadDeploymentScope.Global)
+                return KyberWeaveConfigLoader.TryLoad(targetRoot);
 
-            // A home without the user-level file keeps the project loader's fallback to a legacy root-level file.
-            return File.Exists(UserHostConfig.GetPath(home))
-                ? KyberWeaveConfigLoader.TryLoadUserConfig(home)
+            // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or
+            // the root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
+            string home = Path.GetFullPath(homeDirectory);
+            KyberWeaveConfigLoadResult user = KyberWeaveConfigLoader.TryLoadUserConfig(home);
+
+            // Only a home with no user-level file falls back to the project loader's legacy root-level file.
+            return user.ConfigPath is not null && File.Exists(user.ConfigPath)
+                ? user
                 : KyberWeaveConfigLoader.TryLoad(home);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
