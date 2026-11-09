@@ -441,7 +441,9 @@ public sealed class UpdateCommandTests : IDisposable
     /// <summary>
     /// The same parity for the <c>dotnet tool</c> channel: a <c>dotnet tool</c> install that is invoked
     /// with <c>--finish-update</c> must take the tool-channel refusal, not the version-mismatch error,
-    /// because FinishUpdate runs the channel guard before the version guards.
+    /// because FinishUpdate runs the channel guard before the version guards. The mismatch is what makes
+    /// the order matter — both orderings throw on a refused channel, so a matching version would pass
+    /// either way and pin nothing about the ordering.
     /// </summary>
     [Fact]
     public void FinishUpdateWithDotnetToolInstallIsRefused()
@@ -456,7 +458,7 @@ public sealed class UpdateCommandTests : IDisposable
         SelfUpdateOutcome outcome = Run(
             handler,
             host,
-            new SelfUpdateOptions("0.1.0", false, false, FinishUpdate: true));
+            new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("dotnet tool", outcome.Message, StringComparison.Ordinal);

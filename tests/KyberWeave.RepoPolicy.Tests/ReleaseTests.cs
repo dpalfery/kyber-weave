@@ -3287,8 +3287,10 @@ public sealed class ReleaseTests
         // hide the post-swap YamlDotNet defect from the swap-test and from production alike.
         Assert.Contains("Copyright=", body, StringComparison.Ordinal);
         Assert.Contains("release-local.sh", body, StringComparison.Ordinal);
-        // The pinned layout release is the one whose kyber-weave file moves every assembly's offset.
-        Assert.Contains("LAYOUT_VERSION", body, StringComparison.Ordinal);
+        // The case must run its update against the pinned layout release. A bare "LAYOUT_VERSION" assert is
+        // tautological because body starts at the LAYOUT_VERSION definition; the only occurrence that matters
+        // is `update_case "$LAYOUT_VERSION" --no-kyberdash --no-menubar` inside this section.
+        Assert.Contains("update_case \"$LAYOUT_VERSION\"", body, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------- Sandbox
