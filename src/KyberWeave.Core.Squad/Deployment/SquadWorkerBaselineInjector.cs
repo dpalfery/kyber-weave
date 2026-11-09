@@ -41,9 +41,10 @@ public static class SquadWorkerBaselineInjector
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
 
-    private sealed record CacheEntry(string? Block);
+    private sealed record CacheEntry(DateTime LastWriteTimeUtc, string? Block);
 
-    private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     /// <summary>Empties the baseline block cache.</summary>
     public static void ClearCache() => CachedBlocks.Clear();
@@ -61,14 +62,20 @@ public static class SquadWorkerBaselineInjector
     public static string? ReadBlock(string sourceDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
-        string normalized = Path.GetFullPath(sourceDirectory);
-        return CachedBlocks.GetOrAdd(normalized, dir => new CacheEntry(ReadBlockUncached(dir))).Block;
+        string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
+        string path = Path.Combine(normalized, RelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        DateTime lastWrite = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+        if (CachedBlocks.TryGetValue(normalized, out CacheEntry? entry) && entry.LastWriteTimeUtc == lastWrite)
+            return entry.Block;
+
+        string? block = ReadBlockUncached(path);
+        CachedBlocks[normalized] = new CacheEntry(lastWrite, block);
+        return block;
     }
 
-    private static string? ReadBlockUncached(string sourceDirectory)
+    private static string? ReadBlockUncached(string path)
     {
-        string path = Path.Combine(sourceDirectory, RelativePath.Replace('/', Path.DirectorySeparatorChar));
-
         string text;
         try
         {

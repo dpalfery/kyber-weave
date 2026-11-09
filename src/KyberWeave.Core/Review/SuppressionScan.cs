@@ -97,26 +97,26 @@ public static partial class SuppressionScan
         if (ChangedFiles.ValidateBase(baseRef) is { } baseProblem)
             return new SuppressionScanResult([], baseProblem);
 
-        (bool diffRead, string diff) = RunGit(
+        GitRunResult diffResult = RunGit(
             root,
             MaxDiffBytes,
             "diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--relative", "--diff-filter=ACMRT", baseRef, "--");
-        if (!diffRead)
+        if (!diffResult.Succeeded)
         {
-            if (diff.Contains("exceeded the limit", StringComparison.OrdinalIgnoreCase))
+            if (diffResult.ExceededBudget)
                 return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
 
-            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diff}");
+            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diffResult.Output}");
         }
 
-        SortedDictionary<string, List<AddedLine>> added = ParseAddedLines(diff);
+        SortedDictionary<string, List<AddedLine>> added = ParseAddedLines(diffResult.Output);
 
-        (bool untrackedRead, string untracked) = RunGit(
+        GitRunResult untrackedResult = RunGit(
             root, "ls-files", "-z", "--others", "--exclude-standard", "--");
-        if (!untrackedRead)
-            return new SuppressionScanResult([], $"the untracked files could not be listed: {untracked}");
+        if (!untrackedResult.Succeeded)
+            return new SuppressionScanResult([], $"the untracked files could not be listed: {untrackedResult.Output}");
 
-        string[] untrackedPaths = untracked
+        string[] untrackedPaths = untrackedResult.Output
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -349,16 +349,18 @@ public static partial class SuppressionScan
     [GeneratedRegex(@"<\s*NoWarn\b", RegexOptions.CultureInvariant)]
     private static partial Regex AddsNoWarn();
 
+    private readonly record struct GitRunResult(bool Succeeded, string Output, bool ExceededBudget = false);
+
     /// <summary>
     /// Runs git with argv, never a shell, and returns its output or the reason it produced none. A missing git, a
     /// timeout, and a non-zero exit are all the same fact to the caller: the change was not read.
     /// </summary>
-    private static (bool Succeeded, string Output) RunGit(string workingDirectory, params string[] arguments) =>
+    private static GitRunResult RunGit(string workingDirectory, params string[] arguments) =>
         RunGit(workingDirectory, null, arguments);
 
-    private static (bool Succeeded, string Output) RunGit(
+    private static GitRunResult RunGit(
         string workingDirectory,
-        int? maxOutputCharacters,
+        long? maxOutputBytes,
         params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
@@ -376,15 +378,19 @@ public static partial class SuppressionScan
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputCharacters);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);
             return result.ExitCode == 0
-                ? (true, result.StandardOutput)
-                : (false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +
-                          result.StandardError.Trim());
+                ? new GitRunResult(true, result.StandardOutput)
+                : new GitRunResult(false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +
+                                          result.StandardError.Trim());
+        }
+        catch (OutputLimitExceededException ex)
+        {
+            return new GitRunResult(false, ex.Message.Trim(), ExceededBudget: true);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException or IOException)
         {
-            return (false, ex.Message.Trim());
+            return new GitRunResult(false, ex.Message.Trim());
         }
     }
 

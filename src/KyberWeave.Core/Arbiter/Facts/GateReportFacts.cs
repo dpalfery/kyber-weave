@@ -59,23 +59,14 @@ public static class GateReportFacts
 
             const int maxBytes = 1024 * 1024;
             using FileStream stream = new(gatesJsonPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > maxBytes)
+            if (stream.Length > maxBytes || stream.Length == 0)
                 return null;
 
-            byte[] buffer = new byte[maxBytes + 1];
-            int totalRead = 0;
-            while (totalRead <= maxBytes)
-            {
-                int read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
-                if (read == 0)
-                    break;
-                totalRead += read;
-            }
+            int length = (int)stream.Length;
+            byte[] buffer = new byte[length];
+            stream.ReadExactly(buffer);
 
-            if (totalRead > maxBytes)
-                return null;
-
-            string json = Encoding.UTF8.GetString(buffer, 0, totalRead);
+            string json = Encoding.UTF8.GetString(buffer);
             return ReviewJson.ReadGates(json);
         }
         catch (Exception ex) when (ex is IOException
@@ -162,9 +153,13 @@ public static class GateReportFacts
 
         DigestClaim finalClaim = claims[^1];
 
+        StringComparison pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
         // Any claim for the final report path that says non-PASS invalidates a PASS on the same report.
         if (string.Equals(finalClaim.Claimed, PassedStatus, StringComparison.Ordinal) &&
-            claims.Any(c => string.Equals(c.ReportPath, finalClaim.ReportPath, StringComparison.Ordinal) &&
+            claims.Any(c => string.Equals(c.ReportPath.Replace('\\', '/'), finalClaim.ReportPath.Replace('\\', '/'), pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
             return new DigestClaim("FAIL", finalClaim.ReportPath);
@@ -201,10 +196,13 @@ public static class GateReportFacts
             string checkPath = resolved;
             while (checkPath.Length >= fullRepo.Length)
             {
-                FileInfo fi = new(checkPath);
-                if (fi.LinkTarget is not null)
+                FileSystemInfo fsi = Directory.Exists(checkPath) ? new DirectoryInfo(checkPath) : new FileInfo(checkPath);
+                if (fsi.LinkTarget is { } linkTarget)
                 {
-                    string target = Path.GetFullPath(Path.Combine(fi.DirectoryName ?? fullRepo, fi.LinkTarget));
+                    string target = Path.IsPathRooted(linkTarget)
+                        ? Path.GetFullPath(linkTarget)
+                        : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(checkPath) ?? fullRepo, linkTarget));
+
                     if (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison))
                         return null;
                 }

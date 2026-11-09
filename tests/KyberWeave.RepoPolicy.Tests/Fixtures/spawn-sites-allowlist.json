@@ -363,9 +363,9 @@
     },
     {
       "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
-      "text": "ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputCharacters: 1000));",
+      "text": "ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));",
       "count": 1,
-      "bound": "Output capped at 1000 characters and timeout of TimeoutSeconds (30 s) kills the child tree; the child is a shell emitting 2000 chars."
+      "bound": "Output capped at 1000 bytes and timeout of TimeoutSeconds (30 s) kills the child tree; the child is a shell emitting 2000 chars."
     },
     {
       "file": "tests/KyberWeave.Tests/ProcessRunnerTests.cs",
@@ -1305,9 +1305,9 @@
     },
     {
       "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputCharacters);",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);",
       "count": 1,
-      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; output capped at maxOutputCharacters to prevent memory exhaustion; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
+      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; output capped at maxOutputBytes to prevent memory exhaustion; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
     }
   ]
 }

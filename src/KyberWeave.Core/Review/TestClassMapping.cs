@@ -61,7 +61,12 @@ public static class TestClassMapping
             if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
                 return [];
 
+            _ = Directory.EnumerateFileSystemEntries(candidate).FirstOrDefault();
             repository = Path.GetFullPath(candidate);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            throw new InvalidOperationException($"The repository root '{root}' is not accessible: {ex.Message}", ex);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {

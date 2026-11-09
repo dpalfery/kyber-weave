@@ -166,7 +166,15 @@ public static class TaskGateSelection
             try
             {
                 if (!Directory.Exists(root))
+                {
                     refusals.Add($"The repository root '{root}' does not exist or is not a directory.");
+                }
+                else
+                {
+                    // Directory.Exists returns false without throwing on permission-denied roots;
+                    // enumerate to detect accessibility issues.
+                    _ = Directory.EnumerateFileSystemEntries(root).FirstOrDefault();
+                }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
             {

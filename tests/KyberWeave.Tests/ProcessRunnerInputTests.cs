@@ -169,8 +169,8 @@ public sealed class ProcessRunnerInputTests
 
         ProcessStartInfo startInfo = CreateShellStartInfo("head -c 2000 /dev/zero | tr '\\0' 'a'");
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputCharacters: 1000));
+        OutputLimitExceededException ex = Assert.Throws<OutputLimitExceededException>(() =>
+            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));
 
         Assert.Contains("exceeded the limit", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
