@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
 using System.IO.Compression;
@@ -502,6 +503,101 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.Contains("updated kyber-weave 0.2.0", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A successful hand-off ends the run with exactly one bold outcome line. The child prints nothing on success, so
+    /// the outcome is never printed twice, once by each process.
+    /// </summary>
+    [Fact]
+    public void ExecuteAfterASuccessfulHandOffPrintsExactlyOneOutcomeLine()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<IReadOnlyList<string>> handOffs = [];
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null,
+            FinishingProcess = (_, arguments, _) =>
+            {
+                handOffs.Add(arguments);
+                return 0;
+            }
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new UpdateSettings { Version = "0.2.0" }));
+
+        Assert.True(execution.Result == 0, $"exit {execution.Result}; output: {execution.Output}");
+        Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
+        string[] lines = execution.Output.Split('\n');
+        Assert.Single(lines, line => line.StartsWith("updated kyber-weave 0.2.0 → ", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A failed hand-off prints exactly one error line, and the line names the retry rather than echoing the raw
+    /// exception text. A user reading the error needs the cause and the command, not a stack-shaped string.
+    /// </summary>
+    [Fact]
+    public void ExecuteAfterAFailedHandOffPrintsExactlyOneErrorLineWithoutTheRawExceptionText()
+    {
+        Win32Exception failure = new(5, "Access is denied.");
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<IReadOnlyList<string>> handOffs = [];
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null,
+            FinishingProcess = (_, arguments, _) =>
+            {
+                handOffs.Add(arguments);
+                if (arguments[0] == "update")
+                    throw failure;
+
+                return 0;
+            }
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new UpdateSettings { Version = "0.2.0" }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
+        string[] lines = execution.Output.Split('\n');
+        string errorLine = Assert.Single(lines, line => line.StartsWith("kyber-weave: error:", StringComparison.Ordinal));
+        Assert.NotEqual($"kyber-weave: error: {failure.Message}", errorLine);
+        Assert.Contains("kyber-weave update 0.2.0", errorLine, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A finish-mode run on the installed version prints no outcome line of its own. Its work is reported by the
+    /// process that started it, so an empty outcome is the correct success.
+    /// </summary>
+    [Fact]
+    public void ExecuteFinishingTheInstalledVersionPrintsNoOutcomeLine()
+    {
+        using MapHandler handler = new();
+        SelfUpdateHost host = CreateHost("0.2.0", "osx-arm64");
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new UpdateSettings { Version = "0.2.0", FinishUpdate = true }));
+
+        Assert.Equal(0, execution.Result);
+        Assert.Empty(handler.Uris);
+        string[] lines = execution.Output.Split('\n');
+        Assert.DoesNotContain(lines, line => line.Contains("already on", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("updated kyber-weave", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.StartsWith("kyber-weave: error:", StringComparison.Ordinal));
     }
 
     [Fact]

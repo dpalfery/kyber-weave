@@ -107,8 +107,8 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     }
 
     /// <summary>
-    /// The refresh travels through the injected seam, never through a child process:
-    /// no process runner sees an arbiter hook argv.
+    /// The refresh never runs a hook script or the arbiter binary, and it runs inside the new kyber-weave:
+    /// the injected seam is the only path to it, so no process runner sees an arbiter hook argv.
     /// </summary>
     [Fact]
     public void Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
