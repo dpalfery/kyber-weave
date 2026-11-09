@@ -135,6 +135,25 @@ public sealed class SquadWorkerBaselineInjectionTests
     }
 
     [Fact]
+    public void ReadBlockReturnsNullWithoutThrowingWhenNoBaselineFileExists()
+    {
+        string emptyTemp = Path.Combine(Path.GetTempPath(), "kw-empty-baseline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(emptyTemp);
+        try
+        {
+            string? block = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            Assert.Null(block);
+
+            string? cached = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            Assert.Null(cached);
+        }
+        finally
+        {
+            Directory.Delete(emptyTemp, true);
+        }
+    }
+
+    [Fact]
     public void NestedBlockOpenThrowsSquadRenderValidationException()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-baseline-" + Guid.NewGuid().ToString("N"));

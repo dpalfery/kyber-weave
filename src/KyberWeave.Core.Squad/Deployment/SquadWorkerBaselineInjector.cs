@@ -41,7 +41,9 @@ public static class SquadWorkerBaselineInjector
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
 
-    private static readonly ConcurrentDictionary<string, string?> CachedBlocks = new(StringComparer.Ordinal);
+    private sealed record CacheEntry(string? Block);
+
+    private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(StringComparer.Ordinal);
 
     /// <summary>Empties the baseline block cache.</summary>
     public static void ClearCache() => CachedBlocks.Clear();
@@ -59,7 +61,8 @@ public static class SquadWorkerBaselineInjector
     public static string? ReadBlock(string sourceDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
-        return CachedBlocks.GetOrAdd(sourceDirectory, ReadBlockUncached);
+        string normalized = Path.GetFullPath(sourceDirectory);
+        return CachedBlocks.GetOrAdd(normalized, dir => new CacheEntry(ReadBlockUncached(dir))).Block;
     }
 
     private static string? ReadBlockUncached(string sourceDirectory)
