@@ -53,6 +53,10 @@ public static class GateReportFacts
     {
         try
         {
+            FileInfo fileInfo = new(gatesJsonPath);
+            if (!fileInfo.Exists || fileInfo.Length > 1024 * 1024)
+                return null;
+
             return ReviewJson.ReadGates(File.ReadAllText(gatesJsonPath));
         }
         catch (Exception ex) when (ex is IOException
@@ -108,6 +112,7 @@ public static class GateReportFacts
 
     private static DigestClaim? ReadClaim(string returnedText)
     {
+        DigestClaim? lastClaim = null;
         foreach (string line in returnedText.Split('\n'))
         {
             int marker = line.IndexOf(DigestMarker, StringComparison.Ordinal);
@@ -117,7 +122,7 @@ public static class GateReportFacts
             string[] words = line[(marker + DigestMarker.Length)..]
                 .Split([' ', '\t', '\r'], StringSplitOptions.RemoveEmptyEntries);
             if (words.Length == 0)
-                return null;
+                continue;
 
             string? reportPath = null;
             foreach (string word in words)
@@ -126,10 +131,11 @@ public static class GateReportFacts
                     reportPath = word[ReportField.Length..];
             }
 
-            return reportPath is null ? null : new DigestClaim(words[0], reportPath);
+            if (reportPath is not null)
+                lastClaim = new DigestClaim(words[0], reportPath);
         }
 
-        return null;
+        return lastClaim;
     }
 
     private static string? Resolve(string reportPath, string? repositoryRoot)
@@ -154,8 +160,11 @@ public static class GateReportFacts
         if (!string.Equals(claimed, PassedStatus, StringComparison.Ordinal))
             return false;
 
-        return report.Gates.Any(gate => gate.Passed)
-            && report.Gates.All(gate => gate.Passed || gate.NotApplicable);
+        if (report.Gates is null || report.Gates.Count == 0)
+            return false;
+
+        return report.Gates.Any(gate => gate is not null && gate.Passed)
+            && report.Gates.All(gate => gate is not null && (gate.Passed || gate.NotApplicable));
     }
 
     /// <summary>The claim a returned digest makes: its status word and its report path.</summary>

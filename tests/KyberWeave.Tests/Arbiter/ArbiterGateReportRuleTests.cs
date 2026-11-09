@@ -1,6 +1,8 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -95,6 +97,85 @@ public sealed class ArbiterGateReportRuleTests
     public void AReturnWithNoVerifiableReportEscalatesTheDispatch()
     {
         Assert.Equal(RuleEffects.Escalate, EffectFor(new ArbiterFactSet()));
+    }
+
+    [Fact]
+    public void AnAgreeingReportAllowsTheDispatch()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-agree-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string reportPath = Path.Combine(tempDir, "gates.json");
+            GateReport report = new(
+                GateReport.CurrentSchema,
+                [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(reportPath, ReviewJson.Write(report));
+
+            string returned = $"TASK_GATE: PASS report={reportPath}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.True(agrees);
+
+            ArbiterFactSet facts = new ArbiterFactSet()
+                .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
+
+            Assert.Equal(RuleEffects.Allow, EffectFor(facts));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ADisagreeingReportEscalatesTheDispatch()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-disagree-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string reportPath = Path.Combine(tempDir, "gates.json");
+            GateReport report = new(
+                GateReport.CurrentSchema,
+                [new GateResult("build", true, 1, "failed")]);
+            File.WriteAllText(reportPath, ReviewJson.Write(report));
+
+            string returned = $"TASK_GATE: PASS report={reportPath}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.False(agrees);
+
+            ArbiterFactSet facts = new ArbiterFactSet()
+                .With(GateReportFacts.AgreesFact, agrees, ArbiterFactLabel.Derived);
+
+            Assert.Equal(RuleEffects.Escalate, EffectFor(facts));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void AnEmptyOrPrecedingMarkerLineDoesNotAbortClaimExtraction()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-multi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string reportPath = Path.Combine(tempDir, "gates.json");
+            GateReport report = new(
+                GateReport.CurrentSchema,
+                [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(reportPath, ReviewJson.Write(report));
+
+            string returned = $"Example: TASK_GATE:\nQuoted: TASK_GATE: PASS\nTASK_GATE: PASS report={reportPath}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.True(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
     }
 
     /// <summary>
