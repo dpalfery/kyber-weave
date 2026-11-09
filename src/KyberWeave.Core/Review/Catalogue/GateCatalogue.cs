@@ -167,6 +167,11 @@ public static class GateCatalogue
         foreach (GateCatalogueFamily family in families)
         {
             List<string> served = family.Technologies.Where(declared.Contains).ToList();
+            bool servesPlumbing = string.Equals(family.Family, "csharp", StringComparison.Ordinal)
+                && declared.Contains("github-actions");
+            if (servesPlumbing && !served.Contains("github-actions"))
+                served.Add("github-actions");
+
             if (served.Count == 0)
                 continue;
 
@@ -181,7 +186,9 @@ public static class GateCatalogue
 
         List<string> noFamily = declaredTechnologies
             .Where(technology => !families.Any(family =>
-                family.Technologies.Contains(technology, StringComparer.Ordinal)))
+                family.Technologies.Contains(technology, StringComparer.Ordinal))
+                && !(string.Equals(technology, "github-actions", StringComparison.Ordinal)
+                     && families.Any(f => string.Equals(f.Family, "csharp", StringComparison.Ordinal))))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
@@ -229,11 +236,14 @@ public static class GateCatalogue
             return scripts;
         }
 
-        foreach (IGrouping<string, FamilyGate> group in family.Gates.GroupBy(gate => gate.Id, StringComparer.Ordinal))
+        if (declared.Contains(family.Family))
         {
-            foreach (RootContext target in GroupTargets(group, contexts))
-                RenderCouncilEntry(renderer, family, served, technologies, group, target, ScriptsFor, runner,
-                    repositoryRoot);
+            foreach (IGrouping<string, FamilyGate> group in family.Gates.GroupBy(gate => gate.Id, StringComparer.Ordinal))
+            {
+                foreach (RootContext target in GroupTargets(group, contexts))
+                    RenderCouncilEntry(renderer, family, served, technologies, group, target, ScriptsFor, runner,
+                        repositoryRoot);
+            }
         }
 
         foreach (IGrouping<string, FamilyGate> group in family.TaskGates.GroupBy(gate => gate.Id,
@@ -355,7 +365,8 @@ public static class GateCatalogue
         HashSet<string> declared)
     {
         // Without a root every gate stays commented with the marker the host should point at.
-        if (context.IsPlaceholder)
+        // Gates that are not root-bound (e.g. repo plumbing) render against the repo root.
+        if (context.IsPlaceholder && IsRootBound(group.First()))
         {
             string placeholderReason = NoRootReason(family);
             foreach (FamilyGate candidate in group)
@@ -686,6 +697,8 @@ public static class GateCatalogue
     private static List<string> TaskGateLines(SubstitutedTaskGate gate, string indent)
     {
         List<string> lines = [$"{indent}- id: {gate.Id}"];
+        if (gate.FullSuite)
+            lines.Add($"{indent}  full-suite: true");
         if (gate.Include.Count > 0)
             lines.Add($"{indent}  include: [{string.Join(", ", gate.Include.Select(Quote))}]");
         if (gate.Os is not null)
@@ -726,7 +739,8 @@ public static class GateCatalogue
             entry.Blocking,
             entry.TimeoutSeconds,
             WorkingDirectoryFor(entry, context),
-            entry.FailOnOutput);
+            entry.FailOnOutput,
+            IsFullSuite(entry));
     }
 
     private static string? WorkingDirectoryFor(FamilyGate entry, RootContext context)
@@ -1198,7 +1212,8 @@ public static class GateCatalogue
         bool Blocking,
         int? TimeoutSeconds,
         string? WorkingDirectory,
-        bool FailOnOutput = false);
+        bool FailOnOutput = false,
+        bool FullSuite = false);
 
     private sealed record LiveTaskRender(string Technology, FamilyGate Entry, SubstitutedTaskGate Gate);
 

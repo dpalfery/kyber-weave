@@ -64,14 +64,15 @@ task-gates:
   - id: workflow-lint
     role: lint
     agents: [github-devops]
-    include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
     os: "unix"
     run: [actionlint, "{changed}"]
   - id: shellcheck
     role: lint
     agents: [github-devops]
-    include: ["**/*.sh"]
+    include: ["scripts/*.sh", "scripts/**/*.sh"]
     os: "unix"
+    note: "Narrow to scripts/**/*.sh if the repository carries shell fixtures or vendored scripts."
     run: [shellcheck, "{changed}"]
   # `review catalogue` loads `.kyber-weave/kyber-weave.yml` through the same loader `review gates` uses
   # and fails with KW-CONFIG-001 when the file no longer loads, which is the whole check: a config the

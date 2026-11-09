@@ -136,7 +136,8 @@ public sealed class TaskGatesRepositoryConfigTests
             stream.Load(reader);
         }
 
-        return (YamlMappingNode)stream.Documents[0].RootNode;
+        Assert.NotEmpty(stream.Documents);
+        return Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
     }
 
     private static string? Scalar(YamlMappingNode map, string key)

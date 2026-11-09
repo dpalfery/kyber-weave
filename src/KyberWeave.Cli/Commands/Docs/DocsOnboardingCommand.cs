@@ -3,6 +3,7 @@ using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -82,14 +83,28 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return RefusedInput;
         }
 
-        string root = Path.GetFullPath(settings.Path);
-        DiagnosticReport report = new();
-        if (!CommandHelpers.TryLoadConfig(root, null, report, out _, out string? configPath))
+        string root;
+        try
         {
-            ReportRenderer.Render(report, OutputFormat.Table, "docs onboarding", "kyber-weave.yml");
-            return Failed;
+            root = Path.GetFullPath(settings.Path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(settings.Path)}' is not a valid path: {Markup.Escape(ex.Message)}");
+            return RefusedInput;
         }
 
+        if (!Directory.Exists(root))
+        {
+            string message = File.Exists(root)
+                ? $"'{Markup.Escape(root)}' is a file, not a directory."
+                : $"directory '{Markup.Escape(root)}' does not exist.";
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {message}");
+            return RefusedInput;
+        }
+
+        string? configPath = KyberWeaveConfigLoader.FindConfigPath(root);
         if (configPath is null)
         {
             AnsiConsole.MarkupLine(
@@ -116,6 +131,14 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
     /// <returns><c>0</c> when the file now holds the answer, or <see cref="Failed"/>.</returns>
     private static int RecordAnswer(string configPath, string answer)
     {
+        if (IsSymlink(configPath))
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' is a symbolic link. " +
+                "Refusing to write through a link.");
+            return Failed;
+        }
+
         string existing;
         try
         {
@@ -130,13 +153,24 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return Failed;
         }
 
-        string updated = HostConfigYaml.WithOnboarding(existing, answer);
+        string updated;
+        try
+        {
+            updated = HostConfigYaml.WithOnboarding(existing, answer);
+        }
+        catch (InvalidDataException ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' has an invalid " +
+                $"onboarding configuration: {Markup.Escape(ex.Message)}");
+            return Failed;
+        }
         if (string.Equals(existing, updated, StringComparison.Ordinal))
             return 0;
 
         try
         {
-            File.WriteAllText(configPath, updated);
+            AtomicFile.WriteAllText(configPath, updated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -169,13 +203,21 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return 0;
         }
 
+        if (IsSymlink(agentsPath))
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{Markup.Escape(CommandName)}: error:[/] the answer was recorded, but '{Markup.Escape(agentsPath)}' " +
+                "is a symbolic link. Refusing to write through a link.");
+            return Failed;
+        }
+
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
         if (!loaded.Success || loaded.Config is null)
         {
             AnsiConsole.MarkupLine(
-                $"[yellow]warn[/] the configuration could not be reloaded, so the Config Reg block in " +
+                $"[red]{Markup.Escape(CommandName)}: error:[/] the configuration could not be reloaded, so the Config Reg block in " +
                 $"{AgentsFile} was left as it was: {Markup.Escape(loaded.Error ?? "unknown error")}");
-            return 0;
+            return Failed;
         }
 
         string existing;
@@ -206,7 +248,7 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
 
         try
         {
-            File.WriteAllText(agentsPath, updated);
+            AtomicFile.WriteAllText(agentsPath, updated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -223,5 +265,27 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             $"Config Reg block in [grey]{AgentsFile}[/] refreshed, so agents read " +
             $"<{ConfigRegConfig.OnboardingProperty}> from it.");
         return 0;
+    }
+
+    private static bool IsSymlink(string path)
+    {
+        try
+        {
+            FileInfo info = new(path);
+            if (info.LinkTarget is not null)
+                return true;
+
+            if (File.Exists(path))
+            {
+                FileAttributes attributes = File.GetAttributes(path);
+                return attributes.HasFlag(FileAttributes.ReparsePoint);
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

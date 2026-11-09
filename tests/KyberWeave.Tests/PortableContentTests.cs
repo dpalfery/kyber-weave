@@ -89,7 +89,17 @@ public sealed class PortableContentTests
                          new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
             {
                 if (entry.LinkTarget is not null)
-                    continue;
+                {
+                    if (entry is DirectoryInfo)
+                        continue;
+
+                    FileSystemInfo? target = entry.ResolveLinkTarget(true);
+                    string targetPath = target?.FullName ?? Path.GetFullPath(entry.FullName);
+                    if (!targetPath.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    {
+                        Assert.Fail($"File symlink '{entry.FullName}' targets outside portable root '{root}': {targetPath}");
+                    }
+                }
 
                 if (entry is DirectoryInfo child)
                 {
@@ -115,12 +125,9 @@ public sealed class PortableContentTests
                 ? []
                 : content.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Assert.Fail($"Unreadable portable file '{path}': {ex.Message}");
             return [];
         }
     }

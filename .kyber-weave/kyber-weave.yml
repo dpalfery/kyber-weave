@@ -394,13 +394,13 @@ review:
       - *dotnet-build
       - &workflow-lint
         id: workflow-lint
-        include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+        include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
         # actionlint is the build for a workflow: it parses the file against the schema GitHub
         # uses and fails on an expression or a runner that cannot resolve.
         run: [actionlint, "{changed}"]
       - &shellcheck
         id: shellcheck
-        include: ["scripts/*.sh", "scripts/**/*.sh"]
+        include: ["scripts/*.sh", "scripts/**/*.sh", "dash/scripts/*.sh", "dash/scripts/**/*.sh"]
         run: [shellcheck, "{changed}"]
       - &review-config
         id: review-config

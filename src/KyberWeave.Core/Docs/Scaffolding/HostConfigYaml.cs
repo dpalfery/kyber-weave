@@ -328,6 +328,9 @@ public static partial class HostConfigYaml
     /// </summary>
     private static (string Value, string Suffix) SplitScalarAndSuffix(string rest)
     {
+        if (rest.Length > 0 && rest[0] == '#')
+            return (string.Empty, rest);
+
         char quote = rest.Length > 0 && rest[0] is '\'' or '"' ? rest[0] : '\0';
         int start = quote == '\0' ? 0 : 1;
         for (int i = start; i < rest.Length; i++)
@@ -530,6 +533,8 @@ public static partial class HostConfigYaml
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentException.ThrowIfNullOrWhiteSpace(answer);
+        if (answer.Contains('\n', StringComparison.Ordinal) || answer.Contains('\r', StringComparison.Ordinal))
+            throw new ArgumentException("An onboarding answer must not contain newline characters.", nameof(answer));
 
         HostConfigLines lines = HostConfigLines.Read(yaml);
         string recorded = answer.Trim();
@@ -544,6 +549,22 @@ public static partial class HostConfigYaml
             return lines.ToText();
         }
 
+        for (int i = existing + 1; i < lines.Count; i++)
+        {
+            string l = lines[i];
+            if (l.Length == 0 || l.TrimStart().StartsWith('#'))
+                continue;
+
+            if (char.IsWhiteSpace(l[0]))
+            {
+                throw new InvalidDataException(
+                    "onboarding holds a block mapping or sequence, not a scalar. " +
+                    "Replace it with a scalar before setting onboarding.");
+            }
+
+            break;
+        }
+
         // The byte-order mark is a character of the line, not of the key: take it off, split
         // the key, and put it back, so a file saved with one keeps it.
         string line = lines[existing];
@@ -556,6 +577,12 @@ public static partial class HostConfigYaml
         (string? current, string? suffix) = SplitScalarAndSuffix(rest);
         if (ScalarEquals(current, recorded))
             return yaml;
+
+        if (prefix.EndsWith(':'))
+            prefix += " ";
+
+        if (suffix.Length > 0 && !suffix.StartsWith(' ') && !suffix.StartsWith('\t'))
+            suffix = " " + suffix;
 
         lines[existing] = (hasBom ? "\uFEFF" : string.Empty) + prefix + recorded + suffix;
         return lines.ToText();
@@ -1617,10 +1644,22 @@ public static partial class HostConfigYaml
             return false;
 
         indent = line[..(line.Length - trimmed.Length)];
-        if (!trimmed.StartsWith(name, StringComparison.Ordinal))
+        int keyLength;
+        if (trimmed.StartsWith("\"" + name + "\"", StringComparison.Ordinal) ||
+            trimmed.StartsWith("'" + name + "'", StringComparison.Ordinal))
+        {
+            keyLength = name.Length + 2;
+        }
+        else if (trimmed.StartsWith(name, StringComparison.Ordinal))
+        {
+            keyLength = name.Length;
+        }
+        else
+        {
             return false;
+        }
 
-        int i = name.Length;
+        int i = keyLength;
         if (i < trimmed.Length && trimmed[i] != ' ' && trimmed[i] != '\t' && trimmed[i] != ':')
             return false;
 

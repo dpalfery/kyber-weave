@@ -466,6 +466,9 @@ internal sealed class RunStartProbe : IDisposable
     /// <summary>The bare repository the clone calls <c>origin</c>.</summary>
     public string Remote { get; }
 
+    /// <summary>The isolated home the child process sees as <c>HOME</c>.</summary>
+    public string Home => _home;
+
     public void Dispose()
     {
         _temp.Dispose();

@@ -52,11 +52,11 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
 A plan's task file is the tracked file the architect writes at finalization so the conductor can
-dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan,
-`<spec-folder>/tasks.json` inside a specification. The plan stays the authority, so every rule here
-is a disagreement between the file and the plan it sits beside, or a prompt that cannot be acted
-on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not behind a
-flag, because the orchestrator has the docs tools and no shell.
+dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. (The merge-time rule
+`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
+authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
+that cannot be acted on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not
+behind a flag, because the orchestrator has the docs tools and no shell.
 
 | Id | Severity | Meaning |
 |---|---|---|

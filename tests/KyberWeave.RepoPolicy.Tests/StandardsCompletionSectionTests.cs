@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -66,7 +67,7 @@ public sealed class StandardsCompletionSectionTests
             string.IsNullOrWhiteSpace(section),
             $"The '{technology}' coding standard has no '## Completion' section, so there is nothing to read.");
         string[] missing = InnerLoopCommands
-            .Where(command => !section.Contains(command, StringComparison.OrdinalIgnoreCase))
+            .Where(command => !Regex.IsMatch(section, $@"\b{Regex.Escape(command)}\b", RegexOptions.IgnoreCase))
             .ToArray();
         Assert.True(
             missing.Length == 0,
@@ -165,7 +166,7 @@ public sealed class StandardsCompletionSectionTests
         foreach (string file in roots.Where(File.Exists))
             yield return file;
 
-        foreach (string directory in new[] { Path.Combine(root, "docs"), Path.Combine(root, "products") })
+        foreach (string directory in new[] { Path.Combine(root, "docs"), Path.Combine(root, "products"), Path.Combine(root, ".apm") })
         {
             if (!Directory.Exists(directory))
                 continue;

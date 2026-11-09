@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Parsing;
@@ -76,7 +77,7 @@ public sealed class KyberStandardsTemplatesTests
             string.IsNullOrWhiteSpace(section),
             $"The '{technology}' standard template has no '## Completion' section, so there is nothing to read.");
         string[] missing = InnerLoopCommands
-            .Where(command => !section.Contains(command, StringComparison.OrdinalIgnoreCase))
+            .Where(command => !Regex.IsMatch(section, $@"\b{Regex.Escape(command)}\b", RegexOptions.IgnoreCase))
             .ToArray();
         Assert.True(
             missing.Length == 0,

@@ -468,7 +468,7 @@ public sealed class GateCatalogueRenderTests
         HashSet<string> wholeSuite = new(StringComparer.Ordinal);
         foreach (GateCatalogueFamily family in families)
         {
-            foreach (string gateId in family.Gates.Where(gate => gate.Role == "test").Select(gate => gate.Id))
+            foreach (string gateId in family.Gates.Concat(family.TaskGates).Where(gate => gate.Role == "test").Select(gate => gate.Id))
                 wholeSuite.Add(family.Family + "-" + gateId);
         }
 
@@ -510,6 +510,31 @@ public sealed class GateCatalogueRenderTests
     private static GateCatalogueFamily Family(string name)
     {
         return GateCatalogue.LoadEmbedded().Single(family => family.Family == name);
+    }
+
+    [Fact]
+    public void NonCsharpHostWithGithubActionsRendersPlumbingGatesLive()
+    {
+        using TempDirectory repository = new();
+        Dictionary<string, ProjectRootSet> roots = new(StringComparer.Ordinal)
+        {
+            ["go"] = new ProjectRootSet([new ProjectRoot(".", "go.mod", "root")], false),
+            ["csharp"] = new ProjectRootSet([], false)
+        };
+
+        RenderedReviewBlock block = GateCatalogue.Render(["go", "github-actions"], roots, repository.Path);
+        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+
+        // Zero csharp council gates rendered
+        Assert.DoesNotContain(config.Review.Gates, gate => gate.Id.StartsWith("csharp-", StringComparison.Ordinal));
+
+        // Plumbing task gates are rendered for github-devops and docs-dev
+        Assert.True(config.Review.TaskGates.TryGetValue("github-devops", out IReadOnlyList<ReviewTaskGate>? devopsGates));
+        Assert.Contains(devopsGates!, gate => gate.Id == "csharp-workflow-lint");
+        Assert.Contains(devopsGates!, gate => gate.Id == "csharp-shellcheck");
+
+        Assert.True(config.Review.TaskGates.TryGetValue("docs-dev", out IReadOnlyList<ReviewTaskGate>? docsGates));
+        Assert.Contains(docsGates!, gate => gate.Id == "csharp-review-config");
     }
 
     /// <summary>One synthetic root per family at the repository root, using the family's first marker.</summary>

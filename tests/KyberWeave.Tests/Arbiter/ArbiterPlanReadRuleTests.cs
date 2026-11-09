@@ -90,6 +90,23 @@ public sealed class ArbiterPlanReadRuleTests
     }
 
     /// <summary>
+    /// Lexical variations (leading ./, duplicate slashes, /./, /../) must still be identified as
+    /// planning paths and escalate rather than bypassing the rule.
+    /// </summary>
+    [Theory]
+    [InlineData("./docs/plans/2026-11-07-ready-tasks.md")]
+    [InlineData("docs//plans/2026-11-07-ready-tasks.md")]
+    [InlineData("docs/./plans/2026-11-07-ready-tasks.md")]
+    [InlineData("docs/sub/../plans/2026-11-07-ready-tasks.md")]
+    public void APromptThatNamesALexicallyVariantPlanningPathEscalatesTheDispatch(string path)
+    {
+        string prompt = Prompt(
+            $"Read `{path}` and implement the task it describes in `src/KyberWeave.Core/RunStart/RunStartPlanner.cs`.");
+
+        Assert.Equal(RuleEffects.Escalate, Effect(prompt));
+    }
+
+    /// <summary>
     /// The header names the plan on purpose: it is how the Arbiter identifies the work, and the
     /// worker is told the path is routing metadata, not something to read. A rule that read the
     /// raw prompt would escalate every dispatch in a run.

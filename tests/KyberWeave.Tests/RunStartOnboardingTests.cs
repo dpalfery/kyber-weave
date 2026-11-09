@@ -113,6 +113,7 @@ public sealed class RunStartOnboardingTests : IDisposable
 
         Assert.True(result.ExitCode == 0, $"A run in a declined repository exited {result.ExitCode}. {result.Output}");
         Assert.DoesNotContain(OnboardingSkill, result.Output, StringComparison.Ordinal);
+        Assert.True(_probe.BranchExists(Branch), "A declined run created no branch. " + result.Output);
     }
 
     /// <summary>

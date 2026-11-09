@@ -192,7 +192,9 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
             foreach (FamilyGate gate in catalogue.Gates.Concat(catalogue.TaskGates))
             {
                 bool selects = gate.Include.Any(pattern => PathGlob.IsMatch(
-                    pattern.Replace("{{root-glob}}", string.Empty, StringComparison.Ordinal),
+                    pattern.Replace("{{root-glob}}", string.Empty, StringComparison.Ordinal)
+                        .Replace("{{root}}", ".", StringComparison.Ordinal)
+                        .Replace("{{marker}}", string.Empty, StringComparison.Ordinal),
                     changed));
                 if (selects)
                     matches.Add((catalogue, gate));
@@ -257,9 +259,10 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
                 stream.Load(reader);
             }
 
+            Assert.NotEmpty(stream.Documents);
+            YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
             Dictionary<string, string> sources = new(StringComparer.Ordinal);
-            if (((YamlMappingNode)stream.Documents[0].RootNode).Children
-                .FirstOrDefault(pair => pair.Key is YamlScalarNode key && key.Value == "sources")
+            if (root.Children.FirstOrDefault(pair => pair.Key is YamlScalarNode key && key.Value == "sources")
                 .Value is YamlMappingNode declared)
             {
                 foreach (KeyValuePair<YamlNode, YamlNode> pair in declared.Children)
