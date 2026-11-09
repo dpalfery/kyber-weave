@@ -156,6 +156,55 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     [Fact]
+    public void AppendedClaimsWithFailDoNotCorroboratePass()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-shadow-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string passReport = Path.Combine(tempDir, "pass.json");
+            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(passReport, ReviewJson.Write(pass));
+
+            string failReport = Path.Combine(tempDir, "fail.json");
+            GateReport fail = new(GateReport.CurrentSchema, [new GateResult("build", true, 1, "failed")]);
+            File.WriteAllText(failReport, ReviewJson.Write(fail));
+
+            string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.False(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void AbsoluteReportPathOutsideRepositoryRootIsRefused()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-path-" + Guid.NewGuid().ToString("N"));
+        string outsideDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-outside-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        Directory.CreateDirectory(outsideDir);
+        try
+        {
+            string outsideReport = Path.Combine(outsideDir, "gates.json");
+            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(outsideReport, ReviewJson.Write(pass));
+
+            string returned = $"TASK_GATE: PASS report={outsideReport}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.Null(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+            Directory.Delete(outsideDir, true);
+        }
+    }
+
+    [Fact]
     public void AnEmptyOrPrecedingMarkerLineDoesNotAbortClaimExtraction()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-multi-" + Guid.NewGuid().ToString("N"));

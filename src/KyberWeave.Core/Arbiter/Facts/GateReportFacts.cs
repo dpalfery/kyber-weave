@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Review;
 
@@ -53,11 +54,21 @@ public static class GateReportFacts
     {
         try
         {
-            FileInfo fileInfo = new(gatesJsonPath);
-            if (!fileInfo.Exists || fileInfo.Length > 1024 * 1024)
+            if (!File.Exists(gatesJsonPath))
                 return null;
 
-            return ReviewJson.ReadGates(File.ReadAllText(gatesJsonPath));
+            const int maxBytes = 1024 * 1024;
+            using FileStream stream = new(gatesJsonPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (stream.Length > maxBytes)
+                return null;
+
+            using StreamReader reader = new(stream, Encoding.UTF8);
+            char[] buffer = new char[maxBytes + 1];
+            int read = reader.ReadBlock(buffer, 0, buffer.Length);
+            if (read > maxBytes)
+                return null;
+
+            return ReviewJson.ReadGates(new string(buffer, 0, read));
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException
@@ -112,7 +123,7 @@ public static class GateReportFacts
 
     private static DigestClaim? ReadClaim(string returnedText)
     {
-        DigestClaim? lastClaim = null;
+        List<DigestClaim> claims = [];
         foreach (string line in returnedText.Split('\n'))
         {
             int marker = line.IndexOf(DigestMarker, StringComparison.Ordinal);
@@ -132,23 +143,49 @@ public static class GateReportFacts
             }
 
             if (reportPath is not null)
-                lastClaim = new DigestClaim(words[0], reportPath);
+                claims.Add(new DigestClaim(words[0], reportPath));
         }
 
-        return lastClaim;
+        if (claims.Count == 0)
+            return null;
+
+        DigestClaim? nonPass = claims.FirstOrDefault(c => !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal));
+        if (nonPass is not null)
+            return nonPass;
+
+        if (claims.Select(c => c.ReportPath).Distinct(StringComparer.Ordinal).Count() > 1)
+            return null;
+
+        return claims[0];
     }
 
     private static string? Resolve(string reportPath, string? repositoryRoot)
     {
-        if (string.IsNullOrWhiteSpace(reportPath))
+        if (string.IsNullOrWhiteSpace(reportPath) || string.IsNullOrWhiteSpace(repositoryRoot))
             return null;
 
-        if (Path.IsPathRooted(reportPath))
-            return reportPath;
+        try
+        {
+            string fullRepo = Path.GetFullPath(repositoryRoot);
+            string resolved = Path.IsPathRooted(reportPath)
+                ? Path.GetFullPath(reportPath)
+                : Path.GetFullPath(Path.Combine(fullRepo, reportPath));
 
-        // A worktree worker reports an absolute path; a shared-checkout worker reports one
-        // relative to the root it dispatched from, which is the event's working directory.
-        return string.IsNullOrWhiteSpace(repositoryRoot) ? null : Path.Combine(repositoryRoot, reportPath);
+            string normalizedRepo = fullRepo.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                    + Path.DirectorySeparatorChar;
+
+            if (!resolved.StartsWith(normalizedRepo, StringComparison.Ordinal) &&
+                !string.Equals(resolved, fullRepo, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return resolved;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static bool Corroborates(string claimed, GateReport report)
