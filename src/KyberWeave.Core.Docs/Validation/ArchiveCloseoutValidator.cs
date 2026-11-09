@@ -46,6 +46,11 @@ public sealed partial class ArchiveCloseoutValidator
 
     private const string InventoryFileName = "README.md";
 
+    // The one archive kind that keeps an inventory of its entries directly in its folder. Another
+    // kind's README.md at that depth is an ordinary archived entry and still needs its closeout
+    // evidence. IndexSectionCatalog registers the same file; the two change together.
+    private const string InventoryKind = "plans";
+
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
     private readonly Func<DocumentLoader> _loaderFactory;
@@ -173,22 +178,23 @@ public sealed partial class ArchiveCloseoutValidator
     }
 
     /// <summary>
-    /// True for the inventory a kind keeps directly in its archive folder, such as
-    /// <c>docs/archive/plans/README.md</c>. It lists archived entries and is not one; a
-    /// specification folder's own <c>README.md</c> sits one level deeper and stays an entry.
+    /// True for the plans inventory, <c>docs/archive/plans/README.md</c>. It lists archived
+    /// entries and is not one. Only the plans kind keeps an inventory: another kind's
+    /// <c>README.md</c> at that depth, and a specification folder's own <c>README.md</c> one
+    /// level deeper, stay entries.
     /// </summary>
     private bool IsArchiveInventory(string relativePath)
     {
         foreach (string root in _config.Ontology.DocsRoots)
         {
-            string prefix = root == "."
-                ? OntologyConfig.ArchiveSegment + "/"
-                : root + "/" + OntologyConfig.ArchiveSegment + "/";
+            string prefix = ArchivePrefix(root);
             if (!relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             string[] rest = relativePath[prefix.Length..].Split('/');
-            if (rest.Length == 2 && rest[1].Equals(InventoryFileName, StringComparison.OrdinalIgnoreCase))
+            if (rest.Length == 2
+                && rest[0].Equals(InventoryKind, StringComparison.OrdinalIgnoreCase)
+                && rest[1].Equals(InventoryFileName, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 
@@ -200,22 +206,18 @@ public sealed partial class ArchiveCloseoutValidator
     {
         foreach (string root in _config.Ontology.DocsRoots)
         {
-            if (root == ".")
-            {
-                string? first = relativePath.Split('/').FirstOrDefault();
-                if (string.Equals(first, OntologyConfig.ArchiveSegment, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            else if (relativePath.StartsWith(
-                         root + "/" + OntologyConfig.ArchiveSegment + "/",
-                         StringComparison.OrdinalIgnoreCase))
-            {
+            if (relativePath.StartsWith(ArchivePrefix(root), StringComparison.OrdinalIgnoreCase))
                 return true;
-            }
         }
 
         return false;
     }
+
+    /// <summary>The path prefix every archived document under <paramref name="root"/> starts with.</summary>
+    private static string ArchivePrefix(string root) =>
+        root == "."
+            ? OntologyConfig.ArchiveSegment + "/"
+            : root + "/" + OntologyConfig.ArchiveSegment + "/";
 
     /// <summary>Reads only the frontmatter impact key, to decide scope without parsing the body.</summary>
     private static string? FrontmatterImpact(string absolutePath)

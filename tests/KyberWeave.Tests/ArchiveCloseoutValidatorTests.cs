@@ -251,6 +251,26 @@ public sealed class ArchiveCloseoutValidatorTests
         Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
     }
 
+    /// <summary>
+    /// Only the plans kind keeps an inventory in its archive folder. A README.md at that depth in
+    /// another kind is an archived entry like any other and must still carry closeout evidence.
+    /// </summary>
+    [Theory]
+    [InlineData("6-Docs/archive/specs/README.md")]
+    [InlineData("6-Docs/archive/todo/README.md")]
+    [InlineData("6-Docs/archive/adr/README.md")]
+    public void AnotherKindsTopLevelArchiveReadmeIsStillAnEntry(string readme)
+    {
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(readme, CloseoutCorpus.PlanDocument(status: "draft"));
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(readme, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Equal(readme, finding.FilePath);
+    }
+
     /// <summary>Without a Decisions table there is nothing to harvest, which fails C3.</summary>
     [Fact]
     public void MissingDecisionsSectionFailsCloseoutAsC3()
