@@ -176,13 +176,11 @@ rules:
     question: Did the planner write only inside the plan, spec and todo directories?
     answers: [inside, outside]
     decide:
-      - when: { fact: git.changed-paths.since-dispatch, exists: false }
+      - when: { fact: review.changed-paths, count: 0 }
         answer: inside
-      - when: { fact: git.changed-paths.since-dispatch, count: 0 }
+      - when: { fact: review.changed-paths, subset-of: config.planning-dirs }
         answer: inside
-      - when: { fact: git.changed-paths.since-dispatch, subset-of: config.planning-dirs }
-        answer: inside
-      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+      - when: { fact: review.changed-paths, exists: true }
         answer: outside
     effects: { inside: allow, outside: escalate }
 

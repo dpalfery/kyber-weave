@@ -182,12 +182,14 @@ graph TD
 
 **Completed 2026-11-09.** Archived under `docs/archive/plans/`. Every decision D1 to D3 and AP1 maps to a destination below.
 
+**Revision (review round, 2026-11-09).** PR #549 review identified that keying `KW-ARB-PLANNER-DIFF-001` on `git.changed-paths.since-dispatch` with `exists: false -> inside` failed open because `HookGitFacts` never populates `git.changed-paths.since-dispatch`. D1 was revised to add `review.changed-paths` to `ArbiterTriggerCatalog` for `delegate.planner.returned` and key `KW-ARB-PLANNER-DIFF-001` on `review.changed-paths` (`count: 0 -> inside`, `subset-of: config.planning-dirs -> inside`, `exists: true -> outside`), keeping an absent fact `undecidable` (`escalate`) while truthfully evaluating committed-plus-dirty paths against the run base.
+
 ### Verification evidence
 
 | Check | Result |
 |---|---|
 | Reproduction command | `dotnet run --project src/KyberWeave.Arbiter --no-build -- hook --harness factory <<< '{"hook_event_name":"PostToolUse","tool_name":"Task","tool_input":{"subagent_type":"architect","prompt":"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan the upgrade"},"tool_response":"done"}'` exits 0 with no escalation. |
-| Targeted tests | `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests --filter "FullyQualifiedName~ArbiterPlannerDiffRuleTests\|FullyQualifiedName~ArbiterExistsFalseRuleTests"` passes: 18 passed, 0 failed. |
+| Targeted tests | `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests --filter "FullyQualifiedName~ArbiterPlannerDiffRuleTests\|FullyQualifiedName~ArbiterExistsFalseRuleTests"` passes: 20 passed, 0 failed. |
 | `docs validate --merge-ready`, `docs drift` | 0 findings after archive. |
 
 ### Mapping
@@ -196,8 +198,8 @@ Documentation-impact is `no-design-change`, impact component is KyberArbiter, la
 
 | ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
 |---|---|---|---|---|---|
-| D1 | Documentation waiver: defect fix in default-rules.yml adding exists: false and count: 0 clauses to KW-ARB-PLANNER-DIFF-001. No architectural change; rationale recorded in this plan. | no-design-change | KyberArbiter | 2026-11-09 | archived |
-| D2 | Documentation waiver: test assertions updated in ArbiterExistsFalseRuleTests.cs and ArbiterPlannerDiffRuleTests.cs. Test-scoped only. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+| D1 | [docs/kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md): `KW-ARB-PLANNER-DIFF-001` evaluates `review.changed-paths` on `delegate.planner.returned`. Documentation waiver: defect fix in default-rules.yml and ArbiterTriggerCatalog.cs. | no-design-change | KyberArbiter | 2026-11-09 | archived |
+| D2 | Documentation waiver: test assertions updated in ArbiterPlannerDiffRuleTests.cs (building facts through the real classifier and builder path) and ArbiterExistsFalseRuleTests.cs. Test-scoped only. | no-design-change | KyberArbiter | 2026-11-09 | archived |
 | D3 | Documentation waiver: no-design-change on KyberArbiter. No ADR — ADR waiver: defect fix for rule definition in default-rules.yml. | no-design-change | KyberArbiter | 2026-11-09 | archived |
 | AP1 | Documentation waiver: autonomous approval of plan and test-first execution. Operational dispatch record only. | no-design-change | KyberArbiter | 2026-11-09 | archived |
 
