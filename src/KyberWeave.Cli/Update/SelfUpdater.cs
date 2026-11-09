@@ -357,6 +357,12 @@ internal sealed class SelfUpdater : IDisposable
                 "--finish-update cannot be combined with --release-candidate. It finishes one named version.");
         }
 
+        // Finish mode is reachable from `dotnet run` or a `dotnet tool` install when the hidden flag
+        // is passed explicitly, so it runs the same releases-channel check every other path enforces.
+        // It runs before the version guards to match RunCore (line 186 runs before the version work):
+        // a refused channel on a mismatched version reports the channel refusal, not the mismatch.
+        EnsureReleaseInstallChannel();
+
         if (string.IsNullOrWhiteSpace(options.Version))
         {
             throw new SelfUpdateException(
@@ -370,10 +376,6 @@ internal sealed class SelfUpdater : IDisposable
             throw new SelfUpdateException(
                 $"--finish-update finishes the update to the version that runs it. This kyber-weave is {current}, but {version} was asked for.");
         }
-
-        // Finish mode is reachable from `dotnet run` or a `dotnet tool` install when the hidden flag
-        // is passed explicitly, so it runs the same releases-channel check every other path enforces.
-        EnsureReleaseInstallChannel();
 
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         ReconcileKyberDash(options, version, windows, true);

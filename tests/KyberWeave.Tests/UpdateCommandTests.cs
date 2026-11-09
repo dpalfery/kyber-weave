@@ -438,6 +438,30 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The same parity for the <c>dotnet tool</c> channel: a <c>dotnet tool</c> install that is invoked
+    /// with <c>--finish-update</c> must take the tool-channel refusal, not the version-mismatch error,
+    /// because FinishUpdate runs the channel guard before the version guards.
+    /// </summary>
+    [Fact]
+    public void FinishUpdateWithDotnetToolInstallIsRefused()
+    {
+        string tools = Path.Combine(_install.Path, ".dotnet", "tools");
+        Directory.CreateDirectory(tools);
+        string processPath = Path.Combine(tools, "kyber-weave");
+        File.WriteAllText(processPath, "shim");
+        SelfUpdateHost host = new(processPath, "0.1.0", "osx-arm64", false, false);
+
+        using MapHandler handler = new();
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.1.0", false, false, FinishUpdate: true));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("dotnet tool", outcome.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RunDotnetToolInstallIsRefused()
     {

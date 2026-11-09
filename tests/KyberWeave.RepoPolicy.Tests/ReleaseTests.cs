@@ -3239,21 +3239,32 @@ public sealed class ReleaseTests
         string loop = File.ReadAllText(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
 
+        // Anchored at the layout release's definition rather than at the `begin_case` header so the body
+        // window captures the `Copyright=...release-local.sh` padded-publish that makes the size guard
+        // meaningful. The header itself and every constant the case uses still fall inside this window.
+        const string layoutAnchor = "LAYOUT_VERSION=\"${TO_VERSION}.layout\"";
         const string caseHeader = "begin_case arbiter-hooks-after-swap";
+        Assert.Contains(layoutAnchor, loop, StringComparison.Ordinal);
         Assert.Contains(caseHeader, loop, StringComparison.Ordinal);
         Assert.Contains("/legacy/kyber-weave-arbiter", loop, StringComparison.Ordinal);
 
-        int start = loop.IndexOf(caseHeader, StringComparison.Ordinal);
-        int bodyStart = start + caseHeader.Length;
+        int start = loop.IndexOf(layoutAnchor, StringComparison.Ordinal);
+        int caseHeaderIdx = loop.IndexOf(caseHeader, StringComparison.Ordinal);
         int end = loop.Length;
 
-        int nextCase = loop.IndexOf("begin_case", bodyStart, StringComparison.Ordinal);
+        // The end is computed relative to the case header (which sits inside `body`) so `nextCase`
+        // does not snap to our own `begin_case arbiter-hooks-after-swap` line. There is no later
+        // case in this section, but the search is still anchored at the case header for symmetry
+        // with the existing pin shape.
+        int nextCase =
+            loop.IndexOf("begin_case", caseHeaderIdx + caseHeader.Length, StringComparison.Ordinal);
         if (nextCase >= 0)
         {
             end = Math.Min(end, nextCase);
         }
 
-        int nextDivider = loop.IndexOf("# ----", bodyStart, StringComparison.Ordinal);
+        int nextDivider =
+            loop.IndexOf("# ----", caseHeaderIdx, StringComparison.Ordinal);
         if (nextDivider >= 0)
         {
             end = Math.Min(end, nextDivider);
@@ -3268,9 +3279,14 @@ public sealed class ReleaseTests
         Assert.Contains("update_case", body, StringComparison.Ordinal);
         Assert.Contains("--no-kyberdash", body, StringComparison.Ordinal);
 
-        // The size guard fails the case if the layout-shifted build stops growing kyber-weave by at least one
-        // page, which would put every assembly at the same offset and hide the post-swap YamlDotNet defect.
-        Assert.Contains("4096", body, StringComparison.Ordinal);
+        // The size guard expression, not just the byte count: a regression that keeps "4096" in a comment
+        // — or that swaps the comparison for `-gt` while leaving the number — must not satisfy this pin.
+        Assert.Contains("-lt 4096", body, StringComparison.Ordinal);
+        // The padding that shifts every assembly by a page lives in the `Copyright` metadata of the
+        // layout release's publish; without it, two builds of one tree would lay out identically and
+        // hide the post-swap YamlDotNet defect from the swap-test and from production alike.
+        Assert.Contains("Copyright=", body, StringComparison.Ordinal);
+        Assert.Contains("release-local.sh", body, StringComparison.Ordinal);
         // The pinned layout release is the one whose kyber-weave file moves every assembly's offset.
         Assert.Contains("LAYOUT_VERSION", body, StringComparison.Ordinal);
     }
