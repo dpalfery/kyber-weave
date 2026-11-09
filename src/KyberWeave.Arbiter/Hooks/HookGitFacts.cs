@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -52,9 +51,9 @@ internal sealed class HookGitFacts(
 
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
-    private const int MaxStoredSnapshots = 64;
-    private const int MaxHashedPromptBytes = 16_384;
+    private const int MaxStoredSnapshots = 256;
     private static readonly TimeSpan SnapshotRetention = TimeSpan.FromHours(4);
+    private static readonly TimeSpan PeekRetryBudget = TimeSpan.FromMilliseconds(100);
 
     /// <inheritdoc/>
     public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev)
@@ -168,18 +167,31 @@ internal sealed class HookGitFacts(
         // baseline instead of falling back to a diff the dispatch's commits never appear in.
         // Lock-free: atomic renames mean readers only ever see whole documents, so pairing
         // a recorded baseline never waits on — or blocks — a concurrent record.
-        List<StoredSnapshot> entries = ReadSnapshots(Path.Combine(directory, SnapshotFileName));
-        int index = FindMatchingIndex(entries, target, ev);
-        if (index < 0)
+        // A rename landing mid-read serves the previous whole document, which may lack a
+        // just-recorded entry. Re-read briefly before calling the dispatch unobservable:
+        // a transient miss then still pairs, while genuine absence resolves absent.
+        string filePath = Path.Combine(directory, SnapshotFileName);
+        Stopwatch elapsed = Stopwatch.StartNew();
+        while (true)
         {
-            return null;
-        }
+            List<StoredSnapshot> entries = ReadSnapshots(filePath);
+            int index = FindMatchingIndex(entries, target, ev);
+            if (index >= 0)
+            {
+                StoredSnapshot entry = entries[index];
+                return new GitSnapshot(
+                    entry.Head,
+                    entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                    entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+            }
 
-        StoredSnapshot entry = entries[index];
-        return new GitSnapshot(
-            entry.Head,
-            entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
-            entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+            if (elapsed.Elapsed >= PeekRetryBudget)
+            {
+                return null;
+            }
+
+            Thread.Sleep(TimeSpan.FromMilliseconds(20));
+        }
     }
 
     private static int FindMatchingIndex(
@@ -217,21 +229,37 @@ internal sealed class HookGitFacts(
         return -1;
     }
 
-    // Bounded input: only the first bytes enter the hash, mixed with the total length,
-    // so two prompts sharing a prefix but not a length still key differently.
+    // Streams the prompt through the hash in chunks: the full byte form is never
+    // allocated, yet every byte still keys the match, so same-prefix prompts with
+    // different tails cannot share a key.
     private static string HashPrompt(string prompt)
     {
-        byte[] bytes = Encoding.UTF8.GetBytes(prompt);
-        if (bytes.Length <= MaxHashedPromptBytes)
+        const int charsPerChunk = 2048;
+        Span<byte> byteBuffer = stackalloc byte[Encoding.UTF8.GetMaxByteCount(charsPerChunk)];
+        using IncrementalHash sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Encoder encoder = Encoding.UTF8.GetEncoder();
+        ReadOnlySpan<char> remaining = prompt.AsSpan();
+        while (!remaining.IsEmpty)
         {
-            return Convert.ToHexString(SHA256.HashData(bytes));
+            // The final chunk flushes, so a split surrogate always resolves; a
+            // non-final chunk holds a full window, so progress is guaranteed.
+            int take = Math.Min(remaining.Length, charsPerChunk);
+            encoder.Convert(
+                remaining[..take],
+                byteBuffer,
+                take == remaining.Length,
+                out int charsUsed,
+                out int bytesUsed,
+                out _);
+            if (bytesUsed > 0)
+            {
+                sha.AppendData(byteBuffer[..bytesUsed]);
+            }
+
+            remaining = remaining[charsUsed..];
         }
 
-        byte[] suffix = Encoding.UTF8.GetBytes(":" + bytes.Length.ToString(CultureInfo.InvariantCulture));
-        byte[] head = new byte[MaxHashedPromptBytes + suffix.Length];
-        Buffer.BlockCopy(bytes, 0, head, 0, MaxHashedPromptBytes);
-        Buffer.BlockCopy(suffix, 0, head, MaxHashedPromptBytes, suffix.Length);
-        return Convert.ToHexString(SHA256.HashData(head));
+        return Convert.ToHexString(sha.GetHashAndReset());
     }
 
     private static void WithSnapshotStore(
