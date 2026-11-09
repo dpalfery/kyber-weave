@@ -287,7 +287,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 return RefuseInput(report, settings, gitRefusals);
         }
 
-        TaskGatePlan plan = TaskGateSelection.Plan(agentGates, changed, settings.TaskSlug, CurrentOs());
+        string repoRoot = EnclosingRepositoryRoot(root);
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap);
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
@@ -446,6 +448,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// </summary>
     internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
         gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
+
+    private static string EnclosingRepositoryRoot(string path)
+    {
+        for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
+        {
+            string gitPath = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitPath) || File.Exists(gitPath) || Directory.Exists(Path.Combine(dir.FullName, ".kyber-weave")))
+                return dir.FullName;
+        }
+        return path;
+    }
 
     private static string CurrentOs()
     {

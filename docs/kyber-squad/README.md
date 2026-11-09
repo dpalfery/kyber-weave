@@ -93,3 +93,4 @@ Explore the full Kyber-Squad documentation suite:
 * **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, transaction engine, and conductor execution circuit-breaker.
 * **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, degradation taxonomy, and the circuit-breaker harvest.
 * **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.
+* **[Worker Rule Map](worker-rule-map.md)** — One row per duplicated worker rule: where it lives now, its single home after the text trim, and the check that still enforces it.

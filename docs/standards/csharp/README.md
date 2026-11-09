@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-11-08
 ---
 
 # C# coding standard
@@ -33,6 +33,12 @@ Consequences worth stating:
   runs all Roslyn analyzers with `TreatWarningsAsErrors=true` under `AnalysisMode=all`,
   developer task-gates (`review.task-gates`) omit `dotnet format analyzers`, saving ~24s
   per task with zero loss of analyzer coverage.
+- **A format gate's exit 0 does not prove a project file was checked.** `dotnet format
+  --include` accepts a `.csproj`, `.props` or `.targets` path and exits 0 without formatting
+  anything, because it rewrites C# documents; a path that does not exist behaves the same way.
+  Measured on Linux, Windows and macOS for all three verbs. Those globs in a gate's `include`
+  buy **selection** — a change to one of those files makes the gate run instead of selecting
+  nothing — and never coverage of the project file itself.
 - **Persistent InspectCode AST caching.** Whole-solution ReSharper InspectCode
   (`inspectcode`) runs with `--caches-home=artifacts/inspectcode-cache` to persist AST
   caches across runs, cutting warm inspection duration by ~35% wall-clock and ~68% CPU.

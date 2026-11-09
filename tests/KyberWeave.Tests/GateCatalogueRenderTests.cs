@@ -167,7 +167,16 @@ public sealed class GateCatalogueRenderTests
         RenderedReviewBlock block = GateCatalogue.Render(["csharp"], roots, repository.Path);
         KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
 
-        string[] expected = ["csharp-format-analyzers", "csharp-format-style", "csharp-format-whitespace"];
+        // `csharp-suppressions` joined this set when the conductor run-speed programme added the
+        // suppression gate: test-dev writes C# tests and can add a `#pragma` or a SuppressMessage
+        // like any other author, so the same gate applies. The assertion stays an exact set.
+        string[] expected =
+        [
+            "csharp-format-analyzers",
+            "csharp-format-style",
+            "csharp-format-whitespace",
+            "csharp-suppressions",
+        ];
         string[] actual = config.Review.TaskGates["test-dev"]
             .Select(gate => gate.Id)
             .OrderBy(id => id, StringComparer.Ordinal)

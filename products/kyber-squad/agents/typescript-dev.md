@@ -38,7 +38,7 @@ You do **not** own:
 - CI/CD workflows, Dockerfiles, release packaging, or environment secrets — that is `github-devops`. Provide build, test, and run commands; do not write workflows or images
 - Infrastructure — that is `pulumi-dev`
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ## Workflow
 
@@ -71,7 +71,6 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Never turn an unmeasured value into `0`, `''`, or a default that looks like data.
 - Never author test files, React components, CI workflows, or Dockerfiles.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Completion digest
 

@@ -456,12 +456,14 @@ review:
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
-Both `run` and `fix` are argv for the same reason `review.gates` is. Two tokens expand, and only
+Both `run` and `fix` are argv for the same reason `review.gates` is. Three tokens expand, and only
 in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
 changed file the gate's `include` matches; `{task}` is the `--task` slug and may sit inside an
-argument. The program, the first element of `run` or `fix`, is always a literal: a token there is
-refused, so a changed file or a task slug can never choose what executes. A gate whose `include`
-matches no changed file is skipped, not passed. The loader refuses an unknown or embedded token,
+argument; `{tests}` is the fully qualified test classes that cover the change, described under
+[the tests a task gate runs](#the-tests-a-task-gate-runs). The program, the first element of
+`run` or `fix`, is always a literal: a token there is refused, so a changed file or a task slug
+can never choose what executes. A gate whose `include` matches no changed file is skipped, not
+passed. The loader refuses an unknown or embedded token,
 a token in the program, an empty list, an empty argument, a duplicate gate id, a non-slug agent
 or gate id, and an unrecognised `os`, at the point the operator wrote it. At run time a changed
 path that is absolute, leaves the repository, begins with `-`, or passes through a symbolic link
@@ -499,6 +501,89 @@ The shipped Go format gate (`gofmt -l`, council and task) sets `fail-on-output: 
 on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff only from Go 1.26, so a
 gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
 on all of them.
+
+### The tests a task gate runs
+
+A build that compiles is not evidence the change still passes its tests, and the product suite is too
+slow to run per task. So a task gate can name the classes that cover the change instead, through the
+third token. `{tests}` expands in the same step `{changed}` and `{task}` do, and becomes the
+`--filter` value the runner takes:
+
+```yaml
+review:
+  test-map:
+    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+  task-gates:
+    csharp-dev:
+      - id: tests
+        include: ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
+        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+```
+
+**`review.test-map` is the declaration, and the name convention is the fallback.** The map is a
+source glob to the fully qualified test classes that cover it. A changed path is matched against the
+declared globs first; a path no glob covers is tried as `<Stem>Tests`, the naming convention these
+tests already follow. A candidate survives only when a test file of that name exists, and the name
+emitted is the one the class declares itself — or the one its directory implies, for a file that
+declares no namespace. A name assembled from a path is how a filter ends up matching nothing and
+exiting success, which afterwards reads as a suite that ran and passed.
+
+**Nothing mapped is a skip, never a pass.** A change no class covers skips the gate with
+`KW-REVIEW-026`, which names the gate, rather than running a filter over nothing. The map is loaded
+with the rest of the `review:` section, so a blank path pattern, an entry that lists no class, a blank
+class name, and a name that is not dot-separated identifiers are each refused at the point the
+operator wrote them.
+
+**`{tests}` is refused in the program position** like the other two tokens, so a changed file can
+never choose what executes. The `--no-build` in the example is deliberate: the gate is declared after
+`dotnet-build`, which writes the per-task artifacts directory this gate then reuses, so the classes run
+against the binaries the build produced.
+
+### The suppression gate
+
+`kyber-weave review suppressions [path]` fails a change that adds a warning suppression without saying
+why. It judges added lines only — a `#pragma warning disable`, a `SuppressMessage` attribute, and the
+`NoWarn` element of a project file are recognised — and each one needs `reason: <why>` on the same
+added line or on the added line immediately above it. History is never re-litigated, so a committed
+suppression passes untouched, and a change that adds none passes.
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-036` | Error | A suppression the change added states no reason; the file, the line and the form are named |
+| `KW-REVIEW-037` | Error | The change could not be read, so nothing was scanned — a failure, never a pass |
+| `KW-REVIEW-028` | Error | The `--base` ref or the path is refused before anything is read (exit `2`) |
+
+`--base <REF>` is the ref the working tree is diffed against, and defaults to `HEAD`. A suppression
+found on a context line satisfies nothing, and an empty change is a pass. The command needs no
+`review:` section, so it runs in a host that declares none.
+
+Every .NET authoring role runs it as a task gate: `csharp-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`,
+`sql-database-architect` and `test-dev`. A suppression is the same defect wherever it is written, and a
+test file is written by an author like any other. The gate's argv is bare — `review suppressions "."` —
+and never carries `{changed}`: the command reads the change against its base itself, so a changed-file
+list would scan those files twice and still miss a suppression added to a file the gate's `include` did
+not list.
+
+It is a task gate and not a `review.gates` entry, and that is deliberate rather than an omission. The
+command measures the working tree against a base, so in a worker's tree the default `HEAD` is exactly the
+change that worker made. A council gate runs inside a working tree the runner has already checked out and
+usually committed, where the same default would compare `HEAD` with itself, find an empty change and pass
+— a gate that always passes is worse than no gate, because it reads as a check that ran. Making it safe
+there would mean a gate carrying an explicit `--base` per pipeline, and the task gate already covers the
+author that adds the suppression.
+
+The `csharp` family ships the same gate in its catalogue entry, so `docs init` scaffolds it into any host
+that installs a .NET stack rather than leaving the check to this repository alone. Unlike the family's
+three plumbing gates it carries no `os` restriction: a .NET authoring role writes a suppression on any
+platform, and `kyber-weave` is a dotnet tool that resolves the way `dotnet` does, so restricting it would
+leave a Windows host with every other csharp gate and not this one. Windows is not exercised. That entry
+names the
+five developers the catalogue's developer-slug vocabulary admits; `sql-database-architect` is not one of
+them, so a host scaffolded from the catalogue gets the gate for the other five and
+[sql-database-architect is not a catalogue developer slug](../todo/sql-database-architect-is-not-a-catalogue-developer-slug.md)
+tracks the gap.
 
 ### Council gates
 
@@ -690,6 +775,13 @@ with its note as the reason). Conditions are evaluated per root, because two roo
 one repository can differ — one `package.json` may define a `lint` script while another
 does not. Entries sharing an id pick one form per root. Every command is argv, and every
 gate id has a source URL in its family file.
+
+**What a host receives is pinned, not reviewed by eye.** Each family has an approved
+`expected-review.yml` under `tests/fixtures/gate-catalogue/<family>/`, and `DocsInitWritesTheApprovedReviewBlock`
+asserts that the `review:` section `docs init` writes equals it, version stamp aside. A hand edit to a
+family file that changes what an installing repository gets therefore fails a test rather than shipping
+quietly, and a gate added to a family is delivered by regenerating that fixture through the real
+`docs init` path so the diff is the new entries and nothing else.
 
 **A gate whose `role` is `test` is rendered with `full-suite: true`, and no other gate is.** The
 role is the catalogue's own definition of a whole-suite run, so a family that later ships a second

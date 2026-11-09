@@ -1,4 +1,4 @@
-# The 19 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 20 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -289,6 +289,30 @@ rules:
       - when: { fact: delegation.planning-paths, exists: true }
         answer: names-plan
     effects: { names-plan: escalate, no-plan: allow, closeout: allow }
+
+  # A dispatch claims what the worker will do; the digest that comes back carries a
+  # `TASK_GATE:` line claiming a gate run happened. That line is the worker's own word,
+  # so the rule checks it against the report file the line names rather than reading the
+  # claim. Joining the claimed status to the report's gates is a two-fact comparison the
+  # closed predicate set cannot express, so GateReportFacts makes it and answers the fact:
+  # true when the report corroborates the claim, false when it contradicts it, absent
+  # when the line, the path or the file is missing. Both failures escalate, because a
+  # dispatch whose evidence cannot be found is exactly the case this rule exists for;
+  # the two answers stay apart so the envelope says which one happened. Where a harness
+  # cannot observe returns the post-dispatch hook never fires and the rule cannot run;
+  # the end-of-run gates catch that case instead.
+  - id: KW-ARB-GATE-REPORT-001
+    trigger: delegate.returned
+    question: Does the returned digest's TASK_GATE line agree with the gate report it names?
+    answers: [verified, disagrees, missing]
+    decide:
+      - when: { fact: gate.report.agrees, exists: false }
+        answer: missing
+      - when: { fact: gate.report.agrees, equals: true }
+        answer: verified
+      - when: { fact: gate.report.agrees, exists: true }
+        answer: disagrees
+    effects: { verified: allow, disagrees: escalate, missing: escalate }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

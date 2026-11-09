@@ -500,7 +500,7 @@ safely merges the ignore entry for new and existing hosts.
 ## Arbiter configuration
 
 The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
-section, the Arbiter is disabled, the provider is `none`, and all 18 shipped rules are
+section, the Arbiter is disabled, the provider is `none`, and all 20 shipped rules are
 enabled. Hooks render only when `enabled` is true.
 
 ```yaml
@@ -595,6 +595,7 @@ concurrency cap (see `ReviewConfig`):
 | `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
 | `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+| `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
 
 Every .NET `dotnet build` invocation in the gate path carries
 `-nr:false -p:UseSharedCompilation=false` (no MSBuild node reuse, no shared
@@ -608,6 +609,21 @@ that names `{task}` refuses the run when no `--task` slug was given.
 ```yaml
 review:
   max-concurrent-workers: 4
+```
+
+`test-map` is what lets a task gate run tests at all: this repository's single product test project
+takes about 25 minutes with coverage, so a gate that ran it per task would cost far more than the task.
+Each entry maps one source glob to the fully qualified classes that cover it, and a `{tests}` token in
+a task gate's `run` becomes those class names. A changed path the map does not cover falls back to the
+`<Stem>Tests` naming convention, and a path no existing test file answers leaves the gate skipped
+(`KW-REVIEW-026`) rather than running a filter that matches nothing and exits zero. The rules the token
+follows are in [the review council architecture](code-review/architecture.md#the-tests-a-task-gate-runs).
+
+```yaml
+review:
+  test-map:
+    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
 ```
 
 A gate may set `full-suite: true` (a boolean, default `false`). It marks a gate that runs the full product

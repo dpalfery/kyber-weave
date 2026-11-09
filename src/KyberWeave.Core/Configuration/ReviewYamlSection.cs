@@ -8,6 +8,9 @@ internal sealed class ReviewYamlSection
     /// <summary>Agent slug to its ordered task gates, as the operator wrote them.</summary>
     public Dictionary<string, List<ReviewTaskGateYaml>?>? TaskGates { get; init; }
 
+    /// <summary>Source glob to the fully qualified test classes that cover it, as the operator wrote them.</summary>
+    public Dictionary<string, List<string>?>? TestMap { get; init; }
+
     public ReviewCoverageYaml? Coverage { get; init; }
 
     public ReviewDuplicatesYaml? Duplicates { get; init; }

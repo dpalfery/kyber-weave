@@ -75,4 +75,4 @@ Harvest H1–H10 migrated into canonical documentation at `extends-component` sc
 | H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
 | H8 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
 | H9 | [Install](../../../install.md), [DocGraph onboarding](../../../docgraph/onboarding.md) |
-| H10 | [Task-gate config review](../../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |
+| H10 | [Task-gate config review](../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |

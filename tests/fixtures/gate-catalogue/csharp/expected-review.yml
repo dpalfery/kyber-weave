@@ -42,6 +42,10 @@ review:
       # csharp: build (.)
       - id: csharp-build
         run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+      # csharp: lint (.)
+      - id: csharp-suppressions
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['kyber-weave', 'review', 'suppressions', '.']
     dal-dev:
       # csharp: format (.)
       - id: csharp-format-whitespace
@@ -61,6 +65,10 @@ review:
       # csharp: build (.)
       - id: csharp-build
         run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+      # csharp: lint (.)
+      - id: csharp-suppressions
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['kyber-weave', 'review', 'suppressions', '.']
     maui-dev:
       # csharp: format (.)
       - id: csharp-format-whitespace
@@ -80,6 +88,10 @@ review:
       # csharp: build (.)
       - id: csharp-build
         run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+      # csharp: lint (.)
+      - id: csharp-suppressions
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['kyber-weave', 'review', 'suppressions', '.']
     pulumi-dev:
       # csharp: format (.)
       - id: csharp-format-whitespace
@@ -99,6 +111,10 @@ review:
       # csharp: build (.)
       - id: csharp-build
         run: ['dotnet', 'build', 'Fixture.sln', '-c', 'Release', '--artifacts-path', '.agent_scratchpad/{task}/artifacts']
+      # csharp: lint (.)
+      - id: csharp-suppressions
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['kyber-weave', 'review', 'suppressions', '.']
     test-dev:
       # csharp: format (test-dev copy)
       - id: csharp-format-whitespace
@@ -115,3 +131,7 @@ review:
         include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
         run: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--verify-no-changes', '--severity', 'warn', '--include', '{changed}']
         fix: ['dotnet', 'format', 'Fixture.sln', 'analyzers', '--severity', 'warn', '--include', '{changed}']
+      # csharp: lint (test-dev copy)
+      - id: csharp-suppressions
+        include: ['**/*.cs', '**/*.csproj', '**/*.props', '**/*.targets']
+        run: ['kyber-weave', 'review', 'suppressions', '.']

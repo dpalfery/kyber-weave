@@ -22,7 +22,7 @@ impact-components:
 verification, the gates and every decision's destination are in [Closeout](#closeout) and
 [Closeout mapping](#closeout-mapping) below. Two things are recorded there rather than hidden:
 T41's `dotnet format --include` check on Linux and Windows has not run, so
-[task-gate-config-review](../../todo/task-gate-config-review.md) stays open for that one question; and
+[task-gate-config-review](../todo/task-gate-config-review.md) stays open for that one question; and
 the `docs-dev` documentation check stays open in
 [its own todo](../../todo/docs-dev-task-gate-entry.md), which this slice narrowed and did not close.
 Every other decision is mapped to a live document.
@@ -35,7 +35,7 @@ The parent design's measured runs showed project knowledge living where it is re
 
 The goal of this slice (the parent's fix 11): **project knowledge out of portable files** — runnable checks into `review.gates` and `review.task-gates`, and how-to-finish knowledge into a `## Completion` section in every coding standard, fetched by topic only when a worker is finishing (D4, D5, D31); **an `onboarding` setting and flow** — `run start` checks it before anything else and stops when unset, `kyber-docs-onboarding-and-assessment` walks each technology's defaults and `kyber-weave docs onboarding <done|declined>` writes the value (D6, D7, D33, D34, D40); **catalogue repair** — whole-suite gates carry `full-suite: true`, targeted gates do not, and the generated command is never wrapped in `proc-guard.sh` (D32); **this repository's own gate choices settled** — `sql-database-architect` and `github-devops` get gate sets that match the files they edit, workflow, shell and config edits select at least one gate, `onboarding: done` is set, and `docs-dev` gains its first task-gates entry (D60); and **the `dotnet format --include` leniency confirmed on Linux and Windows** (T41), because it was only ever checked on macOS.
 
-The slice completes three open todos: [docs-init-emit-full-suite-gate-key](../../archive/todo/docs-init-emit-full-suite-gate-key.md) (T37), [task-gates-workflow-and-shell-edits](../../archive/todo/task-gates-workflow-and-shell-edits.md) (T37 plus T40), and [task-gate-config-review](../../todo/task-gate-config-review.md) (T40, plus T41's Linux and Windows evidence — the parent's own condition: without that evidence the todo is narrowed to that one question and left open, never archived).
+The slice completes three open todos: [docs-init-emit-full-suite-gate-key](../../archive/todo/docs-init-emit-full-suite-gate-key.md) (T37), [task-gates-workflow-and-shell-edits](../../archive/todo/task-gates-workflow-and-shell-edits.md) (T37 plus T40), and [task-gate-config-review](../todo/task-gate-config-review.md) (T40, plus T41's Linux and Windows evidence — the parent's own condition: without that evidence the todo is narrowed to that one question and left open, never archived).
 
 ## Decisions
 
@@ -333,7 +333,7 @@ files read.
 ### Recorded, not closed
 
 - **T41's Linux and Windows evidence does not exist.**
-  [task-gate-config-review](../../todo/task-gate-config-review.md) stays open for that one question,
+  [task-gate-config-review](../todo/task-gate-config-review.md) stays open for that one question,
   narrowed to it: the first question is answered in the configuration. No
   `.agent_scratchpad/T41/format-include-check.md` and no `ubuntu-latest` or `windows-latest` run is
   cited anywhere in this tree, so nothing is claimed.

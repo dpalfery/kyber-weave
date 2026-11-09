@@ -72,7 +72,9 @@ public sealed record ReviewGate(
 /// <param name="Os">
 /// <c>windows</c> or <c>unix</c> to run only on that platform; null to run everywhere.
 /// </param>
-/// <param name="Run">The verifying command, as argv. <c>{changed}</c> and <c>{task}</c> stay literal here.</param>
+/// <param name="Run">
+/// The verifying command, as argv. <c>{changed}</c>, <c>{task}</c> and <c>{tests}</c> stay literal here.
+/// </param>
 /// <param name="Fix">The command that applies the fix, as argv, with the same token rules as <see cref="Run"/>.</param>
 /// <param name="Blocking">Whether a failing gate blocks the change.</param>
 /// <param name="TimeoutSeconds">Seconds before the runner kills the process tree.</param>
@@ -81,8 +83,9 @@ public sealed record ReviewGate(
 /// </param>
 /// <remarks>
 /// Like <see cref="ReviewGate"/>, both commands are argv lists and never a command line. The
-/// runner expands the <c>{changed}</c> and <c>{task}</c> tokens; this record only carries them,
-/// so a token that is not a whole argument is refused at the point the operator wrote it.
+/// runner expands the <c>{changed}</c>, <c>{task}</c> and <c>{tests}</c> tokens; this record only
+/// carries them, so a token that would mean nothing where the operator put it is refused at the point
+/// they wrote it.
 /// </remarks>
 public sealed record ReviewTaskGate(
     string Id,
@@ -196,6 +199,18 @@ public sealed class ReviewConfig
     public IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> TaskGates { get; init; } =
         new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(
             new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// The host's mapping from a source glob to the fully qualified test classes that cover it, which the
+    /// <c>{tests}</c> task-gate token expands through. Empty when the host declares none.
+    /// </summary>
+    /// <remarks>
+    /// A declared entry is read before the file-name convention, because an operator who maps a source area
+    /// knows which classes exercise it and a file name does not.
+    /// </remarks>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> TestMap { get; init; } =
+        new ReadOnlyDictionary<string, IReadOnlyList<string>>(
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal));
 
     /// <summary>The unit-coverage floor.</summary>
     public ReviewCoverage Coverage { get; init; } = new();

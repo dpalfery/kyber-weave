@@ -431,14 +431,15 @@ Owned by the [Kyber Utilities adoption and activation guide](kyber-utilities/onb
 
 ### `review` — the deterministic review half
 
-Owned by the [Review council overview](code-review/README.md#four-commands), with the
+Owned by the [Review council overview](code-review/README.md#the-review-commands), with the
 verdict engine under [Review council architecture](code-review/architecture.md#how-the-verdict-is-computed).
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`review gates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--gate <ID>` (repeatable), `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix`, `--council` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped; with `--gate`, run only the gates named); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
+| [`review gates`](code-review/README.md#the-review-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--gate <ID>` (repeatable), `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix`, `--council` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped; with `--gate`, run only the gates named); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
-| [`review duplicates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
+| [`review duplicates`](code-review/README.md#the-review-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
+| [`review suppressions`](code-review/architecture.md#the-suppression-gate) | `-f\|--format`, `--no-info`, `-c\|--config`, `--base <REF>` | Fail a change that adds a warning suppression without a `reason:` on the same or the immediately preceding added line. History is never re-litigated; an unreadable change fails rather than passing. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes from findings and gates. |
 
 `review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
@@ -478,10 +479,13 @@ changed, instead of running the repository-wide `review.gates`:
   finding. The other gates still run, unless the run is `--all` (see above), and `--agent` task-gate runs
   are unaffected. The command exits `1`.
   A pre-push self-review run never passes `--council`; CI runs the refused gates.
-- Two tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
-  becomes one argument per changed file the gate's `include` matches, and `{task}`, which may
-  sit inside an argument. Neither reaches a shell, and the program (the first element) is always
-  a literal, never a token.
+- Three tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
+  becomes one argument per changed file the gate's `include` matches; `{task}`, which may sit
+  inside an argument; and `{tests}`, which becomes the fully qualified test classes covering the
+  change, resolved from `review.test-map` first and the `<Stem>Tests` naming convention second. A
+  change no class covers skips the gate with `KW-REVIEW-026` rather than running a filter over
+  nothing. None reaches a shell, and the program (the first element) is always a literal, never a
+  token.
 
 ### `update` — replace the Release binaries
 
@@ -614,6 +618,7 @@ risk. The three rules below mirror the contract in
 | `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, `--paths` or `--gate` is a client-input error (`KW-REVIEW-028`, exit `2`). `--gate` naming no declared gate, or combining with `--agent`, is a client-input error (`KW-REVIEW-028`); an unknown id exits `1`, a bad combination exits `2`. A full-suite gate refused for lack of `--council` (`KW-REVIEW-033`, a gate that never started) is a blocking failure: exit `1`. Under `--all` that refusal ends the run with no gate started; in a scoped run the other gates still run. A gate whose `requires-paths` entry is absent is also `KW-REVIEW-033`, exitCode `-1`: exit `1` when blocking. |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
+| [`review suppressions`](code-review/architecture.md#the-suppression-gate) | `0` when every suppression the change added states a reason, or the change adds none; `1` when one does not (`KW-REVIEW-036`) or the change against `--base` could not be read (`KW-REVIEW-037`), because an unreadable change is no evidence either way; `2` for a `--base` ref or a path refused before anything was read (`KW-REVIEW-028`) |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
 | `arbiter install`, `arbiter uninstall` | `2` for a client-input error (missing or unknown `--target`, combining `--global` and `--project` or `--path` without `--project` — `KW-ARB-INSTALL-001`, a keyed provider with no key — `KW-ARB-KEY-001`, an invalid `--provider`, a declined confirmation), `1` for an operational failure (unreadable/unwritable config or state, failed Squad render, failed verification, a receipt that refuses a block claim such as one target claiming one path twice); `0` for success or an idempotent no-op. The codes are the same at both scopes, and at global scope a second block-bearing target is neither a client-input error nor a duplicate: its block is claimed by target beside path, so each target installs and uninstalls on its own (`0`) |
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |

@@ -83,6 +83,25 @@ task-gates:
     include: [".kyber-weave/kyber-weave.yml", "kyber-weave.yml"]
     os: "unix"
     run: [kyber-weave, review, catalogue, "."]
+  # A suppression that states no reason is a rule turned off with no record of why. This reads the
+  # change's added lines only, so it judges what a task introduced rather than re-litigating history,
+  # and it fails closed when the diff cannot be read. Every .NET developer can add one, so every one
+  # of them gets the gate.
+  - id: suppressions
+    role: lint
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, test-dev]
+    # `sql-database-architect` also adds suppressions, but the catalogue's developer-slug
+    # vocabulary does not list it, so naming it here fails the render. Recorded as a todo
+    # rather than worked around by widening the vocabulary.
+    include: ["{{root-glob}}**/*.cs", "{{root-glob}}**/*.csproj", "{{root-glob}}**/*.props", "{{root-glob}}**/*.targets"]
+    # No `os` restriction, unlike the plumbing gates: a .NET authoring role writes a suppression on
+    # any platform, and `kyber-weave` is a dotnet tool that resolves the way `dotnet` does, so
+    # restricting it would leave a Windows host with every other csharp gate and not this one.
+    # Not exercised on Windows.
+    # No {changed}: the command reads the change against its base itself, so naming the
+    # changed files would scan them twice and, worse, scan nothing when a suppression
+    # was added to a file the gate did not list.
+    run: [kyber-weave, review, suppressions, "."]
 sources:
   # Test (VSTest form). The MTP form is documented at https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-mtp
   format-whitespace: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
@@ -92,4 +111,5 @@ sources:
   test: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest
   workflow-lint: https://github.com/rhysd/actionlint#download
   shellcheck: https://github.com/koalaman/shellcheck#installing
+  suppressions: https://github.com/dpalfery/kyber-weave/blob/main/docs/code-review/architecture.md#the-suppression-gate
   review-config: https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh

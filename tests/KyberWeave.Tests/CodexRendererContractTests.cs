@@ -64,7 +64,7 @@ public sealed class CodexRendererContractTests : IDisposable
             Assert.Equal(expectedModel, parsed.Model);
 
             Assert.Equal(
-                Normalized(TestSquadCorpus.ExpectedRenderText(SquadTarget.Codex, agent.InstructionBody)),
+                Normalized(TestSquadCorpus.ExpectedBodyText(SquadTarget.Codex, agent)),
                 parsed.DeveloperInstructions);
         }
 

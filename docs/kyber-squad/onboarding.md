@@ -1334,6 +1334,35 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
 Standardizing this schema eliminates rejection rework caused by formatting variations.
 
+### What every dispatched worker carries
+
+Every worker a run dispatches arrives already holding four rules, injected into its rendered body from
+one file, `products/kyber-squad/shared/worker-baseline.md`: discover before you read, do not open a
+plan or specification, never run the full test suite, and batch independent reads into one round trip.
+`SquadWorkerBaselineInjector` applies the block in the render pipeline, so it sits in the worker's own
+instructions on every turn with no load step and nothing for an operator to switch on.
+
+What that means in practice:
+
+- **One file to read, and one file to change.** The baseline is repository content, not a home-owned
+  override: there is no per-user equivalent to `response-guidance.md`. A host that wants a different
+  worker rule edits the canonical file and re-renders, rather than editing a copy that the next update
+  would overwrite.
+- **Entry points do not receive it.** `conductor`, `bug-crusher` and the other primary agents run in a
+  session whose own instructions already carry their rules, and the plan-read rule would contradict a
+  conductor whose job is to read the plan. The block reaches dispatched workers only.
+- **A project-specific rule still goes in the packet or the standard.** Injection keeps the always-on
+  rules in one place; it does not make the baseline the home for anything specific to one task or one
+  host repository.
+- **A deployed worker shows the block exactly once.** A file carrying it twice, or a worker carrying
+  none, is a rendering defect rather than a source one: re-run `squad update` against the current
+  release and confirm the block appears once in the rendered body.
+- **It is not a size saving on its own.** The same four rules still reach the worker; what changes is
+  that one copy serves every body, so the duplication cannot drift or regrow. The rules and the check
+  that holds each one are in [the worker rule map](worker-rule-map.md), and the harness behaviours the
+  block depends on, with what this tree can and cannot establish, are in
+  [the capability matrix](requirements.md#harness-behaviour-the-product-relies-on).
+
 ### Worktree MCP setup and canonical binding
 
 When conductor executes concurrent tasks in isolated git worktrees, MCP configuration binds to the canonical repository root rather than ephemeral worktree paths:

@@ -37,7 +37,7 @@ You do **not** own:
 - Azure resource provisioning — that belongs to `pulumi-dev`. Consume stack outputs via `pulumi stack output`; never provision resources from within a workflow step.
 - Application code, test authorship, or schema migrations.
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ## Run-start step
 
@@ -72,9 +72,8 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
-- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
+- Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Workflow
 
@@ -83,13 +82,8 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 3. Identify which environments exist and which Pulumi stacks map to them.
 4. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.
 5. Write or update the workflow file(s). Validate YAML structure — GitHub Actions YAML errors are silent until runtime.
-6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving workflow errors or pipeline failures:
-   - **Iteration Cap:** Maximum of 3 incremental fix iterations against the same failing pipeline step or workflow failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If unresolved after 3 attempts, halt immediately and trip the circuit breaker.
-   - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm edits remain strictly within authorized workflow and CI files. If resolving a failure requires expanding blast radius into unapproved scripts or out-of-scope infrastructure, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
-   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one pipeline job causes another job to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the second job regresses the first (A→B→A) or a failure signature repeats.
-   - **JEV Checkpoint 3 (Invariant Contradiction):** If pipeline steps assert contradictory requirements across platforms or environments, do not apply hacks. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
-7. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
-8. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
+6. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
+7. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
 
 ## Coordination
 
@@ -110,13 +104,4 @@ TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — age
 OPEN_QUESTIONS: <bullets, or "none">
 ```
 
-If the iteration circuit breaker trips, return instead:
-
-```text
-STATUS: ESCALATION
-CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>
-FAILURE_CLUSTER: <failing job/step names or failure cluster>
-CONTRADICTORY_INVARIANTS: <invariant A vs invariant B, or none>
-BLAST_RADIUS: <files touched / attempted vs authorized scope>
-RECOMMENDED_ACTION: <pipeline modernization | environment alignment | architect re-planning>
-```
+If the failure loop trips, return the escalation in `skills/task-gate/references/rework.md` instead.

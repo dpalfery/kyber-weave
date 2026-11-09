@@ -133,6 +133,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/rust-dev/references/gates-and-platforms.md` | procedure | retain-in-place | rendered | — | Per-platform procedure for running the Rust gates; the commands themselves are named by `<rust-coding-standard>` (D2). |
 | `skills/setup-dev-environment/agents/openai.yaml` | metadata | retain-in-place | packaged-only | — | Codex skill-UI metadata (display name, default prompt, implicit-invocation policy); no instruction references it, so no closure reaches it (D2, D6). |
 | `skills/setup-dev-environment/references/inventory.md` | inventory | retain-in-place | rendered | — | Host bootstrap inventory reference; not a host-reversible policy (D2). |
+| `skills/task-gate/references/rework.md` | procedure | retain-in-place | rendered | — | The failure loop a gate failure sends a worker round: what to fix, when to rework, when to stop. Kyber-authored procedure rather than host-reversible policy, and the single home the trim in slice 8 moved the copies to. |
 | `skills/test-dev/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
 | `skills/test-dev/references/integration-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 9 Policy-line ledger rows below: 7 duplicate lines point to `<test-coding-standard>`; 2 migrated gaps move into the existing `test § Isolation` section. |
 | `skills/test-dev/references/mock-usage-analysis.md` | technique | retain-in-place | rendered | — | Mocking-analysis technique; not a host-reversible policy (D2). |
@@ -144,10 +145,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/types-and-absent-values.md` | technique | retain-in-place | rendered | — | Narrowing and absent-value technique; typing and absent-value policy lives in `<typescript-coding-standard>` (D2). |
 
-Eighty-eight rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 66
+Eighty-nine rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 67
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 87 `rendered`, 1 `packaged-only` (`openai.yaml`).
+`policy-migrated-to-template`). Delivery: 88 `rendered`, 1 `packaged-only` (`openai.yaml`).
 
 ## Policy-line ledger
 

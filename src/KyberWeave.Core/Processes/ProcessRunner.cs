@@ -1,8 +1,17 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 
 namespace KyberWeave.Core.Processes;
+
+/// <summary>Thrown when a child process produces more output than its configured byte budget.</summary>
+public sealed class OutputLimitExceededException : InvalidOperationException
+{
+    public OutputLimitExceededException() { }
+    public OutputLimitExceededException(string? message) : base(message) { }
+    public OutputLimitExceededException(string? message, Exception? innerException) : base(message, innerException) { }
+}
 
 /// <summary>What a finished child process wrote, and how it ended.</summary>
 /// <param name="ExitCode">The process exit code.</param>
@@ -33,7 +42,16 @@ public static class ProcessRunner
     ///     if the child has not finished within this limit. Unbounded waits are how a hung gate
     ///     takes the whole review with it.
     /// </param>
-    public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput, TimeSpan? timeout = null)
+    /// <param name="maxOutputBytes">
+    ///     When set, bounds standard output and standard error reading to this many bytes. If the child process
+    ///     produces more output, its process tree is killed and an <see cref="OutputLimitExceededException" />
+    ///     is thrown before the full output is buffered in memory.
+    /// </param>
+    public static ProcessResult Run(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout = null,
+        long? maxOutputBytes = null)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
@@ -61,8 +79,8 @@ public static class ProcessRunner
 
         // Reads start before the write because a child may produce more than one pipe
         // buffer of output before it consumes any stdin.
-        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        Task<string> standardOutput = ReadBoundedAsync(process.StandardOutput, maxOutputBytes);
+        Task<string> standardError = ReadBoundedAsync(process.StandardError, maxOutputBytes);
         Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
 
         bool timedOut = false;
@@ -85,12 +103,19 @@ public static class ProcessRunner
                 io.GetAwaiter().GetResult();
             }
         }
+        catch (Exception ex) when (ex is not TimeoutException)
+        {
+            TryKillTree(process);
+            if (ex is AggregateException ae)
+                throw ae.Flatten().InnerExceptions[0];
+            throw;
+        }
         finally
         {
-            // After a timeout kill, an unbounded WaitForExit can hang if the tree did not
+            // After a timeout kill or fault, an unbounded WaitForExit can hang if the tree did not
             // actually die. The success path still waits without a cap: WhenAll already
             // drained both pipes, so the child cannot be blocked on write.
-            if (timedOut)
+            if (timedOut || !process.HasExited)
                 process.WaitForExit(TimeSpan.FromSeconds(5));
             else
                 process.WaitForExit();
@@ -208,6 +233,31 @@ public static class ProcessRunner
                 safe.Environment[pair.Key] = pair.Value;
 
         return safe;
+    }
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, long? maxBytes)
+    {
+        if (maxBytes is null)
+            return await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        if (maxBytes.Value < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxBytes), maxBytes.Value, "maxBytes cannot be negative.");
+
+        long max = maxBytes.Value;
+        int bufferSize = (int)Math.Clamp(max > 16383 ? 16384 : max + 1, 1, 16384);
+        char[] buffer = new char[bufferSize];
+        StringBuilder sb = new();
+        long totalBytes = 0;
+        int read;
+        while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+        {
+            totalBytes += reader.CurrentEncoding.GetByteCount(buffer, 0, read);
+            if (totalBytes > max)
+                throw new OutputLimitExceededException($"The process output exceeded the limit of {max.ToString(CultureInfo.InvariantCulture)} bytes.");
+
+            sb.Append(buffer, 0, read);
+        }
+        return sb.ToString();
     }
 
     private static async Task WriteAndCloseAsync(StreamWriter writer, string input)

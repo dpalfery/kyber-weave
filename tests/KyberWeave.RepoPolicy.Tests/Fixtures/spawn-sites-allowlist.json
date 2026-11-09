@@ -362,6 +362,12 @@
       "bound": "200 ms timeout kills the tree; the child is `sleep 2`, the subject of the timeout test."
     },
     {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));",
+      "count": 1,
+      "bound": "Output capped at 1000 bytes and timeout of TimeoutSeconds (30 s) kills the child tree; the child is a shell emitting 2000 chars."
+    },
+    {
       "file": "tests/KyberWeave.Tests/ProcessRunnerTests.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"/bin/sh\")",
       "count": 1,
@@ -1290,6 +1296,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "60 s timeout kills the child tree on expiry. Receives stdin then EOF immediately, drains both redirected streams through ProcessRunner, and is the only start site in the run-start suites; every child is the local kyber-weave host or a local git repository under a TempDirectory."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the RunGit call at line 343: ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry. git argv only, never a shell, reading the diff of the caller's repository; a missing git, a timeout and a non-zero exit all return 'the change was not read' rather than blocking."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);",
+      "count": 1,
+      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; output capped at maxOutputBytes to prevent memory exhaustion; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
     }
   ]
 }

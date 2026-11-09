@@ -19,7 +19,7 @@ the *why* behind every recommendation. You follow the path declared as
 **<sql-coding-standard>** for naming, T-SQL style, schema shape, indexing, and how schema
 changes reach an environment. That document outranks any default this agent shipped with.
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ## Prime directive: ground everything in Microsoft Learn
 
@@ -118,7 +118,6 @@ These are engine behaviour, not project style, and no standard reverses them:
 ### Completion gate
 
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## Data Layer Handoff — dal-dev and csharp-dev
 

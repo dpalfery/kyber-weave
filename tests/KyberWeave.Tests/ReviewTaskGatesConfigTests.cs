@@ -17,7 +17,7 @@
 //   Rejections are YamlException. Every message names the agent slug and, for gate-level faults,
 //   the gate id, plus the offending field or value. Unknown {tokens} also carry the nearest known
 //   token ("{changed}" or "{task}") in the message.
-//   Known tokens: changed, task.
+//   Known tokens: changed, task, tests.
 
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -848,6 +848,79 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.True(
             offenders.Count == 0,
             $"Expected no agent in review.task-gates to declare 'format-analyzers', but these agents did: {string.Join(", ", offenders)}");
+    }
+
+    [Fact]
+    public void TestMapRequiresFullyQualifiedClassNamesWithNamespaceDot()
+    {
+        string yaml = """
+            review:
+              test-map:
+                "src/**":
+                  - SingleSegmentName
+            """;
+
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.Contains("SingleSegmentName", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("not a fully qualified class name", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TestMapTrimsPatternKeyAndValues()
+    {
+        string yaml = """
+            review:
+              test-map:
+                "  src/**  ":
+                  - "  Namespace.TestClass  "
+            """;
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        Assert.True(config.Review.TestMap.ContainsKey("src/**"));
+        Assert.Equal(["Namespace.TestClass"], config.Review.TestMap["src/**"]);
+    }
+
+    [Fact]
+    public void TestMapRejectsEmptyPatternOrClasses()
+    {
+        string yamlEmptyPattern = """
+            review:
+              test-map:
+                "":
+                  - Namespace.TestClass
+            """;
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlEmptyPattern));
+
+        string yamlNoClasses = """
+            review:
+              test-map:
+                "src/**": []
+            """;
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlNoClasses));
+
+        string yamlEmptyClassName = """
+            review:
+              test-map:
+                "src/**":
+                  - ""
+            """;
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlEmptyClassName));
+    }
+
+    [Fact]
+    public void TestMapRejectsDuplicateTrimmedPatterns()
+    {
+        string yaml = """
+            review:
+              test-map:
+                "src/**":
+                  - Namespace.FirstTest
+                "  src/**  ":
+                  - Namespace.SecondTest
+            """;
+
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.Contains("duplicate pattern 'src/**'", ex.Message, StringComparison.Ordinal);
     }
 
     private static bool HasFlag(IReadOnlyList<string> run, string flag)

@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using Xunit;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -52,6 +53,44 @@ public static class TestSquadCorpus
     {
         ArgumentNullException.ThrowIfNull(canonicalText);
         return canonicalText.Replace("{{harness}}", SquadTargetCatalog.GetToken(target), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The canonical worker body as a subagent render carries it: the authored body plus the shared
+    /// baseline block the renderer appends to every dispatched worker.
+    /// </summary>
+    /// <remarks>
+    /// The block is read from the product file rather than produced by calling the injector, so this
+    /// expectation cannot pass whatever the injector happens to do — the same reason
+    /// <see cref="ExpectedRenderText" /> spells the substitution out. An entry-point body (the
+    /// conductor, bug-crusher, product-owner) carries no block: those read the plan as their own job.
+    /// </remarks>
+    public static string ExpectedSubagentRenderText(SquadTarget target, string canonicalText)
+    {
+        string block = File.ReadAllText(
+            Path.Combine(ProductRoot, "shared", "worker-baseline.md"));
+        int start = block.IndexOf("<worker-baseline>", StringComparison.Ordinal);
+        int end = block.IndexOf("</worker-baseline>", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "products/kyber-squad/shared/worker-baseline.md must carry one tagged block.");
+
+        return ExpectedRenderText(target, canonicalText)
+            + Environment.NewLine
+            + block[start..end].TrimEnd()
+            + Environment.NewLine
+            + "</worker-baseline>";
+    }
+
+    /// <summary>
+    /// The body text a render carries for <paramref name="agent" />: the authored body plus the shared
+    /// baseline block when the agent is a dispatched worker, and the authored body alone when it is a
+    /// session entry point, which reads the plan as part of its own job.
+    /// </summary>
+    public static string ExpectedBodyText(SquadTarget target, SquadAgent agent)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        return agent.Invocation == SquadInvocation.Subagent
+            ? ExpectedSubagentRenderText(target, agent.InstructionBody)
+            : ExpectedRenderText(target, agent.InstructionBody);
     }
 
     /// <summary>

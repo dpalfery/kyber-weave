@@ -1,4 +1,9 @@
+using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -24,6 +29,20 @@ public sealed class SquadPerformanceContractTests
     private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
     private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
     private const string TestDevSkillPath = "products/kyber-squad/skills/test-dev/SKILL.md";
+
+    /// <summary>
+    ///     The skill a worker loads when it finishes. Report formats — the completion digest and its
+    ///     fields — belong here rather than in each agent body (the rule map's "Report formats" row),
+    ///     so the pins below read this file instead of the per-agent copies.
+    /// </summary>
+    private const string TaskGateSkillPath = "products/kyber-squad/skills/task-gate/SKILL.md";
+
+    /// <summary>
+    ///     The one always-on source of worker text (decision D27): the Discovery order, the plan-read
+    ///     ban, the full-suite ban and the batched-read rule are injected from here into every worker
+    ///     render, so no agent body repeats them.
+    /// </summary>
+    private const string WorkerBaselinePath = "products/kyber-squad/shared/worker-baseline.md";
     private const string TestCodingStandardPath = "docs/standards/test/README.md";
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string OnboardingDocPath = "docs/kyber-squad/onboarding.md";
@@ -366,13 +385,15 @@ public sealed class SquadPerformanceContractTests
             content);
     }
 
-    [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
-    public void WorkerSurfacesSpecifyExplicitSixFieldCompletionDigestSchema(string relativePath)
+    /// <summary>
+    ///     One home for the report format: the skill a worker loads when it finishes carries the six
+    ///     fields, the exact <c>COMMIT:</c> and <c>REMOTE_HEAD:</c> spellings and the contiguous
+    ///     template. Pinning it in each agent body is what let three copies drift apart.
+    /// </summary>
+    [Fact]
+    public void TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema()
     {
-        string content = ReadRepoFile(relativePath);
+        string content = ReadRepoFile(TaskGateSkillPath);
         foreach (string field in RequiredDigestFields) Assert.Contains(field, content, StringComparison.Ordinal);
 
         Assert.Contains("COMMIT: <commit-sha | NONE>", content, StringComparison.Ordinal);
@@ -576,32 +597,75 @@ public sealed class SquadPerformanceContractTests
     }
 
     /// <summary>
-    ///     Only the review council and CI run the full suite. It walks the agents directory, so a
-    ///     dev agent added later is covered without anyone remembering this list.
+    ///     Only the review council and CI run the full suite. Decision D27 puts that ban in one
+    ///     always-on line injected into every worker's text from the shared baseline, so the ban is
+    ///     asserted where it is written, and no agent body repeats it — text in each agent file is
+    ///     re-sent on every round trip of every worker.
     /// </summary>
     [Fact]
-    public void EveryAgentThatRunsTheTaskGateIsToldNeverToRunTheFullTestSuite()
+    public void TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten()
     {
-        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
-        string[] gated = Directory.GetFiles(agents, "*.md")
-            .Where(path => File.ReadAllText(path).Contains("`task-gate` skill", StringComparison.Ordinal))
-            .ToArray();
+        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(WorkerBaselinePath));
 
-        Assert.NotEmpty(gated);
-        string[] missing = gated
-            .Where(path => !Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
+        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
+        string[] repeating = Directory.GetFiles(agents, "*.md", SearchOption.AllDirectories)
+            .Where(path => Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
             .Select(Path.GetFileName)
             .OfType<string>()
             .ToArray();
-        Assert.True(missing.Length == 0, "Missing the full-suite rule: " + string.Join(", ", missing));
+
+        Assert.True(
+            repeating.Length == 0,
+            "The full-suite ban is injected from the shared baseline; these agent bodies repeat it: " +
+            string.Join(", ", repeating));
     }
 
-    [Theory]
-    [InlineData("products/kyber-squad/skills/bug-crusher/SKILL.md")]
-    [InlineData("products/kyber-squad/agents/bug-crusher-investigator.md")]
-    public void BugCrusherSurfacesAreToldNeverToRunTheFullTestSuite(string relativePath)
+    /// <summary>The harnesses that ship; each one renders the bug-crusher surfaces.</summary>
+    public static TheoryData<SquadTarget> ShippedRenderTargets() =>
+        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+
+    /// <summary>
+    ///     The bug-crusher skill is a primary session, so the baseline never reaches it and the ban has
+    ///     to be in its own text.
+    /// </summary>
+    [Fact]
+    public void BugCrusherSkillIsToldNeverToRunTheFullTestSuite()
     {
-        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(relativePath));
+        Assert.Matches(
+            NeverRunFullSuiteRegex,
+            ReadRepoFile("products/kyber-squad/skills/bug-crusher/SKILL.md"));
+    }
+
+    /// <summary>
+    ///     The investigator is a dispatched subagent, so the ban reaches it the way it reaches every
+    ///     worker: from the shared baseline, once per render (decision D27). The evidence that this
+    ///     agent is told never to run the full suite is therefore that render, not a second copy in its
+    ///     body — a body copy is what
+    ///     <see cref="TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten"/> forbids. The subject is
+    ///     unchanged; only where it is read from moved.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedRenderTargets))]
+    public async Task BugCrusherInvestigatorIsToldNeverToRunTheFullTestSuiteByItsRender(SquadTarget target)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        (string RelativePath, string Content)[] investigatorFiles =
+        [
+            .. result.Files
+                .Where(file => file.RelativePath.Contains("bug-crusher-investigator", StringComparison.Ordinal))
+                .Select(file => (file.RelativePath, Content: Encoding.UTF8.GetString(file.Content.Span)))
+        ];
+
+        Assert.True(
+            investigatorFiles.Length > 0,
+            $"The {target} render carries no file for 'bug-crusher-investigator', so this case would prove nothing.");
+
+        Assert.True(
+            investigatorFiles.Any(file => Regex.IsMatch(file.Content, NeverRunFullSuiteRegex)),
+            $"The {target} render of 'bug-crusher-investigator' carries no 'never run the full test suite' line. " +
+            "It reaches the agent from the shared baseline, which every worker render injects once.");
     }
 
     [Theory]

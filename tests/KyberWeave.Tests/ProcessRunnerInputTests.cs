@@ -158,4 +158,20 @@ public sealed class ProcessRunnerInputTests
         Assert.Throws<TimeoutException>(() =>
             ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMilliseconds(200)));
     }
+
+    [Fact]
+    public void RunWhenOutputExceedsLimitThrowsInvalidOperationExceptionAndKillsChild()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip("POSIX shell process execution tests are not run on Windows.");
+        }
+
+        ProcessStartInfo startInfo = CreateShellStartInfo("head -c 2000 /dev/zero | tr '\\0' 'a'");
+
+        OutputLimitExceededException ex = Assert.Throws<OutputLimitExceededException>(() =>
+            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds), maxOutputBytes: 1000));
+
+        Assert.Contains("exceeded the limit", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

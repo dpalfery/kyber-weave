@@ -40,7 +40,7 @@ contract, but stop there — don't build UI components.
 
 When a request mixes both sides, do your half, write the contract down, and use the handoff.
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ## Operating workflow
 
@@ -170,7 +170,6 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 ### Completion gate
 
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- Never run the full test suite, even for a cross-cutting change: the review council and CI run it. Run a targeted set instead: the tests covering your change and any test that references a symbol you changed.
 
 ## How to handle common requests
 
