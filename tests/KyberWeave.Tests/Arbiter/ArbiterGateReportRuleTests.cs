@@ -156,9 +156,9 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     [Fact]
-    public void AppendedClaimsWithFailDoNotCorroboratePass()
+    public void FieldOrderDoesNotAffectClaimParsing()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-shadow-" + Guid.NewGuid().ToString("N"));
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-order-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -166,11 +166,53 @@ public sealed class ArbiterGateReportRuleTests
             GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
             File.WriteAllText(passReport, ReviewJson.Write(pass));
 
+            string returned = $"TASK_GATE: report={passReport} PASS";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.True(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void SuccessfulRetryWithNewReportCorroboratesPass()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-retry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
             string failReport = Path.Combine(tempDir, "fail.json");
             GateReport fail = new(GateReport.CurrentSchema, [new GateResult("build", true, 1, "failed")]);
             File.WriteAllText(failReport, ReviewJson.Write(fail));
 
+            string passReport = Path.Combine(tempDir, "pass.json");
+            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(passReport, ReviewJson.Write(pass));
+
             string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
+            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            Assert.True(agrees);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void ConflictingStatusesOnSameReportPathDoNotCorroboratePass()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-test-gate-same-report-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string report = Path.Combine(tempDir, "gates.json");
+            GateReport pass = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "pass")]);
+            File.WriteAllText(report, ReviewJson.Write(pass));
+
+            string returned = $"TASK_GATE: FAIL report={report}\nTASK_GATE: PASS report={report}";
             bool? agrees = GateReportFacts.Agrees(returned, tempDir);
             Assert.False(agrees);
         }

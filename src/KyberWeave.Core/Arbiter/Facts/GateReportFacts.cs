@@ -62,13 +62,21 @@ public static class GateReportFacts
             if (stream.Length > maxBytes)
                 return null;
 
-            using StreamReader reader = new(stream, Encoding.UTF8);
-            char[] buffer = new char[maxBytes + 1];
-            int read = reader.ReadBlock(buffer, 0, buffer.Length);
-            if (read > maxBytes)
+            byte[] buffer = new byte[maxBytes + 1];
+            int totalRead = 0;
+            while (totalRead <= maxBytes)
+            {
+                int read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+                if (read == 0)
+                    break;
+                totalRead += read;
+            }
+
+            if (totalRead > maxBytes)
                 return null;
 
-            return ReviewJson.ReadGates(new string(buffer, 0, read));
+            string json = Encoding.UTF8.GetString(buffer, 0, totalRead);
+            return ReviewJson.ReadGates(json);
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException
@@ -136,27 +144,33 @@ public static class GateReportFacts
                 continue;
 
             string? reportPath = null;
+            string? status = null;
             foreach (string word in words)
             {
                 if (word.Length > ReportField.Length && word.StartsWith(ReportField, StringComparison.Ordinal))
                     reportPath = word[ReportField.Length..];
+                else if (status is null && !word.Contains('=', StringComparison.Ordinal))
+                    status = word;
             }
 
-            if (reportPath is not null)
-                claims.Add(new DigestClaim(words[0], reportPath));
+            if (reportPath is not null && status is not null)
+                claims.Add(new DigestClaim(status, reportPath));
         }
 
         if (claims.Count == 0)
             return null;
 
-        DigestClaim? nonPass = claims.FirstOrDefault(c => !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal));
-        if (nonPass is not null)
-            return nonPass;
+        DigestClaim finalClaim = claims[^1];
 
-        if (claims.Select(c => c.ReportPath).Distinct(StringComparer.Ordinal).Count() > 1)
-            return null;
+        // Any claim for the final report path that says non-PASS invalidates a PASS on the same report.
+        if (string.Equals(finalClaim.Claimed, PassedStatus, StringComparison.Ordinal) &&
+            claims.Any(c => string.Equals(c.ReportPath, finalClaim.ReportPath, StringComparison.Ordinal) &&
+                            !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
+        {
+            return new DigestClaim("FAIL", finalClaim.ReportPath);
+        }
 
-        return claims[0];
+        return finalClaim;
     }
 
     private static string? Resolve(string reportPath, string? repositoryRoot)
@@ -174,10 +188,31 @@ public static class GateReportFacts
             string normalizedRepo = fullRepo.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                                     + Path.DirectorySeparatorChar;
 
-            if (!resolved.StartsWith(normalizedRepo, StringComparison.Ordinal) &&
-                !string.Equals(resolved, fullRepo, StringComparison.Ordinal))
+            StringComparison comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            if (!resolved.StartsWith(normalizedRepo, comparison) &&
+                !string.Equals(resolved, fullRepo, comparison))
             {
                 return null;
+            }
+
+            string checkPath = resolved;
+            while (checkPath.Length >= fullRepo.Length)
+            {
+                FileInfo fi = new(checkPath);
+                if (fi.LinkTarget is not null)
+                {
+                    string target = Path.GetFullPath(Path.Combine(fi.DirectoryName ?? fullRepo, fi.LinkTarget));
+                    if (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison))
+                        return null;
+                }
+
+                string? parent = Path.GetDirectoryName(checkPath);
+                if (parent is null || parent.Length == checkPath.Length)
+                    break;
+                checkPath = parent;
             }
 
             return resolved;
