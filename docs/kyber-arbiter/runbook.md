@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-09
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -26,7 +26,14 @@ provider, stores the key in the OS credential store, verifies, and prints the ta
 step. `--project` opts into a repository root instead, `--path` is valid only with it, and
 `--global --project` exits `2` with `KW-ARB-INSTALL-001`. `--provider ""` means `none`. A
 second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
-when the project's `arbiter.enabled` is true. A global hook resolves the project config first:
+when the project's `arbiter.enabled` is true. `kyber-weave update` re-renders the same hooks after it swaps the
+binaries. That refresh runs in the new release, in the finishing process the updater starts, so it renders the hook
+source of the release being installed, not the templates of the release you updated from. A corrupt project registry
+still refreshes the global hooks. A failed refresh does not fail the update: it prints `warning: arbiter hooks were
+not refreshed: <cause>. The binaries are already updated; run kyber-weave update <version> to retry.` and exits 0,
+where the cause is `the project registry could not be read: <message>` when the registry could not be read, `a program
+component could not be loaded (<assembly>): <message>` for a failed assembly load, or otherwise the exception message.
+A global hook resolves the project config first:
 when that project enables Arbiter it logs `deferred-to-project`, writes no ledger entry, and
 lets the project configuration decide. Otherwise the user-level config is used and the
 per-root ledger lives under `~/.kyber-weave/arbiter/projects/<root-key>/`.

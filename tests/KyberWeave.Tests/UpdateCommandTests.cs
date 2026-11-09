@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
 using System.IO.Compression;
@@ -19,6 +20,9 @@ public sealed class UpdateCommandTests : IDisposable
 {
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();
+
+    /// <summary>The loopback the last helper run used, so a test can read the child's own outcome.</summary>
+    private LoopbackFinishingProcess? _lastChild;
 
     public void Dispose()
     {
@@ -409,6 +413,57 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Finish mode is reachable from <c>dotnet run</c> when the hidden <c>--finish-update</c> flag is passed
+    /// explicitly, so the same releases-channel refusal that protects the normal path applies here too.
+    /// </summary>
+    [Fact]
+    public void FinishUpdateWithDotnetHostIsRefused()
+    {
+        SelfUpdateHost host = new(
+            Path.Combine(_install.Path, "dotnet"),
+            "0.1.0",
+            "osx-arm64",
+            false,
+            false);
+        File.WriteAllText(host.ProcessPath, "shim");
+
+        using MapHandler handler = new();
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.1.0", false, false, FinishUpdate: true));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The same parity for the <c>dotnet tool</c> channel: a <c>dotnet tool</c> install that is invoked
+    /// with <c>--finish-update</c> must take the tool-channel refusal, not the version-mismatch error,
+    /// because FinishUpdate runs the channel guard before the version guards. The mismatch is what makes
+    /// the order matter — both orderings throw on a refused channel, so a matching version would pass
+    /// either way and pin nothing about the ordering.
+    /// </summary>
+    [Fact]
+    public void FinishUpdateWithDotnetToolInstallIsRefused()
+    {
+        string tools = Path.Combine(_install.Path, ".dotnet", "tools");
+        Directory.CreateDirectory(tools);
+        string processPath = Path.Combine(tools, "kyber-weave");
+        File.WriteAllText(processPath, "shim");
+        SelfUpdateHost host = new(processPath, "0.1.0", "osx-arm64", false, false);
+
+        using MapHandler handler = new();
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("dotnet tool", outcome.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RunDotnetToolInstallIsRefused()
     {
@@ -488,11 +543,13 @@ public sealed class UpdateCommandTests : IDisposable
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        LoopbackFinishingProcess loopback = new(handler, host, _ => { }, _ => null);
         UpdateCommand command = new()
         {
             Host = host,
             Handler = handler,
-            ReadEnvironment = _ => null
+            ReadEnvironment = _ => null,
+            FinishingProcess = loopback.Invoke
         };
 
         CapturedConsoleExecution<int> execution =
@@ -500,6 +557,103 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.Contains("updated kyber-weave 0.2.0", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A successful hand-off ends the run with exactly one bold outcome line. The child prints nothing on success, so
+    /// the outcome is never printed twice, once by each process.
+    /// </summary>
+    [Fact]
+    public void ExecuteAfterASuccessfulHandOffPrintsExactlyOneOutcomeLine()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<IReadOnlyList<string>> handOffs = [];
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null,
+            FinishingProcess = (_, arguments, _) =>
+            {
+                handOffs.Add(arguments);
+                return 0;
+            }
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new UpdateSettings { Version = "0.2.0" }));
+
+        Assert.True(execution.Result == 0, $"exit {execution.Result}; output: {execution.Output}");
+        Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
+        string[] lines = execution.Output.Split('\n');
+        Assert.Single(lines, line => line.StartsWith("updated kyber-weave 0.2.0 → ", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A failed hand-off prints exactly one error line, and the line names the retry rather than echoing the raw
+    /// exception text. A user reading the error needs the cause and the command, not a stack-shaped string.
+    /// </summary>
+    [Fact]
+    public void ExecuteAfterAFailedHandOffPrintsExactlyOneErrorLineWithoutTheRawExceptionText()
+    {
+        Win32Exception failure = new(5, "Access is denied.");
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<IReadOnlyList<string>> handOffs = [];
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null,
+            FinishingProcess = (_, arguments, _) =>
+            {
+                handOffs.Add(arguments);
+                if (arguments[0] == "update")
+                    throw failure;
+
+                return 0;
+            }
+        };
+
+        // The error line names the retry at the end of a long message; a width that fits it keeps the line whole.
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => command.Execute(null!, new UpdateSettings { Version = "0.2.0" }),
+            width: 240);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
+        string[] lines = execution.Output.Split('\n');
+        string errorLine = Assert.Single(lines, line => line.StartsWith("kyber-weave: error:", StringComparison.Ordinal));
+        Assert.NotEqual($"kyber-weave: error: {failure.Message}", errorLine);
+        Assert.Contains("kyber-weave update 0.2.0", errorLine, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A finish-mode run on the installed version prints no outcome line of its own. Its work is reported by the
+    /// process that started it, so an empty outcome is the correct success.
+    /// </summary>
+    [Fact]
+    public void ExecuteFinishingTheInstalledVersionPrintsNoOutcomeLine()
+    {
+        using MapHandler handler = new();
+        SelfUpdateHost host = CreateHost("0.2.0", "osx-arm64");
+        UpdateCommand command = new()
+        {
+            Host = host,
+            Handler = handler,
+            ReadEnvironment = _ => null
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new UpdateSettings { Version = "0.2.0", FinishUpdate = true }));
+
+        Assert.Equal(0, execution.Result);
+        Assert.Empty(handler.Uris);
+        string[] lines = execution.Output.Split('\n');
+        Assert.DoesNotContain(lines, line => line.Contains("already on", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("updated kyber-weave", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.StartsWith("kyber-weave: error:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -542,7 +696,19 @@ public sealed class UpdateCommandTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
 
-        using SelfUpdater updater = new(handler, host, log.Add, _ => null, captureProcess: (_, _) => QuietSuccess);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -784,13 +950,21 @@ public sealed class UpdateCommandTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -809,13 +983,21 @@ public sealed class UpdateCommandTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -874,17 +1056,28 @@ public sealed class UpdateCommandTests : IDisposable
         bool trayRecorded = true,
         int trayExitCode = 0)
     {
+        Func<string, string?> readEnvironment = HomeWithTrayRecord(trayRecorded);
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            spawned.Add((file, args));
+            return trayExitCode;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayRecord(trayRecorded),
-            (file, args) =>
-            {
-                spawned.Add((file, args));
-                return trayExitCode;
-            },
-            captureProcess: (_, _) => QuietSuccess);
+            readEnvironment,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
+        _lastChild = loopback;
         return updater.Run(options);
     }
 
@@ -930,8 +1123,13 @@ public sealed class UpdateCommandTests : IDisposable
             trayExitCode: 3);
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash tray step", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 3", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash tray step", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 3", child.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1000,28 +1198,40 @@ public sealed class UpdateCommandTests : IDisposable
     {
         ProcessResult engine = engineResult ?? new ProcessResult(0, "engine: not-running\n", string.Empty);
         ProcessResult plugin = pluginResult ?? new ProcessResult(0, string.Empty, string.Empty);
+        Func<string, string?> readEnvironment = HomeWithTrayVersion(trayVersion);
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("tray", file, args));
+            if (trayException is not null)
+                throw trayException;
+            return 0;
+        };
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
+        {
+            bool engineCall = args.Count > 0 && args[0] == "engine";
+            steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
+            if (engineCall && engineException is not null)
+                throw engineException;
+            if (!engineCall && pluginException is not null)
+                throw pluginException;
+            return engineCall ? engine : plugin;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayVersion(trayVersion),
-            (file, args) =>
-            {
-                steps.Add(new ReconcileStep("tray", file, args));
-                if (trayException is not null)
-                    throw trayException;
-                return 0;
-            },
-            captureProcess: (file, args) =>
-            {
-                bool engineCall = args.Count > 0 && args[0] == "engine";
-                steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
-                if (engineCall && engineException is not null)
-                    throw engineException;
-                if (!engineCall && pluginException is not null)
-                    throw pluginException;
-                return engineCall ? engine : plugin;
-            });
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess,
+            finishingProcess: loopback.Invoke);
+        _lastChild = loopback;
         return updater.Run(options);
     }
 
@@ -1256,8 +1466,13 @@ public sealed class UpdateCommandTests : IDisposable
             engineResult: new ProcessResult(2, string.Empty, "engine did not answer"));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash engine step", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("exited 2", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash engine step", child.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 2", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
@@ -1524,7 +1739,12 @@ public sealed class UpdateCommandTests : IDisposable
             engineException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash engine step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash engine step could not start", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
@@ -1547,7 +1767,12 @@ public sealed class UpdateCommandTests : IDisposable
             trayException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Contains("KyberDash tray step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave update 0.10.0", outcome.Message, StringComparison.Ordinal);
+        // The child names the step; the parent cannot carry it, so the child's own outcome is checked.
+        SelfUpdateOutcome? child = _lastChild?.LastChildOutcome;
+        Assert.NotNull(child);
+        Assert.Contains("KyberDash tray step could not start", child.Message, StringComparison.Ordinal);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
@@ -1589,21 +1814,32 @@ public sealed class UpdateCommandTests : IDisposable
         List<ReconcileStep> steps,
         Func<string, IReadOnlyList<string>, ProcessResult>? capture = null)
     {
+        Func<string, string?> readEnvironment = HomeWithTrayVersion("0.9.23");
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("tray", file, args));
+            return 0;
+        };
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("capture", file, args));
+            return capture is null ? QuietSuccess : capture(file, args);
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayVersion("0.9.23"),
-            (file, args) =>
-            {
-                steps.Add(new ReconcileStep("tray", file, args));
-                return 0;
-            },
-            captureProcess: (file, args) =>
-            {
-                steps.Add(new ReconcileStep("capture", file, args));
-                return capture is null ? QuietSuccess : capture(file, args);
-            });
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 
@@ -1717,18 +1953,27 @@ public sealed class UpdateCommandTests : IDisposable
         Func<string, string?>? env = null,
         Func<string, bool>? canWriteDirectory = null)
     {
+        Func<string, string?> readEnvironment = env ?? (name => name switch
+        {
+            "HOME" => _install.Path,
+            "USERPROFILE" => _install.Path,
+            _ => null
+        });
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            _ => { },
+            readEnvironment,
+            canWriteDirectory: canWriteDirectory,
+            captureProcess: (_, _) => QuietSuccess);
         using SelfUpdater updater = new(
             handler,
             host,
             _ => { },
-            env ?? (name => name switch
-            {
-                "HOME" => _install.Path,
-                "USERPROFILE" => _install.Path,
-                _ => null
-            }),
+            readEnvironment,
             canWriteDirectory: canWriteDirectory,
-            captureProcess: (_, _) => QuietSuccess);
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 

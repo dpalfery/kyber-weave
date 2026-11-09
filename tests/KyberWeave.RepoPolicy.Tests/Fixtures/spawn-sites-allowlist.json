@@ -818,6 +818,18 @@
       "bound": "Builds only; nothing starts on this line. Started by RunProcess (Process.Start at SelfUpdater.cs:611), whose wait is bounded at TrayUpdateTimeout = 5 min with a tree kill."
     },
     {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "ProcessStartInfo child = new(fileName) { UseShellExecute = false };",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by StartFinishingProcess, whose hand-off waits FinishUpdateTimeout = 15 min and stops the whole process tree on expiry (TimeoutException). The pre-swap rehearsal is the same method with output discarded and RehearsalTimeout = 30 s, also tree-killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "using Process? started = Process.Start(child);",
+      "count": 1,
+      "bound": "Process.Start in StartFinishingProcess. The hand-off waits at most FinishUpdateTimeout = 15 min (longer than the child's own bounds: 120 s engine, 5 min tray, two 120 s plugin steps); the rehearsal waits at most RehearsalTimeout = 30 s. On expiry the whole process tree is killed and TimeoutException is raised."
+    },
+    {
       "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
       "count": 1,

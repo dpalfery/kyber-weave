@@ -68,6 +68,16 @@ internal sealed class SelfUpdater : IDisposable
     /// </summary>
     private static readonly TimeSpan TrayUpdateTimeout = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// The bound for the finish-update child the old process starts after every binary is committed. The child may run
+    /// the engine verb (120 s), the tray (5 min) and two plugin steps (120 s each), so 15 minutes is longer than all of
+    /// them together and a hung child is still stopped.
+    /// </summary>
+    private static readonly TimeSpan FinishUpdateTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>The bound for the pre-swap rehearsal, which runs the installed command with <c>--version</c> and must return at once.</summary>
+    private static readonly TimeSpan RehearsalTimeout = TimeSpan.FromSeconds(30);
+
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
     private readonly Action<string> _log;
@@ -76,6 +86,7 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
+    private readonly Func<string, IReadOnlyList<string>, bool, int>? _finishingProcess;
 
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
@@ -94,7 +105,8 @@ internal sealed class SelfUpdater : IDisposable
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
         Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null)
+        IArbiterHookRefresher? arbiterHookRefresher = null,
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
@@ -103,6 +115,7 @@ internal sealed class SelfUpdater : IDisposable
         _runProcess = runProcess ?? RunProcess;
         _captureProcess = captureProcess ?? RunCapture;
         _arbiterHookRefresher = arbiterHookRefresher;
+        _finishingProcess = finishingProcess;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
@@ -120,9 +133,15 @@ internal sealed class SelfUpdater : IDisposable
     internal static SelfUpdater Create(
         SelfUpdateHost host,
         Action<string>? log = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null)
+        IArbiterHookRefresher? arbiterHookRefresher = null,
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
     {
-        return new SelfUpdater(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log, arbiterHookRefresher: arbiterHookRefresher);
+        return new SelfUpdater(
+            new SocketsHttpHandler { AllowAutoRedirect = true },
+            host,
+            log,
+            arbiterHookRefresher: arbiterHookRefresher,
+            finishingProcess: finishingProcess);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
@@ -155,6 +174,9 @@ internal sealed class SelfUpdater : IDisposable
 
     private SelfUpdateOutcome RunCore(SelfUpdateOptions options)
     {
+        if (options.FinishUpdate)
+            return FinishUpdate(options);
+
         if (options.ReleaseCandidate && !string.IsNullOrWhiteSpace(options.Version))
         {
             throw new SelfUpdateException(
@@ -186,7 +208,7 @@ internal sealed class SelfUpdater : IDisposable
             // Nothing to download, but a new kyberdash can still be running an old engine, a tray, or an
             // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
             ReconcileKyberDash(options, version, windows, false);
-            RefreshArbiterHooks(options, windows);
+            RefreshArbiterHooks(options, version, windows);
             return new SelfUpdateOutcome(0, $"already on {version}");
         }
 
@@ -227,16 +249,18 @@ internal sealed class SelfUpdater : IDisposable
                     work.FullName));
             }
 
-            // This process's own image is committed last. Overwriting it costs the runtime
-            // the ability to load any assembly it has not already touched, because a
-            // single-file host reads bundled assemblies back out of the executable by path.
-            // Everything downstream — the remaining commits, and the rollback below — then
-            // runs on borrowed code, so the swap belongs after the work that can still fail.
+            // This process's own image is committed last. Overwriting it costs the runtime the ability
+            // to load any assembly it has not already touched, because a single-file host reads bundled
+            // assemblies back out of the executable by path. So the swap belongs after the work that can
+            // still fail, and after it this process does only what the hand-off needs: start the new
+            // kyber-weave. The rehearsal below runs that start path once while the image is still valid.
             staged =
             [
                 .. staged.Where(item => !IsRunningImage(item.Destination)),
                 .. staged.Where(item => IsRunningImage(item.Destination))
             ];
+
+            RehearseHandOff(_host.ProcessPath);
 
             DirectoryInfo backupDir = Directory.CreateTempSubdirectory("kyber-weave-backup-");
             try
@@ -306,15 +330,204 @@ internal sealed class SelfUpdater : IDisposable
             }
         }
 
-        // After the binaries are in place, so every step that runs is the new kyberdash, and the tray
-        // installer resolves the release this update just installed.
-        ReconcileKyberDash(options, version, windows, true);
-        RefreshArbiterHooks(options, windows);
+        // The binaries are committed, so the post-update steps run in the new kyber-weave: the KyberDash steps, the
+        // arbiter hook refresh and their messages. A failed hand-off is reported with its retry and is not rolled back.
+        int handOffExit = HandOff(options, version, windows);
+        if (handOffExit != 0)
+            return new SelfUpdateOutcome(
+                handOffExit,
+                UnfinishedHandOffMessage(version, handOffExit, RetryFlags(options)));
 
         string installed = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(CliBaseName, windows));
         return new SelfUpdateOutcome(0, $"updated kyber-weave {version} → {installed}");
+    }
+
+    /// <summary>
+    /// Finish mode, run by the installed kyber-weave that the old process started after the swap. It runs the
+    /// post-update steps for the version this binary is: the KyberDash steps, then the arbiter hook refresh, in-process.
+    /// It downloads, resolves and commits nothing, and prints no outcome line, because the process that started it does.
+    /// </summary>
+    private SelfUpdateOutcome FinishUpdate(SelfUpdateOptions options)
+    {
+        if (options.ReleaseCandidate)
+        {
+            throw new SelfUpdateException(
+                "--finish-update cannot be combined with --release-candidate. It finishes one named version.");
+        }
+
+        // Finish mode is reachable from `dotnet run` or a `dotnet tool` install when the hidden flag
+        // is passed explicitly, so it runs the same releases-channel check every other path enforces.
+        // It runs before the version guards to match RunCore (line 186 runs before the version work):
+        // a refused channel on a mismatched version reports the channel refusal, not the mismatch.
+        EnsureReleaseInstallChannel();
+
+        if (string.IsNullOrWhiteSpace(options.Version))
+        {
+            throw new SelfUpdateException(
+                "usage: kyber-weave update <version> --finish-update. Name the version the update installed.");
+        }
+
+        string version = ReleaseVersion.Normalize(options.Version);
+        string current = ReleaseVersion.Normalize(_host.CurrentVersion);
+        if (!string.Equals(current, version, StringComparison.Ordinal))
+        {
+            throw new SelfUpdateException(
+                $"--finish-update finishes the update to the version that runs it. This kyber-weave is {current}, but {version} was asked for.");
+        }
+
+        bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
+        ReconcileKyberDash(options, version, windows, true);
+        RefreshArbiterHooks(options, version, windows);
+        return new SelfUpdateOutcome(0, string.Empty);
+    }
+
+    /// <summary>
+    /// Starts the installed kyber-weave to finish the update, after every binary is committed. The old process cannot
+    /// load the assemblies the post-update steps need, so it does nothing else after the swap. The child's output is
+    /// inherited, so its own lines reach the owner.
+    /// </summary>
+    /// <returns>The child's exit code.</returns>
+    private int HandOff(SelfUpdateOptions options, string version, bool windows)
+    {
+        string installed = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(CliBaseName, windows));
+        List<string> arguments = ["update", version, "--finish-update"];
+        if (options.NoKyberDash)
+            arguments.Add("--no-kyberdash");
+        if (options.NoMenubar)
+            arguments.Add("--no-menubar");
+        if (options.NoArbiter)
+            arguments.Add("--no-arbiter");
+        if (options.NoRestart)
+            arguments.Add("--no-restart");
+
+        _log("finishing the update in the new kyber-weave…");
+        try
+        {
+            return StartChild(installed, arguments, false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception
+                                       or InvalidOperationException or TimeoutException
+                                       or AggregateException)
+        {
+            // The binaries are already committed, so this names the state and the one command that finishes it.
+            throw new SelfUpdateException(
+                $"kyber-weave {version} is installed, but the last steps did not finish: {EndSentence(DescribeFailure(ex))} " +
+                $"Run kyber-weave update {version}{RetryFlags(options)} to finish them.");
+        }
+    }
+
+    /// <summary>
+    /// Runs the hand-off's start path once with <c>--version</c>, before anything installed changes. Its purpose is to
+    /// load, while the old image is still whole, what the start path needs. The result is ignored, because the real
+    /// hand-off reports its own failure.
+    /// </summary>
+    private void RehearseHandOff(string processPath)
+    {
+        try
+        {
+            StartChild(processPath, ["--version"], true);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException or TimeoutException)
+        {
+            _log($"the hand-off rehearsal did not complete ({ex.Message}); the hand-off will report any failure");
+        }
+    }
+
+    /// <summary>
+    /// Starts a child through the injected seam, or through the production start when none is injected. The rehearsal
+    /// and the hand-off both come here, so they differ only in whether output is discarded and in their bound.
+    /// </summary>
+    private int StartChild(string fileName, IReadOnlyList<string> arguments, bool discardOutput)
+    {
+        if (_finishingProcess is not null)
+            return _finishingProcess(fileName, arguments, discardOutput);
+
+        return StartFinishingProcess(
+            fileName,
+            arguments,
+            discardOutput,
+            discardOutput ? RehearsalTimeout : FinishUpdateTimeout);
+    }
+
+    /// <summary>
+    /// Starts a child that inherits this console, or discards its output when <paramref name="discardOutput"/> is set,
+    /// and waits at most <paramref name="timeout"/>. A child still running at the bound has its whole process tree
+    /// stopped, and the caller gets a <see cref="TimeoutException"/>: a hung step must not hang the update.
+    /// </summary>
+    private static int StartFinishingProcess(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        bool discardOutput,
+        TimeSpan timeout)
+    {
+        ProcessStartInfo child = new(fileName) { UseShellExecute = false };
+        if (discardOutput)
+        {
+            child.RedirectStandardOutput = true;
+            child.RedirectStandardError = true;
+        }
+
+        foreach (string argument in arguments)
+            child.ArgumentList.Add(argument);
+
+        using Process? started = Process.Start(child);
+        if (started is null)
+            throw new InvalidOperationException($"the process could not be started: {fileName}");
+
+        // Redirected output must be drained, or a child that writes a lot blocks on a full pipe. With no handler attached,
+        // the asynchronous reads discard what they read.
+        if (discardOutput)
+        {
+            started.BeginOutputReadLine();
+            started.BeginErrorReadLine();
+        }
+
+        if (started.WaitForExit(timeout))
+            return started.ExitCode;
+
+        try
+        {
+            if (!started.HasExited)
+                started.Kill(true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or AggregateException)
+        {
+            // It exited between the check and the kill, or the tree kill itself failed (Process.Kill(true)
+            // aggregates the per-process results into one exception when any member refuses to die). The
+            // timeout below still reports the step.
+        }
+
+        started.WaitForExit(TimeSpan.FromSeconds(5));
+        throw new TimeoutException(
+            $"The process did not exit within {(int)timeout.TotalSeconds} seconds, and its process tree was stopped.");
+    }
+
+    /// <summary>The forwarded opt-outs as a single leading-space token, empty when none were forwarded.</summary>
+    /// <remarks>
+    /// The hand-off passes the owner's <c>--no-*</c> flags to the finishing child. A retry, whether this CLI prints it
+    /// or the user types it, has to carry the same flags, or the retry re-runs the steps the owner explicitly opted
+    /// out of.
+    /// </remarks>
+    internal static string RetryFlags(SelfUpdateOptions options)
+    {
+        List<string> flags = new(capacity: 4);
+        if (options.NoKyberDash) flags.Add("--no-kyberdash");
+        if (options.NoMenubar) flags.Add("--no-menubar");
+        if (options.NoArbiter) flags.Add("--no-arbiter");
+        if (options.NoRestart) flags.Add("--no-restart");
+        return flags.Count == 0 ? string.Empty : " " + string.Join(' ', flags);
+    }
+
+    private static string UnfinishedHandOffMessage(string version, int exitCode, string retryFlags)
+    {
+        return $"kyber-weave {version} is installed, but the post-update steps did not finish: the new kyber-weave exited " +
+               $"{exitCode}, and its output above says why. The binaries are already updated. " +
+               $"Run kyber-weave update {version}{retryFlags} to finish them.";
     }
 
     /// <summary>Whether to delegate to <c>kyberdash menubar --update</c>.</summary>
@@ -413,12 +626,12 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>
-    /// Re-renders arbiter hooks for registered projects with <c>arbiter.enabled</c>, after the
-    /// binaries move. Runs only when an arbiter is installed: update replaces what is installed,
-    /// it does not add a surface the owner left out. Never shells out; the refresh travels through
-    /// the injected seam. A failed refresh is a warning — the binaries are already committed.
+    /// Re-renders arbiter hooks for registered projects with <c>arbiter.enabled</c>, and for the global targets, once the
+    /// binaries are new. Runs in-process inside the new kyber-weave, so it renders from that binary's own templates. Runs
+    /// only when an arbiter is installed: update replaces what is installed, it does not add a surface the owner left out.
+    /// Every failure after that check is a warning with exit 0, because the binaries are already committed.
     /// </summary>
-    private void RefreshArbiterHooks(SelfUpdateOptions options, bool windows)
+    private void RefreshArbiterHooks(SelfUpdateOptions options, string version, bool windows)
     {
         if (options.NoArbiter || _arbiterHookRefresher is null)
             return;
@@ -429,78 +642,151 @@ internal sealed class SelfUpdater : IDisposable
         if (!File.Exists(arbiter))
             return;
 
-        (bool loaded, IReadOnlyList<string> roots) = CollectArbiterEnabledProjectRoots();
-
-        string? home = _readEnvironment("HOME");
-        if (string.IsNullOrWhiteSpace(home))
-            home = _readEnvironment("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home))
-            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
-            && UserHostConfig.ReadGlobalTargets(home).Count > 0;
-
-        if (!loaded && !hasConfiguredGlobalTargets)
-            return;
-
-        ArbiterHookRefreshResult outcome;
         try
         {
-            outcome = _arbiterHookRefresher.Refresh(roots);
+            // An unreadable registry leaves no project to refresh, but the global targets do not depend on it, so they are
+            // still read and refreshed. The warning names the project part as not refreshed.
+            IReadOnlyList<string> roots = [];
+            bool registryRead = true;
+            try
+            {
+                roots = CollectArbiterEnabledProjectRoots();
+            }
+            catch (Exception ex) when (IsRegistryReadFailure(ex))
+            {
+                registryRead = false;
+                WarnArbiterHooksNotRefreshed(
+                    $"the project registry could not be read: {ex.Message}",
+                    version,
+                    options);
+            }
+
+            string? home = _readEnvironment("HOME");
+            if (string.IsNullOrWhiteSpace(home))
+                home = _readEnvironment("USERPROFILE");
+            if (string.IsNullOrWhiteSpace(home))
+                home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
+                && UserHostConfig.ReadGlobalTargets(home).Count > 0;
+
+            if (!registryRead && !hasConfiguredGlobalTargets)
+                return;
+
+            ArbiterHookRefreshResult outcome = _arbiterHookRefresher.Refresh(roots);
+
+            if (roots.Count == 0 && !hasConfiguredGlobalTargets)
+                _log("arbiter hooks are checked");
+            else if (outcome.Failed > 0)
+                _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +
+                     $"{outcome.Failed} failed");
+            else
+                _log($"refreshed arbiter hooks for {outcome.Refreshed} project(s)");
         }
         catch (Exception ex) when (ex is InvalidOperationException
             or IOException
             or UnauthorizedAccessException
             or InvalidDataException
+            or BadImageFormatException
             or HttpRequestException
             or TimeoutException
             or OperationCanceledException)
         {
-            _log($"warning: the arbiter hook refresh step failed: {ex.Message}");
-            return;
+            WarnArbiterHooksNotRefreshed(DescribeFailure(ex), version, options);
         }
-
-        if (roots.Count == 0 && !hasConfiguredGlobalTargets)
-            _log("arbiter hooks are checked");
-        else if (outcome.Failed > 0)
-            _log($"warning: refreshed arbiter hooks for {outcome.Refreshed} project(s); " +
-                 $"{outcome.Failed} failed");
-        else
-            _log($"refreshed arbiter hooks for {outcome.Refreshed} project(s)");
     }
 
     /// <summary>
-    /// The registered, non-stale projects whose configuration enables the arbiter. A project whose
-    /// configuration cannot be read is skipped; an unreadable registry is reported as failed so the
-    /// caller does not print a success line for a check that never happened.
+    /// The registered, non-stale projects whose configuration enables the arbiter. A registry that cannot be read throws
+    /// to the caller, which names it as a registry failure; a program component that cannot load is not caught here,
+    /// so it is never reported as a registry failure.
     /// </summary>
-    private (bool Loaded, IReadOnlyList<string> Roots) CollectArbiterEnabledProjectRoots()
+    private IReadOnlyList<string> CollectArbiterEnabledProjectRoots()
     {
-        try
+        ISquadUserPaths userPaths = SquadCommandComposition.ResolveUserPaths(null, _readEnvironment);
+        SquadStateStore stateStore = new(userPaths);
+        List<string> roots = [];
+        foreach (SquadProjectRegistryEntry entry in stateStore.ListProjects())
         {
-            ISquadUserPaths userPaths = SquadCommandComposition.ResolveUserPaths(null, _readEnvironment);
-            SquadStateStore stateStore = new(userPaths);
-            List<string> roots = [];
-            foreach (SquadProjectRegistryEntry entry in stateStore.ListProjects())
-            {
-                if (entry.Stale)
-                    continue;
+            if (entry.Stale)
+                continue;
 
-                KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(entry.Path);
-                if (loaded.Success && loaded.Config?.Arbiter.Enabled == true)
-                    roots.Add(entry.Path);
-            }
-
-            return (true, roots);
+            KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(entry.Path);
+            if (loaded.Success && loaded.Config?.Arbiter.Enabled == true)
+                roots.Add(entry.Path);
         }
-        catch (Exception ex) when (ex is IOException
-            or UnauthorizedAccessException
-            or InvalidDataException
-            or InvalidOperationException)
+
+        return roots;
+    }
+
+    /// <summary>
+    /// Whether a failure while reading the project registry is a registry failure. A program component that cannot load
+    /// is an <see cref="IOException"/> too, so it is excluded by type and reported as a component instead.
+    /// </summary>
+    private static bool IsRegistryReadFailure(Exception ex)
+    {
+        return (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+               && !IsComponentLoadFailure(ex, out _);
+    }
+
+    private void WarnArbiterHooksNotRefreshed(string cause, string version, SelfUpdateOptions options)
+    {
+        _log($"warning: arbiter hooks were not refreshed: {EndSentence(cause)} " +
+             $"The binaries are already updated; run kyber-weave update {version}{RetryFlags(options)} to retry.");
+    }
+
+    /// <summary>The cause a user reads: a component that could not load is named by its assembly, anything else is its own message.</summary>
+    private static string DescribeFailure(Exception ex)
+    {
+        if (!IsComponentLoadFailure(ex, out string? assembly))
+            return ex.Message;
+
+        return $"a program component could not be loaded ({assembly}): {ex.Message}";
+    }
+
+    /// <summary>
+    /// Classifies by type, never by message text. A file that exists but cannot load, and a binary built for another
+    /// runtime, are component failures. A missing file is one only when its name is an assembly identity (name, version,
+    /// culture, key) rather than a path, so a missing config file keeps its own message.
+    /// </summary>
+    private static bool IsComponentLoadFailure(Exception ex, [NotNullWhen(true)] out string? assembly)
+    {
+        switch (ex)
         {
-            _log("warning: arbiter hooks could not be checked because the project registry " +
-                 $"could not be read: {ex.Message}");
-            return (false, []);
+            case FileLoadException fileLoad:
+                assembly = AssemblyNameOf(fileLoad.FileName);
+                return true;
+            case BadImageFormatException badImage:
+                assembly = AssemblyNameOf(badImage.FileName);
+                return true;
+            case FileNotFoundException notFound when IsAssemblyIdentity(notFound.FileName):
+                assembly = AssemblyNameOf(notFound.FileName);
+                return true;
+            default:
+                assembly = null;
+                return false;
         }
+    }
+
+    private static bool IsAssemblyIdentity(string? fileName)
+    {
+        return fileName is not null
+               && fileName.Contains(", Version=", StringComparison.Ordinal)
+               && !fileName.Contains('/', StringComparison.Ordinal)
+               && !fileName.Contains('\\', StringComparison.Ordinal);
+    }
+
+    private static string AssemblyNameOf(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return "unknown assembly";
+
+        return fileName.Split(',')[0].Trim();
+    }
+
+    /// <summary>Ends a cause with one full stop, so a message that already ends with one does not print two.</summary>
+    private static string EndSentence(string text)
+    {
+        return text.EndsWith('.') ? text : text + ".";
     }
 
     /// <summary>Asks the installed kyberdash to replace a running engine of another version. Starts nothing when none runs.</summary>

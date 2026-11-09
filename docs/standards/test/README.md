@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -174,7 +174,10 @@ stale entry. Use the `ProcessRunner` test helper, which kills the child tree at 
 
 **Production .NET starts carry bounds too.** The shared process executor defaults to 60 s, and the
 KyberDash plugin verb to 120 s. `docs init`'s `apm install` is 5 min. The self-updater's capture verbs
-are 120 s and its tray menubar update is 5 min; both kill the tree on expiry. The best-effort `xattr`
+are 120 s and its tray menubar update is 5 min; both kill the tree on expiry. The finish-update hand-off,
+which runs the post-swap steps in the new kyber-weave, is 15 min and kills the whole process tree on
+expiry. Its pre-swap rehearsal runs the installed `kyber-weave --version` with its output discarded and
+is bounded to 30 s, and it kills the tree on expiry too. The best-effort `xattr`
 call is 30 s. The CodeGraph sqlite read is 60 s. The analysis cache's `git ls-files` is 60 s, the
 analysis sqlite batch 120 s, and its version probe 30 s. **One deliberate exception:**
 `ProcessRunner.RunInteractive`, which runs `squad run` attended by a user at the console, has no

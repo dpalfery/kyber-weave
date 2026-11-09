@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 ---
 
 # Distribution and release flow
@@ -491,11 +491,72 @@ again. The documented hash-verification and **More info → Run anyway** flow in
 [install.md](install.md#windows-unsigned-binaries-and-smartscreen) is the supported
 path for Windows users until signing is implemented.
 
+## The self-update sequence
+
+`kyber-weave update` runs in two processes. The updating process downloads, verifies and swaps
+the binaries, then does nothing but the hand-off. Every later step runs in the new kyber-weave,
+so its assemblies and its hook templates come from the release being installed
+([ADR 0065](adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md)).
+When the release is already installed ("already on"), nothing is swapped, and the same post-update
+steps run in the updating process itself.
+
+1. **Stage and verify.** Downloads the Release assets and checks each against `SHA256SUMS.txt`
+   before installing anything.
+2. **Rehearse.** Once, before the first binary is committed, the installed `kyber-weave --version`
+   runs with its output discarded, under a 30-second bound. This loads the code that starts the
+   hand-off while the old image is still whole. A rehearsal that cannot start, or that outlasts
+   its bound, is logged as `the hand-off rehearsal did not complete (<message>); the hand-off will
+   report any failure` and does not stop the update. A rehearsal that starts and exits non-zero is
+   not logged, and does not stop the update either.
+3. **Commit.** Each binary is swapped in. The hand-off starts only after the last one is committed.
+4. **Hand off.** The updating process starts the installed `kyber-weave update <version>
+   --finish-update`, passing on `--no-kyberdash`, `--no-menubar`, `--no-arbiter` and `--no-restart`
+   when they were given. The updating process prints `finishing the
+   update in the new kyber-weave…` before it starts the child, so that line comes from the old
+   process. The child's output is inherited. The wait is 15 minutes. On expiry the whole process tree is
+   killed. The updating process exits with the child's exit code.
+5. **Finish.** The new process runs the KyberDash steps as a changed release, then the arbiter hook
+   refresh, in its own image. It downloads nothing and never starts another hand-off. On success it
+   prints no outcome line.
+
+Finish mode refuses before doing any work, with these messages:
+
+- no version named: `usage: kyber-weave update <version> --finish-update. Name the version the update installed.`
+- a version other than its own: `--finish-update finishes the update to the version that runs it. This kyber-weave is <current>, but <version> was asked for.`
+- `--release-candidate`: `--finish-update cannot be combined with --release-candidate. It finishes one named version.`
+
+`--finish-update` is a hidden option. Only the updater passes it.
+
+**One outcome line.** The updating process prints the only outcome line on success:
+`updated kyber-weave <version> → <path>`. A failure after the install is reported without rolling
+anything back, in one of these forms:
+
+- An IO, access, process or timeout failure after the install: `kyber-weave <version> is installed,
+  but the last steps did not finish: <cause>. Run kyber-weave update <version> to finish them.` Exit 1.
+- The new kyber-weave exits non-zero: `kyber-weave <version> is installed, but the post-update steps
+  did not finish: the new kyber-weave exited <code>, and its output above says why. The binaries are
+  already updated. Run kyber-weave update <version> to finish them.` The exit code is the child's.
+
+A failed arbiter hook refresh is a warning with exit 0:
+`warning: arbiter hooks were not refreshed: <cause>. The binaries are already updated; run kyber-weave
+update <version> to retry.` The cause is `the project registry could not be read: <message>` when
+the registry could not be read, `a program component could not be loaded (<assembly>): <message>`
+for a failed assembly load, or otherwise the exception message. A corrupt registry still refreshes
+the global hooks.
+
+A pinned older release does not know `--finish-update`, so its hand-off fails. The message then
+gives the pinned retry, `kyber-weave update <version>`. The first update away from a build that
+predates this design (rc.21) is still run by that build's own updater, so it can show the old
+`Could not load file or assembly YamlDotNet` error once. The binaries are installed. Run
+`kyber-weave update <version>` with the version you are on, once more, and it takes the "already on"
+path and refreshes the hooks. Do not use the bare form: it resolves the latest stable release, which on
+a pre-release build can be an older one that predates `--finish-update`.
+
 ## Verifying a release locally
 
-A self-updater is always executed by the **old** binary. A fix to the update path therefore
+An update is always started by the **old** binary. The old binary runs the staging, the rehearsal, the swap and the hand-off; the steps after the swap (the KyberDash reconcile and the arbiter hook refresh) run in the new binary. A fix to what the old binary runs therefore
 cannot be proven by the release that contains it — only by updating away from a build that
-predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
+predates it. A fix to the finish-mode steps is exercised by the release that contains it, because the new binary runs them. Tag-and-wait cycles get the first kind wrong silently: the release ships, the same failure
 reappears, and the fix looks broken when it was simply never the code that ran.
 
 Changes to the self-updater, `install.sh`, the Squad release path, or how `kyberdash` is built
@@ -540,9 +601,10 @@ The loop exports `KYBER_WEAVE_RELEASE_ORIGIN` after the loopback server is liste
 because it means the binaries already on this machine. The loop serves
 `http://127.0.0.1` with the port the server printed, so that staging needs curl.
 
-Run against a **published single-file binary**, never `dotnet run`. The failure this exists
-to catch — a running image replacing itself and then failing to load an assembly it had not
-yet touched — does not exist in any other shape.
+Run against a **published single-file binary**, never `dotnet run`. The failures this exists
+to catch are a hand-off that does not start the new binary, and an old updating process that, after the
+swap, cannot load an assembly the new bundle lays out at a different offset. Only a published single-file
+bundle has that layout, so neither failure exists in any other shape.
 
 The loop unpacks the `kyber-weave` and `kyber-weave-mcp` archives that `release-local.sh` publishes,
 and after the self-update asserts that `kyber-weave --version` prints exactly `kyber-weave <version>`
@@ -590,6 +652,18 @@ record the updater reads is a fixture and never this machine's:
 | `recovery-cache` | A cached Node download that does not match its `SHASUMS256.txt` fails the build and is removed, not trusted by the next run. |
 
 The main self-update also asserts that an absent `kyberdash` stays absent.
+
+### Arbiter hooks after the swap
+
+The `arbiter-hooks-after-swap` case covers the step the other cases never reach. It needs the Squad
+assets, so `--skip-squad` skips it. It installs global and project arbiter state with the product,
+points the global Cursor hook at a legacy `/legacy/kyber-weave-arbiter` path, and then updates to its
+own release, `99.0.0-local.layout`. That release is published from the same tree with 6000 bytes of
+padding in its Copyright metadata. The padding moves every assembly after `kyber-weave.dll` to a new
+offset, because two builds of one tree lay out identically and hide the defect. The case fails unless
+the from and to binaries differ in bytes and the to file is at least a page larger. It proves that a
+real swap exits 0, that the output has no `Could not load file or assembly` and no `kyber-weave: error:`,
+that the refresh is reported, and that the stale hook is rewritten to run `kyber-weave-arbiter` again.
 
 The tray step cannot succeed in the loop. Linux has no tray, and the local release carries
 no tray installer. So `tray-delegated` proves that the step ran and failed by name, not

@@ -33,4 +33,8 @@ public sealed class UpdateSettings : CommandSettings
     [Description(
         "Do not restart the KyberDash engine or tray after the update; the OpenCode capture plugin is still upgraded.")]
     public bool NoRestart { get; set; }
+
+    [CommandOption("--finish-update", IsHidden = true)]
+    [Description("Used by the updater to finish an update in the newly installed binary.")]
+    public bool FinishUpdate { get; set; }
 }

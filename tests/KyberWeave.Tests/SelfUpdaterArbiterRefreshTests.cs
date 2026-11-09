@@ -52,13 +52,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -77,13 +85,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -91,8 +107,8 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     }
 
     /// <summary>
-    /// The refresh travels through the injected seam, never through a child process:
-    /// no process runner sees an arbiter hook argv.
+    /// The refresh never runs a hook script or the arbiter binary, and it runs inside the new kyber-weave:
+    /// the injected seam is the only path to it, so no process runner sees an arbiter hook argv.
     /// </summary>
     [Fact]
     public void Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
@@ -104,18 +120,28 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         List<string> log = [];
         List<string> spawned = [];
 
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            spawned.Add(file + " " + string.Join(" ", args));
+            return 0;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
             _ => null,
-            (file, args) =>
-            {
-                spawned.Add(file + " " + string.Join(" ", args));
-                return 0;
-            },
+            runProcess,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: refresher);
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -169,13 +195,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -240,13 +274,22 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: new ArbiterHookRefresher(log.Add, environment));
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -288,13 +331,22 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: new ArbiterHookRefresher(log.Add, environment));
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
