@@ -453,7 +453,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
         {
-            if (Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            string gitPath = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitPath) || File.Exists(gitPath) || Directory.Exists(Path.Combine(dir.FullName, ".kyber-weave")))
                 return dir.FullName;
         }
         return path;

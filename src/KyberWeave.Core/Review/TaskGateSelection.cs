@@ -161,6 +161,22 @@ public static class TaskGateSelection
         List<SkippedTaskGate> skipped = [];
         List<string> refusals = [];
 
+        if (root is not null)
+        {
+            try
+            {
+                if (!Directory.Exists(root))
+                    refusals.Add($"The repository root '{root}' does not exist or is not a directory.");
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                refusals.Add($"The repository root '{root}' is not accessible: {ex.Message}");
+            }
+
+            if (refusals.Count > 0)
+                return new TaskGatePlan([], skipped, refusals);
+        }
+
         foreach (ReviewTaskGate gate in gates)
         {
             // A gate with no program has nothing to start. The loader refuses this where the operator wrote it;

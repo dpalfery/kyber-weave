@@ -174,6 +174,17 @@ public sealed class TaskGateSelectionTests
     }
 
     [Fact]
+    public void AnInaccessibleOrMissingRootRefusesThePlan()
+    {
+        ReviewTaskGate gate = FormatGate();
+        TaskGatePlan plan = TaskGateSelection.Plan([gate], Changed, null, "unix", "non_existent_directory_xyz");
+
+        string refusal = Assert.Single(plan.Refusals);
+        Assert.Contains("non_existent_directory_xyz", refusal, StringComparison.Ordinal);
+        Assert.Empty(plan.Gates);
+    }
+
+    [Fact]
     public void TestClassMappingInvalidRootReturnsEmptyWithoutThrowing()
     {
         IReadOnlyList<string> resolved = TestClassMapping.Resolve("non_existent_directory_xyz", Changed);
