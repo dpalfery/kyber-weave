@@ -582,7 +582,9 @@ internal sealed class SquadHarnessRenderContext
     /// <summary>
     /// Adds Squad's owned block for a shared hook file whose containers are <c>PreToolUse</c> and
     /// <c>PostToolUse</c> matcher groups, when the request enables Arbiter. Files are untouched
-    /// either way: the block travels separately for the deployment plan to splice.
+    /// either way: the block travels separately for the deployment plan to splice. Under global
+    /// scope the file sits directly beneath the harness's global root, so the harness's project
+    /// directory (<c>.codex/</c>, <c>.agents/</c> and so on) is dropped from the path.
     /// </summary>
     public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher)
     {
@@ -592,10 +594,8 @@ internal sealed class SquadHarnessRenderContext
         }
 
         string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
-        string relativePath = Scope == SquadDeploymentScope.Global
-            && SquadHookJsonBlock.RelativePath(format).StartsWith("." + Token + "/", StringComparison.OrdinalIgnoreCase)
-            ? SquadHookJsonBlock.RelativePath(format)[(Token.Length + 2)..]
-            : SquadHookJsonBlock.RelativePath(format);
+        string projectPath = SquadHookJsonBlock.RelativePath(format);
+        string relativePath = Scope == SquadDeploymentScope.Global ? Path.GetFileName(projectPath) : projectPath;
         Blocks.Add(new SquadRenderedBlock(
             Token,
             relativePath,

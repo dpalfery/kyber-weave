@@ -540,7 +540,12 @@ document, and an existing user file at a block path is not an unmanaged collisio
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 
 All five blocks render when the Arbiter is enabled, at project scope and at global scope —
-this replaces the earlier "at project scope" alone. The Cursor and Codex
+this replaces the earlier "at project scope" alone. The table gives the project-scope path;
+at global scope the file sits directly beneath the harness's global root, so Antigravity's
+group lands in `~/.gemini/config/hooks.json`, the only file it reads globally, never in
+`.agents/hooks.json` there. An install made before that fix recorded the group at
+`.agents/hooks.json` under the global root; `arbiter uninstall --target antigravity`
+removes it, and a reinstall writes the right file. The Cursor and Codex
 blocks landed in Phase 2, and the Factory, Devin, and Antigravity shapes in Phase 3. Pi's
 owned extension file is a whole owned file, not a block. Only documented fields are
 written, never a sentinel key, and shared-file hook commands carry no `--caller` because

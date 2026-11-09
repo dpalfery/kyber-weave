@@ -434,6 +434,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.True(
                 tools.Contains("write_to_file", StringComparer.Ordinal),
                 $"Documentation agent '{agent.Name}' must have write_to_file tool");
+            Assert.True(
+                tools.Contains("replace_file_content", StringComparer.Ordinal),
+                $"Documentation agent '{agent.Name}' must have replace_file_content tool");
             Assert.DoesNotContain(
                 result.Degradations,
                 d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
@@ -533,11 +536,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     expectedWriteToFileProfiles.Contains(agent.CapabilityProfile),
                     $"Agent '{agent.Name}' with profile '{agent.CapabilityProfile}' has filesystem.write: allow but profile was not in expectedWriteToFileProfiles");
                 Assert.Contains("write_to_file", tools);
+                Assert.Contains("replace_file_content", tools);
             }
             else
             {
                 nonWriteAgents.Add(agent);
                 Assert.DoesNotContain("write_to_file", tools);
+                Assert.DoesNotContain("replace_file_content", tools);
             }
         }
 
@@ -810,7 +815,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // D12: These tools are withheld pending live verification
         string[] inconclusivelTools =
-            ["grep_search", "replace_file_content", "multi_replace_file_content", "search_web", "read_url_content"];
+            ["grep_search", "multi_replace_file_content", "search_web", "read_url_content"];
 
         foreach (SquadAgent agent in source.Agents)
         {

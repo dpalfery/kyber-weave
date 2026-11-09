@@ -39,9 +39,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///     </para>
 ///     <para>
 ///         <b>Arbiter block (Req 6.3, 8.1, 8.2, 22.2).</b> When the render request carries an
-///         enabled <see cref="SquadArbiterWiring"/> under
-///         <see cref="SquadDeploymentScope.Project"/>, the renderer returns an
-///         <c>antigravity</c> <see cref="SquadRenderedBlock"/> for <c>.agents/hooks.json</c>.
+///         enabled <see cref="SquadArbiterWiring"/>, the renderer returns an
+///         <c>antigravity</c> <see cref="SquadRenderedBlock"/> for <c>.agents/hooks.json</c> under
+///         <see cref="SquadDeploymentScope.Project"/> and for <c>hooks.json</c> under
+///         <see cref="SquadDeploymentScope.Global"/>, where Antigravity reads it from directly
+///         beneath its global root (<c>~/.gemini/config</c>) and never from <c>.agents/</c> there.
 ///         Antigravity's top-level hook-file keys are group names, so Squad owns the whole
 ///         top-level group <c>kyber-arbiter</c> — an unknown key there would be read as another
 ///         group — holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher groups matching
@@ -51,8 +53,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         <c>arbiter-not-enforced</c> with details <c>no-post-dispatch-feedback</c>, one record
 ///         per rendered agent (design §10.5 records per target and agent): post-dispatch outcomes
 ///         are logged and reported by <c>audit</c>, but not delivered back to the harness. A null
-///         or disabled wiring, or Global scope (no project configuration to enforce from, Req
-///         22.4), renders no block and no arbiter degradation, leaving the owned files
+///         or disabled wiring renders no block and no arbiter degradation, leaving the owned files
 ///         byte-identical.
 ///     </para>
 ///     <para>
@@ -428,7 +429,9 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
             tools.Add("list_dir");
 
         // filesystem.write - D4/D10: narrowed by XOR with process.execute
-        // Note: replace_file_content and multi_replace_file_content are withheld per D12 pending live verification.
+        // replace_file_content is live-verified: it gives the agent the CLI's edit_file, so a writer
+        // changes a few lines instead of emitting the whole file. multi_replace_file_content stays
+        // withheld per D12: listing it alone grants no tool.
         bool processExecuteAllow =
             profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
             execDecision == SquadPermissionDecision.Allow;
@@ -440,12 +443,14 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
         {
             // filesystem.write allowed, process.execute not: emit write tools
             tools.Add("write_to_file");
+            tools.Add("replace_file_content");
         }
         else if (filesystemWriteAllow && processExecuteAllow)
         {
             // Both allowed: emit execute and write tools
             tools.Add("run_command");
             tools.Add("write_to_file");
+            tools.Add("replace_file_content");
         }
         else if (!filesystemWriteAllow && processExecuteAllow)
         {
