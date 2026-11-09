@@ -488,11 +488,13 @@ public sealed class UpdateCommandTests : IDisposable
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        LoopbackFinishingProcess loopback = new(handler, host, _ => { }, _ => null);
         UpdateCommand command = new()
         {
             Host = host,
             Handler = handler,
-            ReadEnvironment = _ => null
+            ReadEnvironment = _ => null,
+            FinishingProcess = loopback.Invoke
         };
 
         CapturedConsoleExecution<int> execution =
@@ -542,7 +544,19 @@ public sealed class UpdateCommandTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
 
-        using SelfUpdater updater = new(handler, host, log.Add, _ => null, captureProcess: (_, _) => QuietSuccess);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -784,13 +798,21 @@ public sealed class UpdateCommandTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -809,13 +831,21 @@ public sealed class UpdateCommandTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -874,17 +904,27 @@ public sealed class UpdateCommandTests : IDisposable
         bool trayRecorded = true,
         int trayExitCode = 0)
     {
+        Func<string, string?> readEnvironment = HomeWithTrayRecord(trayRecorded);
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            spawned.Add((file, args));
+            return trayExitCode;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayRecord(trayRecorded),
-            (file, args) =>
-            {
-                spawned.Add((file, args));
-                return trayExitCode;
-            },
-            captureProcess: (_, _) => QuietSuccess);
+            readEnvironment,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 
@@ -1000,28 +1040,39 @@ public sealed class UpdateCommandTests : IDisposable
     {
         ProcessResult engine = engineResult ?? new ProcessResult(0, "engine: not-running\n", string.Empty);
         ProcessResult plugin = pluginResult ?? new ProcessResult(0, string.Empty, string.Empty);
+        Func<string, string?> readEnvironment = HomeWithTrayVersion(trayVersion);
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("tray", file, args));
+            if (trayException is not null)
+                throw trayException;
+            return 0;
+        };
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
+        {
+            bool engineCall = args.Count > 0 && args[0] == "engine";
+            steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
+            if (engineCall && engineException is not null)
+                throw engineException;
+            if (!engineCall && pluginException is not null)
+                throw pluginException;
+            return engineCall ? engine : plugin;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayVersion(trayVersion),
-            (file, args) =>
-            {
-                steps.Add(new ReconcileStep("tray", file, args));
-                if (trayException is not null)
-                    throw trayException;
-                return 0;
-            },
-            captureProcess: (file, args) =>
-            {
-                bool engineCall = args.Count > 0 && args[0] == "engine";
-                steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
-                if (engineCall && engineException is not null)
-                    throw engineException;
-                if (!engineCall && pluginException is not null)
-                    throw pluginException;
-                return engineCall ? engine : plugin;
-            });
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 
@@ -1589,21 +1640,32 @@ public sealed class UpdateCommandTests : IDisposable
         List<ReconcileStep> steps,
         Func<string, IReadOnlyList<string>, ProcessResult>? capture = null)
     {
+        Func<string, string?> readEnvironment = HomeWithTrayVersion("0.9.23");
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("tray", file, args));
+            return 0;
+        };
+        Func<string, IReadOnlyList<string>, ProcessResult> captureProcess = (file, args) =>
+        {
+            steps.Add(new ReconcileStep("capture", file, args));
+            return capture is null ? QuietSuccess : capture(file, args);
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
-            HomeWithTrayVersion("0.9.23"),
-            (file, args) =>
-            {
-                steps.Add(new ReconcileStep("tray", file, args));
-                return 0;
-            },
-            captureProcess: (file, args) =>
-            {
-                steps.Add(new ReconcileStep("capture", file, args));
-                return capture is null ? QuietSuccess : capture(file, args);
-            });
+            readEnvironment,
+            runProcess,
+            captureProcess: captureProcess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 
@@ -1717,18 +1779,27 @@ public sealed class UpdateCommandTests : IDisposable
         Func<string, string?>? env = null,
         Func<string, bool>? canWriteDirectory = null)
     {
+        Func<string, string?> readEnvironment = env ?? (name => name switch
+        {
+            "HOME" => _install.Path,
+            "USERPROFILE" => _install.Path,
+            _ => null
+        });
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            _ => { },
+            readEnvironment,
+            canWriteDirectory: canWriteDirectory,
+            captureProcess: (_, _) => QuietSuccess);
         using SelfUpdater updater = new(
             handler,
             host,
             _ => { },
-            env ?? (name => name switch
-            {
-                "HOME" => _install.Path,
-                "USERPROFILE" => _install.Path,
-                _ => null
-            }),
+            readEnvironment,
             canWriteDirectory: canWriteDirectory,
-            captureProcess: (_, _) => QuietSuccess);
+            captureProcess: (_, _) => QuietSuccess,
+            finishingProcess: loopback.Invoke);
         return updater.Run(options);
     }
 
