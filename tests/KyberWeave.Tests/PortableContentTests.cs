@@ -95,7 +95,7 @@ public sealed class PortableContentTests
 
                     FileSystemInfo? target = entry.ResolveLinkTarget(true);
                     string targetPath = target?.FullName ?? Path.GetFullPath(entry.FullName);
-                    if (!targetPath.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    if (!targetPath.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                     {
                         Assert.Fail($"File symlink '{entry.FullName}' targets outside portable root '{root}': {targetPath}");
                     }

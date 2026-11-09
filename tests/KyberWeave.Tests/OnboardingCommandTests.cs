@@ -187,6 +187,7 @@ public sealed class OnboardingCommandTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("invalid onboarding configuration", result.Output, StringComparison.Ordinal);
+        Assert.Equal(original, ReadConfig());
     }
 
     private string ReadConfig()
