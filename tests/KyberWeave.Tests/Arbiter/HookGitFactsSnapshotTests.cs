@@ -229,8 +229,8 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     }
 
     /// <summary>
-    /// The match key hashes a bounded prompt prefix plus its length: a very long prompt
-    /// still pairs with itself, while two prompts sharing a prefix but not a length do not.
+    /// The match key hashes every prompt byte: two prompts sharing a prefix and a length
+    /// but not a tail still key apart, so a dispatch never pairs with another's baseline.
     /// </summary>
     [Fact]
     public void LongPromptsPairByBoundedHash()
@@ -238,6 +238,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         string head = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/big.md\n\n";
         string big = head + new string('p', 100_000);
         string bigOtherLength = big + "extra";
+        string bigOtherTail = head + new string('p', 99_999) + "q";
         Pre(prompt: big, callId: null);
 
         Assert.True(
@@ -246,6 +247,26 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         Assert.False(
             PostFacts(prompt: bigOtherLength, callId: null).IsPresent(SinceDispatchFact),
             "a prompt sharing only a prefix must not pair with another dispatch's baseline.");
+        Assert.False(
+            PostFacts(prompt: bigOtherTail, callId: null).IsPresent(SinceDispatchFact),
+            "a prompt sharing a prefix and a length but not a tail must not pair.");
+    }
+
+    /// <summary>
+    /// A burst of dispatches must not evict a pending baseline: seventy pres go in, the
+    /// first one's post still pairs instead of resolving absent.
+    /// </summary>
+    [Fact]
+    public void BurstOfPreservesPendingBaselines()
+    {
+        const int burst = 70;
+        for (int i = 0; i < burst; i++)
+        {
+            Pre(prompt: PlannerPrompt + $"\n# burst {i}", callId: $"call-burst-{i}");
+        }
+
+        IReadOnlyList<string> paths = SinceDispatch(prompt: PlannerPrompt + "\n# burst 0", callId: "call-burst-0");
+        Assert.NotNull(paths);
     }
 
     /// <summary>
