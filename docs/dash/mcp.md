@@ -134,7 +134,7 @@ hand**; Kyber-Weave does not write them (Codex, ZCode, and Copilot repository se
 | **Factory** | `~/.factory/mcp.json` | Same JSON shape as Claude Code `mcpServers` — see [Factory](../docgraph/mcp-runbook.md#factory) |
 | **Copilot** | `~/.copilot/mcp-config.json` | User-scope MCP config; repository settings are snippet-only on wire |
 | **Kilo** | `kilo.jsonc` `mcp` key | Server entry plus per-agent `kw-dash_*: allow` in permissions where needed — see [Kilo](../docgraph/mcp-runbook.md#kilo) |
-| **ZCode** | ZCode user / project MCP storage | Declare key `kw-dash` with argv `kyberdash`, `mcp`; body shape is pinned in [ZCode](../docgraph/mcp-runbook.md#zcode) |
+| **ZCode** | ZCode user / project MCP storage | Declare key `kw-dash` with argv `kyberdash`, `mcp`; body shape is **not** pinned — read keys from ZCode's own `mcpSchema`, see [ZCode](../docgraph/mcp-runbook.md#zcode) |
 
 **Cursor example** (`~/.cursor/mcp.json`):
 
