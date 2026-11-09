@@ -39,9 +39,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///     </para>
 ///     <para>
 ///         <b>Arbiter block (Req 6.3, 8.1, 8.2, 22.2).</b> When the render request carries an
-///         enabled <see cref="SquadArbiterWiring"/> under
-///         <see cref="SquadDeploymentScope.Project"/>, the renderer returns an
-///         <c>antigravity</c> <see cref="SquadRenderedBlock"/> for <c>.agents/hooks.json</c>.
+///         enabled <see cref="SquadArbiterWiring"/>, the renderer returns an
+///         <c>antigravity</c> <see cref="SquadRenderedBlock"/> for <c>.agents/hooks.json</c> under
+///         <see cref="SquadDeploymentScope.Project"/> and for <c>hooks.json</c> under
+///         <see cref="SquadDeploymentScope.Global"/>, where Antigravity reads it from directly
+///         beneath its global root (<c>~/.gemini/config</c>) and never from <c>.agents/</c> there.
 ///         Antigravity's top-level hook-file keys are group names, so Squad owns the whole
 ///         top-level group <c>kyber-arbiter</c> — an unknown key there would be read as another
 ///         group — holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher groups matching
@@ -51,8 +53,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         <c>arbiter-not-enforced</c> with details <c>no-post-dispatch-feedback</c>, one record
 ///         per rendered agent (design §10.5 records per target and agent): post-dispatch outcomes
 ///         are logged and reported by <c>audit</c>, but not delivered back to the harness. A null
-///         or disabled wiring, or Global scope (no project configuration to enforce from, Req
-///         22.4), renders no block and no arbiter degradation, leaving the owned files
+///         or disabled wiring renders no block and no arbiter degradation, leaving the owned files
 ///         byte-identical.
 ///     </para>
 ///     <para>
