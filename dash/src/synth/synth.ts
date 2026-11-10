@@ -51,6 +51,7 @@ export type { ParsedProviderCall } from '../providers/types.js'
 import {
   contentFromParts,
   notMeasurable,
+  SESSION_LABEL_KEY,
   SKILLS_INVOKED_KEY,
   SKILLS_LISTED_KEY,
   type CanonicalRecord,
@@ -568,6 +569,7 @@ export function synthesizeCall(
       provenance,
       ...(invokedSkills !== undefined ? { [SKILLS_INVOKED_KEY]: invokedSkills } : {}),
       ...(listedSkills !== undefined ? { [SKILLS_LISTED_KEY]: listedSkills } : {}),
+      ...(typeof call.sessionTitle === 'string' && call.sessionTitle !== '' ? { [SESSION_LABEL_KEY]: call.sessionTitle } : {}),
     },
   }
 }
