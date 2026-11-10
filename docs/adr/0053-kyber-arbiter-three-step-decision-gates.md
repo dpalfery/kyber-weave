@@ -179,6 +179,7 @@ fact outside those declared states leaves the machine.
 - **Step-1 thresholds are measured for Jev 1.13 and Jev 1.14.** Shipped thresholds started
   conservative for `jev-1.13.0`. A measurement on 2026-11-09 with 120 labelled cases left
   them unchanged and moved the default model to `jev-1.14.0`; `jev-1.13.0` stays supported.
+  OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids measured, are tuned too.
   The cases are synthetic, labelled by two Claude models, and run through OpenRouter; the
   method and limits are in [the architecture guide](../kyber-arbiter/architecture.md). The
   repository treats `jev-1.13-free` as the free-tier id of Jev 1.13 and it shares those

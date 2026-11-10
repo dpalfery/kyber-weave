@@ -210,13 +210,14 @@ Passing mutually exclusive scope flags (`--global` and `--project`) or `--path` 
 
 ## Provider and models
 
-`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud and to a local
-Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
+`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud, to OpenRouter, and
+to a local Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
 
 | Model | Endpoint | Key | Usable input | Accuracy on Ollama's 3,880-decision comparison |
 |---|---|---|---|---|
 | `jev-1.14.0` (TypeSafe, default) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | Not published |
 | `jev-1.13.0` (TypeSafe) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | 76.0% |
+| `typesafe/jev-1.14`, `typesafe/jev-1.13` (OpenRouter) | `https://openrouter.ai/api/v1` | Required (the credential store) | The same budget as the TypeSafe ids | Not published |
 | `nimble` (Ollama, 9B) | `http://localhost:11434/v1` | None | About 8,000 tokens per question | 74.8% |
 | `tev1` (Ollama, 4B) | `http://localhost:11434/v1` | None | About 2,000 tokens | 73.3% |
 
@@ -254,10 +255,11 @@ compared.
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.
 
-**Model ids.** `tuned-for` is an exact match and holds TypeSafe's ids, `jev-1.14.0` and
-`jev-1.13.0`. The measurement used OpenRouter's ids for the same releases. A configuration
-that names a `typesafe/` id is not covered: `doctor` warns and the smallest state budget
-applies. `jev-1.13.0` stays listed, and a configuration pinned to it keeps working with no
+**Model ids.** `tuned-for` is an exact match and holds TypeSafe's `jev-1.14.0` and
+`jev-1.13.0`, and OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids the
+measurement used. Any other `typesafe/` id, including a dated snapshot, warns in `doctor`.
+The state budget for a `typesafe/jev-1.*` id is TypeSafe's published limit; OpenRouter's own
+limit was not checked, and the measured cases were small. `jev-1.13.0` stays listed, and a configuration pinned to it keeps working with no
 `doctor` warning. [TypeSafe says](https://typesafe.ai/blog/jev-1-14) it intends to give
 60 days' warning before formally deprecating `jev-1.13.0`, and has set no date. Only a
 configuration that names no model moves to the new default.

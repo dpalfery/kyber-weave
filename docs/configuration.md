@@ -530,8 +530,9 @@ Host rule ids must not start with `KW-ARB-`. The per-user
 `~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else, and
 replaces the repository's provider field by field. The API key never appears here — or in
 any hook or MCP file: it resolves from `TYPESAFE_API_KEY`, then the OS credential store
-entry for the endpoint origin. See the [runbook](kyber-arbiter/runbook.md) for `setup`,
-`status`, and `doctor`.
+entry for the endpoint origin. To use OpenRouter, set `endpoint` to
+`https://openrouter.ai/api/v1` and `model` to `typesafe/jev-1.14` or `typesafe/jev-1.13`. See
+the [runbook](kyber-arbiter/runbook.md) for `setup`, `status`, and `doctor`.
 
 The user-level `~/.kyber-weave/kyber-weave.yml` may also hold `arbiter.global.targets`.
 This list records which harness targets are installed at global scope, and it is valid only

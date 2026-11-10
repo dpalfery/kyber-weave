@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -264,7 +265,7 @@ public static class RuleValidator
     internal static bool TryGetStateBudget(string model, out int budget)
     {
         ArgumentNullException.ThrowIfNull(model);
-        if (model.StartsWith("jev-", StringComparison.Ordinal))
+        if (StateBudget.IsJevModel(model))
         {
             budget = 32_000;
             return true;
