@@ -1582,7 +1582,7 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `codegraph.restore` | `--ensure` only, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
 | `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
-| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | `kyber-weave doctor --check --mcp-timeout <2 x current>` |
+| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | Used up the budget: `kyber-weave doctor --check --mcp-timeout <2 x current>`. Refused because the folder has no `.kyber-weave/kyber-weave.yml`: `kyber-weave docs init "<root>"`, or commit that file to the base branch so new worktrees get it. Any other early exit: run the server directly to read its own error |
 | `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
 
@@ -1653,13 +1653,17 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
   `codegraph init .`. When it exists, the run executes `codegraph sync .`, which brings an
   existing index up to date; both run with the root as the working directory. `codegraph index .`
   is the **repair** step, never the routine one: it rebuilds the whole index for no new
-  information, and `--ensure` is the only mode that runs it, once, after a failed step.
+  information, and `--ensure` is the only mode that runs it, once, after a failed step. A
+  `.codegraph/` folder that was never initialised, such as one holding only a committed
+  `.gitignore`, makes `sync` refuse, so the run executes `codegraph init .` instead and reports
+  that command's result.
 - **Bounded.** Each child is bounded by `--index-timeout` (default 600 seconds). When the bound is
   reached, the child's process tree is killed and the check fails as `codegraph.index`.
 - **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
   write-probe inside that directory, used to test writability. A directory that is corrupt, not
-  writable, or owned by another user fails with `remove .codegraph and run kyber-weave doctor`. A
-  person makes the removal.
+  writable, or owned by another user fails with `git clean -fdx -- .codegraph and run kyber-weave
+  doctor`. That removes only untracked and ignored files, so a committed `.codegraph/.gitignore`
+  survives. A person makes the removal.
 - **Never install the binary.** See [Nothing installs CodeGraph](#nothing-installs-codegraph).
 - **Lock file in the OS temp directory.** Concurrent provisioning runs for one repository are
   serialised by a lock file named `kyber-weave-codegraph-<hash>.lock` in the OS temporary directory,
@@ -1729,7 +1733,7 @@ index of the root it is bound to, and nothing else.
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
+| A Factory Task-dispatched droid lists no MCP tools | `squad install` and `squad update` print `factory-mcp-not-configured` when no Factory config file defines a server the droids are allowed. Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
 | A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kw-docs` server in the ZCode MCP configuration, or the install does not pass |
 | A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kw-docs`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kw_docs_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
 | An Antigravity agent lists no MCP tools | Check the agent file's `mcpServers` entry and the workspace `.agents/mcp_config.json`, then the client's `mcp(server/*)` policy patterns — MCP tools default to Ask there. Adding an MCP tool name to `tools:` does not help and makes the executor construction fail with `unknown component` on stderr. See [Antigravity](#antigravity) |

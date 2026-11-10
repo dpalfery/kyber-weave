@@ -45,6 +45,10 @@ public sealed class RunStartRunner
     private const string CodeGraphExecutable = "codegraph";
     private const string NoTrackOption = "--no-track";
     private const string TrackOption = "--track";
+    private const string WorktreeStampFormat = "yyyyMMdd'T'HHmmss'Z'";
+
+    /// <summary>The highest numeric suffix tried for runs that start in the same second.</summary>
+    private const int MaxWorktreeSuffix = 100;
 
     private readonly IProcessExecutor _executor;
     private readonly string _repositoryRoot;
@@ -278,19 +282,109 @@ public sealed class RunStartRunner
     ///     lands inside the checkout the operator is standing in.
     /// </summary>
     /// <param name="branch">The branch the worktree holds.</param>
-    public string WorktreePathFor(string branch)
+    /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
+    /// <remarks>
+    ///     The name starts with a UTC timestamp so a repeat of the same branch never lands on an earlier
+    ///     folder and a listing sorts by time. The stamp has no colon, which Windows forbids in a file name.
+    ///     Only the folder is stamped: the branch keeps the shape the pull request naming check requires. Two
+    ///     runs in one second take a numeric suffix. The returned path is claimed with a <c>.claim</c> file beside
+    ///     it; the caller removes that with <see cref="ReleaseWorktreeClaim" /> once git has run.
+    /// </remarks>
+    public string WorktreePathFor(string branch, DateTimeOffset startedAt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_repositoryRoot));
         string? parent = Path.GetDirectoryName(root);
-        string name = Path.GetFileName(root);
-        string flattened = branch.Replace('/', '-');
-
-        return Path.Combine(
+        string container = Path.Combine(
             string.IsNullOrEmpty(parent) ? root : parent,
-            name + ".worktrees",
-            flattened);
+            Path.GetFileName(root) + ".worktrees");
+        string stamp = startedAt.UtcDateTime.ToString(WorktreeStampFormat, CultureInfo.InvariantCulture);
+        string folder = stamp + "-" + branch.Replace('/', '-');
+
+        // Bounded: only a folder or claim that really exists moves to the next suffix, and the cap stops even a
+        // directory flooded with them. Past it the last name is returned and git reports why it cannot be used.
+        string candidate = Path.Combine(container, folder);
+        for (int attempt = 2; attempt <= MaxWorktreeSuffix && !TryClaim(container, candidate); attempt++)
+            candidate = Path.Combine(container, folder + "-" + attempt.ToString(CultureInfo.InvariantCulture));
+
+        return candidate;
+    }
+
+    /// <summary>Removes the claim <see cref="WorktreePathFor" /> took, once git has made the folder or failed to.</summary>
+    /// <param name="worktreePath">The path <see cref="WorktreePathFor" /> returned.</param>
+    public static void ReleaseWorktreeClaim(string worktreePath)
+    {
+        try
+        {
+            File.Delete(ClaimPathFor(worktreePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A claim left behind only makes a later run in the same second take the next suffix.
+        }
+    }
+
+    /// <summary>
+    ///     Claims <paramref name="candidate" /> with a file only one process can create, so two runs in the same
+    ///     second never pick the same folder. Checking that the folder is absent is not enough on its own: both
+    ///     runs would see it absent before either created it.
+    /// </summary>
+    private static bool TryClaim(string container, string candidate)
+    {
+        if (Path.Exists(candidate))
+            return false;
+
+        try
+        {
+            Directory.CreateDirectory(container);
+            using (new FileStream(ClaimPathFor(candidate), FileMode.CreateNew, FileAccess.Write))
+            {
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // An unwritable container cannot hold a claim; git reports that folder's real error when it tries.
+            return true;
+        }
+        catch (IOException)
+        {
+            // Only a claim another run holds means "taken". Any other I/O error (a full disk, a path too long)
+            // would fail every suffix the same way, so it is left for git to report.
+            return !File.Exists(ClaimPathFor(candidate));
+        }
+
+        // A run that finished between the check above and the claim has made the folder and dropped its claim.
+        if (!Path.Exists(candidate))
+            return true;
+
+        ReleaseWorktreeClaim(candidate);
+        return false;
+    }
+
+    private static string ClaimPathFor(string worktreePath) => worktreePath + ".claim";
+
+    /// <summary>The worktree that has <paramref name="branch" /> checked out, or null when none does.</summary>
+    /// <param name="porcelain">The output of <c>git worktree list --porcelain</c>.</param>
+    /// <param name="branch">The branch to look for.</param>
+    public static string? WorktreeHolding(string porcelain, string branch)
+    {
+        ArgumentNullException.ThrowIfNull(porcelain);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+
+        const string WorktreePrefix = "worktree ";
+        string branchLine = "branch refs/heads/" + branch;
+        string? current = null;
+        foreach (string raw in porcelain.Split('\n'))
+        {
+            string line = raw.TrimEnd('\r');
+            if (line.StartsWith(WorktreePrefix, StringComparison.Ordinal))
+                current = line[WorktreePrefix.Length..];
+            else if (string.Equals(line, branchLine, StringComparison.Ordinal))
+                return current;
+        }
+
+        return null;
     }
 
     /// <summary>

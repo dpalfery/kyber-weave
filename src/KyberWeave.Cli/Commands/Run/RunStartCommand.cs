@@ -207,6 +207,13 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             }
         }
 
+        // Checked after the fetch, so a branch pushed from elsewhere counts. Git's own error would not say that
+        // resuming is the way to continue the branch.
+        if (resume is null && (runner.HasLocalBranch(branch) || runner.HasRemoteBranch(branch)))
+        {
+            return Refuse(BranchExists(branch));
+        }
+
         // The finished tasks come from the resumed branch's own commits, read while it is still the branch
         // named rather than the one checked out. A branch carrying none is a normal beginning, not a
         // failure, and a log that cannot be read is reported without stopping a resume that can still
@@ -263,11 +270,49 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
         else
         {
-            worktreePath = runner.WorktreePathFor(target);
-            created = resumeTarget is null
-                ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+            string? held = resumeTarget is null
+                ? null
+                : RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget);
+            if (held is not null && Directory.Exists(held))
+            {
+                // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
+                worktreePath = held;
+                created = new GitOutcome(0, string.Empty, string.Empty);
+            }
+            else
+            {
+                // A folder deleted by hand stays registered and would still claim the branch. Pruning removes
+                // only entries whose folder is gone.
+                if (held is not null)
+                {
+                    GitOutcome pruned = runner.Git("worktree", "prune");
+                    if (!pruned.Succeeded)
+                    {
+                        return Fail(
+                            $"git worktree prune failed, so the deleted folder '{held}' still claims " +
+                            $"'{target}': {pruned.FirstErrorLine}");
+                    }
+                }
+
+                worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
+                try
+                {
+                    created = resumeTarget is null
+                        ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
+                        : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+                }
+                finally
+                {
+                    // Released whether git succeeded, failed, or threw, so no claim outlives its run.
+                    RunStartRunner.ReleaseWorktreeClaim(worktreePath);
+                }
+            }
         }
+
+        // The check before creation can lose to another run of the same slug. That loser gets the same refusal
+        // and exit code as a branch that existed from the start, not a generic git failure.
+        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
+            return Refuse(BranchExists(branch));
 
         if (!created.Succeeded)
         {
@@ -574,6 +619,10 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             }
         }
     }
+
+    private static string BranchExists(string branch) =>
+        $"A branch named '{branch}' already exists. To continue it, re-run with --resume {branch}. " +
+        "To start separate work, choose a different --slug.";
 
     private static int Refuse(string message)
     {
