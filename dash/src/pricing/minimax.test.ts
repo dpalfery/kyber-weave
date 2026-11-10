@@ -38,6 +38,19 @@ describe('MiniMax model pricing', () => {
     expect(costs!.outputCostPerToken).toBe(1.2e-6)
   })
 
+  it('returns official pricing for MiniMax-M3.1-Flash', () => {
+    // platform.minimax.io pricing page, retrieved 2026-11-09: $0.15 input, $0.60 output,
+    // $0.015 cache read per million tokens; no cache-write price is published.
+    for (const id of ['MiniMax-M3.1-Flash', 'minimax-m3.1-flash']) {
+      const costs = getModelCosts(id)
+      expect(costs, id).not.toBeNull()
+      expect(costs!.inputCostPerToken).toBeCloseTo(0.15e-6, 15)
+      expect(costs!.outputCostPerToken).toBeCloseTo(0.6e-6, 15)
+      expect(costs!.cacheReadCostPerToken).toBeCloseTo(0.015e-6, 15)
+      expect(costs!.cacheWriteCostIsExplicit).toBe(false)
+    }
+  })
+
   it('highspeed pricing is distinct from base model pricing', () => {
     const base = getModelCosts('MiniMax-M2.7')
     const fast = getModelCosts('MiniMax-M2.7-highspeed')

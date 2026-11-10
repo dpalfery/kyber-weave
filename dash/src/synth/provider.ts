@@ -42,6 +42,7 @@ import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import { antigravityReader } from './readers/antigravity.js'
 import { commandcodeReader } from './readers/commandcode.js'
+import { droidReader } from './readers/droid.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
 import type { DateRange } from '../types.js'
@@ -123,6 +124,7 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['antigravity-cli', antigravityReader],
   ['antigravity-ide', antigravityReader],
   ['commandcode', commandcodeReader],
+  ['droid', droidReader],
 ])
 
 function readerFor(identity: string): ContentReader | undefined {

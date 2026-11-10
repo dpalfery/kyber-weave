@@ -280,3 +280,77 @@ describe('the Droid pairing split', () => {
     expect(result.counterRecords).toEqual([])
   })
 })
+
+// The file source also carries the tool calls a session made, one `tool.invoke`
+// record per call. The split names them in their own bucket so the session
+// derivation can count them. The field is not on DroidSessionSplit yet, so the
+// read goes through a widened type rather than an `any` escape hatch.
+type WithFileToolRecords = DroidSessionSplit & { fileToolRecords?: CanonicalRecord[] }
+
+const FILE_TOOL_RECORD: CanonicalRecord = {
+  ...canonicalRecord({
+    spanId: 'synth:droid:factory-session-1:a1:tool:tu-1',
+    name: 'Read',
+    source: 'codeburn/droid',
+  }),
+  op: 'tool.invoke',
+}
+
+const PLUGIN_TOOL_RECORD: CanonicalRecord = {
+  ...canonicalRecord({
+    spanId: 'plugin-tool-factory-session-1',
+    name: 'factory.tool',
+    source: 'kyberdash-factory-plugin',
+  }),
+  op: 'tool.invoke',
+}
+
+const OTHER_HARNESS_TOOL_RECORD: CanonicalRecord = {
+  ...canonicalRecord({
+    spanId: 'claude-tool-1',
+    name: 'Read',
+    source: 'codeburn/claude',
+    harness: 'claude',
+  }),
+  op: 'tool.invoke',
+}
+
+describe('file tool bucket', () => {
+  it('names the file source tool.invoke records of a Droid session in fileToolRecords', async () => {
+    const split = (await loadSplitHelper()) as (records: readonly CanonicalRecord[]) => WithFileToolRecords
+
+    const result = split([PLUGIN_RECORD, FILE_RECORD, FILE_TOOL_RECORD])
+
+    expect(result.fileToolRecords?.map((record) => record.spanId)).toEqual([FILE_TOOL_RECORD.spanId])
+  })
+
+  it('keeps a file tool.invoke record in counterRecords as well as in fileToolRecords', async () => {
+    const split = (await loadSplitHelper()) as (records: readonly CanonicalRecord[]) => WithFileToolRecords
+
+    const result = split([PLUGIN_RECORD, FILE_RECORD, FILE_TOOL_RECORD])
+
+    expect(result.counterRecords.map((record) => record.spanId)).toContain(FILE_TOOL_RECORD.spanId)
+  })
+
+  it('does not put a plugin tool.invoke record in fileToolRecords', async () => {
+    const split = (await loadSplitHelper()) as (records: readonly CanonicalRecord[]) => WithFileToolRecords
+
+    const result = split([PLUGIN_RECORD, PLUGIN_TOOL_RECORD])
+
+    expect(result.fileToolRecords, 'the fileToolRecords bucket').toBeDefined()
+    expect(result.fileToolRecords?.map((record) => record.spanId)).not.toContain(PLUGIN_TOOL_RECORD.spanId)
+  })
+
+  it('places a record of another harness in no bucket', async () => {
+    const split = (await loadSplitHelper()) as (records: readonly CanonicalRecord[]) => WithFileToolRecords
+
+    const result = split([OTHER_HARNESS_TOOL_RECORD])
+
+    const placed = [
+      ...result.turnRecords,
+      ...result.counterRecords,
+      ...(result.fileToolRecords ?? []),
+    ].map((record) => record.spanId)
+    expect(placed).not.toContain(OTHER_HARNESS_TOOL_RECORD.spanId)
+  })
+})
