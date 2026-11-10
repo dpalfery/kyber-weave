@@ -1109,7 +1109,11 @@ describe('paired droid tools, duration and title', () => {
     }
   })
 
-  it('sums the file-source durations for a paired session, while every plugin record reports zero', async () => {
+  // Changed for review finding 9: tool children run inside the llm call's own
+  // active time, so the paired duration is the non-tool file records only. The
+  // parent carries 4500 ms and its three tools (1500 + 2500 + 500) sit inside it;
+  // the duration must be 4500, not 9000. The plugin records stay zero-width.
+  it('takes a paired session duration from its non-tool file records, so tool time inside the llm call is not counted twice', async () => {
     await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
 
     const store = new CanonStore(':memory:')
@@ -1119,7 +1123,7 @@ describe('paired droid tools, duration and title', () => {
         store,
         [droidAdapter],
       )
-      const parent = { ...(await fileRow(SESSION_ID)), durationMs: 0 }
+      const parent = { ...(await fileRow(SESSION_ID)), durationMs: 4500 }
       store.upsertMany([
         parent,
         fileToolRowOf(parent, 1, 'Read', 1500),
@@ -1209,5 +1213,29 @@ describe('paired droid tools, duration and title', () => {
 
   it('projects kyber.session.label through the store attribute allowlist', () => {
     expect(PROJECTED_ATTRIBUTE_KEYS.has(SESSION_LABEL_KEY)).toBe(true)
+  })
+
+  // Review finding 10: a file tool.invoke record stays in the counter records, so
+  // any tokens it carried would be summed into the session totals. Tool records
+  // are not counters: their tokens must not change the session's input total.
+  it('does not add tokens carried by a file tool.invoke record to the session totals', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([zeroDurationPluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      const parent = await fileRow(SESSION_ID)
+      const toolWithTokens: CanonicalRecord = {
+        ...fileToolRowOf(parent, 1, 'Read', 0),
+        tokens: { ...ZERO_TOKENS, freshInput: 500 },
+      }
+      store.upsertMany([parent, toolWithTokens])
+
+      await buildSessions(store)
+
+      expect(summaryOf(store, SESSION_ID).total_input).toBe(FILE_SESSION_INPUT)
+    } finally {
+      store.close()
+    }
   })
 })

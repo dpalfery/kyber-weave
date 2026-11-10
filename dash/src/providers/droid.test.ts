@@ -498,6 +498,106 @@ describe('droid provider data completeness', () => {
   })
 })
 
+// Review findings on the active-duration boundary (PR 561). Each case pins a
+// behaviour the implementation must keep: only a string timestamp is a time,
+// a bad human-prompt timestamp keeps the last valid boundary, and a rejected or
+// missing call timestamp leaves the boundary where it was.
+describe('droid active duration boundary review findings', () => {
+  beforeEach(async () => {
+    factoryDir = await mkdtemp(join(tmpdir(), 'codeburn-droid-test-'))
+  })
+
+  afterEach(async () => {
+    await rm(factoryDir, { recursive: true, force: true })
+  })
+
+  it('does not treat a non-string human-prompt timestamp as a boundary', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        { type: 'message', id: 'u1', timestamp: ['2026-11-09T10:00:00.000Z'], message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } },
+        assistantText('a1', '2026-11-09T10:00:07.000Z', 'ok'),
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+  })
+
+  it('does not treat a non-string call timestamp as a time', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'),
+        { ...assistantText('a1', undefined, 'ok'), timestamp: ['2026-11-09T10:00:07.000Z'] },
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+  })
+
+  it('keeps the last valid boundary when a later human prompt has no usable timestamp', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'first'),
+        humanPrompt('u2', undefined, 'second, with no timestamp'),
+        assistantText('a1', '2026-11-09T10:00:07.000Z', 'ok'),
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBe(7_000)
+  })
+
+  it('does not move the boundary to a call whose interval was rejected as negative', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:10.000Z', 'hi'),
+        assistantText('a1', '2026-11-09T10:00:05.000Z', 'first'),
+        assistantText('a2', '2026-11-09T10:00:12.000Z', 'second'),
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+    // From the last valid boundary (u1 at 10:00:10), not from the rejected a1 at 10:00:05.
+    expect(calls[1]?.activeDurationMs).toBe(2_000)
+  })
+
+  it('does not clear the boundary when a call has no timestamp', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'),
+        assistantText('a1', undefined, 'untimed'),
+        assistantText('a2', '2026-11-09T10:00:07.000Z', 'timed'),
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+    expect(calls[1]?.activeDurationMs).toBe(7_000)
+  })
+})
+
 describe('the project a Factory session is filed under', () => {
   it('strips the home directory only at a path boundary', () => {
     // A directory that merely starts with the same characters is not under

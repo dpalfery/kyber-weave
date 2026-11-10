@@ -4,10 +4,12 @@
 // skipped rather than failing the whole session.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { afterAll, describe, expect, it } from 'vitest'
 
+import { createDroidProvider } from '../../providers/droid.js'
+import type { ParsedProviderCall } from '../../providers/types.js'
 import { droidReader } from './droid.js'
 import type { ReaderTurn } from './types.js'
 
@@ -155,5 +157,55 @@ describe('droidReader', () => {
 
   it('declares that Droid turns cannot be paired by position', () => {
     expect(droidReader.positionalPairingUnsafe).toBe(true)
+  })
+
+  // Review finding: a tool_use with only a name, or only an id, is not a fully
+  // identified call and must not become a toolCalls entry.
+  it('emits no tool call for a tool_use that carries only a name or only an id', async () => {
+    const path = writeTranscript([
+      JSON.stringify({ type: 'session_start', id: 'session-1', cwd: '/synthetic/project' }),
+      JSON.stringify({
+        type: 'message',
+        id: 'a1',
+        timestamp: '2026-11-09T10:00:01.000Z',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'Read', input: { file_path: 'a.ts' } },
+            { type: 'tool_use', id: 'tu-9', input: { file_path: 'b.ts' } },
+          ],
+        },
+      }),
+    ])
+
+    const [turn] = await readTurns(path)
+
+    expect(turn?.toolCalls).toBeUndefined()
+  })
+
+  // Review finding: an assistant message without an id gets a provider pairing id
+  // (msg-N) but the reader gave the turn no nativeRecordId. With positional pairing
+  // disabled, the counter and its content turn never pair. Both sides must agree.
+  it('gives an id-less assistant turn the same pairing id the provider gives its call', async () => {
+    const path = writeTranscript([
+      JSON.stringify({ type: 'session_start', id: 'session-1', cwd: '/synthetic/project' }),
+      JSON.stringify({ type: 'message', id: 'u1', timestamp: '2026-11-09T10:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }),
+      JSON.stringify({ type: 'message', timestamp: '2026-11-09T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } }),
+    ])
+    writeFileSync(
+      path.replace(/\.jsonl$/, '.settings.json'),
+      JSON.stringify({ model: 'gpt-5', tokenUsage: { inputTokens: 10, outputTokens: 5, cacheCreationTokens: 0, cacheReadTokens: 0, thinkingTokens: 0 } }),
+    )
+
+    const turns = await readTurns(path)
+    const provider = createDroidProvider(dirname(path))
+    const calls: ParsedProviderCall[] = []
+    for await (const call of provider.createSessionParser({ path, project: 'proj', provider: 'droid' }, new Set()).parse()) {
+      calls.push(call)
+    }
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.pairingId).toBeDefined()
+    expect(turns[0]?.nativeRecordId).toBe(calls[0]?.pairingId)
   })
 })

@@ -1787,4 +1787,29 @@ describe('session title stamping', () => {
 
     expect((records[0]?.raw as Record<string, unknown> | undefined)?.[SESSION_LABEL_KEY]).toBeUndefined()
   })
+
+  // Review finding: the stamped label is the trimmed title, a whitespace-only title
+  // is dropped, and a long title is capped at 200 characters.
+  it('drops a whitespace-only session title rather than stamping it', () => {
+    const blank = {
+      ...call({ provider: 'droid', sessionId: 's-blank', deduplicationKey: 'droid:s-blank:a1' }),
+      sessionTitle: '   ',
+    } as ParsedProviderCall
+
+    const records = new Synthesizer().synthesize([blank])
+
+    expect((records[0]?.raw as Record<string, unknown> | undefined)?.[SESSION_LABEL_KEY]).toBeUndefined()
+  })
+
+  it('caps a session title at 200 characters before stamping it', () => {
+    const long = 'x'.repeat(300)
+    const titled = {
+      ...call({ provider: 'droid', sessionId: 's-long', deduplicationKey: 'droid:s-long:a1' }),
+      sessionTitle: long,
+    } as ParsedProviderCall
+
+    const records = new Synthesizer().synthesize([titled])
+
+    expect((records[0]?.raw as Record<string, unknown> | undefined)?.[SESSION_LABEL_KEY]).toBe(long.slice(0, 200))
+  })
 });
