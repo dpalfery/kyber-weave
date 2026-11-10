@@ -351,4 +351,110 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains("judged by no model", note, StringComparison.Ordinal);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Runs one factory <c>PreToolUse</c> <c>Task</c> dispatch to <c>architect</c> through the
+    /// production hook command, with the shipped rules active and a <c>kind: none</c> provider.
+    /// </summary>
+    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string sessionId)
+    {
+        Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n" +
+            "  docs-root: docs\n" +
+            "arbiter:\n" +
+            "  enabled: true\n" +
+            "  provider:\n" +
+            "    kind: none\n");
+
+        string cwd = _repo.Path.Replace("\\", "\\\\", StringComparison.Ordinal);
+        string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["description"] = "Write the plan",
+            ["prompt"] = prompt,
+            ["subagent_type"] = "architect",
+        });
+        string stdin = "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"" + sessionId + "\"," +
+            "\"cwd\":\"" + cwd + "\",\"tool_name\":\"Task\",\"tool_input\":" + toolInput + "}";
+
+        HookCommand command = CreateCommand(new FakeProvider());
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run("factory", null, stdin, stdout, log);
+        return (exit, stdout.ToString(), log.ToString());
+    }
+
+    private static string DenyReason(string stdout)
+    {
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        return doc.RootElement.GetProperty("hookSpecificOutput")
+            .GetProperty("permissionDecisionReason")
+            .GetString() ?? string.Empty;
+    }
+
+    [Fact]
+    public void RealEngine_Factory_AbsolutePlanFile_DeniesWithTheRealReason()
+    {
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
+            "sess-factory-absolute");
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains("ANSWER: plan-file-invalid (step 0)", reason, StringComparison.Ordinal);
+        Assert.Contains("CALLER: conductor (factory)", reason, StringComparison.Ordinal);
+        Assert.Contains("repository-relative", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("recognised marker", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_RelativePlanFile_Allows()
+    {
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nWrite the plan.",
+            "sess-factory-relative");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Theory]
+    [InlineData("INTAKE: docs/todo/item.md")]
+    [InlineData("FINDINGS:")]
+    [InlineData("STATUS: ARBITER_ESCALATION")]
+    [InlineData("FEATURE: search\nPHASE: design")]
+    public void RealEngine_Factory_MarkerOnlyPlannerDispatch_Allows(string body)
+    {
+        (int exit, string stdout, _) = RunFactory($"KYBER-ARBITER: true\n\n{body}", "sess-factory-marker");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_UnmarkedPlannerDispatch_PassesThrough()
+    {
+        (int exit, string stdout, _) = RunFactory("Plan the upgrade.", "sess-factory-unmarked");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_RepeatWithoutPlanFile_CountsOneSession()
+    {
+        const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
+
+        string first = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
+        string otherSession = DenyReason(RunFactory(WithoutPlanFile, "sess-B").Stdout);
+
+        Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 2", second, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 1", otherSession, StringComparison.Ordinal);
+    }
 }

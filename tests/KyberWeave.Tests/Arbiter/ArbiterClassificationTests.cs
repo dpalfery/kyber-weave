@@ -185,12 +185,53 @@ public sealed class ArbiterClassificationTests
     [Fact]
     public void CallerInference_PlannerTargetMeansConductor()
     {
+        string prompt = Marked("INTAKE: docs/todo/item.md");
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch("INTAKE: docs/todo/item.md", target: "architect"),
+            Dispatch(prompt, target: "architect"),
             "architect",
-            "INTAKE: docs/todo/item.md");
+            prompt);
 
         Assert.Equal("conductor", plan.Caller);
+    }
+
+    [Theory]
+    [InlineData("factory")]
+    [InlineData("antigravity")]
+    public void Classification_UnmarkedPlannerTargetOnProjectWideHarnessPasses(string harness)
+    {
+        const string Prompt = "Plan the upgrade.";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: harness),
+            "architect",
+            Prompt);
+
+        Assert.Null(plan.Trigger);
+        Assert.Null(plan.Caller);
+    }
+
+    [Fact]
+    public void Classification_UnmarkedPlannerTargetOnTrustedHarnessStaysGated()
+    {
+        const string Prompt = "Plan the upgrade.";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: "claude"),
+            "architect",
+            Prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
+        Assert.Equal("conductor", plan.Caller);
+    }
+
+    [Fact]
+    public void Classification_UnmarkedPlanFileHeaderStillInfersConductor()
+    {
+        const string Prompt = "PLAN_FILE: docs/plans/plan.md\n\nwork";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: "factory"),
+            "architect",
+            Prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
     }
 
     [Fact]
