@@ -39,6 +39,8 @@ In autonomous mode the conductor never writes the row: it re-invokes `architect`
 
 Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), planner dispatches to `architect` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Draft authoring and resume carry a `PLAN_FILE:` header; finalization carries the `PLAN_FILE:` header followed by the `FINALIZE` line; the findings drain carries `FINDINGS:`; an escalation carries the `STATUS: ARBITER_ESCALATION` envelope itself as its marker.
 
+`PLAN_FILE:` is always the repository-relative path with `/` separators, never the absolute path of a checkout or worktree, even when the run works in a worktree. Sent any other way it is refused as `plan-file-invalid`.
+
 ## Review and its command
 
 A plan records who reviews the change and which skill governs the review, and never the review command itself. The end-of-run council derives that command from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — and the skill is the only place it is written down. A command transcribed into a plan goes stale the moment the gate list or one of its flags moves, and the plan then tells the reviewer to run something nobody validated.
