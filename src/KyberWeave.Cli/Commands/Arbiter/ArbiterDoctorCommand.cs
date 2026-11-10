@@ -47,8 +47,15 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        AnsiConsole.Profile.Width = int.MaxValue;
         DiagnosticReport report = new();
+        CommandHelpers.WriteUnfolded(() => Inspect(settings, report));
+
+        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
+        return report.HasErrors ? 1 : 0;
+    }
+
+    private static void Inspect(ArbiterSettings settings, DiagnosticReport report)
+    {
         _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
         string home = ArbiterCommandComposition.HomeDirectory();
         IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
@@ -67,9 +74,6 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckGuard(config, settings, report);
         CheckProjectHooks(settings.Path, projectEnabled, report);
         CheckAdvisoryPostDispatchTargets();
-
-        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
-        return report.HasErrors ? 1 : 0;
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
