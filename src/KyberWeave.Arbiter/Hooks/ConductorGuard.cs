@@ -83,8 +83,15 @@ public static partial class ConductorGuard
         }
         catch (Exception ex)
         {
-            log.WriteLine($"{HookCommand.FailClosedCode}: conductor guard could not read the event: {ex.Message}");
             stdout.Write(Deny("The conductor guard could not read this tool call, so it was denied."));
+            try
+            {
+                log.WriteLine($"{HookCommand.FailClosedCode}: conductor guard could not read the event: {ex.Message}");
+            }
+            catch (Exception)
+            {
+                // The log is best effort; the deny is already written.
+            }
         }
 
         return 0;
