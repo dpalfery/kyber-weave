@@ -356,7 +356,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     /// Runs one factory <c>PreToolUse</c> <c>Task</c> dispatch to <c>architect</c> through the
     /// production hook command, with the shipped rules active and a <c>kind: none</c> provider.
     /// </summary>
-    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string sessionId)
+    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string? sessionId)
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         File.WriteAllText(
@@ -375,7 +375,8 @@ public sealed class ArbiterRealEngineTests : IDisposable
             ["prompt"] = prompt,
             ["subagent_type"] = "architect",
         });
-        string stdin = "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"" + sessionId + "\"," +
+        string session = sessionId is null ? string.Empty : "\"session_id\":\"" + sessionId + "\",";
+        string stdin = "{\"hook_event_name\":\"PreToolUse\"," + session +
             "\"cwd\":\"" + cwd + "\",\"tool_name\":\"Task\",\"tool_input\":" + toolInput + "}";
 
         HookCommand command = CreateCommand(new FakeProvider());
@@ -456,5 +457,17 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 2", second, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 1", otherSession, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether()
+    {
+        const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
+
+        string first = DenyReason(RunFactory(WithoutPlanFile, null).Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, null).Stdout);
+
+        Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 1", second, StringComparison.Ordinal);
     }
 }

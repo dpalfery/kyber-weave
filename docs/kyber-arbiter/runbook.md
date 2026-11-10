@@ -188,7 +188,8 @@ the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answer
 
 `REPEAT` counts earlier refusals from the same session when the dispatch has no
 `PLAN_FILE:`, because there is no plan to key on. A refusal that is the first in its session
-reads `REPEAT: 1`, whatever other sessions have done. A `REPEAT` of 2 or more means the same
+reads `REPEAT: 1`, whatever other sessions have done. On a harness that sends no session
+id, such as Copilot, these refusals always read `REPEAT: 1`. A `REPEAT` of 2 or more means the same
 kind of refusal came back in this session, so fix the cause rather than resending the
 dispatch unchanged.
 
