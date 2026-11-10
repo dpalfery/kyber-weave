@@ -5,9 +5,10 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 status: current
 decided-by:
+  - adr/0066-copilot-system-prompt-override-is-machine-wide
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -2053,8 +2054,110 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 
 ---
 
+## 11. Copilot system-prompt override (opt-in, machine-wide)
+
+`kyber-weave squad copilot-prompt` replaces GitHub Copilot's top-level system prompt in VS Code
+with Kyber-Weave's own prompt. It is off until a person runs `install`. It is machine-wide,
+because VS Code reads the setting only from the default profile's user `settings.json`, and one
+Agent Host serves every window ([ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md)).
+The operating guide is the [adoption guide](onboarding.md#copilot-system-prompt-override-opt-in);
+the doctor checks and limits are in the [runbook](copilot-prompt-runbook.md).
+
+```mermaid
+flowchart TD
+    Install["squad copilot-prompt install"] --> Detect{"VS Code user data found<br/>for each build?"}
+    Detect -- "none" --> Fail1["exit 1, nothing written"]
+    Detect -- "yes" --> Plan["Plan a JsonServerSplice edit<br/>of each User/settings.json"]
+    Plan --> Refused{"Any file holds a foreign<br/>'*' entry or cannot be spliced?"}
+    Refused -- "yes" --> Fail2["exit 1, no file changed"]
+    Refused -- "no" --> Write["Write the prompt file first,<br/>then each settings file (AtomicFile)"]
+    Write --> Done["exit 0: every Copilot chat on the machine<br/>uses the prompt after a restart"]
+```
+
+### Opt-in state
+
+There is no receipt. The override is on when both halves hold:
+
+1. The prompt file exists at `~/.kyber-weave/copilot/system-prompt.yaml`
+   (`CopilotPromptFile.InstalledPath`).
+2. A detected build's `User/settings.json` has a `*` entry under
+   `chat.agentHost.copilot.modelCapabilityOverrides` whose `promptOverrideFile` equals that path.
+
+Either half alone is not the state. `CopilotOverrideSettings.Read` reads the entry leniently
+(comments, trailing commas, byte-order mark) and never writes. The doctor probe runs only when the
+file in half 1 exists.
+
+Detection is per build. `VsCodeUserSettingsPaths` resolves each build's user-data directory
+(`Code` or `Code - Insiders`) for the platform. macOS uses `~/Library/Application Support`, Windows
+uses `%APPDATA%` with a fallback to `AppData\Roaming`, and Linux uses `~/.config`. A build is in
+scope only when its user-data directory exists. `--flavour` narrows the set.
+
+### Prompt embedding and refresh
+
+- The source is `products/kyber-squad/copilot/system-prompt.yaml`. It is embedded in
+  `KyberWeave.Core` under the manifest name `CopilotPrompt.system-prompt.yaml`, so only a new
+  binary can change it, and the install needs no network.
+- `CopilotPromptFile.Validate` accepts exactly one YAML document with a non-empty `systemPrompt`
+  and no key other than `systemPrompt` and `toolDescriptions`. VS Code treats an unusable file as
+  no file, so an unknown key is refused rather than ignored.
+- `kyber-weave update` refreshes the file through `CopilotPromptRefresher` only when the file
+  already exists and differs from the embedded text. It never creates the file, because creating it
+  changes every chat on the machine. A read-only file is left alone with a warning.
+- The refresh runs on both update paths in `SelfUpdater`: the already-current path, and
+  `FinishUpdate` after the swap, in the finishing process, as [ADR 0065](../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md)
+  requires for any post-update step. A refresh failure is a warning, and the update's exit code
+  does not depend on it.
+- VS Code reads the file when a chat session starts. A running session keeps the prompt it started
+  with, so `run start` is too late to apply a new prompt.
+
+### Settings splice and refusal rule
+
+Edits go through `JsonServerSplice` with the key path `["chat.agentHost.copilot.modelCapabilityOverrides"]`,
+the entry name `*`, and the body `{"promptOverrideFile": "<absolute path>"}`. The splice is a byte
+edit. Comments, key order, trailing commas and the byte-order mark outside the insertion are kept.
+Writes go through `AtomicFile`. A new JSON-with-comments library or a re-serialise would drop
+comments, so neither is used.
+
+| Existing state in a settings file | Install | Uninstall |
+|---|---|---|
+| No `*` entry | Inserts the entry. | Nothing to remove. |
+| `*` entry naming this prompt file | No change; reported as already set. | Removes the entry. |
+| `*` entry naming another file, or with no `promptOverrideFile` | Refuses that file; no file changes; exit 1. | Leaves it alone; refuses the whole uninstall; exit 1. |
+| Not readable JSON | Refuses; exit 1. | Refuses; exit 1. |
+
+Model-specific entries (any key other than `*`) are never touched. VS Code gives a model-specific
+entry priority over `*` for that model, so `status` lists them.
+
+Uninstall removes the settings entries first and deletes the prompt file second, so no setting is
+left pointing at a file that was already removed. A refusal in any file stops the whole uninstall
+before anything is written, so the prompt file is never removed while a setting still depends on it.
+
+### Coexistence with the hook and the skill start
+
+The prompt is instruction-only. It changes what the top-level agent is told, not what it may call.
+So the Kyber-Weave guards that already exist stay in place:
+
+- The `preToolUse` hook, when deployed, still blocks a top-level agent that does work it should
+  route to a worker.
+- The skill start is unchanged, including its tool filter.
+- Workers dispatched through `task` keep Copilot's own prompt, because only the top-level agent's
+  prompt is replaced.
+
+The prompt's conductor branch depends on the open workspace holding `.kyber-weave/kyber-weave.yml`.
+Without that file the prompt tells the model to act as a general coding assistant.
+
+### Doctor integration
+
+`RepositoryDoctor.Run` appends `CopilotPromptProbe.Run` after its own checks. The probe adds nothing
+when the prompt file is absent, and under `--ensure` it turns each failure into a warning. The
+checks, their ids, and the log line they read are in the [runbook](copilot-prompt-runbook.md).
+
+---
+
 ## Related
 
+- [ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md) — the opt-in, machine-wide Copilot system-prompt override
+- [Copilot prompt runbook](copilot-prompt-runbook.md) — doctor checks, the `mode=replace` line, silent fallback, and known limits
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation

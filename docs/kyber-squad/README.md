@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-10
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -90,7 +90,8 @@ Explore the full Kyber-Squad documentation suite:
 
 * **[Adoption & Usage Guide](onboarding.md)** — Installing, updating, scoping (`--global`), updating registered projects (`--projects`), targeting specific harnesses, migrating from earlier state locations, and running health checks.
 * **[Model Profiles and Presets](model-profiles.md)** — The six semantic profiles, per-harness token shapes, preset files, validation, and switching or reverting a profile.
-* **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, transaction engine, and conductor execution circuit-breaker.
+* **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, transaction engine, conductor execution circuit-breaker, and the opt-in Copilot system-prompt override.
+* **[Copilot system-prompt override runbook](copilot-prompt-runbook.md)** — The opt-in, machine-wide replacement of Copilot's VS Code prompt: doctor checks, the `mode=replace` log line, silent fallback, known limits, and the retest after each VS Code update. Live verification is not yet complete.
 * **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, degradation taxonomy, and the circuit-breaker harvest.
 * **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.
 * **[Worker Rule Map](worker-rule-map.md)** — One row per duplicated worker rule: where it lives now, its single home after the text trim, and the check that still enforces it.

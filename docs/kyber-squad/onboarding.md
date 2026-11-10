@@ -5,9 +5,10 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-10
 status: current
 decided-by:
+  - adr/0066-copilot-system-prompt-override-is-machine-wide
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
@@ -838,6 +839,71 @@ It reports these:
   The remedy is `kyber-weave docs mcp-migrate`. An old key that is present but not provably ours is
   `KW-MCP-WIRE-008` (**Info**) and is likewise reported and left alone. `kyber-weave docs init`
   reports the same two findings, with the same effect on its exit code.
+
+---
+
+## Copilot system prompt override (opt-in)
+
+By default GitHub Copilot's chat in VS Code uses its own top-level system prompt. This optional
+step replaces that prompt with Kyber-Weave's prompt. The prompt sends work to the conductor only in
+repositories that have `.kyber-weave/kyber-weave.yml`, and it acts as a general coding assistant
+everywhere else.
+
+**The effect is machine-wide.** VS Code reads the setting only from your user settings, and one
+background process serves every window. Once on, every Copilot chat on this machine uses the prompt,
+including chats in repositories that do not use Kyber-Weave. The setting is labelled experimental in
+VS Code. The limits are in the [runbook](copilot-prompt-runbook.md#known-limits).
+
+```bash
+# Preview: writes nothing
+kyber-weave squad copilot-prompt install --dry-run
+
+# Turn on for every VS Code build found (stable and Insiders)
+kyber-weave squad copilot-prompt install
+
+# Turn on for one build only, without the confirmation prompt
+kyber-weave squad copilot-prompt install --flavour insiders --yes
+
+# Check which builds point at the prompt
+kyber-weave squad copilot-prompt status
+
+# Turn off and remove the prompt file
+kyber-weave squad copilot-prompt uninstall --yes
+```
+
+- `install` writes the prompt to `~/.kyber-weave/copilot/system-prompt.yaml` and adds one `*` entry
+  to `chat.agentHost.copilot.modelCapabilityOverrides` in each build's `User/settings.json`. Other
+  entries and comments in that file are kept.
+- `install` asks you to confirm and names each settings file. With no terminal attached, pass `--yes`,
+  or it exits `2`.
+- `install` refuses a file that already has a `*` entry from somewhere else. It changes nothing and
+  exits `1`. Remove that entry by hand, then run `install` again.
+- `uninstall` removes only the entry that names this prompt file, then deletes the prompt file.
+- `status` takes `--flavour` only. `--dry-run` and `--yes` have no effect on it.
+- Restart VS Code after `install` or `uninstall`. Chats already open keep the prompt they started with.
+- `kyber-weave update` refreshes the prompt file, but only if it is already installed. It never
+  installs it.
+
+Turning it on is not a project setting. Do not add it to a project's `.vscode/settings.json`:
+VS Code ignores that key there.
+
+### Check that it is live
+
+Run `kyber-weave doctor`. When the override is on, it adds `copilot.prompt.*` checks. The newest
+AgentHost log must show `mode=replace`. Doctor explains each failure and the fix. The runbook covers
+each check and the silent fallback in [Copilot system-prompt override runbook](copilot-prompt-runbook.md).
+
+### Retest after each VS Code update
+
+VS Code may change or remove this setting in any release. After every VS Code update:
+
+1. Restart VS Code and send one chat message.
+2. Run `kyber-weave doctor`. The `.log` check must pass with `mode=replace`.
+3. If the check fails or the setting is gone, run `kyber-weave squad copilot-prompt uninstall --yes`
+   so no stale entry is left behind, and report it.
+
+Live verification of this feature in a signed-in VS Code chat is not yet complete. Until it is, treat
+the override as unproven on your machine.
 
 ---
 
