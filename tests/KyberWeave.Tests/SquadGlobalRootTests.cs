@@ -1259,11 +1259,13 @@ public sealed class SquadGlobalRootTests : IDisposable
     ///         Σ non-suppressed skill resources
     ///     </c>
     ///     , read from the loaded corpus rather than a
-    ///     hardcoded literal. Claude and Factory keep the primary agent's native principal and
-    ///     add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
+    ///     hardcoded literal. Claude, Factory, and Copilot keep the primary agent's native principal
+    ///     and add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
     ///     precedent (the agent principal plus its refs out, <c>SKILL.md</c> plus its refs in),
-    ///     so only the receipt paths differ there. Codex, Claude, and Factory retain the native
-    ///     principal and add a skill entry point for the conductor.
+    ///     so only the receipt paths differ there. Codex, Claude, Factory, and Copilot retain the
+    ///     native principal and add a skill entry point for each non-shared primary whose fallback
+    ///     profile lowers to a skill, so the count follows the parent roles the renderer emits
+    ///     skills for rather than a fixed number.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -1291,12 +1293,15 @@ public sealed class SquadGlobalRootTests : IDisposable
         int sharedPrimaryCount = source.Agents.Count(agent =>
             agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
 
-        // Codex, Claude, and Factory keep the native principal and add an entry-point skill beside
-        // it, but only for a non-shared primary: a primary shared identity already has its
-        // canonical skill as the entry point. The lowering targets (Cursor, Pi, ZCode, Devin, Warp)
-        // replace a non-shared primary's agent principal with an entry point, and emit nothing at all
-        // for a shared one.
-        if (target is SquadTarget.Codex or SquadTarget.Claude or SquadTarget.Factory)
+        // Codex, Claude, Factory, and Copilot keep the native principal and add an entry-point skill
+        // beside it, but only for a non-shared primary: a primary shared identity already has its
+        // canonical skill as the entry point. Copilot keeps its agent file for every primary, hidden
+        // from the picker when a skill carries the role (CopilotRenderer.RenderAgent), so its parent
+        // roles (conductor, bug-crusher, product-owner, all role-skill today) add the same
+        // entry-point skill the other native targets do. The lowering targets (Cursor, Pi, ZCode, Devin,
+        // Warp) replace a non-shared primary's agent principal with an entry point, and emit nothing at
+        // all for a shared one.
+        if (target is SquadTarget.Codex or SquadTarget.Claude or SquadTarget.Factory or SquadTarget.Copilot)
         {
             int entryPointAddition = 0;
             foreach (SquadAgent agent in source.Agents.Where(a =>
