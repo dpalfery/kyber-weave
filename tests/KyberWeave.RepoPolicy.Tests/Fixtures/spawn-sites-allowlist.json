@@ -230,6 +230,18 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
     },
     {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardPollCostTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (20 s) kills the tree. The wrapped command is sleep 2 or sh -c \"exit 0\", which exit by themselves; the process table is a counting fixture (KW_PROC_GUARD_PS) that lists no processes."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardPollCostTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (20 s) kills the tree. The wrapped command exits by itself within two seconds; the process table is a fixture."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardDotnetServersTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
       "count": 1,
