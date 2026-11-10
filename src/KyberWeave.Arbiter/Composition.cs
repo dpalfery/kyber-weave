@@ -97,7 +97,18 @@ public static class Composition
 
         if (args.Length > 0 && string.Equals(args[0], "guard", StringComparison.Ordinal))
         {
-            string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+            string stdinText;
+            try
+            {
+                stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // An empty event is unreadable, so the guard answers it with an explicit deny.
+                await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: conductor guard could not read stdin: {ex.Message}").ConfigureAwait(false);
+                stdinText = string.Empty;
+            }
+
             return ConductorGuard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));
         }
 

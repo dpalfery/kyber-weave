@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -8,6 +9,7 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ConductorGuardTests
 {
     private const string Cwd = "/repo";
+    private const string CopilotHome = "/home/me/.copilot";
 
     [Theory]
     [InlineData("edit")]
@@ -16,6 +18,7 @@ public sealed class ConductorGuardTests
     [InlineData("rg")]
     [InlineData("web_fetch")]
     [InlineData("codegraph-codegraph_explore")]
+    [InlineData("evil-arbiter_evaluate_agent_dispatch_or_return")]
     public void ProjectWorkTools_AreDenied(string tool)
     {
         Assert.Contains(tool, ReasonFor(Event(tool, new { path = "src/a.cs" })), StringComparison.Ordinal);
@@ -29,7 +32,7 @@ public sealed class ConductorGuardTests
     [InlineData("tool_search_tool")]
     [InlineData("kyber-weave-docs_answer_question_from_repo_documentation")]
     [InlineData("kw-docs-docs_look_up_glossary_term_definition")]
-    [InlineData("kyber-weave-arbiter_evaluate_agent_dispatch_or_return")]
+    [InlineData("arbiter_evaluate_agent_dispatch_or_return")]
     public void DelegationAndBookkeepingTools_ArePermittedSilently(string tool)
     {
         Assert.Empty(Run(Event(tool, new { })));
@@ -37,6 +40,7 @@ public sealed class ConductorGuardTests
 
     [Theory]
     [InlineData("kyber-weave run start --harness copilot --type fix --slug a-b")]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug a --failing-version 1.2.3 --resume copilot/fix/a --json")]
     [InlineData("kyber-weave doctor --ensure")]
     [InlineData("kyber-weave doctor --ensure /repo")]
     public void RunStartCommands_ArePermitted(string command)
@@ -46,12 +50,15 @@ public sealed class ConductorGuardTests
 
     [Theory]
     [InlineData("git status")]
+    [InlineData("kyber-weave run start")]
+    [InlineData("kyber-weave run start --evil-flag x")]
+    [InlineData("kyber-weave doctor --ensure --evil-flag")]
     [InlineData("kyber-weave doctor --ensure; rm -rf /")]
-    [InlineData("kyber-weave run start && cat secrets")]
-    [InlineData("kyber-weave run start $(id)")]
-    [InlineData("kyber-weave run start `id`")]
-    [InlineData("kyber-weave run start | tee x")]
-    [InlineData("kyber-weave run start\nrm x")]
+    [InlineData("kyber-weave run start --slug a && cat secrets")]
+    [InlineData("kyber-weave run start --slug $(id)")]
+    [InlineData("kyber-weave run start --slug `id`")]
+    [InlineData("kyber-weave run start --slug a | tee x")]
+    [InlineData("kyber-weave run start --slug a\nrm x")]
     public void OtherCommands_AreDenied(string command)
     {
         Assert.NotEmpty(ReasonFor(Event("bash", new { command })));
@@ -59,6 +66,7 @@ public sealed class ConductorGuardTests
 
     [Theory]
     [InlineData("/home/me/.copilot/agents/conductor/references/plan-path.md")]
+    [InlineData(".github/agents/conductor/references/plan-path.md")]
     [InlineData("AGENTS.md")]
     [InlineData("/repo/6-Docs/plans/README.md")]
     [InlineData("docs/specs/feature/tasks.md")]
@@ -74,6 +82,8 @@ public sealed class ConductorGuardTests
     [InlineData("docs/plans/../../src/notes.md")]
     [InlineData("docs/plans/code.cs")]
     [InlineData("/elsewhere/plans/x.md")]
+    [InlineData("evil/agents/conductor/secret.md")]
+    [InlineData("/tmp/agents/conductor/secret.md")]
     public void OtherFiles_AreDenied(string path)
     {
         Assert.NotEmpty(ReasonFor(Event("view", new { path })));
@@ -126,10 +136,44 @@ public sealed class ConductorGuardTests
     }
 
     [Fact]
+    public void AToolCallCarryingAPromptField_IsStillDenied()
+    {
+        string json = JsonSerializer.Serialize(new { cwd = Cwd, transformedPrompt = "hi", toolName = "edit", toolArgs = new { } });
+
+        Assert.Contains("edit", ReasonFor(json), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnOverlongPath_IsDeniedNotThrown()
+    {
+        Assert.NotEmpty(ReasonFor(Event("view", new { path = $"docs/plans/{new string('a', 100_000)}\0.md" })));
+    }
+
+    [Fact]
+    public async Task GuardVerb_DeniesWhenStdinCannotBeRead()
+    {
+        using StringWriter stdout = new();
+        using StringReader closed = new(string.Empty);
+        closed.Dispose();
+
+        int exit = await KyberWeave.Arbiter.Composition.DispatchAsync(["guard"], closed, stdout, TextWriter.Null);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GuardCommandLine_AcceptsADottedServerName()
+    {
+        Assert.Equal("kyber-weave-arbiter guard --allow-mcp my.server", ArbiterHookWiring.GuardCommandLine("my.server"));
+        Assert.Throws<ArgumentException>(() => ArbiterHookWiring.GuardCommandLine("a b"));
+    }
+
+    [Fact]
     public void AllowedMcpServer_IsPermittedOnlyWhenNamed()
     {
         using StringWriter stdout = new();
-        ConductorGuard.Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel");
+        ConductorGuard.Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel", CopilotHome);
 
         Assert.Empty(stdout.ToString());
         Assert.NotEmpty(ReasonFor(Event("operator-channel-send", new { })));
@@ -153,7 +197,7 @@ public sealed class ConductorGuardTests
     private static string Run(string json)
     {
         using StringWriter stdout = new();
-        Assert.Equal(0, ConductorGuard.Run(json, stdout, TextWriter.Null));
+        Assert.Equal(0, ConductorGuard.Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
         return stdout.ToString();
     }
 
