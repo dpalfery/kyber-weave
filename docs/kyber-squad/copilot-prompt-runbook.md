@@ -90,7 +90,7 @@ adds nothing, so a machine that never opted in sees no new output.
 | Check | Passes when | Fails when | Fix |
 |---|---|---|---|
 | `copilot.prompt.setting` | Some detected VS Code settings file points its `*` entry at the installed prompt file. | No detected settings file points at it. Reported once, without a build label. | `kyber-weave squad copilot-prompt install --yes` |
-| `copilot.prompt.<stable\|insiders>.setting` | That build's `*` entry names the installed prompt file. | That build's settings file is present but cannot be read, for example a directory or a file without read permission. Not reported for a build that does not point at it. | Fix the file's permissions or type, then run `kyber-weave doctor` |
+| `copilot.prompt.<stable\|insiders>.setting` | That build's `*` entry names the installed prompt file. | That build's settings file is present but cannot be read (for example a directory or a file without read permission) or is not JSON. Not reported for a build that does not point at it. | Fix the file's permissions, type or JSON, then run `kyber-weave doctor` |
 | `copilot.prompt.<stable\|insiders>.file` | The prompt file is readable YAML with exactly one document, a non-empty `systemPrompt`, and no key other than `systemPrompt` and `toolDescriptions`. | The file is unreadable, not YAML, has another key, or has no usable `systemPrompt`. The reason names the problem. | As above |
 | `copilot.prompt.<stable\|insiders>.log` | The newest AgentHost log's last `Resolved system message` line shows `mode=replace`. | The last line shows another mode. The reason says to restart VS Code and run doctor again. | `kyber-weave doctor` |
 

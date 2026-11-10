@@ -61,6 +61,18 @@ public static partial class CopilotPromptProbe
             }
 
             CopilotOverrideState? state = read.Document is { } document ? CopilotOverrideSettings.Read(document) : null;
+            if (read.Document is not null && state is null)
+            {
+                // Present but not JSON: install and uninstall refuse this file, so reinstalling is not the fix.
+                anyUnreadable = true;
+                checks.Add(new DoctorCheck(
+                    $"copilot.prompt.{label}.setting",
+                    false,
+                    $"the settings file {settingsFile} is not readable JSON",
+                    $"fix the JSON in {settingsFile}, then run kyber-weave doctor"));
+                continue;
+            }
+
             if (state?.StarPromptFile is null || !string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal))
                 continue;
 
