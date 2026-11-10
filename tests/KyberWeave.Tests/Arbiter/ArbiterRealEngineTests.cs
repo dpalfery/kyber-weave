@@ -459,13 +459,16 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains("REPEAT: 1", otherSession, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether(string? sessionId)
     {
         const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
 
-        string first = DenyReason(RunFactory(WithoutPlanFile, null).Stdout);
-        string second = DenyReason(RunFactory(WithoutPlanFile, null).Stdout);
+        string first = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
 
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 1", second, StringComparison.Ordinal);

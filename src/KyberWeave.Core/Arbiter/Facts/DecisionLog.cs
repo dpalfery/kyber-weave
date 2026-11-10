@@ -100,7 +100,7 @@ public sealed class DecisionLog
     /// A dispatch with no plan file has no plan to key on, so without a session
     /// every such escalation in the repository would count toward one another.
     /// <c>session</c> is consulted only when the plan file is null, and matching on it
-    /// keeps a planless repeat to the same conversation. A null session never matches:
+    /// keeps a planless repeat to the same conversation. A null or blank session never matches:
     /// some harnesses send none, the log never expires, and a repeat of two or more stops
     /// the task, so counting those together would stop unrelated conversations for good.
     /// </remarks>
@@ -114,6 +114,7 @@ public sealed class DecisionLog
             && string.Equals(decision.PlanDigest, planDigest, StringComparison.Ordinal)
             && string.Equals(decision.Task, task, StringComparison.Ordinal)
             && (planFile is not null
-                || (session is not null && string.Equals(decision.Session, session, StringComparison.Ordinal))));
+                || (!string.IsNullOrWhiteSpace(session)
+                    && string.Equals(decision.Session, session, StringComparison.Ordinal))));
     }
 }
