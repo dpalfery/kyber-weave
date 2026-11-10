@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -146,6 +147,37 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
                 $"Agent '{agentName}' must not carry a 'hooks' frontmatter entry under Global scope.");
+        }
+    }
+
+    /// <summary>
+    /// A parent that dispatches through its skill entry point has no caller identity there, so the
+    /// Arbiter cannot enforce its dispatch gate. Each parent records that at both scopes.
+    /// </summary>
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project)]
+    [InlineData(SquadDeploymentScope.Global)]
+    public async Task RenderAsync_EnabledArbiter_RecordsSkillEntryHasNoCallerIdentity(SquadDeploymentScope scope)
+    {
+        using TempDirectory roots = new();
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            Targets: [SquadTarget.Copilot],
+            Scope: scope,
+            GlobalRoots: new FixedGlobalRoots(roots.Path),
+            PreloadedSource: TestSquadCorpus.CanonicalSource,
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (string parent in new[] { "conductor", "bug-crusher", "product-owner" })
+        {
+            Assert.Single(
+                result.Degradations,
+                d => d.Target == "copilot"
+                     && d.CanonicalIdentity == parent
+                     && d.Code == "arbiter-not-enforced"
+                     && d.Details == "skill-entry-no-caller");
         }
     }
 

@@ -51,11 +51,16 @@ public sealed class SquadRenderingContractTests
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
+        // The conductor is a primary with a skill entry point on Copilot: that skill and its closure are
+        // emitted beside the agent file, so both count here.
+        int conductorEntryPointFileCount =
+            1 + Assert.Single(source.Agents, agent => agent.Name == "conductor").Resources.Count;
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
             + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+                .Sum(skill => skill.Resources.Count)
+            + conductorEntryPointFileCount;
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("copilot", f.Target));
 
@@ -72,14 +77,9 @@ public sealed class SquadRenderingContractTests
                 TestSquadCorpus.ExpectedRenderText(SquadTarget.Copilot, agent.Description),
                 RequireScalar(frontmatter, "description"));
 
-            if (agent.Invocation == SquadInvocation.Subagent)
-            {
-                Assert.Equal("false", RequireScalar(frontmatter, "user-invocable"));
-            }
-            else
-            {
-                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("user-invocable")));
-            }
+            // Branch A: every agent file is hidden from the picker, including the primary parents, whose
+            // entry point is the skill rendered beside them.
+            Assert.Equal("false", RequireScalar(frontmatter, "user-invocable"));
 
             IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools");
             Assert.Equal(CopilotToolCatalog.Normalize(agent.CopilotTools), tools);

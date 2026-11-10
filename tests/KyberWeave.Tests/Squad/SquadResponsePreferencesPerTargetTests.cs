@@ -29,7 +29,7 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
             { SquadTarget.Claude, "conductor", [".claude/agents/conductor.md", ".claude/skills/conductor/SKILL.md"] },
             { SquadTarget.Claude, "bug-crusher", [".claude/agents/bug-crusher.md", ".claude/skills/bug-crusher/SKILL.md"] },
 
-            { SquadTarget.Copilot, "conductor", [".github/agents/conductor.agent.md"] },
+            { SquadTarget.Copilot, "conductor", [".github/agents/conductor.agent.md", ".github/skills/conductor/SKILL.md"] },
             { SquadTarget.Copilot, "bug-crusher", [".github/agents/bug-crusher.agent.md", ".github/skills/bug-crusher/SKILL.md"] },
 
             { SquadTarget.OpenCode, "conductor", [".opencode/agents/conductor.md"] },
@@ -80,6 +80,7 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
         ],
         [SquadTarget.Copilot] = [
             ".github/agents/conductor.agent.md",
+            ".github/skills/conductor/SKILL.md",
             ".github/agents/bug-crusher.agent.md",
             ".github/skills/bug-crusher/SKILL.md",
         ],

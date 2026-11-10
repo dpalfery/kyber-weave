@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -717,9 +718,9 @@ public sealed class CopilotRendererTests
             ?.Trim();
 
         Assert.Equal(expectedAgentsLine, actual);
-        Assert.DoesNotContain(
-            frontmatter.Split('\n'),
-            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+
+        // Every parent renders a skill entry point, so its agent file stays hidden from the picker.
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -765,9 +766,9 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("agents:", StringComparison.Ordinal));
-        Assert.DoesNotContain(
-            frontmatter.Split('\n'),
-            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+
+        // A primary with no delegates still renders a skill entry point (fallback: none), so it is hidden.
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -796,9 +797,7 @@ public sealed class CopilotRendererTests
             primaryFrontmatter.Split('\n')
                 .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
                 ?.Trim());
-        Assert.DoesNotContain(
-            primaryFrontmatter.Split('\n'),
-            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+        Assert.Contains("user-invocable: false", primaryFrontmatter, StringComparison.Ordinal);
 
         SquadDeploymentFile subagent = Assert.Single(
             result.Files,
@@ -829,6 +828,279 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("agents:", StringComparison.Ordinal));
+    }
+
+    private static readonly string[] ParentIdentities = ["conductor", "bug-crusher", "product-owner"];
+
+    private static readonly Regex MarkdownLinkRegex = new(@"\]\((?<target>[^)\s]+)\)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The conductor is a primary agent, and Copilot has no primary-agent primitive for it, so its
+    /// entry point is a skill. The skill's references sit beside it, so every relative link in the
+    /// skill body resolves to an emitted file.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_RendersConductorEntryPointSkillWithItsReferences()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile skill = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/skills/conductor/SKILL.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Single(result.Files, f => f.RelativePath == $".github/skills/conductor/conductor/references/{file}");
+        }
+
+        MatchCollection links = MarkdownLinkRegex.Matches(ReadBody(skill));
+        Assert.NotEmpty(links);
+        foreach (Match link in links)
+        {
+            string target = link.Groups["target"].Value;
+            if (target.Contains("://", StringComparison.Ordinal) || target.StartsWith('#'))
+            {
+                continue;
+            }
+
+            Assert.DoesNotContain("..", target, StringComparison.Ordinal);
+            string resolved = $".github/skills/conductor/{target.Split('#')[0]}";
+            Assert.True(
+                result.Files.Any(f => f.RelativePath == resolved),
+                $"The conductor skill links '{target}', which does not resolve to an emitted file ('{resolved}').");
+        }
+    }
+
+    /// <summary>
+    /// Each parent skill is valid YAML: its name is its directory, and its description is the
+    /// canonical description on one physical line, within the 1,024-character limit.
+    /// </summary>
+    [Theory]
+    [InlineData("conductor")]
+    [InlineData("bug-crusher")]
+    [InlineData("product-owner")]
+    public async Task RenderAsync_ParentSkillFrontmatterIsValidYaml(string parentName)
+    {
+        SquadAgent agent = Assert.Single(TestSquadCorpus.CanonicalSource.Agents, a => a.Name == parentName);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile skill = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/skills/{parentName}/SKILL.md");
+
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(skill.Content.Span));
+        YamlStream stream = new();
+        stream.Load(new StringReader(frontmatter));
+        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
+
+        Assert.Equal(parentName, RequireScalar(root, "name"));
+
+        string description = RequireScalar(root, "description");
+        Assert.NotEmpty(description);
+        Assert.True(
+            description.Length <= 1024,
+            $"'{parentName}' skill description is {description.Length} characters; the limit is 1,024.");
+        Assert.Equal(agent.Description, description);
+
+        string[] lines = frontmatter.Split('\n');
+        int descriptionLine = Array.FindIndex(lines, l => l.StartsWith("description:", StringComparison.Ordinal));
+        Assert.True(descriptionLine >= 0, $"'{parentName}' skill frontmatter has no description line.");
+        Assert.NotEmpty(lines[descriptionLine]["description:".Length..].Trim());
+        Assert.False(
+            descriptionLine + 1 < lines.Length && lines[descriptionLine + 1].StartsWith(' '),
+            $"'{parentName}' skill description continues onto a second physical line.");
+    }
+
+    /// <summary>
+    /// A shared identity has one skill: the canonical skill is the entry point, so no duplicate is
+    /// emitted beside it, and its body is the canonical body.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_SharedParentsEmitNoDuplicateSkill()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (string identity in new[] { "bug-crusher", "product-owner" })
+        {
+            SquadSkill canonical = Assert.Single(source.Skills, s => s.Name == identity);
+            SquadDeploymentFile skill = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".github/skills/{identity}/SKILL.md");
+
+            Assert.Contains(canonical.InstructionBody.Trim(), ReadBody(skill), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A parent that Copilot lowers to a skill records the role-skill fallback, and records that the
+    /// session's tools, roster and model apply to the skill rather than to the agent.
+    /// </summary>
+    [Theory]
+    [InlineData("conductor")]
+    [InlineData("bug-crusher")]
+    [InlineData("product-owner")]
+    public async Task RenderAsync_ParentRecordsRoleSkillFallback(string parentName)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.Contains(
+            result.Degradations,
+            d => d.Target == "copilot" && d.CanonicalIdentity == parentName && d.Code == "role-skill-fallback");
+        Assert.Contains(
+            result.Degradations,
+            d => d.Target == "copilot"
+                 && d.CanonicalIdentity == parentName
+                 && d.Code == "permission-not-expressible"
+                 && d.Details is not null
+                 && d.Details.Contains("the session's tools, roster and model apply to the skill", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The product owner is dispatched by the conductor, so its agent file stays hidden from the picker
+    /// and carries no model-invocation lock.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ProductOwnerStaysAHiddenDispatchableAgent()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/product-owner.agent.md");
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("disable-model-invocation:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Every subagent stays dispatch-only: hidden from the picker, with no model-invocation lock.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_WorkerAgentFilesAreUnchanged()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent[] workers = source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent).ToArray();
+        Assert.NotEmpty(workers);
+        foreach (SquadAgent worker in workers)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".github/agents/{worker.Name}.agent.md");
+            string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+
+            Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                frontmatter.Split('\n'),
+                l => l.StartsWith("disable-model-invocation:", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// A primary agent whose fallback profile omits the entry point has no skill, and its agent file
+    /// stays selectable: it carries no user-invocable line.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_PrimaryWithNoEntryPointStaysSelectable()
+    {
+        using TempDirectory temp = new();
+        WritePrimaryDelegationSquad(temp.Path);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "profiles", "fallbacks.yml"), """
+                schema: kyber-squad.fallback-profiles/v1
+                profiles:
+                  none:
+                    no-primary-agent: skill
+                    no-agent-primitive: skill
+                  omit-entry:
+                    no-primary-agent: omit
+                    no-agent-primitive: skill
+                """);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "agents", "primary-lonely.md"), """
+                ---
+                schema: kyber-squad.agent/v1
+                name: primary-lonely
+                description: Test agent primary-lonely
+                invocation: primary
+                model-profile: default
+                capability-profile: plain
+                copilot-tools: [todo, vscode]
+                delegates-to: []
+                fallback: omit-entry
+                aliases: []
+                ---
+                Instruction body for primary-lonely.
+                """);
+
+        SquadRenderResult result = await new CopilotRenderer().RenderAsync(new SquadRenderRequest(
+            temp.Path,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-lonely.agent.md");
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            result.Files,
+            f => f.RelativePath == ".github/skills/primary-lonely/SKILL.md");
+    }
+
+    /// <summary>
+    /// Every parent agent file is hidden from the picker: the conductor and bug-crusher dispatch
+    /// through their skills, so the agent files must not offer a second entry point.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ParentAgentFilesAreHidden()
+    {
+        foreach (string parent in ParentIdentities)
+        {
+            string frontmatter = await RenderFrontmatterAsync(parent);
+            Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The conductor and bug-crusher are entry points a human chooses, so the model itself cannot
+    /// invoke either one.
+    /// </summary>
+    [Theory]
+    [InlineData("conductor")]
+    [InlineData("bug-crusher")]
+    public async Task RenderAsync_UndispatchedParentsCannotBeInvokedByTheModel(string parent)
+    {
+        string frontmatter = await RenderFrontmatterAsync(parent);
+        Assert.Contains("disable-model-invocation: true", frontmatter, StringComparison.Ordinal);
+    }
+
+    private static string ReadBody(SquadDeploymentFile file)
+    {
+        string text = Encoding.UTF8.GetString(file.Content.Span);
+        const string closing = "\n---\n";
+        int end = text.IndexOf(closing, 4, StringComparison.Ordinal);
+        Assert.True(end > 0, $"'{file.RelativePath}' has no closing frontmatter delimiter.");
+        return text[(end + closing.Length)..];
+    }
+
+    private static string RequireScalar(YamlMappingNode node, string key)
+    {
+        Assert.True(
+            node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value),
+            $"Frontmatter has no '{key}' entry.");
+        return Assert.IsType<YamlScalarNode>(value).Value ?? string.Empty;
     }
 
     private static readonly string[] ConductorReferenceFiles =

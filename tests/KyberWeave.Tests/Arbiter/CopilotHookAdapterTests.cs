@@ -33,6 +33,8 @@ public sealed class CopilotHookAdapterTests
 
         public string? SeenPreTarget;
 
+        public string? SeenPrePrompt;
+
         public string? SeenPostCaller;
 
         public bool ThrowOnPre;
@@ -46,6 +48,7 @@ public sealed class CopilotHookAdapterTests
             PreCalls++;
             SeenPreCaller = caller;
             SeenPreTarget = target;
+            SeenPrePrompt = prompt;
             if (ThrowOnPre)
             {
                 throw new InvalidOperationException("provider is down");
@@ -468,6 +471,77 @@ public sealed class CopilotHookAdapterTests
         Assert.Equal("deny", doc.RootElement.GetProperty("permissionDecision").GetString());
         string reason = doc.RootElement.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
         Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The VS Code host sends the CLI-shaped payload for a dispatch: no <c>hook_event_name</c>,
+    /// <c>toolName</c> <c>task</c>, and <c>toolArgs</c> carrying <c>agent_type</c>, <c>prompt</c>,
+    /// <c>name</c>, <c>description</c> and <c>mode</c>. The marked dispatch is gated, not passed through.
+    /// </summary>
+    private const string CliShapedVsCodeDispatch = """
+        {
+          "sessionId": "sess-copilot-vs-cli-shape-1",
+          "timestamp": 1789345600,
+          "cwd": "/repo",
+          "toolCallId": "toolu-copilot-vs-cli-shape-1",
+          "toolName": "task",
+          "toolArgs": {
+            "agent_type": "csharp-dev",
+            "name": "csharp-dev-t42",
+            "description": "Implement T4.2",
+            "mode": "sync",
+            "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.2\n\nImplement the parser."
+          }
+        }
+        """;
+
+    [Fact]
+    public void CliShapedVsCodeDispatch_IsNotPassThrough()
+    {
+        CopilotHookAdapter adapter = new(new ScriptedEngine(), CopilotHookAdapter.VsCodeToken);
+        using JsonDocument document = JsonDocument.Parse(CliShapedVsCodeDispatch);
+
+        Assert.False(adapter.IsPassThrough(document.RootElement, null));
+    }
+
+    [Fact]
+    public void CliShapedVsCodeDispatch_MapsTargetAndPrompt()
+    {
+        ScriptedEngine engine = new();
+
+        (int exit, _, _) = Run(CopilotHookAdapter.VsCodeToken, CliShapedVsCodeDispatch, null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, engine.PreCalls);
+        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.NotNull(engine.SeenPrePrompt);
+        Assert.Contains("KYBER-ARBITER: true", engine.SeenPrePrompt, StringComparison.Ordinal);
+        Assert.Contains("Implement the parser.", engine.SeenPrePrompt, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A Local-schema dispatch arriving with no rendered caller is still classified as a dispatch and
+    /// gated by the engine: the absent caller answers as <c>unidentified</c>, never as pass-through.
+    /// </summary>
+    [Fact]
+    public void LocalDispatchWithNoRenderedCaller_IsClassifiedAndGated()
+    {
+        const string envelope =
+            "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
+        ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
+        string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
+            "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-nocaller-1", StringComparison.Ordinal);
+
+        (int exit, string stdout, _) = Run(CopilotHookAdapter.CliToken, stdin, null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, engine.PreCalls);
+        Assert.Equal("unidentified", engine.SeenPreCaller);
+        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.Equal(envelope, output.GetProperty("permissionDecisionReason").GetString());
     }
 
     [Fact]

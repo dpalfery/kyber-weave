@@ -113,6 +113,31 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Branch A: the conductor is a primary with a skill entry point, and the overlay stays on the agent
+    /// file only. The skill carries neither the overlay text nor the server placeholder.
+    /// </summary>
+    [Fact]
+    public async Task Overlay_OnBranchAgentFileOnly()
+    {
+        (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
+
+        SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+
+        string firstParagraph = SquadOperatorChannelFixture.OverlayFirstParagraph();
+        Assert.Contains(firstParagraph, SquadOperatorChannelFixture.ConductorText(on), StringComparison.Ordinal);
+
+        SquadDeploymentFile skill = Assert.Single(on.Files, f => f.RelativePath == "skills/conductor/SKILL.md");
+        string skillText = System.Text.Encoding.UTF8.GetString(skill.Content.Span);
+        Assert.DoesNotContain(firstParagraph, skillText, StringComparison.Ordinal);
+        Assert.DoesNotContain(SquadOperatorChannelFixture.Placeholder, skillText, StringComparison.Ordinal);
+        foreach (string eventLabel in SquadOperatorChannelFixture.EventLabels)
+        {
+            Assert.DoesNotContain(eventLabel, skillText, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task OperatorChannelGate_ExactTrueWithServerFound_ConductorBodyGrowsByTheOverlayAndStaysWithinBudget()
     {
