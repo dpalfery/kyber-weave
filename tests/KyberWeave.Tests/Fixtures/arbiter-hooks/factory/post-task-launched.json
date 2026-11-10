@@ -1,0 +1,14 @@
+{
+  "session_id": "session-factory-capture",
+  "transcript_path": "/repo/.factory/transcripts/capture.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "auto-high",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Task",
+  "tool_input": {
+    "subagent_type": "echoer",
+    "description": "capture run",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T9\n\nRepeat this line: RED_EVIDENCE: capture-line"
+  },
+  "tool_response": "Task launched in background.\ntask_id: 9892cb53-6a23-4cdd-b3e7-7da20b4e21b6\nsession_id: 9892cb53-6a23-4cdd-b3e7-7da20b4e21b6\nsubagent_type: echoer\ndescription: capture run\nThe task is running in a subagent session.\nYou will be notified automatically when it completes and its report will be delivered to you: do not wait for it or poll for it with TaskOutput.\nTo inspect progress, open/load session \"9892cb53-6a23-4cdd-b3e7-7da20b4e21b6\".\nTo peek at progress without waiting: use TaskOutput with task_id \"9892cb53-6a23-4cdd-b3e7-7da20b4e21b6\" and block=false\nTo resume later with follow-up: use Task with resume=\"9892cb53-6a23-4cdd-b3e7-7da20b4e21b6\""
+}

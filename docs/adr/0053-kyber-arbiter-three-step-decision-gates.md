@@ -173,6 +173,10 @@ fact outside those declared states leaves the machine.
 - **Unsupported harnesses stay fallback-only until the matrix is verified.** Warp and ZCode have
   no hooks, and the MCP fallback records the harness as `fallback-only` with the reason code
   `hooks-disabled-by-harness` or `dispatch-unconfirmed` until the hook matrix is verified.
+- **Completion is the worker's own report.** A task counts as complete when its worker's
+  report reads `RESULT: PASS`, because the separate task reviewer the design named no longer
+  exists. A worker can therefore mark its own task complete; the final review still judges
+  the whole change.
 - **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
   is not committed; a fresh clone escalates dependent tasks until architect attests, after
   user confirmation, what is complete (D31).

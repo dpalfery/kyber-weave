@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -73,7 +74,7 @@ public sealed record PlanTask(
 /// <param name="OutOfScope">Backticked paths under the <c>Out of scope</c> headings, taken by the path rule.</param>
 /// <param name="ContractRows">The rows of the Test or verification contract table, keyed by their task-id cell.</param>
 /// <param name="Diagnostics">Parse findings: KW-ARB-PARSE-001 for unknown dependency tokens, KW-ARB-PARSE-002 for tasks that list no files.</param>
-public sealed record PlanDocument(
+public sealed partial record PlanDocument(
     string? Status,
     string DevelopmentMode,
     bool HasTasks,
@@ -90,6 +91,27 @@ public sealed record PlanDocument(
 
     /// <summary>The contract table rows, keyed by their task-id cell.</summary>
     public IReadOnlyList<PlanContractRow> ContractRows { get; init; } = ContractRows ?? [];
+
+    /// <summary>
+    /// The <c>plan.test-contract.row</c> fact for <paramref name="taskId"/>: the row's
+    /// <c>RED evidence required</c> cell, with every way of saying no test is owed read as
+    /// <c>Not applicable</c>. Null when the task has no row or the cell is empty.
+    /// </summary>
+    public string? RedEvidenceRequirement(string taskId)
+    {
+        string? cell = ContractRows
+            .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal))
+            ?.RedEvidenceRequired?.Trim();
+        if (string.IsNullOrEmpty(cell))
+        {
+            return null;
+        }
+
+        return NoRedEvidenceRegex().IsMatch(cell) ? "Not applicable" : cell;
+    }
+
+    [GeneratedRegex(@"^(n/?a|none|not[ -]applicable)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NoRedEvidenceRegex();
 
     /// <summary>The parse findings raised while reading the document.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; init; } = Diagnostics ?? [];

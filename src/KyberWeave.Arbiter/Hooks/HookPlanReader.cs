@@ -76,7 +76,7 @@ internal sealed class HookPlanReader(string repositoryRoot) : IArbiterPlanReader
                 facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
                 facts = facts.With(
                     "plan.test-contract.row",
-                    document.ContractRows.Any(row => string.Equals(row.TaskId, task.Id, StringComparison.Ordinal)),
+                    document.RedEvidenceRequirement(task.Id),
                     ArbiterFactLabel.Derived);
             }
         }

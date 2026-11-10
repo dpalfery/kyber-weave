@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
@@ -77,6 +78,12 @@ public sealed class FactoryHookAdapterTests
 
         public string? SeenPostSessionId;
 
+        public string? SeenPostTarget;
+
+        public string? SeenPostPrompt;
+
+        public string? SeenPostOutput;
+
         public int PostCalls;
 
         public HookOutcome PreResult { get; set; } = new(HookOutcomeKind.Allow);
@@ -119,6 +126,9 @@ public sealed class FactoryHookAdapterTests
             string? sessionId = null)
         {
             PostCalls++;
+            SeenPostTarget = target;
+            SeenPostPrompt = prompt;
+            SeenPostOutput = toolOutput;
             SeenPostToolCallId = toolCallId;
             SeenPostSessionId = sessionId;
             return PostResult;
@@ -351,6 +361,93 @@ public sealed class FactoryHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void BackgroundLaunch_RecordsNoReturn()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(Fixture("post-task-launched.json"), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    private static string SubagentStop(string transcriptPath, string taskName = "capture run")
+    {
+        JsonObject root = JsonNode.Parse(Fixture("subagent-stop.json"))!.AsObject();
+        root["transcript_path"] = transcriptPath;
+        root["task_name"] = taskName;
+        return root.ToJsonString();
+    }
+
+    private static string TranscriptFixture() =>
+        Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
+            "Fixtures", "arbiter-hooks", "factory", "transcript-background-task.jsonl");
+
+    [Fact]
+    public void SubagentStop_RecordsTheReportAgainstItsDispatch()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture()), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(1, engine.PostCalls);
+        Assert.Equal("echoer", engine.SeenPostTarget);
+        Assert.Contains("TASK: T9", engine.SeenPostPrompt, StringComparison.Ordinal);
+        Assert.Equal("RED_EVIDENCE: capture-line", engine.SeenPostOutput);
+        Assert.Null(engine.SeenPostToolCallId);
+    }
+
+    [Fact]
+    public void SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
+    {
+        string transcript = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + ".jsonl");
+        File.WriteAllText(
+            transcript,
+            File.ReadAllText(TranscriptFixture()).Replace("\"echoer\"", "\"csharp-dev\"", StringComparison.Ordinal));
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal("csharp-dev", engine.SeenPostTarget);
+            Assert.DoesNotContain("KYBER-ARBITER", engine.SeenPostPrompt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Theory]
+    [InlineData("no such description")]
+    public void SubagentStop_WithNoMatchingLaunch_RecordsNothing(string taskName)
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture(), taskName), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void SubagentStop_WithAnUnreadableTranscript_RecordsNothing()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, _, _) = Run(SubagentStop("/nonexistent/transcript.jsonl"), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(0, engine.PostCalls);
     }
 
     [Fact]

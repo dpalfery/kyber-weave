@@ -1,0 +1,10 @@
+{
+  "session_id": "session-factory-capture",
+  "transcript_path": "/repo/.factory/transcripts/capture.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "auto-high",
+  "hook_event_name": "SubagentStop",
+  "task_name": "capture run",
+  "task_result": "RED_EVIDENCE: capture-line",
+  "stop_hook_active": false
+}

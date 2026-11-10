@@ -10,8 +10,8 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// The Factory hook dialect ([F11] of the task packet): <c>PreToolUse</c> on
 /// <c>Task</c> for dispatch gating, with the target from
 /// <c>tool_input.subagent_type</c> and the prompt from
-/// <c>tool_input.prompt</c>, and <c>PostToolUse</c> on the same tool for
-/// return events.
+/// <c>tool_input.prompt</c>, <c>PostToolUse</c> on the same tool for foreground
+/// return events, and <c>SubagentStop</c> for background returns.
 /// </summary>
 /// <remarks>
 /// The dispatch tool matches exactly (<c>tool_name == "Task"</c>), so task-list
@@ -35,7 +35,10 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// hook is project-wide with no caller identity, so the rendered
 /// <c>--caller</c> is honoured when present and the caller is otherwise
 /// unidentified; plan reads stay advisory and header stripping rides the
-/// dispatch allow path (design §12).
+/// dispatch allow path (design §12). <c>Task</c> runs in the background by default,
+/// so its <c>PostToolUse</c> fires at launch with no report: that event records
+/// nothing, and the return is recorded on <c>SubagentStop</c>, which carries the
+/// report but names the task only by its description.
 /// </remarks>
 public sealed class FactoryHookAdapter : IHarnessHookAdapter
 {
@@ -66,6 +69,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
             return !IsDispatchTool(tool);
+        }
+
+        if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
+        {
+            return false;
         }
 
         if (!string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
@@ -109,6 +117,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
             return HandlePost(payload, tool, caller, config, context);
+        }
+
+        if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
+        {
+            return HandleSubagentStop(payload, caller, config, context);
         }
 
         throw new InvalidOperationException(
@@ -216,6 +229,13 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
             ? response.GetString() ?? string.Empty
             : response.GetRawText();
 
+        // A background launch carries no report. Recording it as the return would close
+        // the dispatch with nothing in it, and the real return arrives on SubagentStop.
+        if (toolOutput.StartsWith(FactoryTranscript.BackgroundLaunchPrefix, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
         string? target = null;
         string prompt = string.Empty;
         if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
@@ -248,6 +268,34 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
+    }
+
+    /// <summary>
+    /// Records a background task's return. Writes nothing: the event ends a sub-agent, so
+    /// its output has no conductor context to reach, and the engine logs any non-allow.
+    /// </summary>
+    private string HandleSubagentStop(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    {
+        string? description = GetString(payload, "task_name");
+        string? transcriptPath = GetString(payload, "transcript_path");
+        if (string.IsNullOrWhiteSpace(description) || string.IsNullOrWhiteSpace(transcriptPath))
+        {
+            return string.Empty;
+        }
+
+        FactoryBackgroundDispatch? dispatch = FactoryTranscript.FindBackgroundDispatch(transcriptPath, description);
+        if (dispatch is null)
+        {
+            return string.Empty;
+        }
+
+        // The transcript keeps the prompt as written, while a specialist ran it stripped.
+        string prompt = ReadGuard.IsImplementationSpecialist(dispatch.Target)
+            ? HeaderBlock.Strip(dispatch.Prompt)
+            : dispatch.Prompt;
+        string output = GetString(payload, "task_result") ?? GetString(payload, "task_error") ?? string.Empty;
+        _ = DecidePost(payload, caller, dispatch.Target, prompt, output, config, context);
+        return string.Empty;
     }
 
     private HookOutcome DecidePre(
