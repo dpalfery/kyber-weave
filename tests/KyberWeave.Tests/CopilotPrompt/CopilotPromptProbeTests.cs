@@ -118,6 +118,24 @@ public sealed class CopilotPromptProbeTests : IDisposable
     }
 
     [Fact]
+    public void Run_TailStartsExactlyOnTheReplaceLine_KeepsThatLine()
+    {
+        Healthy();
+        const int tailBytes = 4 * 1024 * 1024;
+        byte[] replace = System.Text.Encoding.UTF8.GetBytes(ReplaceLine + "\n");
+        byte[] before = System.Text.Encoding.UTF8.GetBytes(new string('x', 99) + "\n");
+        byte[] after = System.Text.Encoding.UTF8.GetBytes(new string('y', tailBytes - replace.Length - 1) + "\n");
+        string directory = Path.Combine(UserDataDirectory, "logs", "2026-11-10T09-00-00");
+        Directory.CreateDirectory(directory);
+        File.WriteAllBytes(Path.Combine(directory, "agenthost.log"), [.. before, .. replace, .. after]);
+
+        IReadOnlyList<DoctorCheck> checks = Run();
+
+        Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.log" && check.Passed
+            && check.Reason?.StartsWith("warning:", StringComparison.Ordinal) != true);
+    }
+
+    [Fact]
     public void Run_LastMatchingLogLineIsAppend_Fails()
     {
         Healthy();
@@ -173,7 +191,6 @@ public sealed class CopilotPromptProbeTests : IDisposable
     [InlineData("", "{b}", "{b}")]
     [InlineData(" {a} ", null, "{a}")]
     [InlineData("relative/home", "{b}", "{b}")]
-    [InlineData("/unix/home", "{b}", "/unix/home")]
     [InlineData("relative/home", "relative/profile", null)]
     [InlineData("  ", null, null)]
     [InlineData(null, null, null)]
@@ -185,6 +202,22 @@ public sealed class CopilotPromptProbeTests : IDisposable
         Dictionary<string, string?> variables = new() { ["HOME"] = Expand(home), ["USERPROFILE"] = Expand(userProfile) };
 
         Assert.Equal(Expand(expected), CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)));
+    }
+
+    [Theory]
+    [InlineData(false, "/unix/home", "/fallback", "/unix/home")]
+    [InlineData(false, @"C:\Users\a", "/fallback", "/fallback")]
+    [InlineData(true, "/c/Users/foo", @"C:\Users\b", @"C:\Users\foo")]
+    [InlineData(true, "/d", @"C:\Users\b", @"D:\")]
+    [InlineData(true, "/unix/home", @"C:\Users\b", @"C:\Users\b")]
+    [InlineData(true, @"D:\home", @"C:\Users\b", @"D:\home")]
+    [InlineData(true, @"\\server\share\home", null, @"\\server\share\home")]
+    [InlineData(true, "/unix/home", null, null)]
+    public void FromEnvironment_AppliesTheHostsPathRules(bool windows, string? home, string? userProfile, string? expected)
+    {
+        Dictionary<string, string?> variables = new() { ["HOME"] = home, ["USERPROFILE"] = userProfile };
+
+        Assert.Equal(expected, CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name), windows));
     }
 
     [Fact]

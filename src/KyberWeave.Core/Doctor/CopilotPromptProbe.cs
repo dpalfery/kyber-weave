@@ -237,12 +237,17 @@ public static partial class CopilotPromptProbe
     {
         using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         cut = stream.Length > LogTailBytes;
+        bool partialFirstLine = false;
         if (cut)
-            stream.Seek(-LogTailBytes, SeekOrigin.End);
+        {
+            // The first line is partial only when the byte before the tail is not a line break.
+            stream.Seek(-LogTailBytes - 1, SeekOrigin.End);
+            partialFirstLine = stream.ReadByte() != '\n';
+        }
 
         using StreamReader reader = new(stream);
-        if (cut)
-            reader.ReadLine(); // The first line is partial: the seek landed inside it.
+        if (partialFirstLine)
+            reader.ReadLine();
 
         string? mode = null;
         while (reader.ReadLine() is { } line)
