@@ -125,8 +125,7 @@ public static partial class ConductorGuard
                 : Deny("The conductor guard found no tool name in this event, so it was denied.");
         }
 
-        // Copilot writes these fields, and only for a worker's tool call. The model cannot set them.
-        if (TryGetText(root, "agentId", out _) || TryGetText(root, "agent_id", out _))
+        if (IsWorkerCall(root))
         {
             return null;
         }
@@ -134,6 +133,27 @@ public static partial class ConductorGuard
         string? cwd = TryGetText(root, "cwd", out string? directory) ? directory : null;
         ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome));
         return denied is null ? null : Deny($"{DenyReason} Blocked tool: {denied.Name}.");
+    }
+
+    /// <summary>
+    /// A worker's tool call, by the runtime's own subagent fields. Copilot omits all three on a root
+    /// call, writes them at the top level where tool arguments cannot reach, and in Copilot CLI
+    /// 1.0.109 never sends a worker's call to the conductor's hooks at all. Requiring the full set,
+    /// and a type other than the conductor, keeps a stray id from opening the guard.
+    /// </summary>
+    private static bool IsWorkerCall(JsonElement root)
+    {
+        bool camel = TryGetText(root, "agentId", out _)
+            && TryGetText(root, "parentAgentId", out _)
+            && TryGetText(root, "agentType", out string? camelType)
+            && !IsConductor(camelType);
+        bool snake = TryGetText(root, "agent_id", out _)
+            && TryGetText(root, "parent_agent_id", out _)
+            && TryGetText(root, "agent_type", out string? snakeType)
+            && !IsConductor(snakeType);
+        return camel || snake;
+
+        static bool IsConductor(string type) => string.Equals(type, "conductor", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveCopilotHome() =>

@@ -121,9 +121,20 @@ public sealed class ConductorGuardTests
     [Fact]
     public void AWorkerToolCall_IsPermitted()
     {
-        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", toolName = "edit", toolArgs = new { } });
+        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", parentAgentId = "p1", agentType = "csharp-dev", toolName = "edit", toolArgs = new { } });
 
         Assert.Empty(Run(json));
+    }
+
+    [Theory]
+    [InlineData("{\"cwd\":\"/repo\",\"agentId\":\"a1\",\"toolName\":\"edit\",\"toolArgs\":{}}")]
+    [InlineData("{\"cwd\":\"/repo\",\"agent_id\":\"a1\",\"toolName\":\"edit\",\"toolArgs\":{}}")]
+    [InlineData("{\"cwd\":\"/repo\",\"agentId\":\"a1\",\"parentAgentId\":\"p1\",\"toolName\":\"edit\",\"toolArgs\":{}}")]
+    [InlineData("{\"cwd\":\"/repo\",\"agentId\":\"a1\",\"parentAgentId\":\"p1\",\"agentType\":\"conductor\",\"toolName\":\"edit\",\"toolArgs\":{}}")]
+    [InlineData("{\"cwd\":\"/repo\",\"toolName\":\"edit\",\"toolArgs\":{\"agentId\":\"a1\",\"parentAgentId\":\"p1\",\"agentType\":\"x\"}}")]
+    public void AnIncompleteOrForgedWorkerId_IsDenied(string json)
+    {
+        Assert.Contains("edit", ReasonFor(json), StringComparison.Ordinal);
     }
 
     [Theory]
