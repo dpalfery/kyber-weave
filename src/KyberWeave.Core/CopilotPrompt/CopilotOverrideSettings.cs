@@ -20,6 +20,38 @@ public sealed record CopilotOverrideState(bool StarEntryPresent, string? StarPro
 /// </remarks>
 public static class CopilotOverrideSettings
 {
+    /// <summary>
+    /// Reads one VS Code settings file, telling a missing file apart from one that is present but unusable.
+    /// </summary>
+    /// <param name="settingsFile">The settings file path.</param>
+    /// <returns>The bytes; or neither bytes nor error when the file is missing; or the reason it cannot be read.</returns>
+    /// <remarks>
+    /// A symbolic link whose final target does not exist is missing: <see cref="File.Exists(string)"/> is true for it,
+    /// but there is nothing to read, and a write goes through it. A directory at the path is present but unusable.
+    /// Every probe and the read itself are guarded, so an IO or permission failure comes back as
+    /// <see cref="SettingsFileRead.Error"/> for the caller to report, never as a crash. The install commands and the
+    /// doctor probe both read through here, so they agree on what they see.
+    /// </remarks>
+    public static SettingsFileRead ReadFile(string settingsFile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(settingsFile);
+        try
+        {
+            if (Directory.Exists(settingsFile))
+                return new SettingsFileRead(null, "the path is a directory, not a file");
+
+            FileInfo info = new(settingsFile);
+            bool present = info.LinkTarget is null
+                ? info.Exists
+                : info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+            return present ? new SettingsFileRead(File.ReadAllBytes(settingsFile), null) : new SettingsFileRead(null, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new SettingsFileRead(null, exception.Message);
+        }
+    }
+
     /// <summary>The user setting that holds the per-model capability overrides.</summary>
     public const string SettingId = VsCodeUserSettingsPaths.SettingId;
 
@@ -84,3 +116,11 @@ public static class CopilotOverrideSettings
         return new CopilotOverrideState(starPresent, promptFile, modelIds);
     }
 }
+
+/// <summary>One settings file as read: its bytes, null when it is missing, or the error that made it unusable.</summary>
+/// <param name="Document">The file's bytes; null when the file is missing or unusable.</param>
+/// <param name="Error">Why a present file could not be read; null when it was read or is missing.</param>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Performance", "CA1819:Properties should not return arrays",
+    Justification = "The bytes are handed once to the JSON splice and reader, which take byte[]; no caller mutates them.")]
+public sealed record SettingsFileRead(byte[]? Document, string? Error);

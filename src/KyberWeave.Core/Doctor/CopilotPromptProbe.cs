@@ -42,22 +42,36 @@ public static partial class CopilotPromptProbe
 
         List<DoctorCheck> checks = [];
         bool anyFlavourPoints = false;
+        bool anyUnreadable = false;
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
             string settingsFile = VsCodeUserSettingsPaths.SettingsFile(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
-            CopilotOverrideState? state = ReadState(settingsFile);
+            string label = flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(settingsFile);
+            if (read.Error is not null)
+            {
+                // Present but unusable is its own fault: "no settings file points at it" would send the person to reinstall.
+                anyUnreadable = true;
+                checks.Add(new DoctorCheck(
+                    $"copilot.prompt.{label}.setting",
+                    false,
+                    $"the settings file {settingsFile} could not be read: {read.Error}",
+                    $"fix the permissions or type of {settingsFile}, then run kyber-weave doctor"));
+                continue;
+            }
+
+            CopilotOverrideState? state = read.Document is { } document ? CopilotOverrideSettings.Read(document) : null;
             if (state?.StarPromptFile is null || !string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal))
                 continue;
 
             anyFlavourPoints = true;
-            string label = flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
             string userData = VsCodeUserSettingsPaths.UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
             checks.Add(new DoctorCheck($"copilot.prompt.{label}.setting", true, null, null));
             checks.Add(FileCheck(label, promptPath));
             checks.Add(LogCheck(label, userData));
         }
 
-        if (!anyFlavourPoints)
+        if (!anyFlavourPoints && !anyUnreadable)
         {
             checks.Add(new DoctorCheck(
                 "copilot.prompt.setting",
@@ -76,21 +90,6 @@ public static partial class CopilotPromptProbe
     /// <summary>A check that cannot prove the state either way passes, with its reason prefixed by <c>warning:</c>.</summary>
     private static DoctorCheck Inconclusive(string id, string reason) =>
         new(id, true, $"warning: {reason}", null);
-
-    private static CopilotOverrideState? ReadState(string settingsFile)
-    {
-        if (!File.Exists(settingsFile))
-            return null;
-
-        try
-        {
-            return CopilotOverrideSettings.Read(File.ReadAllBytes(settingsFile));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
 
     /// <summary>Checks that the installed prompt file is readable and valid YAML with the allowed keys.</summary>
     private static DoctorCheck FileCheck(string label, string promptPath)

@@ -41,9 +41,6 @@ internal sealed record CopilotPromptEnvironment(
     Func<string, bool> ReadAnswer,
     string? XdgConfigHome = null);
 
-/// <summary>One settings file as read: its bytes, null when it is missing, or the error that made it unusable.</summary>
-internal sealed record SettingsRead(byte[]? Document, string? Error);
-
 /// <summary>
 /// Writes the Copilot system-prompt override file and points VS Code's setting at it.
 /// </summary>
@@ -102,7 +99,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         foreach (VsCodeFlavour flavour in targets)
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -233,7 +230,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -360,6 +357,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             : $"Prompt file: not installed (expected {Markup.Escape(promptPath)}).");
 
         IReadOnlyList<VsCodeFlavour> detected = CopilotPromptCommandSupport.DetectedTargets(environment, null);
+        bool unreadable = false;
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
             if (requested is not null && requested.Value != flavour)
@@ -373,10 +371,11 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
             if (read.Error is not null)
             {
                 CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
+                unreadable = true;
                 continue;
             }
 
@@ -386,6 +385,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             if (state is null)
             {
                 CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not readable JSON.");
+                unreadable = true;
                 continue;
             }
 
@@ -399,7 +399,8 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
         }
 
-        return 0;
+        // A settings file status cannot read is a fault, as it is for install and uninstall: exit 1 so a caller sees it.
+        return unreadable ? 1 : 0;
     }
 
     private static string DescribeStarEntry(CopilotOverrideState state, string promptPath)
@@ -462,30 +463,6 @@ internal static class CopilotPromptCommandSupport
 
         Fail("no home directory is known. Set HOME (or USERPROFILE on Windows) to an absolute path and run the command again.");
         return false;
-    }
-
-    /// <summary>
-    /// Reads one settings file, telling a missing file apart from one that is present but unusable.
-    /// </summary>
-    /// <remarks>
-    /// A symbolic link whose final target does not exist is missing: <see cref="File.Exists(string)"/> is true for it,
-    /// but there is nothing to read, and a write goes through it. Every probe and the read itself are guarded, so an
-    /// IO or permission failure comes back as <see cref="SettingsRead.Error"/> for the caller to report, never as a crash.
-    /// </remarks>
-    internal static SettingsRead ReadSettings(string file)
-    {
-        try
-        {
-            FileInfo info = new(file);
-            bool present = info.LinkTarget is null
-                ? info.Exists
-                : info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
-            return present ? new SettingsRead(File.ReadAllBytes(file), null) : new SettingsRead(null, null);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return new SettingsRead(null, exception.Message);
-        }
     }
 
     /// <summary>Parses <c>--flavour</c>. Null means the option was not given, so every detected build is in scope.</summary>
