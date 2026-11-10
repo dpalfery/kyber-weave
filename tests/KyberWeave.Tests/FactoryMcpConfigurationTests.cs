@@ -87,6 +87,45 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     }
 
     [Fact]
+    public async Task GlobalInstall_UserConfigDefinesEveryServer_DoesNotWarn()
+    {
+        WriteConfig(_home, "kw-docs", "codegraph");
+
+        Assert.Empty(await FactoryWarningsAsync(SquadDeploymentScope.Global));
+    }
+
+    [Fact]
+    public void InstanceDeployment_NoConfigAnywhere_DoesNotWarn()
+    {
+        Assert.Empty(FactoryMcpConfiguration.Warnings(
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Instance,
+            TestSquadCorpus.CanonicalSource,
+            _project,
+            _home));
+    }
+
+    [Fact]
+    public async Task ProjectUpdate_NoConfigAnywhere_Warns()
+    {
+        using SyntheticValidSquadReleaseSource release = new();
+        SquadLifecycleService service = NewService(release, new FactoryRenderer());
+        await service.InstallAsync(
+            new SquadInstallRequest(_project, SquadDeploymentScope.Project, [SquadTarget.Factory], Version: Version));
+
+        SquadLifecycleResult result = await service.UpdateAsync(
+            new SquadUpdateRequest(
+                _project,
+                SquadDeploymentScope.Project,
+                [SquadTarget.Factory],
+                Version: Version,
+                DryRun: true));
+
+        Assert.True(result.Success);
+        Assert.Single(FactoryWarnings(result));
+    }
+
+    [Fact]
     public async Task ProjectInstall_MalformedConfig_WarnsRatherThanThrows()
     {
         string directory = Path.Combine(_project, ".factory");
@@ -119,14 +158,8 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
         ISquadRenderer renderer)
     {
         using SyntheticValidSquadReleaseSource release = new();
-        SquadStateStore store = new(_paths);
-        SquadLifecycleService service = new(
-            release,
-            new SquadRendererRegistry([renderer]),
-            store,
-            globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
 
-        SquadLifecycleResult result = await service.InstallAsync(
+        SquadLifecycleResult result = await NewService(release, renderer).InstallAsync(
             new SquadInstallRequest(
                 scope == SquadDeploymentScope.Global ? _home : _project,
                 scope,
@@ -135,10 +168,19 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
                 DryRun: true));
 
         Assert.True(result.Success);
-        return
-        [
-            .. (result.Warnings ?? []).Where(warning =>
-                warning.StartsWith(FactoryMcpConfiguration.WarningCode, StringComparison.Ordinal))
-        ];
+        return FactoryWarnings(result);
     }
+
+    private SquadLifecycleService NewService(ISquadReleaseSource release, ISquadRenderer renderer) =>
+        new(
+            release,
+            new SquadRendererRegistry([renderer]),
+            new SquadStateStore(_paths),
+            globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
+
+    private static IReadOnlyList<string> FactoryWarnings(SquadLifecycleResult result) =>
+    [
+        .. (result.Warnings ?? []).Where(warning =>
+            warning.StartsWith(FactoryMcpConfiguration.WarningCode, StringComparison.Ordinal))
+    ];
 }
