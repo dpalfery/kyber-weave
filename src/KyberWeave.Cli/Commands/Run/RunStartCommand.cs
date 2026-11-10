@@ -207,6 +207,15 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             }
         }
 
+        // Checked after the fetch, so a branch pushed from elsewhere counts. Git's own error would not say that
+        // resuming is the way to continue the branch.
+        if (resume is null && (runner.HasLocalBranch(branch) || runner.HasRemoteBranch(branch)))
+        {
+            return Refuse(
+                $"A branch named '{branch}' already exists. To continue it, re-run with --resume {branch}. " +
+                "To start separate work, choose a different --slug.");
+        }
+
         // The finished tasks come from the resumed branch's own commits, read while it is still the branch
         // named rather than the one checked out. A branch carrying none is a normal beginning, not a
         // failure, and a log that cannot be read is reported without stopping a resume that can still
@@ -261,9 +270,17 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 ? runner.CreateBranchInPlace(target, startRef)
                 : runner.SwitchToBranch(target);
         }
+        else if (resumeTarget is not null &&
+                 RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget) is { } held &&
+                 Directory.Exists(held))
+        {
+            // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
+            worktreePath = held;
+            created = new GitOutcome(0, string.Empty, string.Empty);
+        }
         else
         {
-            worktreePath = runner.WorktreePathFor(target);
+            worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
             created = resumeTarget is null
                 ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
                 : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);

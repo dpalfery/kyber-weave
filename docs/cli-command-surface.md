@@ -379,10 +379,13 @@ creating one only moves the discovery to the end of the work.
 
 **Where the branch lands.** A clean checkout with no other worktree attached is branched in place.
 A dirty one, or one a second worktree already shares, gets a worktree at
-`<repository parent>/<repo name>.worktrees/<branch with / replaced by ->` — for example
-`…/kyber-weave.worktrees/claude-fix-arbiter-global-block-identity` — so the operator's edits stay
-on the branch they were made for, and no branch moves under another worker. A resumed branch keeps
-its own branch and is never renamed.
+`<repository parent>/<repo name>.worktrees/<UTC timestamp>-<branch with / replaced by ->` — for
+example `…/kyber-weave.worktrees/20261110T150612Z-claude-fix-arbiter-global-block-identity` — so the
+operator's edits stay on the branch they were made for, and no branch moves under another worker.
+The timestamp (`yyyyMMddTHHmmssZ`) keeps a repeat run off an earlier folder and sorts by time; two
+runs in one second take a `-2` suffix. Only the folder is stamped, never the branch. A resumed branch
+keeps its own branch and is never renamed: if a worktree already holds it, the run continues there,
+and otherwise it gets a new timestamped folder.
 
 **`--json` keys.** One object on stdout, for a caller that dispatches the step and reads its result:
 
@@ -412,7 +415,7 @@ its own branch and is never renamed.
 |---|---|
 | `0` | Ready: the branch, or the resumed branch, is in place. |
 | `1` | A tool failure while `stop-on-tool-failure` is on — the fetch, the base, or the branch creation. With the setting off, a failed fetch only warns and the run continues from the base this checkout last fetched. |
-| `2` | Refused input: an unknown harness token, a type that is not conventional, a slug that is not lowercase hyphen-separated words, a `--resume` naming neither a local nor an `origin` branch, or a `--resume` naming a pull request number. |
+| `2` | Refused input: an unknown harness token, a type that is not conventional, a slug that is not lowercase hyphen-separated words, a new branch whose name already exists locally or on `origin` (continue it with `--resume`, or choose another slug), a `--resume` naming neither a local nor an `origin` branch, or a `--resume` naming a pull request number. |
 | `3` | The `codegraph` binary is not on `PATH`. Its remedy is an install, so it is not reported as a failure (exit `1`). |
 
 **Known limit.** `--resume` accepts a local branch or `origin/<branch>`. A numeric pull request

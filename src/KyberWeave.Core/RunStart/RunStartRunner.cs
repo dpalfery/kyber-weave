@@ -45,6 +45,7 @@ public sealed class RunStartRunner
     private const string CodeGraphExecutable = "codegraph";
     private const string NoTrackOption = "--no-track";
     private const string TrackOption = "--track";
+    private const string WorktreeStampFormat = "yyyyMMdd'T'HHmmss'Z'";
 
     private readonly IProcessExecutor _executor;
     private readonly string _repositoryRoot;
@@ -278,19 +279,53 @@ public sealed class RunStartRunner
     ///     lands inside the checkout the operator is standing in.
     /// </summary>
     /// <param name="branch">The branch the worktree holds.</param>
-    public string WorktreePathFor(string branch)
+    /// <param name="startedAt">When the run started; the folder name carries it in UTC.</param>
+    /// <remarks>
+    ///     The name starts with a UTC timestamp so a repeat of the same branch never lands on an earlier
+    ///     folder and a listing sorts by time. The stamp has no colon, which Windows forbids in a file name.
+    ///     Only the folder is stamped: the branch keeps the shape the pull request naming check requires. Two
+    ///     runs in one second take a numeric suffix.
+    /// </remarks>
+    public string WorktreePathFor(string branch, DateTimeOffset startedAt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_repositoryRoot));
         string? parent = Path.GetDirectoryName(root);
-        string name = Path.GetFileName(root);
-        string flattened = branch.Replace('/', '-');
-
-        return Path.Combine(
+        string container = Path.Combine(
             string.IsNullOrEmpty(parent) ? root : parent,
-            name + ".worktrees",
-            flattened);
+            Path.GetFileName(root) + ".worktrees");
+        string stamp = startedAt.UtcDateTime.ToString(WorktreeStampFormat, CultureInfo.InvariantCulture);
+        string folder = stamp + "-" + branch.Replace('/', '-');
+
+        string candidate = Path.Combine(container, folder);
+        for (int attempt = 2; Path.Exists(candidate); attempt++)
+            candidate = Path.Combine(container, folder + "-" + attempt.ToString(CultureInfo.InvariantCulture));
+
+        return candidate;
+    }
+
+    /// <summary>The worktree that has <paramref name="branch" /> checked out, or null when none does.</summary>
+    /// <param name="porcelain">The output of <c>git worktree list --porcelain</c>.</param>
+    /// <param name="branch">The branch to look for.</param>
+    public static string? WorktreeHolding(string porcelain, string branch)
+    {
+        ArgumentNullException.ThrowIfNull(porcelain);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+
+        const string WorktreePrefix = "worktree ";
+        string branchLine = "branch refs/heads/" + branch;
+        string? current = null;
+        foreach (string raw in porcelain.Split('\n'))
+        {
+            string line = raw.TrimEnd('\r');
+            if (line.StartsWith(WorktreePrefix, StringComparison.Ordinal))
+                current = line[WorktreePrefix.Length..];
+            else if (string.Equals(line, branchLine, StringComparison.Ordinal))
+                return current;
+        }
+
+        return null;
     }
 
     /// <summary>

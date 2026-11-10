@@ -1,5 +1,7 @@
 using Xunit;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -126,6 +128,84 @@ public sealed class McpLiveProbeTests : IDisposable
         DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
         Assert.False(handshake.Passed);
         Assert.False(string.IsNullOrWhiteSpace(handshake.Fix));
+    }
+
+    /// <summary>
+    /// A folder with no host configuration makes the server refuse to start. The doctor names the missing file and the
+    /// command that adds it: raising the timeout, which it used to suggest, can never help a server that refused.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_NoHostConfiguration_NamesTheMissingFileAndTheCommandThatAddsIt()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string stub = DoctorHarness.WriteStub(
+            _stubs.Path,
+            "echo 'KW-MCP-ROOT-001: No Kyber-Weave host configuration was found for MCP root' >&2\nexit 1");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(stub),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains(".kyber-weave/kyber-weave.yml", handshake.Reason, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs init", handshake.Fix, StringComparison.Ordinal);
+        Assert.Contains(Root, handshake.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A server that exits before answering did not run out of time, so the remedy is to read its own error. Only a
+    /// server that really used up the budget is told to raise it.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ServerThatExitsBeforeAnswering_IsNotToldToRaiseTheTimeout()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string stub = DoctorHarness.WriteStub(_stubs.Path, "echo 'something else broke' >&2\nexit 1");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(stub),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains("something else broke", handshake.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-mcp", handshake.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>.codegraph/</c> folder that was never initialised makes <c>sync</c> and <c>index</c> both refuse. The fix the
+    /// doctor prints must be the one that works, <c>codegraph init .</c>, not the command that just failed.
+    /// </summary>
+    [Fact]
+    public void Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("--version", StringComparer.Ordinal)
+                ? DoctorHarness.Ok("1.5.0")
+                : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Ensure,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
+        Assert.False(index.Passed);
+        Assert.Contains("not set up", index.Reason, StringComparison.Ordinal);
+        Assert.Equal("codegraph init .", index.Fix);
     }
 
     /// <summary>
@@ -412,14 +492,16 @@ public sealed class McpLiveProbeTests : IDisposable
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
-                DoctorHarness.WriteStub(_stubs.Path, "exit 0"),
+                DoctorHarness.WriteStub(
+                    _stubs.Path,
+                    $"read _initialize\nprintf '%s\\n' '{DoctorHarness.InitializeReply}'\nread _initialized\nread _call\nexit 0"),
                 TimeSpan.FromSeconds(2_000_000_000)),
             DoctorHarness.Executor(Root),
             _ => null);
 
-        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
-        Assert.False(handshake.Passed);
-        string fix = handshake.Fix ?? string.Empty;
+        DoctorCheck docsExplore = DoctorHarness.CheckNamed(report, "mcp.docs_explore");
+        Assert.False(docsExplore.Passed);
+        string fix = docsExplore.Fix ?? string.Empty;
         int marker = fix.IndexOf("--mcp-timeout ", StringComparison.Ordinal);
         Assert.True(marker >= 0, $"The remedy '{fix}' does not name a timeout to raise.");
         string suggested = fix[(marker + "--mcp-timeout ".Length)..].Trim();

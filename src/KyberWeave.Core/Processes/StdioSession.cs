@@ -105,6 +105,26 @@ public sealed class StdioSession : IDisposable
     /// </remarks>
     public string? FirstErrorLine => _firstErrorLine.IsCompletedSuccessfully ? _firstErrorLine.Result : null;
 
+    /// <summary>
+    ///     <see cref="FirstErrorLine"/>, after waiting up to <paramref name="wait"/> for stderr to finish. A child
+    ///     that exits closes stdout and stderr together, so a caller that saw stdout end can otherwise read this
+    ///     before the error line has been drained.
+    /// </summary>
+    /// <param name="wait">The longest to wait for stderr to close.</param>
+    public string? WaitForFirstErrorLine(TimeSpan wait)
+    {
+        try
+        {
+            _firstErrorLine.Wait(wait);
+        }
+        catch (AggregateException)
+        {
+            // A faulted drain has no line to show, which FirstErrorLine reports as null.
+        }
+
+        return FirstErrorLine;
+    }
+
     /// <summary>Writes one line to the child's standard input and flushes it.</summary>
     /// <param name="line">The line to send, without its terminator.</param>
     public void SendLine(string line)

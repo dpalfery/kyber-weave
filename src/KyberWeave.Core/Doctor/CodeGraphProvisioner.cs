@@ -457,7 +457,11 @@ public static class CodeGraphProvisioner
                 return new ChildRun(verb, subject, ChildRunFailure.None, 0, null, Corrupt: false);
 
             string detail = FirstLine(result.StandardError) ?? FirstLine(result.StandardOutput) ?? "no output";
-            return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result));
+            return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result))
+            {
+                NotInitialised = (result.StandardError + "\n" + result.StandardOutput)
+                    .Contains("not initialized", StringComparison.OrdinalIgnoreCase)
+            };
         }
         catch (TimeoutException)
         {
@@ -489,6 +493,12 @@ public static class CodeGraphProvisioner
                 $"codegraph {run.Verb} exceeded its {options.IndexTimeout.TotalSeconds:0} second limit and was stopped",
                 $"kyber-weave doctor --{flag} --index-timeout {RaisedTimeout(options)}"),
             ChildRunFailure.CouldNotStart => new DoctorCheck(checkId, false, $"{command} could not be run", command),
+            _ when run.NotInitialised => new DoctorCheck(
+                checkId,
+                false,
+                $"CodeGraph is not set up in this folder, so codegraph {run.Verb} cannot run. " +
+                ".codegraph/ exists but holds no index",
+                $"codegraph {InitVerb} ."),
             _ => run.Corrupt
                 ? new DoctorCheck(
                     checkId,
@@ -670,6 +680,9 @@ public static class CodeGraphProvisioner
     {
         /// <summary>Whether the child exited zero.</summary>
         public bool Ok => Failure is ChildRunFailure.None;
+
+        /// <summary>Whether the child said CodeGraph was never initialised in this folder.</summary>
+        public bool NotInitialised { get; init; }
     }
 
     /// <summary>Why a CodeGraph child run did not succeed.</summary>

@@ -1582,7 +1582,7 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `codegraph.restore` | `--ensure` only, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
 | `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
-| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | `kyber-weave doctor --check --mcp-timeout <2 x current>` |
+| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | Used up the budget: `kyber-weave doctor --check --mcp-timeout <2 x current>`. Refused because the folder has no `.kyber-weave/kyber-weave.yml`: `kyber-weave docs init "<root>"`, or commit that file to the base branch so new worktrees get it. Any other early exit: run the server directly to read its own error |
 | `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
 
@@ -1653,7 +1653,9 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
   `codegraph init .`. When it exists, the run executes `codegraph sync .`, which brings an
   existing index up to date; both run with the root as the working directory. `codegraph index .`
   is the **repair** step, never the routine one: it rebuilds the whole index for no new
-  information, and `--ensure` is the only mode that runs it, once, after a failed step.
+  information, and `--ensure` is the only mode that runs it, once, after a failed step. A
+  `.codegraph/` folder that was never initialised, such as one holding only a committed
+  `.gitignore`, makes `sync` and `index` refuse. Doctor then prints `codegraph init .` as the fix.
 - **Bounded.** Each child is bounded by `--index-timeout` (default 600 seconds). When the bound is
   reached, the child's process tree is killed and the check fails as `codegraph.index`.
 - **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
