@@ -203,6 +203,59 @@ public sealed class ConductorGuardTests
         Assert.NotEmpty(ReasonFor(Event("operator-channel-send", new { })));
     }
 
+    [Theory]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug ../../evil")]
+    [InlineData("kyber-weave run start --harness ../x --type fix --slug a")]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug a --resume ../main")]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug a --resume /etc/x")]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug a --resume .hidden")]
+    [InlineData("kyber-weave run start --harness copilot --type fix --slug a --failing-version 1/2")]
+    public void RunStartValuesThatTraverse_AreDenied(string command)
+    {
+        Assert.NotEmpty(ReasonFor(Event("bash", new { command })));
+    }
+
+    [Fact]
+    public void AContractPathThroughASymlink_IsDenied()
+    {
+        string root = Directory.CreateTempSubdirectory("guard-link-").FullName;
+        try
+        {
+            string outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
+            File.WriteAllText(Path.Combine(outside, "secret.md"), "x");
+            string repo = Directory.CreateDirectory(Path.Combine(root, "repo")).FullName;
+            Directory.CreateDirectory(Path.Combine(repo, "docs", "plans"));
+            Directory.CreateSymbolicLink(Path.Combine(repo, "docs", "plans", "link"), outside);
+            File.WriteAllText(Path.Combine(repo, "docs", "plans", "real.md"), "x");
+
+            Assert.Contains("deny", RunIn(repo, "docs/plans/link/secret.md"), StringComparison.Ordinal);
+            Assert.Empty(RunIn(repo, "docs/plans/real.md"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AFailingStdout_StillReturnsZero()
+    {
+        using StringWriter closed = new();
+        closed.Dispose();
+
+        Assert.Equal(0, ConductorGuard.Run(Event("edit", new { }), closed, TextWriter.Null, copilotHome: CopilotHome));
+    }
+
+    [Fact]
+    public void TheFailureLog_IsOneLine()
+    {
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        ConductorGuard.Run("{\"toolName\":\"bash\",\"toolArgs\":\"not\\njson\"}", stdout, log, copilotHome: CopilotHome);
+
+        Assert.Single(log.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+    }
+
     [Fact]
     public void ModelFacingPrompt_GetsTheWorkflowAppended()
     {
@@ -222,6 +275,17 @@ public sealed class ConductorGuardTests
     {
         using StringWriter stdout = new();
         Assert.Equal(0, ConductorGuard.Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
+        return stdout.ToString();
+    }
+
+    private static string RunIn(string cwd, string path)
+    {
+        using StringWriter stdout = new();
+        ConductorGuard.Run(
+            JsonSerializer.Serialize(new { cwd, toolName = "view", toolArgs = new { path } }),
+            stdout,
+            TextWriter.Null,
+            copilotHome: CopilotHome);
         return stdout.ToString();
     }
 

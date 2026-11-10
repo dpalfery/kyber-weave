@@ -72,30 +72,48 @@ public static partial class ConductorGuard
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(log);
 
+        string? answer;
         try
         {
             using JsonDocument document = JsonDocument.Parse(stdin);
-            string? answer = Decide(document.RootElement, allowedMcpServer, copilotHome ?? ResolveCopilotHome());
-            if (answer is not null)
-            {
-                stdout.Write(answer);
-            }
+            answer = Decide(document.RootElement, allowedMcpServer, copilotHome ?? ResolveCopilotHome());
         }
         catch (Exception ex)
         {
-            stdout.Write(Deny("The conductor guard could not read this tool call, so it was denied."));
+            answer = Deny("The conductor guard could not read this tool call, so it was denied.");
+            TryLog(log, $"conductor guard could not read the event: {ex.Message}");
+        }
+
+        if (answer is not null)
+        {
             try
             {
-                log.WriteLine($"{HookCommand.FailClosedCode}: conductor guard could not read the event: {ex.Message}");
+                stdout.Write(answer);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // The log is best effort; the deny is already written.
+                // Nothing more can reach Copilot once stdout fails; the exit code stays 0 as documented.
+                TryLog(log, $"conductor guard could not write its answer: {ex.Message}");
             }
         }
 
         return 0;
     }
+
+    private static void TryLog(TextWriter log, string message)
+    {
+        try
+        {
+            log.WriteLine($"{HookCommand.FailClosedCode}: {OneLine(message)}");
+        }
+        catch (Exception)
+        {
+            // The log is best effort.
+        }
+    }
+
+    private static string OneLine(string message) =>
+        message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
     private static string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome)
     {
@@ -206,7 +224,7 @@ public static partial class ConductorGuard
         if (Path.IsPathRooted(copilotHome)
             && fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            return !HasLinkBelow(DirectoryPrefix(copilotHome), fullPath);
         }
 
         if (cwd is null)
@@ -222,9 +240,35 @@ public static partial class ConductorGuard
 
         string relative = fullPath[root.Length..];
         string[] segments = relative.Split('/');
-        return relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
+        bool contract = relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(segments[^1], "AGENTS.md", StringComparison.OrdinalIgnoreCase)
             || segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase));
+        return contract && !HasLinkBelow(root, fullPath);
+    }
+
+    /// <summary>
+    /// True when any existing entry between <paramref name="root"/> and <paramref name="fullPath"/>
+    /// is a symbolic link, so the path check above cannot be fooled into reading outside the contract.
+    /// </summary>
+    private static bool HasLinkBelow(string root, string fullPath)
+    {
+        string current = root.TrimEnd('/');
+        foreach (string segment in fullPath[root.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = $"{current}/{segment}";
+            FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (!entry.Exists)
+            {
+                return false;
+            }
+
+            if (entry.LinkTarget is not null)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string DirectoryPrefix(string directory) => $"{Normalize(Path.GetFullPath(directory)).TrimEnd('/')}/";
@@ -253,7 +297,11 @@ public static partial class ConductorGuard
             ["permissionDecisionReason"] = reason,
         }.ToJsonString();
 
-    [GeneratedRegex(@"\A[ \t]*kyber-weave[ \t]+(?:run[ \t]+start(?:[ \t]+--(?:harness|type|slug|resume|failing-version)[ \t]+[A-Za-z0-9._/+@-]+)+(?:[ \t]+--json)?|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?)[ \t]*\z", RegexOptions.CultureInvariant)]
+    // Each run start value has its own shape: names and slugs are lowercase tokens, a version has no
+    // slash, and a resume branch may hold slashes but never "..", a leading dot, or a leading slash.
+    [GeneratedRegex(
+        @"\A[ \t]*kyber-weave[ \t]+(?:run[ \t]+start(?:[ \t]+(?:--(?:harness|type)[ \t]+[a-z][a-z0-9-]*|--slug[ \t]+[a-z0-9]+(?:-[a-z0-9]+)*|--failing-version[ \t]+(?!\S*\.\.)[A-Za-z0-9][A-Za-z0-9.+-]*|--resume[ \t]+(?!\S*\.\.)(?!\S*//)[A-Za-z0-9_][A-Za-z0-9._/+@-]*))+(?:[ \t]+--json)?|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?)[ \t]*\z",
+        RegexOptions.CultureInvariant)]
     private static partial Regex RunStartCommand();
 
     private sealed record ToolCall(string Name, JsonElement? Arguments);
