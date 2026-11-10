@@ -148,12 +148,25 @@ public sealed record ArbiterEscalationEnvelope(
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
         if (family == ArbiterTriggerFamily.Conductor)
         {
-            bool plannerMalformed = entries.Any(entry =>
+            bool PlannerAnswered(string answer) => entries.Any(entry =>
                 string.Equals(entry.RuleId, "KW-ARB-PLANNER-001", StringComparison.Ordinal)
-                && entry.Answer.Text.StartsWith("malformed", StringComparison.Ordinal));
-            if (plannerMalformed)
+                && entry.Answer.Text.StartsWith(answer, StringComparison.Ordinal));
+
+            if (PlannerAnswered("malformed"))
             {
                 return "re-issue this planner dispatch with a recognised marker; do not send it to architect.";
+            }
+
+            if (PlannerAnswered("plan-file-invalid"))
+            {
+                return "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, "
+                    + "with no leading '/', '..', backslash or space; do not send it to architect.";
+            }
+
+            if (PlannerAnswered("plan-file-outside-planning-dirs"))
+            {
+                return "re-issue this planner dispatch with a PLAN_FILE under the plan, spec or todo directory; "
+                    + "do not send it to architect.";
             }
 
             return repeat >= 2

@@ -221,10 +221,16 @@ public static partial class TriggerClassifier
         string? assertedCaller = ev.AssertedCaller
             ?? (string.Equals(ev.CallerSource, ArbiterCallerSources.Asserted, StringComparison.Ordinal) ? ev.Caller : null);
 
+        // An unmarked planner dispatch on a project-wide harness (factory, antigravity) is
+        // not the conductor's: those hooks fire for every agent, so the target alone proves
+        // nothing about the caller. Marked dispatches and trusted harnesses keep the target
+        // inference, both the TARGET header below and the fallback at the end of this method.
+        bool targetInfers = headers.ContainsKey("KYBER-ARBITER") || !IsProjectWideHarness(ev.Harness);
+
         Dictionary<string, string?> resolveHeaders = new(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> pair in headers)
             resolveHeaders[pair.Key] = pair.Value;
-        if (!string.IsNullOrWhiteSpace(target))
+        if (targetInfers && !string.IsNullOrWhiteSpace(target))
             resolveHeaders["TARGET"] = target;
 
         CallerResolution resolution = CallerResolver.Resolve(harnessCaller, renderedCaller, resolveHeaders, assertedCaller);
@@ -242,7 +248,7 @@ public static partial class TriggerClassifier
 
         // Header inference keys on the catalog class, not on a name substring: only
         // the conductor's roster holds planners.
-        if (string.Equals(targetClass, "planner", StringComparison.Ordinal))
+        if (targetInfers && string.Equals(targetClass, "planner", StringComparison.Ordinal))
             return ("conductor", ArbiterCallerSources.Header);
 
         return (null, ArbiterCallerSources.None);

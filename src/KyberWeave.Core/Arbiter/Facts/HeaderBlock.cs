@@ -53,13 +53,24 @@ public sealed partial class HeaderBlock
     /// <summary>The raw header lines consumed, including duplicates whose fact is absent.</summary>
     public int LineCount { get; }
 
+    /// <summary>
+    /// The names whose line matched the header grammar but whose value failed validation or
+    /// which appeared more than once. The values are not kept, so a rejected prompt never
+    /// carries its own text into the decision log.
+    /// </summary>
+    public IReadOnlySet<string> RejectedNames { get; }
+
     /// <summary>Whether the block carries the routing marker.</summary>
     public bool IsMarked => Headers.ContainsKey("KYBER-ARBITER");
 
-    private HeaderBlock(IReadOnlyDictionary<string, string> headers, int lineCount)
+    private HeaderBlock(
+        IReadOnlyDictionary<string, string> headers,
+        int lineCount,
+        IReadOnlySet<string> rejectedNames)
     {
         Headers = headers;
         LineCount = lineCount;
+        RejectedNames = rejectedNames;
     }
 
     /// <summary>Parses the header block at the start of <paramref name="prompt"/>.</summary>
@@ -70,6 +81,7 @@ public sealed partial class HeaderBlock
         string[] lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         Dictionary<string, string> headers = new(StringComparer.Ordinal);
         HashSet<string> duplicated = new(StringComparer.Ordinal);
+        HashSet<string> rejected = new(StringComparer.Ordinal);
         int count = 0;
 
         foreach (string line in lines)
@@ -87,16 +99,20 @@ public sealed partial class HeaderBlock
                 // A duplicate leaves the fact absent: drop the first sighting too.
                 headers.Remove(name);
                 duplicated.Add(name);
+                rejected.Add(name);
                 continue;
             }
 
-            if (duplicated.Contains(name) || !IsValidValue(name, value))
+            if (!IsValidValue(name, value))
+            {
+                rejected.Add(name);
                 continue;
+            }
 
             headers[name] = value;
         }
 
-        return new HeaderBlock(headers, count);
+        return new HeaderBlock(headers, count, rejected);
     }
 
     /// <summary>

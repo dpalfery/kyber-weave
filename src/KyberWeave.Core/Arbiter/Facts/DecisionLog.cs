@@ -96,7 +96,13 @@ public sealed class DecisionLog
     /// <paramref name="ruleId"/>. The current decision is not in the log yet
     /// when the hook calls this, so "earlier" is every matching decision read.
     /// </summary>
-    public int Repeat(string ruleId, string? planFile, string? planDigest, string? task)
+    /// <remarks>
+    /// A dispatch with no plan file has no plan to key on, so without a session
+    /// every such escalation in the repository would count toward one another.
+    /// <c>session</c> is consulted only when the plan file is null, and matching on it
+    /// keeps a planless repeat to the same conversation.
+    /// </remarks>
+    public int Repeat(string ruleId, string? planFile, string? planDigest, string? task, string? session = null)
     {
         ArgumentNullException.ThrowIfNull(ruleId);
         return 1 + ReadAll().Count(decision =>
@@ -104,6 +110,7 @@ public sealed class DecisionLog
             && decision.Rules.Any(rule => string.Equals(rule.Id, ruleId, StringComparison.Ordinal))
             && string.Equals(decision.PlanFile, planFile, StringComparison.Ordinal)
             && string.Equals(decision.PlanDigest, planDigest, StringComparison.Ordinal)
-            && string.Equals(decision.Task, task, StringComparison.Ordinal));
+            && string.Equals(decision.Task, task, StringComparison.Ordinal)
+            && (planFile is not null || string.Equals(decision.Session, session, StringComparison.Ordinal)));
     }
 }
