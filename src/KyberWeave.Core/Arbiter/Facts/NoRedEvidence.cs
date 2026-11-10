@@ -15,9 +15,15 @@ internal static partial class NoRedEvidence
         string.IsNullOrWhiteSpace(text) || Spelling().IsMatch(text.Trim());
 
     [GeneratedRegex(
-        @"^[`*_]*(?:[-–—]+|n/?a|none(?: (?:required|needed))?|not[ -]applicable|not (?:required|needed)"
-        + @"|not a (?:test task|red product test)|no[ -]tests?(?: (?:task|required|needed|owed))?|no (?:product )?red)"
-        + @"[`*_]*\s*(?:$|[-–—:.,;(])",
+        @"^[`*_]*(?:[-\u2013\u2014]+|n/?a|not[ -]applicable"
+        + @"|none(?: (?:required|needed|captured|found|recorded|observed|available))?"
+        + @"|not (?:required|needed|run|captured|recorded|available)"
+        + @"|not a (?:test task|red product test)"
+        + @"|no (?:red |failing test )?evidence(?: (?:required|captured|found|recorded|available))?"
+        + @"|no failing tests?"
+        + @"|no[ -]tests?(?: (?:task|required|needed|owed|failed|fail))?"
+        + @"|no (?:product )?red)"
+        + @"[`*_]*\s*(?:$|[-\u2013\u2014:.,;(])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Spelling();
 }

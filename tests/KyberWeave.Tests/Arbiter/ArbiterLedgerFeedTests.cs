@@ -207,6 +207,13 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [InlineData("None")]
     [InlineData("n/a")]
     [InlineData("N/A \u2014 docs only")]
+    [InlineData("no evidence")]
+    [InlineData("No RED evidence.")]
+    [InlineData("no evidence captured")]
+    [InlineData("not run")]
+    [InlineData("none captured")]
+    [InlineData("no failing test")]
+    [InlineData("no tests failed")]
     public async Task ReportWithoutEvidence_IsNotRedEvidence(string value)
     {
         await Dispatch("test-dev", Prompt("T1"));
@@ -328,6 +335,19 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         Assert.Equal("PASS", markers?.TaskReview);
         Assert.Equal("6 failed", markers?.RedEvidence);
         Assert.Equal("PASS", markers?.PlannerStatus);
+    }
+
+    [Theory]
+    [InlineData("no tests passed, 6 failed")]
+    [InlineData("not run before the fix: 6 failed after it")]
+    public async Task EvidenceOpeningLikeNoEvidence_IsStillEvidence(string value)
+    {
+        await Dispatch("test-dev", Prompt("T1"));
+        await Return("test-dev", Prompt("T1"), $"STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: {value}\n");
+
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
