@@ -1635,6 +1635,7 @@ export class KyberBridge {
     sessionId: string,
     db: DatabaseSync | undefined,
   ): TurnResolutionPool | null {
+    sessionId = this.recordKeyOf(sessionId)
     if (this.store) {
       const records = this.store.recordsForSession(sessionId)
       const turnRecords = records.filter((r) => r.op === 'llm.invoke')
@@ -1784,6 +1785,7 @@ export class KyberBridge {
     excludeSpans?: string | Set<string>,
   ): Array<{ text: string; spanId?: string; timestamp?: string }> {
     if (!sessionId) return []
+    sessionId = this.recordKeyOf(sessionId)
     const isExcluded = (spanId: string): boolean => {
       if (excludeSpans === undefined) return false
       if (typeof excludeSpans === 'string') return spanId === excludeSpans
@@ -1866,7 +1868,7 @@ export class KyberBridge {
     if (ownDb !== sessionDb && this.sessionRowExists(ownDb, sessionId)) return true
     // Records without a derived session row still make the session real —
     // otherwise a span miss on an unbuilt session would 404 as "unknown".
-    if (this.store) return this.store.recordsForSession(sessionId).length > 0
+    if (this.store) return this.store.recordsForSession(this.recordKeyOf(sessionId)).length > 0
     return this.loadContentRecordsFromDb(sessionId).length > 0
   }
 
@@ -1875,6 +1877,7 @@ export class KyberBridge {
    * just to return one band; `recordsForSession` otherwise.
    */
   private loadContentRecords(sessionId: string, spanId?: string): ContentSourceRecord[] {
+    sessionId = this.recordKeyOf(sessionId)
     if (this.store) {
       if (spanId) {
         const record = this.store.get(spanId)
@@ -1888,6 +1891,7 @@ export class KyberBridge {
   }
 
   private loadContentRecordsFromDb(sessionId: string, spanId?: string): ContentSourceRecord[] {
+    sessionId = this.recordKeyOf(sessionId)
     const db = this.getDb()
     if (!this.hasTable(db, 'records')) return []
 
@@ -1993,6 +1997,17 @@ export class KyberBridge {
   }
 
   /** Persisted share ids for the current store — same table `buildRuns` reads. */
+  /**
+   * The key records are stored under for a session id. A canonical key that
+   * spans several harnesses is split into one session per harness named
+   * `${harness}:${key}`; that id is no record's key, so every record read
+   * resolves it back to the key first. Plain ids resolve to themselves.
+   */
+  private recordKeyOf(sessionId: string): string {
+    if (!sessionId.includes(':')) return sessionId
+    return this.sessionIdentities().shareOf(sessionId)?.key ?? sessionId
+  }
+
   private sessionIdentities(): SessionIdentities {
     const db =
       this.store && typeof this.store.getDatabase === 'function'
