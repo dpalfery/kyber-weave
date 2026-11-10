@@ -1977,7 +1977,8 @@ worker can be answered about another branch. The per-role rules are in the
 [MCP runbook](../docgraph/mcp-runbook.md#the-worktree-limitation-per-role); the short form is that a
 shell role asks its own index, a shell-less role whose packet names a worktree passes that path as `codegraph_explore`'s
 `projectPath`, which answers from that worktree's own index (with none named, the default project), and reads directly only when that call cannot answer for
-the branch in hand (an error, a not-indexed reply, or a provenance `branch=` that differs); and the
+the branch in hand (an error, a not-indexed reply, or a provenance `branch=` that differs),
+naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`; and the
 architect returns `BLOCKED` naming "server root differs" so the two CLI gates run in the worktree
 before it plans.
 
