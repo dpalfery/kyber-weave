@@ -287,7 +287,13 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 // only entries whose folder is gone.
                 if (held is not null)
                 {
-                    runner.Git("worktree", "prune");
+                    GitOutcome pruned = runner.Git("worktree", "prune");
+                    if (!pruned.Succeeded)
+                    {
+                        return Fail(
+                            $"git worktree prune failed, so the deleted folder '{held}' still claims " +
+                            $"'{target}': {pruned.FirstErrorLine}");
+                    }
                 }
 
                 worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);

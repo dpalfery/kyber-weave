@@ -141,6 +141,26 @@ public sealed class RunStartCommandTests : IDisposable
         Assert.True(Directory.Exists(second.RootElement.GetProperty("worktree").GetString()));
     }
 
+    /// <summary>A prune that fails is named as the failure, rather than surfacing as git's later complaint.</summary>
+    [Fact]
+    public void ResumeNamesAFailedPrune()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        ProbeResult started = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+        Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
+        using JsonDocument first = ParseJson(started.StandardOutput);
+        Directory.Delete(first.RootElement.GetProperty("worktree").GetString()!, recursive: true);
+        _probe.WriteGitFailOn("prune", "cannot prune");
+
+        ProbeResult resumed = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+            "--resume", "claude/fix/tighten-the-gate");
+
+        Assert.True(resumed.ExitCode == 1, $"A failed prune must exit 1, not {resumed.ExitCode}. {resumed.Output}");
+        Assert.Contains("cannot prune", resumed.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>A well-formed request against a clean checkout is ready, and says so with <c>0</c>.</summary>
     [Fact]
     public void ExitsZeroOnAReadyRun()
