@@ -14,6 +14,7 @@ public static partial class CopilotPromptProbe
     private const string ReplaceMode = "mode=replace";
     private const string LogFolderName = "logs";
     private const int MaximumLogDepth = 8;
+    private const long LogTailBytes = 4L * 1024 * 1024;
 
     /// <summary>Lists the directory's entries one level at a time; a link is not followed. See <c>docs/standards/csharp</c>.</summary>
     private static readonly EnumerationOptions OneLevel = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
@@ -73,7 +74,7 @@ public static partial class CopilotPromptProbe
                 continue;
             }
 
-            if (state?.StarPromptFile is null || !string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal))
+            if (state?.StarPromptFile is null || !CopilotPromptFile.SamePath(state.StarPromptFile, promptPath))
                 continue;
 
             anyFlavourPoints = true;
@@ -211,7 +212,7 @@ public static partial class CopilotPromptProbe
         string? mode = null;
         foreach (string file in logFiles)
         {
-            foreach (string line in File.ReadLines(file))
+            foreach (string line in TailLines(file))
             {
                 if (!line.Contains("Resolved system message:", StringComparison.Ordinal))
                     continue;
@@ -222,6 +223,28 @@ public static partial class CopilotPromptProbe
         }
 
         return mode;
+    }
+
+    /// <summary>
+    /// The complete lines in the last <see cref="LogTailBytes"/> of a log. Only the newest line matters, and an
+    /// AgentHost log grows for as long as VS Code runs, so the probe never reads a whole one.
+    /// </summary>
+    /// <remarks>VS Code holds the log open for writing, so the file is opened with read-write sharing.</remarks>
+    private static IEnumerable<string> TailLines(string file)
+    {
+        using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        bool cut = stream.Length > LogTailBytes;
+        if (cut)
+            stream.Seek(-LogTailBytes, SeekOrigin.End);
+
+        using StreamReader reader = new(stream);
+        if (cut)
+            reader.ReadLine(); // The first line is partial: the seek landed inside it.
+
+        List<string> lines = [];
+        while (reader.ReadLine() is { } line)
+            lines.Add(line);
+        return lines;
     }
 
     [GeneratedRegex(@"Resolved system message: (?<mode>mode=\S+)", RegexOptions.CultureInvariant)]

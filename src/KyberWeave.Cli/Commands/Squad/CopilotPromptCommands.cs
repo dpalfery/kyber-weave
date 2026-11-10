@@ -165,7 +165,8 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             foreach ((string file, byte[] document) in writes)
                 AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             CopilotPromptCommandSupport.Fail($"could not write the prompt or a settings file: {ex.Message}");
             return 1;
@@ -301,7 +302,8 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             if (promptInstalled)
                 File.Delete(promptPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             CopilotPromptCommandSupport.Fail($"could not finish the uninstall: {ex.Message}");
             return 1;
@@ -502,7 +504,7 @@ internal static class CopilotPromptCommandSupport
     /// <summary>True when the state's <c>*</c> entry names this install's prompt file. Only such an entry is ours.</summary>
     internal static bool PointsAtPrompt(CopilotOverrideState? state, string promptPath) =>
         state?.StarPromptFile is not null
-        && string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal);
+        && CopilotPromptFile.SamePath(state.StarPromptFile, promptPath);
 
     /// <summary>Writes one line of console output. Callers escape any value from a file or the operator.</summary>
     internal static void Say(string markup) =>

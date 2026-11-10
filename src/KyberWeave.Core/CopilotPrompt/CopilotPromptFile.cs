@@ -76,7 +76,12 @@ public static class CopilotPromptFile
                     return $"{SystemPromptKey} must be a non-empty string";
                 hasSystemPrompt = true;
             }
-            else if (key != ToolDescriptionsKey)
+            else if (key == ToolDescriptionsKey)
+            {
+                if (entry.Value is not YamlMappingNode)
+                    return $"{ToolDescriptionsKey} must be a mapping of tool names to descriptions";
+            }
+            else
             {
                 return $"'{key}' is not a key VS Code reads; only {SystemPromptKey} and {ToolDescriptionsKey} are allowed";
             }
@@ -84,4 +89,17 @@ public static class CopilotPromptFile
 
         return hasSystemPrompt ? null : $"{SystemPromptKey} is missing";
     }
+
+    /// <summary>
+    /// True when two paths name the same prompt file. Windows and macOS file systems ignore case by default, so a
+    /// settings entry that differs from the install path only in case still names this install's file there.
+    /// </summary>
+    /// <param name="left">One path.</param>
+    /// <param name="right">The other path.</param>
+    /// <returns>True when the paths are equal under the host's usual case rules.</returns>
+    public static bool SamePath(string left, string right) =>
+        string.Equals(
+            left,
+            right,
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

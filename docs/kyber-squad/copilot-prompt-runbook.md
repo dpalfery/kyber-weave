@@ -91,7 +91,7 @@ adds nothing, so a machine that never opted in sees no new output.
 |---|---|---|---|
 | `copilot.prompt.setting` | Some detected VS Code settings file points its `*` entry at the installed prompt file. | No detected settings file points at it. Reported once, without a build label. | `kyber-weave squad copilot-prompt install --yes` |
 | `copilot.prompt.<stable\|insiders>.setting` | That build's `*` entry names the installed prompt file. | That build's settings file is present but cannot be read (for example a directory or a file without read permission) or is not JSON. Not reported for a build that does not point at it. | Fix the file's permissions, type or JSON, then run `kyber-weave doctor` |
-| `copilot.prompt.<stable\|insiders>.file` | The prompt file is readable YAML with exactly one document, a non-empty `systemPrompt`, and no key other than `systemPrompt` and `toolDescriptions`. | The file is unreadable, not YAML, has another key, or has no usable `systemPrompt`. The reason names the problem. | As above |
+| `copilot.prompt.<stable\|insiders>.file` | The prompt file is readable YAML with exactly one document, a non-empty `systemPrompt`, and no key other than `systemPrompt` and `toolDescriptions`, and a `toolDescriptions` that is a mapping. | The file is unreadable, not YAML, has another key, or has no usable `systemPrompt`. The reason names the problem. | As above |
 | `copilot.prompt.<stable\|insiders>.log` | The newest AgentHost log's last `Resolved system message` line shows `mode=replace`. | The last line shows another mode. The reason says to restart VS Code and run doctor again. | `kyber-weave doctor` |
 
 The `.log` check is inconclusive, not failed, when there is no log folder yet, or the newest log has
@@ -114,7 +114,7 @@ VS Code logs the mode it actually applied for each session:
 `mode=replace` is the only proof that the override is live. The settings file can name the right
 prompt file while VS Code ignores it. The doctor reads the last such line in the newest log
 folder: `<user-data>/logs/<newest timestamp folder>/`. It searches that folder, at any depth, for
-files named `agenthost*.log`, and skips links.
+files named `agenthost*.log`, and skips links. It reads only the last 4 MB of each file.
 
 A `mode` other than `replace` means the default prompt is in use for that session, even though the
 settings are right.
