@@ -19,7 +19,9 @@ namespace KyberWeave.Tests.Squad;
 /// and the file each harness actually receives. The harnesses differ in how a grant is spelled.
 /// Most take a tool list. OpenCode and Kilo take a permission map, where a missing key falls back
 /// to the harness default, and Kilo's default asks before all but a short list of read-only
-/// commands, which a headless subagent cannot answer. Codex, Cursor and Warp have no per-agent
+/// commands, which a headless subagent cannot answer. Copilot's only documented shell name is
+/// the bare <c>execute</c>; its <c>execute/*</c> names are VS Code tool names, and under a
+/// conductor in the VS Code agent host a subagent holding only those had no shell. Codex, Cursor and Warp have no per-agent
 /// grant, so the agent inherits the session's shell and the only way to lose it is for the
 /// rendered file to restrict it.
 /// </remarks>
@@ -52,7 +54,7 @@ public sealed class SquadDeveloperAgentShellContractTests
     {
         [SquadTarget.Claude] = new(".claude/agents/{0}.md", ToolList("tools", "Bash", "PowerShell")),
         [SquadTarget.Factory] = new(".factory/droids/{0}.md", ToolList("tools", "Execute")),
-        [SquadTarget.Copilot] = new(".github/agents/{0}.agent.md", ToolList("tools", "execute/runInTerminal")),
+        [SquadTarget.Copilot] = new(".github/agents/{0}.agent.md", ToolList("tools", "execute", "execute/runInTerminal")),
         [SquadTarget.Pi] = new(".pi/agents/{0}.md", ToolList("tools", "bash")),
         [SquadTarget.ZCode] = new(".zcode/agents/{0}.md", ToolList("tools", "Bash")),
         [SquadTarget.CommandCode] = new(".commandcode/agents/{0}.md", ToolList("tools", "shell_command", "shell_output")),
