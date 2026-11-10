@@ -98,12 +98,36 @@ public sealed class StdioSession : IDisposable
     ///     A caller that shows it must still truncate it.
     /// </summary>
     /// <remarks>
-    ///     <see cref="Task.IsCompleted"/> is also true for a faulted task, and reading
-    ///     <see cref="Task{TResult}.Result"/> rethrows its exception. The drain faults whenever the stream is closed
-    ///     under it — which is exactly what <see cref="Dispose"/> does — so this asks for successful completion and
-    ///     treats a faulted drain as "no line to show" rather than raising an exception nobody can act on.
+    ///     The drain publishes the line the moment it reads it, so this does not wait for stderr to close and never
+    ///     touches the drain task, which faults when <see cref="Dispose"/> closes the stream under it.
     /// </remarks>
-    public string? FirstErrorLine => _firstErrorLine.IsCompletedSuccessfully ? _firstErrorLine.Result : null;
+    public string? FirstErrorLine => Volatile.Read(ref _firstErrorLineSeen);
+
+    /// <summary>
+    ///     The first stderr line, published as soon as it is read rather than when stderr closes, so a child that
+    ///     reports an error and then hangs still has that error shown.
+    /// </summary>
+    private string? _firstErrorLineSeen;
+
+    /// <summary>
+    ///     <see cref="FirstErrorLine"/>, after waiting up to <paramref name="wait"/> for stderr to finish. A child
+    ///     that exits closes stdout and stderr together, so a caller that saw stdout end can otherwise read this
+    ///     before the error line has been drained.
+    /// </summary>
+    /// <param name="wait">The longest to wait for stderr to close.</param>
+    public string? WaitForFirstErrorLine(TimeSpan wait)
+    {
+        try
+        {
+            _firstErrorLine.Wait(wait);
+        }
+        catch (AggregateException)
+        {
+            // A faulted drain has no line to show, which FirstErrorLine reports as null.
+        }
+
+        return FirstErrorLine;
+    }
 
     /// <summary>Writes one line to the child's standard input and flushes it.</summary>
     /// <param name="line">The line to send, without its terminator.</param>
@@ -245,7 +269,7 @@ public sealed class StdioSession : IDisposable
                     char current = buffer[index];
                     if (current == '\n')
                     {
-                        first ??= CompleteErrorLine(line, overCap);
+                        Publish(ref first, CompleteErrorLine(line, overCap));
                         line.Clear();
                         overCap = false;
                         continue;
@@ -265,7 +289,7 @@ public sealed class StdioSession : IDisposable
                 }
             }
 
-            first ??= CompleteErrorLine(line, overCap);
+            Publish(ref first, CompleteErrorLine(line, overCap));
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
@@ -274,6 +298,16 @@ public sealed class StdioSession : IDisposable
         }
 
         return first;
+    }
+
+    /// <summary>Keeps <paramref name="line" /> as the first error line if none was kept yet, and publishes it.</summary>
+    private void Publish(ref string? first, string? line)
+    {
+        if (first is not null || line is null)
+            return;
+
+        first = line;
+        Volatile.Write(ref _firstErrorLineSeen, line);
     }
 
     /// <summary>The first non-blank stderr line, or null when the line was blank or discarded for exceeding the cap.</summary>
