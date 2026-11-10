@@ -52,7 +52,8 @@ import { droidAdapter } from './adapters/droid.js'
 import { ingestBatchWithAdapters } from './ingest.js'
 import { buildSessions } from './sessions.js'
 import { CanonStore } from './store.js'
-import type { CanonicalRecord } from './types.js'
+import { PROJECTED_ATTRIBUTE_KEYS } from './store-rows.js'
+import { SESSION_LABEL_KEY, type CanonicalRecord } from './types.js'
 
 /** The Factory session both sources observed. */
 const SESSION_ID = 'factory-session-1'
@@ -995,5 +996,213 @@ describe('the Factory source precedence rule', () => {
     } finally {
       store.close()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tools, duration and title for paired Droid sessions
+// ---------------------------------------------------------------------------
+
+/** A zeroed token usage, for a tool record that carries no tokens of its own. */
+const ZERO_TOKENS = {
+  freshInput: 0,
+  cacheRead: 0,
+  cacheCreation: 0,
+  output: 0,
+  reportedInput: 0,
+  reportedOutput: 0,
+}
+
+/**
+ * One file-source `tool.invoke` record under a parent file-source record.
+ * Built from the parent so the tool carries the same harness and source the
+ * file row does; the parent's counters are not repeated on the tool. The tool
+ * is not parented under the file row: a nested session's duration is its
+ * request roots' only, and these cases measure the tools' own durations.
+ */
+function fileToolRowOf(
+  parent: CanonicalRecord,
+  index: number,
+  name: string,
+  durationMs: number,
+): CanonicalRecord {
+  return {
+    ...parent,
+    spanId: `${parent.spanId}:tool:${index}`,
+    parentSpanId: null,
+    name,
+    op: 'tool.invoke',
+    durationMs,
+    tokens: ZERO_TOKENS,
+  }
+}
+
+/** A plugin span for one tool call, carrying the tool name the plugin reports. */
+function pluginToolSpan(sessionId: string, toolName: string): OtlpSpan {
+  return {
+    ...otlpSpan(
+      `plugin-tool-${sessionId}-${toolName}`,
+      'factory.tool',
+      { ...pluginAttributes(sessionId), 'factory.tool.name': toolName },
+      '2026-04-20T10:00:03.000Z',
+    ),
+    durationMs: 0,
+  }
+}
+
+/** A plugin turn span whose own duration is zero, as the plugin reports it. */
+function zeroDurationPluginTurnSpan(sessionId: string): OtlpSpan {
+  return { ...pluginTurnSpan(sessionId), durationMs: 0 }
+}
+
+describe('paired droid tools, duration and title', () => {
+  it('counts the file tool.invoke records of a paired session, not the single plugin tool span', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [zeroDurationPluginTurnSpan(SESSION_ID), pluginToolSpan(SESSION_ID, 'Read')],
+        store,
+        [droidAdapter],
+      )
+      const parent = await fileRow(SESSION_ID)
+      store.upsertMany([
+        parent,
+        fileToolRowOf(parent, 1, 'Read', 0),
+        fileToolRowOf(parent, 2, 'Edit', 0),
+        fileToolRowOf(parent, 3, 'Execute', 0),
+      ])
+
+      await buildSessions(store)
+
+      const summary = summaryOf(store, SESSION_ID)
+      expect(summary.tool_calls, 'tool calls counted from the file records').toBe(3)
+      expect([...(summary.tools_invoked as string[])].sort()).toEqual(['Edit', 'Execute', 'Read'])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps the plugin tool count for a paired session that has no file tool record', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [zeroDurationPluginTurnSpan(SESSION_ID), pluginToolSpan(SESSION_ID, 'Read')],
+        store,
+        [droidAdapter],
+      )
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      expect(summaryOf(store, SESSION_ID).tool_calls).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('sums the file-source durations for a paired session, while every plugin record reports zero', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [zeroDurationPluginTurnSpan(SESSION_ID), pluginToolSpan(SESSION_ID, 'Read')],
+        store,
+        [droidAdapter],
+      )
+      const parent = { ...(await fileRow(SESSION_ID)), durationMs: 0 }
+      store.upsertMany([
+        parent,
+        fileToolRowOf(parent, 1, 'Read', 1500),
+        fileToolRowOf(parent, 2, 'Edit', 2500),
+        fileToolRowOf(parent, 3, 'Execute', 500),
+      ])
+
+      await buildSessions(store)
+
+      expect(summaryOf(store, SESSION_ID).duration_ms).toBe(4500)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps the tool count and duration it has today for a Droid session only the file source observed', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      const parent = { ...(await fileRow(SESSION_ID)), durationMs: 0 }
+      store.upsertMany([
+        parent,
+        fileToolRowOf(parent, 1, 'Read', 1500),
+        fileToolRowOf(parent, 2, 'Edit', 2500),
+      ])
+
+      await buildSessions(store)
+
+      const summary = summaryOf(store, SESSION_ID)
+      expect(summary.tool_calls).toBe(2)
+      expect(summary.duration_ms).toBe(4000)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps the tool count and duration it has today for a non-Droid session', async () => {
+    const CLAUDE_SESSION_ID = 'claude-session-1'
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      const fileParent = await fileRow(SESSION_ID)
+      const parent: CanonicalRecord = {
+        ...fileParent,
+        spanId: 'claude-llm-1',
+        parentSpanId: null,
+        harness: 'claude',
+        source: 'codeburn/claude',
+        sessionId: CLAUDE_SESSION_ID,
+        durationMs: 0,
+      }
+      store.upsertMany([
+        parent,
+        fileToolRowOf(parent, 1, 'Read', 300),
+        fileToolRowOf(parent, 2, 'Bash', 700),
+      ])
+
+      await buildSessions(store)
+
+      const summary = summaryOf(store, CLAUDE_SESSION_ID)
+      expect(summary.tool_calls).toBe(2)
+      expect(summary.duration_ms).toBe(1000)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('carries the session title from the file record into the session label', async () => {
+    await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([zeroDurationPluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      const file: CanonicalRecord = { ...(await fileRow(SESSION_ID)), raw: { [SESSION_LABEL_KEY]: 'Fix login bug' } }
+      store.upsertMany([file])
+
+      await buildSessions(store)
+
+      const payload = store.getSessionPayload(SESSION_ID) as { label?: unknown } | undefined
+      expect(payload?.label).toBe('Fix login bug')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('projects kyber.session.label through the store attribute allowlist', () => {
+    expect(PROJECTED_ATTRIBUTE_KEYS.has(SESSION_LABEL_KEY)).toBe(true)
   })
 })
