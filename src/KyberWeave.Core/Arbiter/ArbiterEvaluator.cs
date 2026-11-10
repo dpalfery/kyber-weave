@@ -118,7 +118,8 @@ public sealed class ArbiterEvaluator
                 : new TriggerClassification(
                     null, null, ArbiterCallerSources.None, ev.Target, "not-squad",
                     new Dictionary<string, string>(StringComparer.Ordinal), null, true);
-            ArbiterLedgerEvent ledgerEvent = BuildLedgerEvent(ledgerId, now, effective.Source, ev, first);
+            ArbiterLedgerEvent ledgerEvent = BuildLedgerEvent(
+                ledgerId, now, effective.Source, ev, first, TaskFilesFor(ev, first));
             if (effective.DryRun)
             {
                 // Dry run reads and writes nothing: the reads below prove the
@@ -182,6 +183,7 @@ public sealed class ArbiterEvaluator
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config, ev.ObservesReturns);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
+        facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent and the rule escalates; an unexpected failure here
         // reaches the catch in EvaluateAsync, which escalates with the reason.
@@ -489,7 +491,8 @@ public sealed class ArbiterEvaluator
         DateTimeOffset now,
         string source,
         ArbiterEvent ev,
-        TriggerClassification first)
+        TriggerClassification first,
+        IReadOnlyList<string>? taskFiles)
     {
         string phase = MapPhase(ev);
         ArbiterLedgerEvent ledgerEvent = new(ledgerId, now, source, ev.Harness, ev.Session, phase)
@@ -500,8 +503,57 @@ public sealed class ArbiterEvaluator
             Caller = first.Caller,
             CallerSource = first.CallerSource,
             Headers = BuildHeaders(first),
+            PairDigest = PairDigestOf(ev),
+            TaskFiles = taskFiles,
+            Returns = phase == ArbiterLedgerPhases.Post
+                ? ReturnMarkerParser.Parse(
+                    ev.ToolOutput,
+                    readAttestations: string.Equals(first.Trigger, "delegate.planner.returned", StringComparison.Ordinal))
+                : null,
         };
         return ledgerEvent;
+    }
+
+    /// <summary>
+    /// The task files of a <c>delegate</c> dispatch, recorded on its pre event so a later
+    /// dispatch can tell which files it holds. An unreadable plan records none, and the
+    /// rules that need the plan answer for that themselves.
+    /// </summary>
+    private IReadOnlyList<string>? TaskFilesFor(ArbiterEvent ev, TriggerClassification first)
+    {
+        if (MapPhase(ev) != ArbiterLedgerPhases.Pre
+            || !string.Equals(first.Trigger, "delegate", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            ArbiterFactSet facts = _planReader.Enrich(new ArbiterFactSet(), first);
+            return facts.TryGet("plan.task.files", out ArbiterFact? files)
+                && files.Value is IEnumerable<string> paths
+                    ? [.. paths]
+                    : null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Pairs a return with its dispatch when the harness has no call id: the target and
+    /// the prompt as finally executed, which is the prompt after its headers are stripped.
+    /// </summary>
+    private static string? PairDigestOf(ArbiterEvent ev)
+    {
+        if (string.IsNullOrWhiteSpace(ev.Target) || string.IsNullOrWhiteSpace(ev.Prompt))
+        {
+            return null;
+        }
+
+        string executed = HeaderBlock.Strip(ev.Prompt).Trim();
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ev.Target + "\n" + executed)));
     }
 
     private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification)

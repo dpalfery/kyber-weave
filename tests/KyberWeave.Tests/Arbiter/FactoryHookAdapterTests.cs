@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
@@ -77,6 +78,12 @@ public sealed class FactoryHookAdapterTests
 
         public string? SeenPostSessionId;
 
+        public string? SeenPostTarget;
+
+        public string? SeenPostPrompt;
+
+        public string? SeenPostOutput;
+
         public int PostCalls;
 
         public HookOutcome PreResult { get; set; } = new(HookOutcomeKind.Allow);
@@ -119,6 +126,9 @@ public sealed class FactoryHookAdapterTests
             string? sessionId = null)
         {
             PostCalls++;
+            SeenPostTarget = target;
+            SeenPostPrompt = prompt;
+            SeenPostOutput = toolOutput;
             SeenPostToolCallId = toolCallId;
             SeenPostSessionId = sessionId;
             return PostResult;
@@ -351,6 +361,295 @@ public sealed class FactoryHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void BackgroundLaunch_RecordsNoReturn()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(Fixture("post-task-launched.json"), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    private static string LaunchReporting(JsonNode response)
+    {
+        JsonObject root = JsonNode.Parse(Fixture("post-task-launched.json"))!.AsObject();
+        root["tool_response"] = response;
+        return root.ToJsonString();
+    }
+
+    private static string LaunchText() =>
+        JsonNode.Parse(Fixture("post-task-launched.json"))!["tool_response"]!.GetValue<string>();
+
+    [Theory]
+    [InlineData("  \n")]
+    [InlineData("\uFEFF")]
+    [InlineData("\u2003\u00A0")]
+    [InlineData(" \uFEFF ")]
+    public void BackgroundLaunch_AfterLeadingNoise_RecordsNoReturn(string noise)
+    {
+        ContextualEngine engine = new();
+
+        Run(LaunchReporting(JsonValue.Create(noise + LaunchText())), null, engine);
+
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void BackgroundLaunch_InsideAJsonEnvelope_RecordsNoReturn()
+    {
+        ContextualEngine engine = new();
+        JsonObject envelope = new()
+        {
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
+        };
+
+        Run(LaunchReporting(envelope), null, engine);
+
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void ForegroundReport_ThatQuotesTheLaunchNotice_IsRecorded()
+    {
+        ContextualEngine engine = new();
+        JsonObject envelope = new()
+        {
+            ["note"] = LaunchText(),
+            ["content"] = new JsonArray(
+                new JsonObject { ["type"] = "text", ["text"] = "All done." },
+                new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
+        };
+
+        Run(LaunchReporting(envelope), null, engine);
+
+        Assert.Equal(1, engine.PostCalls);
+    }
+
+    private static string TemporaryTranscript(string content, string extension = ".jsonl")
+    {
+        string path = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + extension);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    private static string TwoLaunches(string firstTask, string secondTask)
+    {
+        string fixture = File.ReadAllText(TranscriptFixture());
+        string first = fixture.Replace("TASK: T9", "TASK: " + firstTask, StringComparison.Ordinal);
+        string second = fixture
+            .Replace("TASK: T9", "TASK: " + secondTask, StringComparison.Ordinal)
+            .Replace("toolu_bdrk_01JedzB4Bo7BUfu42oAMKSWs", "toolu_second", StringComparison.Ordinal)
+            .Replace("Repeat this line", "Second attempt", StringComparison.Ordinal);
+        return TemporaryTranscript(first.TrimEnd() + "\n" + second);
+    }
+
+    [Fact]
+    public void SubagentStop_WhenLaunchesNameDifferentTasks_RecordsNothing()
+    {
+        string transcript = TwoLaunches("T8", "T9");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WhenHeaderlessLaunchesDiffer_RecordsNothing()
+    {
+        string withHeaders = TwoLaunches("T8", "T9");
+        string transcript = TemporaryTranscript(
+            File.ReadAllText(withHeaders)
+                .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T8\\n\\n", string.Empty, StringComparison.Ordinal)
+                .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T9\\n\\n", string.Empty, StringComparison.Ordinal));
+        try
+        {
+            Assert.DoesNotContain("KYBER-ARBITER", File.ReadAllText(transcript), StringComparison.Ordinal);
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(transcript);
+            File.Delete(withHeaders);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WhenATaskWasRetried_TakesTheLatestLaunch()
+    {
+        string transcript = TwoLaunches("T9", "T9");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(1, engine.PostCalls);
+            Assert.Contains("Second attempt", engine.SeenPostPrompt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WithAnEmptyResult_ReadsTheError()
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root["task_result"] = string.Empty;
+        root["task_error"] = "RED_EVIDENCE: from-error";
+
+        Run(root.ToJsonString(), null, engine);
+
+        Assert.Equal("RED_EVIDENCE: from-error", engine.SeenPostOutput);
+    }
+
+    [Fact]
+    public void SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
+    {
+        string notTranscript = TemporaryTranscript(File.ReadAllText(TranscriptFixture()), ".txt");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(notTranscript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(notTranscript);
+        }
+    }
+
+    [Theory]
+    [InlineData("task_name")]
+    [InlineData("transcript_path")]
+    public void SubagentStop_WithAWrongTypeField_FailsClosed(string field)
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root[field] = 5;
+
+        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(HookCommand.FailClosedCode, stdout, StringComparison.Ordinal);
+        Assert.Contains("Malformed Factory hook event", stdout, StringComparison.Ordinal);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Theory]
+    [InlineData("task_name")]
+    [InlineData("transcript_path")]
+    public void SubagentStop_MissingWhatItNeeds_PassesThroughWithoutConfig(string field)
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root.Remove(field);
+
+        (int exit, string stdout, _) = Run(
+            root.ToJsonString(),
+            null,
+            engine,
+            _ => throw new InvalidOperationException("config must not load"));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    private static string SubagentStop(string transcriptPath, string taskName = "capture run")
+    {
+        JsonObject root = JsonNode.Parse(Fixture("subagent-stop.json"))!.AsObject();
+        root["transcript_path"] = transcriptPath;
+        root["task_name"] = taskName;
+        return root.ToJsonString();
+    }
+
+    private static string TranscriptFixture() =>
+        Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
+            "Fixtures", "arbiter-hooks", "factory", "transcript-background-task.jsonl");
+
+    [Fact]
+    public void SubagentStop_RecordsTheReportAgainstItsDispatch()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture()), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(1, engine.PostCalls);
+        Assert.Equal("echoer", engine.SeenPostTarget);
+        Assert.Contains("TASK: T9", engine.SeenPostPrompt, StringComparison.Ordinal);
+        Assert.Equal("RED_EVIDENCE: capture-line", engine.SeenPostOutput);
+        Assert.Null(engine.SeenPostToolCallId);
+    }
+
+    [Fact]
+    public void SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
+    {
+        string transcript = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + ".jsonl");
+        File.WriteAllText(
+            transcript,
+            File.ReadAllText(TranscriptFixture()).Replace("\"echoer\"", "\"csharp-dev\"", StringComparison.Ordinal));
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal("csharp-dev", engine.SeenPostTarget);
+            Assert.DoesNotContain("KYBER-ARBITER", engine.SeenPostPrompt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Theory]
+    [InlineData("no such description")]
+    public void SubagentStop_WithNoMatchingLaunch_RecordsNothing(string taskName)
+    {
+        ContextualEngine engine = new();
+
+        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture(), taskName), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void SubagentStop_WithAnUnreadableTranscript_RecordsNothing()
+    {
+        ContextualEngine engine = new();
+
+        (int exit, _, _) = Run(SubagentStop("/nonexistent/transcript.jsonl"), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(0, engine.PostCalls);
     }
 
     [Fact]

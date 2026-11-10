@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -90,6 +91,24 @@ public sealed record PlanDocument(
 
     /// <summary>The contract table rows, keyed by their task-id cell.</summary>
     public IReadOnlyList<PlanContractRow> ContractRows { get; init; } = ContractRows ?? [];
+
+    /// <summary>
+    /// The <c>plan.test-contract.row</c> fact for <paramref name="taskId"/>: the row's
+    /// <c>RED evidence required</c> cell, with every way of saying no test is owed read as
+    /// <c>Not applicable</c>. Null when the task has no row or the cell is empty.
+    /// </summary>
+    public string? RedEvidenceRequirement(string taskId)
+    {
+        string? cell = ContractRows
+            .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal))
+            ?.RedEvidenceRequired?.Trim();
+        if (string.IsNullOrEmpty(cell))
+        {
+            return null;
+        }
+
+        return NoRedEvidence.IsStatedBy(cell) ? "Not applicable" : cell;
+    }
 
     /// <summary>The parse findings raised while reading the document.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; init; } = Diagnostics ?? [];

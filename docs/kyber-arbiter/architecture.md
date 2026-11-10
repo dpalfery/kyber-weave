@@ -136,6 +136,16 @@ Each step-1 rule entry records what the model scored, so thresholds can be tuned
 below its floor is still recorded, beside the `undecidable` it produced. Entries are null when
 the answer could not be read, and `probabilities` is null unless every option has a value.
 
+A worker's return reaches the rules through the ledger. The post event records the report's
+`RESULT:`, `RED_EVIDENCE:` and `STATUS:` lines, and only a planner return may record
+`ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
+prompt with its headers removed, and a specialist's return takes its `TASK` from that dispatch
+because its headers were stripped before it ran. On each `delegate`, `ledger.completed-tasks`
+is the tasks of this plan whose report read `RESULT: PASS`, `ledger.red-evidence` is present
+when this task or one it depends on reported RED evidence, and `ledger.in-flight.paths` is the
+files of this session's dispatches that have not returned. A refused dispatch holds no files.
+A task counts as complete on its worker's own report: no separate reviewer confirms it.
+
 ## The rules
 
 Twenty rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
@@ -204,8 +214,9 @@ skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
 (today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
-`returns-unobservable`, which allows and is logged; the in-flight overlap check still
-runs.
+`returns-unobservable`, which allows and is logged. The in-flight overlap check finds nothing
+there, because a dispatch that never reports back would otherwise hold its files for the
+whole session.
 
 Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-011` and `KW-ARB-INSTALL-001`
 for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
@@ -326,7 +337,7 @@ The degradation records these outcomes produce are listed once, in the
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` |
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts |
-| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — |
 
@@ -413,9 +424,9 @@ Per-harness notes:
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
   `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
-  which allows and is logged, while the dependency's in-flight overlap check still runs —
-  pre-dispatch gating (plan, scope, intent, ownership, overlap) is unaffected, and
-  completion order is advisory there. The render records `arbiter-not-enforced` with
+  which allows and is logged, and the in-flight overlap check finds nothing because no
+  dispatch ever closes — the other pre-dispatch gating (plan, scope, intent, ownership) is
+  unaffected, and completion order is advisory there. The render records `arbiter-not-enforced` with
   `no-post-dispatch-feedback` for every rendered agent: post-dispatch outcomes are logged
   and reported by `audit`, never delivered back to the harness.
 - **Factory** reads the `hooks` key of `.factory/settings.json` only while
@@ -424,7 +435,12 @@ Per-harness notes:
   block and records `arbiter-not-enforced` with `settings-hooks-shadowed`, naming the fix:
   move the user's hooks into `.factory/hooks.json`, then run `squad update`. A strip writes
   `allow` with the complete `updatedInput` (every `tool_input` field copied, only `prompt`
-  rewritten); no call id is documented, so returns pair by `pair-digest`.
+  rewritten); no call id is documented, so returns pair by `pair-digest`. `Task` runs in the
+  background by default, so `PostToolUse` fires at launch with no report and records nothing.
+  The return is recorded on `SubagentStop`, which carries the report but names the task only
+  by its description, so the adapter reads the target and prompt from the parent session's
+  transcript. `SubagentStop` output reaches no conductor, so a non-allow outcome there is
+  logged and reported by `audit`.
 - **Devin** takes the target from `tool_input.profile` and the prompt from
   `tool_input.prompt`; when either is absent the dispatch is treated as unmarked and
   logged, so `audit` reports it. A strip writes `hookSpecificOutput.updatedInput:
