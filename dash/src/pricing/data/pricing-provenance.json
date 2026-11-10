@@ -10,5 +10,9 @@
   "claude-opus-4": {
     "source": "LiteLLM/Anthropic official — https://platform.claude.com/docs/en/about-claude/pricing",
     "retrieved": "2026-10-01"
+  },
+  "MiniMax-M3.1-Flash": {
+    "source": "https://platform.minimax.io/docs/guides/pricing",
+    "retrieved": "2026-11-09"
   }
 }
