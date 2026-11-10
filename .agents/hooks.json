@@ -1,0 +1,14 @@
+{
+  "codegraph-index": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/scripts/codegraph-session-index.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -16,6 +16,11 @@
         "timeout": 5,
         "failClosed": true
       }
+    ],
+    "sessionStart": [
+      {
+        "command": "bash \"$(git rev-parse --show-toplevel)/scripts/codegraph-session-index.sh\""
+      }
     ]
   }
 }
