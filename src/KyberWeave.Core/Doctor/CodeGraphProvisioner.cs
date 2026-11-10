@@ -165,7 +165,23 @@ public static class CodeGraphProvisioner
         // a concurrent run may have created the index while this one waited, and re-running init over an
         // existing directory would be the wrong verb. Both run from the root so the index lands there.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
-        return VerbCheck(RunChild(root, verb, options, executor, subject: "."), options, IndexCheckId, ProvisionFlag);
+        return VerbCheck(PrepareIndex(root, verb, options, executor), options, IndexCheckId, ProvisionFlag);
+    }
+
+    /// <summary>
+    ///     Runs the chosen verb, then <c>codegraph init</c> if CodeGraph says this folder was never set up.
+    /// </summary>
+    /// <remarks>
+    ///     The folder's presence does not prove an index exists: a repository can commit
+    ///     <c>.codegraph/.gitignore</c>, so a new worktree has the folder and no index. <c>sync</c> and
+    ///     <c>index</c> both refuse that, and only <c>init</c> can fix it.
+    /// </remarks>
+    private static ChildRun PrepareIndex(string root, string verb, DoctorOptions options, IProcessExecutor executor)
+    {
+        ChildRun run = RunChild(root, verb, options, executor, subject: ".");
+        return run.NotInitialised && verb != InitVerb
+            ? RunChild(root, InitVerb, options, executor, subject: ".")
+            : run;
     }
 
     /// <summary>
@@ -206,7 +222,7 @@ public static class CodeGraphProvisioner
 
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
-        ChildRun prepared = RunChild(root, verb, options, executor, subject: ".");
+        ChildRun prepared = PrepareIndex(root, verb, options, executor);
         if (!prepared.Ok)
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");

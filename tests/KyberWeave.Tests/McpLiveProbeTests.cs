@@ -182,6 +182,38 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// A <c>.codegraph/</c> folder that was never initialised, such as one holding only a committed <c>.gitignore</c>,
+    /// is set up with <c>codegraph init</c> rather than failing the run.
+    /// </summary>
+    [Theory]
+    [InlineData(DoctorMode.Ensure)]
+    [InlineData(DoctorMode.Provision)]
+    public void FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root)
+                : DoctorHarness.Ok("1.5.0"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            mode,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        Assert.True(DoctorHarness.CheckNamed(report, "codegraph.index").Passed);
+        Assert.Single(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("index", StringComparer.Ordinal));
+    }
+
+    /// <summary>
     /// A <c>.codegraph/</c> folder that was never initialised makes <c>sync</c> and <c>index</c> both refuse. The fix the
     /// doctor prints must be the one that works, <c>codegraph init .</c>, not the command that just failed.
     /// </summary>
