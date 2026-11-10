@@ -56,7 +56,7 @@
   <ItemGroup>
     <!-- Compile-time only, as in KyberWeave.Core: see the note there. -->
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
-    <PackageReference Include="Markdig" Version="1.5.0" />
+    <PackageReference Include="Markdig" Version="1.5.1" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
