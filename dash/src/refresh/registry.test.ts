@@ -142,6 +142,7 @@ describe('HarnessSourceRegistry', () => {
       'codex-unclassified',
       'commandcode',
       'copilot-cli',
+      'droid',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
       'pi',
