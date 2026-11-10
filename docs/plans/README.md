@@ -57,7 +57,11 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+A plan is listed here while it is open and leaves when it is archived.
+
+| Plan | Status | Mode | Scale |
+|---|---|---|---|
+| [Opt-in replacement of GitHub Copilot's top-level system prompt in VS Code](copilot-system-prompt-override.md) | Ready | test-first | extends-component: KyberSquad |
 
 ## Archived Plans
 
