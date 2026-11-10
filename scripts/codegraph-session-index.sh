@@ -15,28 +15,38 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || exit 0
 # empty .codegraph/ behind, and that must not stop the next session from building it.
 [ -f "$root/.codegraph/codegraph.db" ] && exit 0
 command -v codegraph >/dev/null 2>&1 || exit 0
-# One build per checkout at a time. The lock directory holds the pid of the build that owns it; a lock
-# whose build is no longer alive (killed, reboot) is reaped at once, and one with no pid file is
-# reaped after 15 minutes.
-lock="${TMPDIR:-/tmp}/kw-codegraph-index-$(printf '%s' "$root" | cksum | cut -d' ' -f1).lock"
+# One build per checkout at a time. The lock directory is named from the whole root path (no hash to
+# collide) and holds the pid of the build that owns it. A lock is reaped when its pid is not a live
+# process, when it is older than 15 minutes whatever the pid says (a recycled pid must not block
+# forever), or when it has no readable pid for two minutes.
+key="${root//[!A-Za-z0-9]/_}"
+[ "${#key}" -gt 200 ] && key="${key:$((${#key} - 200))}"
+lock="${TMPDIR:-/tmp}/kw-codegraph-index-${key}.lock"
 if ! mkdir "$lock" 2>/dev/null; then
   owner="$(cat "$lock/pid" 2>/dev/null)"
-  if [ -n "$owner" ]; then
-    kill -0 "$owner" 2>/dev/null && exit 0
-  elif [ -z "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then
-    exit 0
-  fi
+  case "$owner" in
+    '' | *[!0-9]*) [ -z "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] && exit 0 ;;
+    *) if [ -z "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then
+         kill -0 "$owner" 2>/dev/null && exit 0
+       fi ;;
+  esac
   rm -rf "$lock" 2>/dev/null
   mkdir "$lock" 2>/dev/null || exit 0
 fi
-log="${HOME:-/tmp}/.cache/kyber-weave/codegraph-index.log"
-mkdir -p "$(dirname "$log")" 2>/dev/null
-# Keep the log small: start over once it passes 100 KB.
-if [ -f "$log" ] && [ "$(wc -c <"$log" 2>/dev/null || echo 0)" -gt 102400 ]; then
-  : >"$log"
+# Claim the lock with this script's own pid at once; it is replaced by the build's pid below.
+printf '%s\n' "$$" >"$lock/pid" 2>/dev/null
+# The log lives in the user's cache directory only; with no HOME there is no log, never a /tmp path.
+log=/dev/null
+if [ -n "${HOME:-}" ] && mkdir -p "$HOME/.cache/kyber-weave" 2>/dev/null; then
+  log="$HOME/.cache/kyber-weave/codegraph-index.log"
+  [ -L "$log" ] && log=/dev/null
 fi
 (
   codegraph init "$root" >>"$log" 2>&1
+  # Keep the last 100 KB. Only the build holding the lock gets here, so nothing else is writing.
+  if [ "$log" != /dev/null ] && [ "$(wc -c <"$log" 2>/dev/null || echo 0)" -gt 102400 ]; then
+    tail -c 102400 "$log" >"$log.tmp" 2>/dev/null && mv "$log.tmp" "$log" 2>/dev/null
+  fi
   rm -rf "$lock" 2>/dev/null
 ) &
 printf '%s\n' "$!" >"$lock/pid" 2>/dev/null
