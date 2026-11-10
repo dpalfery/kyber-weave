@@ -319,7 +319,12 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (string.IsNullOrWhiteSpace(existing))
             return false;
 
-        (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SquadHookJsonBlock.SpliceContent(format, existing, preToolUse, postToolUse);
+        // Factory's global file also carries the SubagentStop group. Splicing without it would
+        // strip the registration the install wrote, so the refresh writes it again.
+        IReadOnlyList<JsonNode> subagentStop = format == SquadHookBlockFormat.Factory
+            ? [CreateMatcherGroup(null, ArbiterHookWiring.HookCommandLine(SquadTarget.Factory, SquadDeploymentScope.Global), timeoutSeconds)]
+            : [];
+        (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SquadHookJsonBlock.SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
         if (string.Equals(existing, spliced, StringComparison.Ordinal))
             return false;
 
@@ -427,18 +432,24 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         }
     }
 
-    private static JsonObject CreateMatcherGroup(string matcher, string commandLine, int timeoutSeconds) =>
-        new()
+    /// <summary>One matcher group holding a single command hook; a null matcher omits the key.</summary>
+    private static JsonObject CreateMatcherGroup(string? matcher, string commandLine, int timeoutSeconds)
+    {
+        JsonObject group = new();
+        if (matcher is not null)
         {
-            ["matcher"] = matcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = commandLine,
-                    ["timeout"] = timeoutSeconds,
-                })
-        };
+            group["matcher"] = matcher;
+        }
+
+        group["hooks"] = new JsonArray(
+            new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = commandLine,
+                ["timeout"] = timeoutSeconds,
+            });
+        return group;
+    }
 
     /// <summary>
     /// Names the project's leftover MCP server keys once, in the same log the refresh already writes

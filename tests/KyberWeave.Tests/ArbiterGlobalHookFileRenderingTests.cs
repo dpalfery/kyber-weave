@@ -95,6 +95,52 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CreateInstallAndUninstall_GlobalFactory_OwnsSubagentStopAndKeepsTheUsersOwn()
+    {
+        using TempDirectory fixture = new();
+        string home = Path.Combine(fixture.Path, "home");
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        SquadStateStore store = Store(fixture.Path);
+
+        string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        File.WriteAllText(hookPath, """
+            {"SubagentStop": [{"hooks": [{"type": "command", "command": "user-own-stop-notifier"}]}]}
+            """);
+
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+            home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            globalRoots: globalRoots,
+            blocks: [CreateBlock(SquadTarget.Factory, SquadHookBlockFormat.Factory)]));
+
+        JsonObject installed = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(hookPath)));
+        JsonArray stop = Assert.IsType<JsonArray>(installed["SubagentStop"]);
+        Assert.Equal(2, stop.Count);
+        JsonObject squadStop = Assert.IsType<JsonObject>(stop[1]);
+        Assert.Equal(["hooks"], squadStop.Select(property => property.Key).ToArray());
+        Assert.Contains("kyber-weave-arbiter hook --harness factory --scope global", squadStop.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", stop.ToJsonString(), StringComparison.Ordinal);
+
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+            home,
+            SquadDeploymentScope.Global,
+            receipt,
+            globalRoots));
+
+        string remaining = File.ReadAllText(hookPath);
+        Assert.DoesNotContain("kyber-weave-arbiter hook --harness factory", remaining, StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", remaining, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Before the global path was fixed, the installer recorded the Antigravity block at
     /// <c>.agents/hooks.json</c> beneath the global root, a file Antigravity never reads. That
@@ -180,7 +226,10 @@ public sealed class ArbiterGlobalHookFileRenderingTests
                 [
                     new SquadRenderedBlockEntry(
                         "PreToolUse",
-                        MatcherGroup($"kyber-weave-arbiter hook --harness {SquadTargetCatalog.GetToken(target)} --scope global", "probe-1"))
+                        MatcherGroup($"kyber-weave-arbiter hook --harness {SquadTargetCatalog.GetToken(target)} --scope global", "probe-1")),
+                    new SquadRenderedBlockEntry(
+                        "SubagentStop",
+                        MatcherGroup($"kyber-weave-arbiter hook --harness {SquadTargetCatalog.GetToken(target)} --scope global", matcher: null)),
                 ]),
             SquadHookBlockFormat.Devin => new SquadRenderedBlock(
                 SquadTargetCatalog.GetToken(target),
@@ -203,18 +252,24 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             ["failClosed"] = true,
         };
 
-    private static JsonObject MatcherGroup(string command, string matcher = "Task") =>
-        new()
+    /// <summary>One matcher group; a null <paramref name="matcher"/> omits the key, as Factory's SubagentStop group does.</summary>
+    private static JsonObject MatcherGroup(string command, string? matcher = "Task")
+    {
+        JsonObject group = new();
+        if (matcher is not null)
         {
-            ["matcher"] = matcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = command,
-                    ["timeout"] = 5,
-                })
-        };
+            group["matcher"] = matcher;
+        }
+
+        group["hooks"] = new JsonArray(
+            new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+                ["timeout"] = 5,
+            });
+        return group;
+    }
 
     private static SquadStateStore Store(string applicationData) =>
         new(new FakeSquadUserPaths(applicationData));

@@ -124,6 +124,7 @@ public sealed record SquadRenderResult(
 /// <c>preToolUse</c>/<c>PreToolUse</c> for the pre container and
 /// <c>postToolUse</c>/<c>PostToolUse</c> for the post container — because Cursor's
 /// containers are camelCase while every other shared-file format's are PascalCase.
+/// <c>SubagentStop</c> is the third container, and only Factory's hook file holds it.
 /// Anything else is a renderer bug and the deployment plan refuses it.
 /// </remarks>
 public sealed record SquadRenderedBlockEntry(string Container, JsonNode Entry);

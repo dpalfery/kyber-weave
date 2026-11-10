@@ -586,7 +586,14 @@ internal sealed class SquadHarnessRenderContext
     /// scope the file sits directly beneath the harness's global root, so the harness's project
     /// directory (<c>.codex/</c>, <c>.agents/</c> and so on) is dropped from the path.
     /// </summary>
-    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher)
+    /// <param name="format">The shared hook-file shape the block is spliced into.</param>
+    /// <param name="matcher">The tool-name matcher for the <c>PreToolUse</c> and <c>PostToolUse</c> groups.</param>
+    /// <param name="includeSubagentStop">
+    /// Adds a <c>SubagentStop</c> entry: a matcher-less group with the same command and timeout.
+    /// Only Factory asks for it, because only Factory fires a hook when a background subagent
+    /// stops.
+    /// </param>
+    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher, bool includeSubagentStop = false)
     {
         if (EnabledArbiter is not { } arbiter)
         {
@@ -596,14 +603,19 @@ internal sealed class SquadHarnessRenderContext
         string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
         string projectPath = SquadHookJsonBlock.RelativePath(format);
         string relativePath = Scope == SquadDeploymentScope.Global ? Path.GetFileName(projectPath) : projectPath;
-        Blocks.Add(new SquadRenderedBlock(
-            Token,
-            relativePath,
-            format,
-            [
-                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
-                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
-            ]));
+        List<SquadRenderedBlockEntry> entries =
+        [
+            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
+            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
+        ];
+        if (includeSubagentStop)
+        {
+            entries.Add(new SquadRenderedBlockEntry(
+                "SubagentStop",
+                MatcherGroup(matcher: null, commandLine, arbiter.HookTimeoutSeconds)));
+        }
+
+        Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));
     }
 
     /// <summary>
@@ -673,18 +685,28 @@ internal sealed class SquadHarnessRenderContext
     public SquadRenderResult ToResult(bool emptyBlocks = false) =>
         new(true, Files, Degradations, Warnings, [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
 
-    private static JsonObject MatcherGroup(string matcher, string commandLine, int timeoutSeconds) =>
-        new()
+    /// <summary>
+    /// One matcher group holding a single command hook. A null <paramref name="matcher"/> omits the
+    /// key, which is how Factory's <c>SubagentStop</c> group runs on every stop rather than on a
+    /// named tool.
+    /// </summary>
+    private static JsonObject MatcherGroup(string? matcher, string commandLine, int timeoutSeconds)
+    {
+        JsonObject group = new();
+        if (matcher is not null)
         {
-            ["matcher"] = matcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = commandLine,
-                    ["timeout"] = timeoutSeconds
-                })
-        };
+            group["matcher"] = matcher;
+        }
+
+        group["hooks"] = new JsonArray(
+            new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = commandLine,
+                ["timeout"] = timeoutSeconds
+            });
+        return group;
+    }
 
     /// <summary>
     /// Rejects a canonical name that would not stay one portable path segment: blank, carrying a
