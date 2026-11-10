@@ -100,7 +100,7 @@ export const droidReader: ContentReader = {
 
         if (role === 'assistant') {
           if (pending !== undefined) yield finish(pending, sessionId)
-          const id = typeof entry['id'] === 'string' ? entry['id'] : `msg-${emittedCalls}`
+          const id = typeof entry['id'] === 'string' && entry['id'] !== '' ? entry['id'] : `msg-${emittedCalls}`
           let emits = false
           pending = { nativeRecordId: id, parts: [], toolCalls: [], toolResults: [] }
           let order = 0

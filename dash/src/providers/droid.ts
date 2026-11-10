@@ -209,7 +209,7 @@ function createParser(
             const callMs = parseMs(entry.timestamp)
             const interval = callMs !== undefined && boundaryMs !== undefined ? callMs - boundaryMs : undefined
             assistantCalls.push({
-              id: entry.id ?? `msg-${assistantCalls.length}`,
+              id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `msg-${assistantCalls.length}`,
               timestamp: entry.timestamp ?? '',
               ...(interval !== undefined && interval >= 0 ? { activeDurationMs: interval } : {}),
               tools: [...pendingTools],
