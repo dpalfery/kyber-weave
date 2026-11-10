@@ -159,17 +159,19 @@ rules:
   - id: KW-ARB-PLANNER-001
     trigger: delegate.planner
     question: Is this a recognised planner invocation?
-    answers: [recognised, malformed]
+    answers: [recognised, malformed, plan-file-invalid, plan-file-outside-planning-dirs]
     decide:
+      - when: { fact: delegation.plan-file-rejected, exists: true }
+        answer: plan-file-invalid
       - when: { fact: delegation.markers, exists: false }
         answer: malformed
       - when: { fact: delegation.plan-file, exists: false }
-        answer: malformed
+        answer: recognised
       - when: { fact: delegation.plan-file, matches: config.planning-dirs }
         answer: recognised
       - when: { fact: delegation.plan-file, exists: true }
-        answer: malformed
-    effects: { recognised: allow, malformed: escalate }
+        answer: plan-file-outside-planning-dirs
+    effects: { recognised: allow, malformed: escalate, plan-file-invalid: escalate, plan-file-outside-planning-dirs: escalate }
 
   - id: KW-ARB-PLANNER-DIFF-001
     trigger: delegate.planner.returned

@@ -142,6 +142,7 @@ describe('HarnessSourceRegistry', () => {
       'codex-unclassified',
       'commandcode',
       'copilot-cli',
+      'droid',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
       'pi',
@@ -472,5 +473,11 @@ describe('parserContractVersionFor — Antigravity and Copilot contracts (D12)',
     for (const providerName of ['opencode', 'cline-cli', 'codewhale', 'openclaude', 'dsh']) {
       expect(parserContractVersionFor({ providerName, harnessId: providerName })).toBe('2')
     }
+  })
+})
+
+describe('droid parser contract', () => {
+  it('assigns the droid harness parser contract version 2', () => {
+    expect(parserContractVersionFor({ providerName: 'droid', harnessId: 'droid' })).toBe('2')
   })
 })

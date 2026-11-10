@@ -69,12 +69,12 @@ public sealed class CopilotRendererTests
     }
 
     /// <summary>
-    /// <c>architect-copilot</c> may allow execute on Copilot only. That envelope must not
-    /// widen the shared <c>architect</c> profile, which withholds the shell (<c>deny</c>).
+    /// <c>architect-copilot</c> is the Copilot-only envelope. It must stay equal to the shared
+    /// <c>architect</c> profile, which now grants the shell (<c>allow</c>) on every target.
     /// </summary>
     [Theory]
     [InlineData("architect")]
-    public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
+    public void ArchitectCopilotMatchesSharedShellGrant(string agentName)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == agentName);
@@ -85,7 +85,7 @@ public sealed class CopilotRendererTests
             SquadPermissionDecision.Allow,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
         Assert.Equal(
-            SquadPermissionDecision.Deny,
+            SquadPermissionDecision.Allow,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["process.execute"]);
         Assert.Equal(
             SquadPermissionDecision.Allow,
