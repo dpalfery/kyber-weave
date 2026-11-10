@@ -135,9 +135,11 @@ public sealed class SquadDeveloperAgentShellContractTests
                 && permission.Children.ContainsKey(bash);
             Assert.True(allowsShell == rendersBash, $"'{agent.Name}': profile allows shell {allowsShell}, renders bash {rendersBash}.");
 
-            SquadDegradationRecord? record = result.Degradations.SingleOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
-            Assert.True(record is not null, $"'{agent.Name}' has no permission-not-expressible record.");
+            SquadDegradationRecord[] records = result.Degradations
+                .Where(d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible")
+                .ToArray();
+            Assert.True(records.Length == 1, $"'{agent.Name}' has {records.Length} permission-not-expressible records; expected 1.");
+            SquadDegradationRecord record = records[0];
             Assert.Equal(!allowsShell, record.Details?.Contains(ProcessExecute, StringComparison.Ordinal));
         }
     }
@@ -174,7 +176,7 @@ public sealed class SquadDeveloperAgentShellContractTests
 
     private static void ShellToolNotDisabled(string text, string agent)
     {
-        int bodyStart = text.IndexOf("developer_instructions", StringComparison.Ordinal);
+        int bodyStart = text.IndexOf("\ndeveloper_instructions", StringComparison.Ordinal);
         string header = bodyStart < 0 ? text : text[..bodyStart];
         string[] featureKeys = header
             .Split('\n')
