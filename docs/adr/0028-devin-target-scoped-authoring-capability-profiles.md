@@ -4,7 +4,7 @@ title: Devin Target-Scoped Capability Profiles for Headless Authoring Roles, wit
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 component: KyberSquad
 ---
 
@@ -37,6 +37,14 @@ execute grant — any client of that server may call the tools. A shell is not a
 not permission to implement. `architect-devin` and `product-planning-devin` still grant
 `process.execute: allow` on Devin so those roles can initialise a missing destination before
 editing; `architect-copilot` is unchanged.
+
+Amended 2026-11-09: the shared `architect` profile now holds `process.execute: allow` on every
+target, so the architect can run `kyber-weave docs validate . --merge-ready`, `kyber-weave docs
+drift .` and `codegraph explore "…"` in a run's worktree, where the MCP servers (bound to the
+canonical checkout) cannot see its plan. The planning-only boundary is unchanged: writes stay
+scoped to the plan, spec and todo directories and the Arbiter classification is untouched.
+`architect-devin` and `architect-copilot` now equal the shared profile. The "deny" statements
+above describe the position before this amendment.
 
 ## Context
 

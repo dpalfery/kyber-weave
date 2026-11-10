@@ -274,7 +274,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     }
 
     [Fact]
-    public void SharedArchitectProfileWithholdsProcessExecuteWithoutAskOrAllow()
+    public void SharedArchitectProfileGrantsProcessExecuteForWorktreeGatesOnly()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadCapabilityProfile architect = source.CapabilityProfiles.Profiles["architect"];
@@ -282,9 +282,10 @@ public sealed class McpDocsGateToolsTests : IDisposable
         Assert.True(
             architect.Permissions.TryGetValue("process.execute", out SquadPermissionDecision decision),
             "The shared architect profile must declare process.execute.");
-        Assert.Equal(SquadPermissionDecision.Deny, decision);
-        Assert.NotEqual(SquadPermissionDecision.Ask, decision);
-        Assert.NotEqual(SquadPermissionDecision.Allow, decision);
+        // The shell exists so the architect can run the CLI gates and the CodeGraph CLI in a
+        // worktree; it is not permission to implement, so writes stay instruction-scoped and
+        // the Arbiter keeps the role planning-only. ask would narrow to deny on some targets.
+        Assert.Equal(SquadPermissionDecision.Allow, decision);
     }
 
     [Fact]
