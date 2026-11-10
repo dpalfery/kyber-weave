@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -874,13 +874,27 @@ derivation calls — and it **splits by what each source can measure**; it never
 
 | The session's figure | Read from | Why |
 |---|---|---|
-| turn count, timeline turns, request roots, per-turn model, tool invocations, duration, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism and alone observes the turn boundary, the tools and the timing |
+| turn count, timeline turns, request roots, per-turn model, context turns | the **plugin rows** | the plugin is the PRIMARY mechanism and alone observes the turn boundary |
+| tool invocations | the **file rows' tool records** when the transcript has any tool record for the session; otherwise the **plugin rows** | the plugin's tool spans cannot tell two calls of one session apart, because Factory's hook payload carries no call id ([ADR 0055](../adr/0055-factory-capture-is-a-hooks-plugin-pipeline.md), amended 2026-11-09), so the transcript is the tool source wherever it has one |
+| duration | the **file rows' durations**, summed | the transcript carries each call's timestamp and the boundary it is measured from; the plugin's spans start and end at the same instant, so they measure no duration |
 | token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters, and its counters are a session-level total split evenly across assistant calls — a session fact, never a turn fact |
 | cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
 
+The split is **total**: every Factory record lands in exactly one of three buckets, and
+`splitDroidSessionRecords` is the one place that assigns them.
+
+- **Turn records** — the plugin's records, and any Factory record of neither source, so a record
+  is never dropped.
+- **Counter records** — the file source's records, identified by the `codeburn/` source prefix.
+- **File tool records** — the counter records that are tool invocations. They also stay in the
+  counter records; tool records carry no tokens, so the token and cost sums do not change.
+
 The file row in a paired session is a **counter carrier**: it contributes its counters and its
-cost and **nothing else**. It is not a turn, not a timeline entry, not a request root, not a tool
-invocation, and its duration is not added to the session's duration.
+cost, and, for a session whose transcript has tool calls, its tool invocations and its duration.
+It is not a turn, not a timeline entry and not a request root. A paired session's tool source is
+one source only: the file tool records when there are any, otherwise the plugin's tool records.
+Its duration is the sum of the file records' durations, which the active-duration rule in
+[the Factory file source](telemetry-inventory.md#what-the-file-source-measures) defines.
 
 Two more figures follow the same split. The **cost** is one figure over the union of the turn
 records and the counter records — disjoint sets, so nothing is priced twice — and the cost-basis
@@ -1305,7 +1319,8 @@ OpenCode sessions are not in this case.
 
 The one harness-scoped exception to that derivation is Factory's: a session both capture sources
 observed is **split** between them — the plugin rows are its turns, the file rows are its
-counters — and the rule that splits it is in
+counters and, where the transcript has them, its tool calls and duration — and the rule that splits
+it is in
 [the Factory source-precedence rule](#the-factory-source-precedence-rule).
 
 ## Normalization layer
