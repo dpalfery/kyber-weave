@@ -605,6 +605,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
+                if (IsAllowedCopilotPromptInclude(path))
+                {
+                    Assert.Equal(
+                        "CopilotPrompt.system-prompt.yaml",
+                        element.Attribute("LogicalName")?.Value);
+                    continue;
+                }
+
                 Assert.DoesNotContain("products", path, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("kyber-squad", path, StringComparison.OrdinalIgnoreCase);
             }
@@ -696,6 +704,29 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             "..\\..\\products\\kyber-squad\\agents\\conductor.md", "Arbiter.Roster.conductor.md"));
         Assert.True(IsAllowedArbiterEmbeddedInclude(
             "..\\..\\products\\kyber-squad\\skills\\code-review\\references\\lenses\\scope.md", "Arbiter.Lens.scope.md"));
+    }
+
+    /// <summary>
+    /// Core may embed exactly one file from <c>products/kyber-squad/copilot/system-prompt.yaml</c>: the
+    /// opt-in Copilot system-prompt text, which the loop then requires to carry the
+    /// <c>CopilotPrompt.system-prompt.yaml</c> logical name. Its path is a single fixed file, not a folder
+    /// the rule opens, so no sibling or nested product path matches.
+    /// </summary>
+    private static bool IsAllowedCopilotPromptInclude(string path)
+    {
+        string normalized = path.Replace('\\', '/');
+        return normalized.EndsWith("products/kyber-squad/copilot/system-prompt.yaml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CopilotPromptInclude_AllowsOnlyTheExactSystemPromptFile()
+    {
+        Assert.True(IsAllowedCopilotPromptInclude("..\\..\\products\\kyber-squad\\copilot\\system-prompt.yaml"));
+        Assert.True(IsAllowedCopilotPromptInclude("../../products/kyber-squad/copilot/system-prompt.yaml"));
+        Assert.False(IsAllowedCopilotPromptInclude("../../products/kyber-squad/copilot/other.yaml"));
+        Assert.False(IsAllowedCopilotPromptInclude("../../products/kyber-squad/copilot/nested/system-prompt.yaml"));
+        Assert.False(IsAllowedCopilotPromptInclude("../../products/kyber-squad/standards/csharp/gates.yml"));
+        Assert.False(IsAllowedCopilotPromptInclude("../../products/kyber-squad/copilot/system-prompt.yaml.bak"));
     }
 
     /// <summary>

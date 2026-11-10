@@ -209,6 +209,7 @@ internal sealed class SelfUpdater : IDisposable
             // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
             ReconcileKyberDash(options, version, windows, false);
             RefreshArbiterHooks(options, version, windows);
+            RefreshCopilotPrompt();
             return new SelfUpdateOutcome(0, $"already on {version}");
         }
 
@@ -380,6 +381,7 @@ internal sealed class SelfUpdater : IDisposable
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         ReconcileKyberDash(options, version, windows, true);
         RefreshArbiterHooks(options, version, windows);
+        RefreshCopilotPrompt();
         return new SelfUpdateOutcome(0, string.Empty);
     }
 
@@ -623,6 +625,35 @@ internal sealed class SelfUpdater : IDisposable
 
         UpdateCapturePlugin(windows);
         UpdateFactoryCapturePlugin(windows);
+    }
+
+    /// <summary>
+    /// Rewrites the installed Copilot system-prompt file to the text this binary ships, when the person installed it.
+    /// </summary>
+    /// <remarks>
+    /// An absent file is left absent. Any failure is a warning: the binaries are already committed, and the update's exit
+    /// code never depends on the prompt file.
+    /// </remarks>
+    private void RefreshCopilotPrompt()
+    {
+        string? home = _readEnvironment("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = _readEnvironment("USERPROFILE");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home))
+            return;
+
+        try
+        {
+            bool rewritten = new CopilotPromptRefresher(home, message => _log($"warning: {message}")).Refresh();
+            if (rewritten)
+                _log("refreshed the installed Copilot system prompt");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            _log($"warning: the Copilot system prompt was not refreshed: {ex.Message}");
+        }
     }
 
     /// <summary>
