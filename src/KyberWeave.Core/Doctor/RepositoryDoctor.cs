@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.CopilotPrompt;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
@@ -74,6 +76,11 @@ public static class RepositoryDoctor
         if (!stops)
             checks = [.. checks.Select(AsWarning)];
 
+        // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
+        // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
+        if (!string.IsNullOrWhiteSpace(home))
+            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform())];
+
         int exitCode = codegraph.BinaryMissing
             ? 3
             : checks.Any(check => !check.Passed) ? 1 : 0;
@@ -93,6 +100,12 @@ public static class RepositoryDoctor
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot);
         return result.Config?.StopsOnToolFailure ?? true;
     }
+
+    /// <summary>The operating system this process runs on, in the terms the VS Code layout is keyed by.</summary>
+    private static OSPlatform CurrentPlatform() =>
+        OperatingSystem.IsWindows() ? OSPlatform.Windows
+        : OperatingSystem.IsMacOS() ? OSPlatform.OSX
+        : OSPlatform.Linux;
 
     /// <summary>Turns a failed check into a passing one whose reason says it is a warning, for a repository that opted out.</summary>
     private static DoctorCheck AsWarning(DoctorCheck check) =>

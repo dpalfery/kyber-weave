@@ -38,10 +38,8 @@ public static class VsCodeUserSettingsPaths
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose layout applies.</param>
     /// <returns>The absolute path <c>&lt;user-data&gt;/User/settings.json</c>.</returns>
-    public static string SettingsFile(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform)
-    {
-        throw new NotImplementedException();
-    }
+    public static string SettingsFile(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform) =>
+        Path.Combine(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform), "User", "settings.json");
 
     /// <summary>
     /// Returns the user-data directory that one VS Code build uses on the given platform.
@@ -53,7 +51,20 @@ public static class VsCodeUserSettingsPaths
     /// <returns>The absolute user-data directory for the build.</returns>
     public static string UserDataDirectory(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform)
     {
-        throw new NotImplementedException();
+        string build = flavour == VsCodeFlavour.Insiders ? "Code - Insiders" : "Code";
+        if (platform == OSPlatform.OSX)
+            return Path.Combine(homeDirectory, "Library", "Application Support", build);
+
+        if (platform == OSPlatform.Windows)
+        {
+            // APPDATA is the roaming directory VS Code uses. Without it, the conventional location under the home directory.
+            string roaming = string.IsNullOrWhiteSpace(appDataDirectory)
+                ? Path.Combine(homeDirectory, "AppData", "Roaming")
+                : appDataDirectory;
+            return Path.Combine(roaming, build);
+        }
+
+        return Path.Combine(homeDirectory, ".config", build);
     }
 
     /// <summary>
@@ -65,6 +76,13 @@ public static class VsCodeUserSettingsPaths
     /// <returns>The detected builds, in a stable order. Empty when neither build is installed.</returns>
     public static IReadOnlyList<VsCodeFlavour> Detect(string homeDirectory, string? appDataDirectory, OSPlatform platform)
     {
-        throw new NotImplementedException();
+        List<VsCodeFlavour> detected = [];
+        foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
+        {
+            if (Directory.Exists(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform)))
+                detected.Add(flavour);
+        }
+
+        return detected;
     }
 }

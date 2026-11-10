@@ -211,6 +211,23 @@ app.Configure(config =>
             .WithExample("squad", "run", "claude")
             .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
 
+        squad.AddBranch("copilot-prompt", copilotPrompt =>
+        {
+            copilotPrompt.SetDescription("Opt in to replacing GitHub Copilot's top-level system prompt in VS Code. Off until installed.");
+
+            copilotPrompt.AddCommand<CopilotPromptInstallCommand>("install")
+                .WithDescription("Write the Kyber-Weave Copilot prompt and point VS Code's override setting at it. Affects every Copilot chat on this machine.")
+                .WithExample("squad", "copilot-prompt", "install", "--yes");
+
+            copilotPrompt.AddCommand<CopilotPromptUninstallCommand>("uninstall")
+                .WithDescription("Remove the override entry this install wrote and delete the prompt file. Leaves any other entry alone.")
+                .WithExample("squad", "copilot-prompt", "uninstall", "--yes");
+
+            copilotPrompt.AddCommand<CopilotPromptStatusCommand>("status")
+                .WithDescription("Show whether the prompt file is installed and whether each VS Code build's override entry points at it.")
+                .WithExample("squad", "copilot-prompt", "status");
+        });
+
         squad.AddBranch("instance", instance =>
         {
             instance.SetDescription("Manage harness preset instance folders.");
