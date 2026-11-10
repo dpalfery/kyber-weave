@@ -21,8 +21,9 @@ code-refs:
 
 Accepted, 2026-11-10. The owner approved the decision with the words "Yes, machine-wide".
 
-The live check (a signed-in VS Code chat, and HydraFusion Cascade coverage) is not yet run.
-This record states the decision. It does not claim the live result.
+A live check on VS Code Insiders 1.146.0-insider, run on 2026-11-10 with the owner present, passed
+for a signed-in chat, prompt routing and the host log. It did not observe HydraFusion Cascade.
+The results are in the [runbook](../kyber-squad/copilot-prompt-runbook.md#live-verification-status).
 
 ## Context
 
@@ -91,8 +92,12 @@ written. A `*` entry that names another file is refused and never overwritten. D
   retest. That retest is documented in the Kyber-Squad onboarding guide.
 - Routing is an instruction to the model, and a model can ignore it. The `preToolUse` hook and the
   skill start therefore stay as they are.
-- HydraFusion Cascade coverage is not established. Whether Cascade's repair phase carries the custom
-  prompt is recorded only by the live check, which is pending.
+- HydraFusion Cascade coverage is not established. The live check ran Auto sessions that stayed on the
+  balance tier and never engaged Cascade, so it is unknown whether Cascade's repair phase carries the
+  custom prompt. It stays a stated limit.
+- The released Kyber-Squad installs the conductor as an agent only, so the prompt's conductor skill
+  is not present until the skill-start change (PR 579) ships. The model dispatches the conductor agent
+  in the meantime.
 - The state is two files with no receipt. Deleting the prompt file by hand without removing the
   `*` entry leaves VS Code pointing at a missing file, which falls back silently to Copilot's default
   prompt. Doctor is the only detector.

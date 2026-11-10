@@ -207,6 +207,20 @@ Run before approval by the conductor on VS Code Insiders 1.146.0-insider, with a
 
 **Conclusion:** user settings only. A project-only value forwards as `{}`, which matches the source analysis.
 
+## Live verification
+
+T4 ran on 2026-11-10 with the owner present, on VS Code Insiders 1.146.0-insider, a throwaway user-data-dir and a scratch `HOME`, using a branch build of the CLI. The owner was signed in to GitHub. The macOS keychain prompt for the throwaway profile was denied, and sign-in still worked, so the keychain denial did not block V1.
+
+- **Setup.** `squad copilot-prompt install --flavour insiders --yes` exited `0` and wrote the prompt file and the `*` entry. The window forwarded the value to `agent-host-config.json`.
+- **V1, full chat (pass).** In the Kyber-Weave repository on Auto, the model identified as the Kyber-Weave-configured assistant, loaded the `task-gate` skill, ran a shell command (`echo SHELL-OK`), found deferred GitHub MCP tools through `tool_search_tool`, and gave a file link. The host log is `<user-data>/logs/<timestamp>/agenthost.log`, which confirms the file name the doctor matches. Across five sessions it showed `Resolved system message: mode=replace (content length 1648)` every time. `kyber-weave doctor --check` passed `copilot.prompt.insiders.setting`, `.file` and `.log`.
+- **V2, routing (pass).** In the Kyber-Weave repository, a cross-cutting request led the model to read `.kyber-weave/kyber-weave.yml` and start with the conductor: it dispatched the conductor agent with the `task` tool, then architect. In a plain repository without that file, the model checked for `AGENTS.md`, `.github/copilot-instructions.md` and `.kyber-weave/kyber-weave.yml`, found none, and acted as a general assistant with no conductor routing. `hook.start` and `hook.end` events fired in every session.
+- **V3, HydraFusion Cascade (not observed).** The Auto session stayed on Auto's default `balance` tier (model `gpt-6-luna`) and never engaged the Fusion tier. No `session.fusion_resolved` event appeared, so the `repair` phase was not recorded. Cascade coverage stays a stated limit.
+- **Cleanup.** `uninstall --flavour insiders --yes` exited `0`, removed the `*` entry and deleted the prompt file. It leaves an empty `"chat.agentHost.copilot.modelCapabilityOverrides": {}` object in `settings.json`, which is harmless and is documented. The owner's real VS Code settings and `~/.copilot` were not touched; none of them references the scratch path.
+
+**Finding, a known interaction and not a defect of this change.** The released Kyber-Squad (v0.1.8-rc.24) installs the conductor as an agent only, not as a skill. The prompt's "load the `conductor` skill" instruction therefore had nothing to load, and the model fell back to dispatching the conductor agent. The skill-start change (PR 579) is the fix path. Until it ships, routing works through the conductor agent.
+
+**Acceptance.** V1 and V2 pass. V3 is recorded as not observed, which the plan permits. No V1 or V2 failure sends the plan back for rework.
+
 ## Risks
 
 - **VS Code changes or removes the setting.** It is labelled experimental, and its predecessor was removed in 1.144. Doctor reports the fallback; onboarding says to retest on each update.

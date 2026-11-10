@@ -24,19 +24,37 @@ machine-wide is in [ADR 0067](../adr/0067-copilot-system-prompt-override-is-mach
 
 ## Live verification status
 
-**Not yet verified.** A real signed-in VS Code chat has not been run with the override, so the
-following are unproven:
+Verified on 2026-11-10 with VS Code Insiders 1.146.0-insider, a throwaway user-data directory and a
+scratch home, using a branch build of the CLI. The owner was signed in to GitHub. The macOS keychain
+prompt for the throwaway profile was denied, and sign-in still worked.
 
-- That a new chat reports the Kyber-Weave identity and loads a skill, runs a shell, finds a
-  deferred tool through `tool_search_tool`, and opens a file link.
-- That a plain chat gets general help, and that a chat in a repository holding
-  `.kyber-weave/kyber-weave.yml` routes non-trivial work to the conductor.
-- Whether HydraFusion Cascade carries the custom prompt. Cascade is one fusion pattern under
-  Auto. Until a live run records it, Cascade coverage is unknown.
-- The exact name of the AgentHost log file. The name used below is a search pattern that matches
-  it. The live check confirms the name.
+- **Install.** `squad copilot-prompt install --flavour insiders --yes` wrote the prompt file and the
+  `*` entry. The window forwarded the value to `agent-host-config.json`.
+- **Full chat, in a Kyber-Weave repository (Auto).** The model identified itself as the
+  Kyber-Weave-configured assistant. It loaded the `task-gate` skill, ran a shell command, found
+  deferred GitHub MCP tools through `tool_search_tool`, and gave a file link. Across five sessions,
+  the host log showed `Resolved system message: mode=replace (content length 1648)` every time.
+- **Log file name.** The host log is `agenthost.log`, the name the doctor's `agenthost*.log` pattern
+  matches.
+- **Doctor.** `kyber-weave doctor --check` passed `copilot.prompt.insiders.setting`,
+  `copilot.prompt.insiders.file` and `copilot.prompt.insiders.log`.
+- **Routing, in a Kyber-Weave repository.** The model read `.kyber-weave/kyber-weave.yml` and
+  started with the conductor: it dispatched the conductor agent with the `task` tool, then architect.
+- **Routing, in a plain repository.** The model looked for `AGENTS.md`,
+  `.github/copilot-instructions.md` and `.kyber-weave/kyber-weave.yml`, found none, and acted as a
+  general assistant with no conductor routing.
+- **Hook events.** `hook.start` and `hook.end` events fired in every session.
+- **Uninstall.** It removed the `*` entry and deleted the prompt file, and exited `0`. It leaves an
+  empty `"chat.agentHost.copilot.modelCapabilityOverrides": {}` object in `settings.json`. That
+  object is harmless.
+- **HydraFusion Cascade: not observed.** The Auto session stayed on Auto's default `balance` tier and
+  never engaged the Fusion tier, so no `session.fusion_resolved` event appeared. Cascade coverage
+  is still an open limit, and no statement is made about the `repair` phase.
 
-Until the live check passes, treat the override as unproven on a real machine.
+**Known interaction.** The released Kyber-Squad (v0.1.8-rc.24) installs the conductor as an agent
+only, not as a skill. The prompt's "load the `conductor` skill" instruction therefore has nothing to
+load until the skill-start change (PR 579) ships. The model fell back to dispatching the conductor
+agent. This is an interaction with the released package, not a defect of this change.
 
 ## Doctor checks
 
@@ -102,7 +120,10 @@ accept a file VS Code rejects. The log check is the authority on real machines.
 - **Worker agents keep Copilot's prompt.** Only the top-level chat agent is replaced.
 - **Routing is an instruction.** The model can ignore the conductor branch of the prompt. The
   `preToolUse` hook and the skill start stay in place to catch that.
-- **HydraFusion Cascade coverage is unverified.** See the live verification status above.
+- **HydraFusion Cascade coverage is not established.** The live check did not observe Cascade, so
+  whether its `repair` phase carries the custom prompt is unknown. See the live verification status above.
+- **Conductor skill not yet shipped.** Until the skill-start change ships, the prompt's conductor
+  skill has nothing to load in the released package, and the model dispatches the conductor agent.
 - **Enterprise policy may block the setting.** This was not checked.
 - **Out of scope.** Copilot CLI, remote and SSH VS Code sessions, the Copilot Chat extension's own
   agent mode, and `toolDescriptions` overrides.

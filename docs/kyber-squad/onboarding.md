@@ -878,7 +878,9 @@ kyber-weave squad copilot-prompt uninstall --yes
   or it exits `2`.
 - `install` refuses a file that already has a `*` entry from somewhere else. It changes nothing and
   exits `1`. Remove that entry by hand, then run `install` again.
-- `uninstall` removes only the entry that names this prompt file, then deletes the prompt file.
+- `uninstall` removes only the entry that names this prompt file, then deletes the prompt file. It
+  leaves an empty `"chat.agentHost.copilot.modelCapabilityOverrides": {}` object in `settings.json`,
+  which is harmless.
 - `status` takes `--flavour` only. `--dry-run` and `--yes` have no effect on it.
 - Restart VS Code after `install` or `uninstall`. Chats already open keep the prompt they started with.
 - `kyber-weave update` refreshes the prompt file, but only if it is already installed. It never
@@ -902,8 +904,10 @@ VS Code may change or remove this setting in any release. After every VS Code up
 3. If the check fails or the setting is gone, run `kyber-weave squad copilot-prompt uninstall --yes`
    so no stale entry is left behind, and report it.
 
-Live verification of this feature in a signed-in VS Code chat is not yet complete. Until it is, treat
-the override as unproven on your machine.
+A live check on VS Code Insiders 1.146.0 passed: a signed-in chat reported the Kyber-Weave identity,
+loaded a skill, ran a shell command and found deferred tools, and the host log showed `mode=replace`
+in every session. The full results are in the [runbook](copilot-prompt-runbook.md#live-verification-status).
+HydraFusion Cascade was not observed, so its coverage is an open limit.
 
 ---
 
