@@ -166,17 +166,24 @@ public sealed class CopilotPromptProbeTests : IDisposable
         Assert.Equal(failures, lenient.Count(check => check.Reason?.StartsWith("warning:", StringComparison.Ordinal) == true));
     }
 
+    /// <summary>Tokens stand for host-absolute paths under the temp home: "{a}" and "{b}" are two different directories.</summary>
     [Theory]
-    [InlineData("/home/a", "/profile/b", "/home/a")]
-    [InlineData(null, "/profile/b", "/profile/b")]
-    [InlineData("", "/profile/b", "/profile/b")]
+    [InlineData("{a}", "{b}", "{a}")]
+    [InlineData(null, "{b}", "{b}")]
+    [InlineData("", "{b}", "{b}")]
+    [InlineData(" {a} ", null, "{a}")]
+    [InlineData("relative/home", "{b}", "{b}")]
+    [InlineData("relative/home", "relative/profile", null)]
     [InlineData("  ", null, null)]
     [InlineData(null, null, null)]
-    public void FromEnvironment_PrefersNonBlankHomeThenUserProfile(string? home, string? userProfile, string? expected)
+    public void FromEnvironment_PrefersAbsoluteHomeThenUserProfile(string? home, string? userProfile, string? expected)
     {
-        Dictionary<string, string?> variables = new() { ["HOME"] = home, ["USERPROFILE"] = userProfile };
+        string? Expand(string? token) => token
+            ?.Replace("{a}", Path.Combine(Home, "a"), StringComparison.Ordinal)
+            .Replace("{b}", Path.Combine(Home, "b"), StringComparison.Ordinal);
+        Dictionary<string, string?> variables = new() { ["HOME"] = Expand(home), ["USERPROFILE"] = Expand(userProfile) };
 
-        Assert.Equal(expected, CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)));
+        Assert.Equal(Expand(expected), CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)));
     }
 
     [Fact]

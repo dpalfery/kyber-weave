@@ -422,4 +422,52 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         Assert.Equal(CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)), environment.HomeDirectory);
         Assert.Equal(Path.Combine(Home, "xdg-config"), environment.XdgConfigHome);
     }
+
+    [Fact]
+    public void SettingsFile_Linux_HonoursLinuxAbsoluteXdgConfigHomeFromAnyHost()
+    {
+        string expected = Path.Combine("/xdg-config", "Code", "User", "settings.json");
+
+        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, "/xdg-config"));
+    }
+
+    [Fact]
+    public void Install_SymlinkedSettingsFileWithMissingTarget_CreatesTargetAndKeepsLink()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
+        string dotfiles = Path.Combine(Home, "dotfiles");
+        Directory.CreateDirectory(dotfiles);
+        string target = Path.Combine(dotfiles, "vscode-settings.json");
+        DetectFlavour(VsCodeFlavour.Stable);
+        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+
+        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
+        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(target)));
+    }
+
+    [Fact]
+    public void Install_NoHomeDirectory_RefusesAndWritesNothing()
+    {
+        DetectFlavour(VsCodeFlavour.Stable);
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(string.Empty, null, OSPlatform.OSX, true, _ => false));
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
+
+        Assert.Equal(2, execution.Result);
+        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.False(File.Exists(PromptPath));
+    }
+
+    [Fact]
+    public void EnvironmentFrom_NoAbsoluteHome_LeavesHomeEmptyRatherThanFallingBack()
+    {
+        CopilotPromptEnvironment environment = CopilotPromptCommandSupport.EnvironmentFrom(
+            name => name == "HOME" ? "relative/home" : null, OSPlatform.Linux, false, _ => false);
+
+        Assert.Equal(string.Empty, environment.HomeDirectory);
+    }
 }

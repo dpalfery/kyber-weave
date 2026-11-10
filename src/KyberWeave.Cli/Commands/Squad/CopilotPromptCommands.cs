@@ -68,6 +68,8 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -98,7 +100,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
             // A file that does not exist yet is created from an empty object: the only write that is not a splice.
-            byte[] document = File.Exists(file) ? File.ReadAllBytes(file) : Encoding.UTF8.GetBytes("{}\n");
+            byte[] document = CopilotPromptCommandSupport.SettingsExist(file) ? File.ReadAllBytes(file) : Encoding.UTF8.GetBytes("{}\n");
             JsonSplicePlan plan = JsonServerSplice.Plan(document, [CopilotOverrideSettings.SettingId], CopilotOverrideSettings.StarEntry, entryJson);
 
             if (plan.Outcome == JsonSpliceOutcome.Inserted)
@@ -154,7 +156,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             // The prompt file goes first, so VS Code never reads a setting that points at a file that is not there yet.
             AtomicFile.WriteAllText(promptPath, CopilotPromptFile.EmbeddedText());
             foreach ((string file, byte[] document) in writes)
-                AtomicFile.WriteAllBytes(file, document);
+                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -199,6 +201,8 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -219,7 +223,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            if (!File.Exists(file))
+            if (!CopilotPromptCommandSupport.SettingsExist(file))
                 continue;
 
             byte[] document = File.ReadAllBytes(file);
@@ -280,7 +284,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         {
             // The settings go first, so a setting never points at a prompt file this command has already deleted.
             foreach ((string file, byte[] document) in removals)
-                AtomicFile.WriteAllBytes(file, document);
+                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
             if (promptInstalled)
                 File.Delete(promptPath);
         }
@@ -325,6 +329,8 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -351,7 +357,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            CopilotOverrideState? state = File.Exists(file)
+            CopilotOverrideState? state = CopilotPromptCommandSupport.SettingsExist(file)
                 ? CopilotOverrideSettings.Read(File.ReadAllBytes(file))
                 : new CopilotOverrideState(false, null, []);
             if (state is null)
@@ -401,19 +407,45 @@ internal static class CopilotPromptCommandSupport
 
     /// <summary>
     /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
-    /// the prompt file where install wrote it; the system profile folder is the last resort.
+    /// the prompt file where install wrote it. An empty home means neither variable names an absolute directory.
     /// </summary>
     internal static CopilotPromptEnvironment EnvironmentFrom(
         Func<string, string?> read,
         OSPlatform platform,
         bool isInteractive,
         Func<string, bool> readAnswer) => new(
-        CopilotPromptHome.FromEnvironment(read) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        CopilotPromptHome.FromEnvironment(read) ?? string.Empty,
         read("APPDATA"),
         platform,
         isInteractive,
         readAnswer,
         read("XDG_CONFIG_HOME"));
+
+    /// <summary>
+    /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
+    /// working directory, where doctor would never look.
+    /// </summary>
+    internal static bool HasHome(CopilotPromptEnvironment environment)
+    {
+        if (!string.IsNullOrWhiteSpace(environment.HomeDirectory))
+            return true;
+
+        Fail("no home directory is known. Set HOME (or USERPROFILE on Windows) to an absolute path and run the command again.");
+        return false;
+    }
+
+    /// <summary>
+    /// True when the settings file has content to read. A symbolic link counts only when its final target exists:
+    /// <see cref="File.Exists(string)"/> is true for a dangling link, which cannot be read but can be written through.
+    /// </summary>
+    internal static bool SettingsExist(string file)
+    {
+        FileInfo info = new(file);
+        if (info.LinkTarget is null)
+            return info.Exists;
+
+        return info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+    }
 
     /// <summary>Parses <c>--flavour</c>. Null means the option was not given, so every detected build is in scope.</summary>
     internal static bool TryParseFlavour(string? text, out VsCodeFlavour? flavour)

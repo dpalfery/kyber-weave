@@ -63,10 +63,11 @@ beside the prompt.
 
 ## Where the files are
 
-- **Home directory.** `install`, `uninstall` and `doctor` read `HOME`, then `USERPROFILE`, and skip
-  a blank value. Only when both are unset does `install` fall back to the system profile folder. On
-  Windows with `HOME` set, such as under Git Bash, all three use `HOME`, so doctor checks the prompt
-  file where install wrote it.
+- **Home directory.** `install`, `uninstall`, `status` and `doctor` read `HOME`, then
+  `USERPROFILE`. Surrounding spaces are trimmed, and a blank or relative value counts as unset. On
+  Windows with `HOME` set, such as under Git Bash, all of them use `HOME`, so doctor checks the
+  prompt file where install wrote it. When neither names an absolute directory, the commands exit
+  `2` and write nothing, and doctor skips the Copilot checks.
 - **Prompt file.** `<home>/.kyber-weave/copilot/system-prompt.yaml`.
 - **VS Code settings file.** `<user-data>/User/settings.json`, where `<user-data>` is:
   - macOS: `<home>/Library/Application Support/Code` (or `Code - Insiders`).
@@ -77,6 +78,8 @@ beside the prompt.
 - **Symlinked `settings.json`.** When `settings.json` is a symbolic link, for example into a
   dotfiles repository, `install` and `uninstall` write through it. The file the link points to is
   updated, and the link stays a link. A link that points at a missing file creates that file.
+  Only the VS Code settings write follows links. Every other file Kyber-Weave writes replaces a
+  link with a regular file and leaves the link's old target alone.
 
 ## Doctor checks
 

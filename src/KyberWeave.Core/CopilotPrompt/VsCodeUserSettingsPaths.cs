@@ -68,7 +68,9 @@ public static class VsCodeUserSettingsPaths
 
         // VS Code on Linux keeps its user data under XDG_CONFIG_HOME when that is set. The XDG base-directory
         // specification says a relative value is invalid and must be ignored, so only an absolute one counts.
-        string configRoot = !string.IsNullOrWhiteSpace(xdgConfigHome) && Path.IsPathFullyQualified(xdgConfigHome)
+        // A leading '/' is the Linux test, so the Linux layout resolves the same from any host.
+        string configRoot = !string.IsNullOrWhiteSpace(xdgConfigHome)
+            && (xdgConfigHome.StartsWith('/') || Path.IsPathFullyQualified(xdgConfigHome))
             ? xdgConfigHome
             : Path.Combine(homeDirectory, ".config");
         return Path.Combine(configRoot, build);

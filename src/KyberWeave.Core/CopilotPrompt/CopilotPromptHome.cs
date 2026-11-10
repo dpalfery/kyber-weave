@@ -12,19 +12,26 @@ namespace KyberWeave.Core.CopilotPrompt;
 public static class CopilotPromptHome
 {
     /// <summary>
-    /// Returns <c>HOME</c>, else <c>USERPROFILE</c>, ignoring a blank value. Null when neither is set.
+    /// Returns <c>HOME</c>, else <c>USERPROFILE</c>, trimmed. A blank or relative value counts as unset,
+    /// because a relative home would put the prompt file under whatever directory the command ran in.
+    /// Null when neither names an absolute directory.
     /// </summary>
+    /// <remarks>
+    /// There is deliberately no fallback to the system profile folder: doctor resolves home through this
+    /// method too, and the two must agree. The install commands refuse to run when this returns null.
+    /// </remarks>
     /// <param name="environment">Reads one environment variable by name.</param>
     /// <returns>The home directory, or null when the environment names none.</returns>
     public static string? FromEnvironment(Func<string, string?> environment)
     {
         ArgumentNullException.ThrowIfNull(environment);
 
-        string? home = environment("HOME");
-        if (!string.IsNullOrWhiteSpace(home))
-            return home;
+        return Absolute(environment("HOME")) ?? Absolute(environment("USERPROFILE"));
+    }
 
-        string? profile = environment("USERPROFILE");
-        return string.IsNullOrWhiteSpace(profile) ? null : profile;
+    private static string? Absolute(string? value)
+    {
+        string? trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) || !Path.IsPathFullyQualified(trimmed) ? null : trimmed;
     }
 }
