@@ -196,7 +196,8 @@ public static partial class ConductorGuard
             return false;
         }
 
-        if (fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase))
+        if (Path.IsPathRooted(copilotHome)
+            && fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

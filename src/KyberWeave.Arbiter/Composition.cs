@@ -105,8 +105,15 @@ public static class Composition
             catch (Exception ex)
             {
                 // An empty event is unreadable, so the guard answers it with an explicit deny.
-                await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: conductor guard could not read stdin: {ex.Message}").ConfigureAwait(false);
                 stdinText = string.Empty;
+                try
+                {
+                    await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: conductor guard could not read stdin: {OneLine(ex.Message)}").ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Stderr is best effort; the deny on stdout still fails closed.
+                }
             }
 
             return ConductorGuard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));

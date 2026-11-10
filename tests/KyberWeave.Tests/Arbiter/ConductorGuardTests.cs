@@ -163,6 +163,30 @@ public sealed class ConductorGuardTests
     }
 
     [Fact]
+    public async Task GuardVerb_DeniesWhenStdinAndStderrBothFail()
+    {
+        using StringWriter stdout = new();
+        using StringReader closedIn = new(string.Empty);
+        using StringWriter closedErr = new();
+        closedIn.Dispose();
+        await closedErr.DisposeAsync();
+
+        int exit = await KyberWeave.Arbiter.Composition.DispatchAsync(["guard"], closedIn, stdout, closedErr);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARelativeCopilotHome_GrantsNothing()
+    {
+        using StringWriter stdout = new();
+        ConductorGuard.Run(Event("view", new { path = ".copilot/agents/conductor/x.md" }), stdout, TextWriter.Null, copilotHome: ".copilot");
+
+        Assert.Contains("deny", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GuardCommandLine_AcceptsADottedServerName()
     {
         Assert.Equal("kyber-weave-arbiter guard --allow-mcp my.server", ArbiterHookWiring.GuardCommandLine("my.server"));
