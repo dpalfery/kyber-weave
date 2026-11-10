@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && [ ! -d \"$CLAUDE_PROJECT_DIR/.codegraph\" ] && command -v codegraph >/dev/null && codegraph init \"$CLAUDE_PROJECT_DIR\" >/dev/null 2>&1; exit 0"
+            "command": "command -v kyber-weave >/dev/null 2>&1 && root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" && [ -n \"$root\" ] && { (cd \"$root\" && kyber-weave doctor --ensure . >/dev/null 2>&1 &); }; exit 0"
           },
           {
             "type": "command",
