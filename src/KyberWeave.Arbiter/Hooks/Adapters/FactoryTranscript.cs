@@ -24,16 +24,20 @@ internal static class FactoryTranscript
     /// <param name="text">The result text.</param>
     /// <returns>True when the text opens with the launch notice.</returns>
     public static bool IsBackgroundLaunch(string text) =>
-        text.TrimStart('\uFEFF', ' ', '\t', '\r', '\n').StartsWith(BackgroundLaunchPrefix, StringComparison.Ordinal);
+        text.TrimStart().TrimStart('\uFEFF').TrimStart().StartsWith(BackgroundLaunchPrefix, StringComparison.Ordinal);
 
     /// <summary>Whether a <c>tool_response</c>, plain or enveloped, is a background launch.</summary>
     /// <param name="response">The hook payload's response.</param>
-    /// <returns>True when any string in it opens with the launch notice.</returns>
+    /// <returns>
+    /// True when its leading text opens with the launch notice. Only the leading text
+    /// counts, because a real report may quote the notice further on.
+    /// </returns>
     public static bool IsBackgroundLaunch(JsonElement response) => response.ValueKind switch
     {
         JsonValueKind.String => IsBackgroundLaunch(response.GetString() ?? string.Empty),
-        JsonValueKind.Array => response.EnumerateArray().Any(IsBackgroundLaunch),
-        JsonValueKind.Object => response.EnumerateObject().Any(property => IsBackgroundLaunch(property.Value)),
+        JsonValueKind.Array => response.GetArrayLength() > 0 && IsBackgroundLaunch(response[0]),
+        JsonValueKind.Object => (response.TryGetProperty("content", out JsonElement text)
+            || response.TryGetProperty("text", out text)) && IsBackgroundLaunch(text),
         _ => false,
     };
 
@@ -92,10 +96,12 @@ internal static class FactoryTranscript
     private static bool IsTranscriptPath(string path) =>
         Path.IsPathRooted(path) && string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase);
 
-    private static (string? Plan, string? Task) TaskOf(FactoryBackgroundDispatch dispatch)
+    /// <summary>What a launch works on. With no task to name, only its target and prompt can say.</summary>
+    private static (string? Plan, string? Task, string? Work) TaskOf(FactoryBackgroundDispatch dispatch)
     {
         IReadOnlyDictionary<string, string> headers = HeaderBlock.Parse(dispatch.Prompt).Headers;
-        return (headers.GetValueOrDefault("PLAN_FILE"), headers.GetValueOrDefault("TASK"));
+        string? task = headers.GetValueOrDefault("TASK");
+        return (headers.GetValueOrDefault("PLAN_FILE"), task, task is null ? dispatch.Target + "\n" + dispatch.Prompt : null);
     }
 
     private static FactoryBackgroundDispatch? ReadLine(

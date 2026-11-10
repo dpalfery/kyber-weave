@@ -73,8 +73,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
         {
-            return string.IsNullOrWhiteSpace(GetString(payload, "task_name"))
-                || string.IsNullOrWhiteSpace(GetString(payload, "transcript_path"));
+            // A field of the wrong type is malformed, not absent: Handle fails it closed.
+            return IsAbsentOrBlank(payload, "task_name") || IsAbsentOrBlank(payload, "transcript_path");
         }
 
         if (!string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
@@ -279,9 +279,10 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
     {
         string? description = GetString(payload, "task_name");
         string? transcriptPath = GetString(payload, "transcript_path");
-        if (string.IsNullOrWhiteSpace(description) || string.IsNullOrWhiteSpace(transcriptPath))
+        if (description is null || transcriptPath is null)
         {
-            return string.Empty;
+            throw new InvalidOperationException(
+                "Malformed Factory hook event: SubagentStop's task_name and transcript_path must be strings.");
         }
 
         FactoryBackgroundDispatch? dispatch = FactoryTranscript.FindBackgroundDispatch(transcriptPath, description);
@@ -356,6 +357,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         && toolInput.ValueKind == JsonValueKind.Object
             ? GetString(toolInput, "subagent_type")
             : null;
+
+    private static bool IsAbsentOrBlank(JsonElement element, string name) =>
+        !element.TryGetProperty(name, out JsonElement value)
+        || value.ValueKind == JsonValueKind.Null
+        || (value.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(value.GetString()));
 
     private static string? GetString(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object

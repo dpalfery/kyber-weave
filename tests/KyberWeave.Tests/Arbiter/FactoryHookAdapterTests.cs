@@ -388,6 +388,8 @@ public sealed class FactoryHookAdapterTests
     [Theory]
     [InlineData("  \n")]
     [InlineData("\uFEFF")]
+    [InlineData("\u2003\u00A0")]
+    [InlineData(" \uFEFF ")]
     public void BackgroundLaunch_AfterLeadingNoise_RecordsNoReturn(string noise)
     {
         ContextualEngine engine = new();
@@ -409,6 +411,23 @@ public sealed class FactoryHookAdapterTests
         Run(LaunchReporting(envelope), null, engine);
 
         Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void ForegroundReport_ThatQuotesTheLaunchNotice_IsRecorded()
+    {
+        ContextualEngine engine = new();
+        JsonObject envelope = new()
+        {
+            ["note"] = LaunchText(),
+            ["content"] = new JsonArray(
+                new JsonObject { ["type"] = "text", ["text"] = "All done." },
+                new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
+        };
+
+        Run(LaunchReporting(envelope), null, engine);
+
+        Assert.Equal(1, engine.PostCalls);
     }
 
     private static string TemporaryTranscript(string content, string extension = ".jsonl")
@@ -444,6 +463,30 @@ public sealed class FactoryHookAdapterTests
         finally
         {
             File.Delete(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WhenHeaderlessLaunchesDiffer_RecordsNothing()
+    {
+        string withHeaders = TwoLaunches("T8", "T9");
+        string transcript = TemporaryTranscript(
+            File.ReadAllText(withHeaders)
+                .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T8\\n\\n", string.Empty, StringComparison.Ordinal)
+                .Replace("KYBER-ARBITER: true\\nPLAN_FILE: docs/plans/x.md\\nTASK: T9\\n\\n", string.Empty, StringComparison.Ordinal));
+        try
+        {
+            Assert.DoesNotContain("KYBER-ARBITER", File.ReadAllText(transcript), StringComparison.Ordinal);
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(transcript);
+            File.Delete(withHeaders);
         }
     }
 
@@ -495,6 +538,23 @@ public sealed class FactoryHookAdapterTests
         {
             File.Delete(notTranscript);
         }
+    }
+
+    [Theory]
+    [InlineData("task_name")]
+    [InlineData("transcript_path")]
+    public void SubagentStop_WithAWrongTypeField_FailsClosed(string field)
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root[field] = 5;
+
+        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(HookCommand.FailClosedCode, stdout, StringComparison.Ordinal);
+        Assert.Contains("Malformed Factory hook event", stdout, StringComparison.Ordinal);
+        Assert.Equal(0, engine.PostCalls);
     }
 
     [Theory]
