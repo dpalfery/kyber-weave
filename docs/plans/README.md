@@ -57,9 +57,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Summary |
-|---|---|---|
-| [Arbiter planner refusal reasons](2026-11-09-arbiter-planner-refusal-reasons.md) | Ready | Stops the Arbiter refusing valid `architect` dispatches and makes each refusal name its real cause. |
+No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
 
 ## Archived Plans
 

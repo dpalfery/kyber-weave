@@ -2,7 +2,7 @@
 id: plans/2026-11-09-arbiter-planner-refusal-reasons
 title: Arbiter stops refusing valid architect dispatches and names the real reason when it refuses
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 created: 2026-11-09
@@ -15,7 +15,7 @@ impact-components: [KyberArbiter]
 
 # Arbiter stops refusing valid architect dispatches and names the real reason when it refuses
 
-**Status: Ready.** Approved for execution under autonomy `autonomous` (decision AP1 below). Frontmatter `status` is `current` because the frontmatter vocabulary has no Ready value. Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberArbiter`.
+**Status: Archived — complete 2026-11-09.** Approved for execution under autonomy `autonomous` (decision AP1 below). Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberArbiter`.
 
 **The one change that lets more dispatches through is D5.** An unmarked dispatch to a planner now passes on project-wide-hook harnesses. To revert it, remove the guard in `TriggerClassifier.ResolveCaller` so a planner target always infers the conductor, and delete the `Classification_UnmarkedPlannerTargetOnProjectWideHarnessPasses` and `RealEngine_Factory_UnmarkedPlannerDispatch_PassesThrough` tests.
 
@@ -254,3 +254,44 @@ Left out, each for a stated reason:
 - **Manual check before closeout:** pipe a Factory `PreToolUse` payload with an absolute `PLAN_FILE:` to the built `kyber-weave-arbiter hook --harness factory`, confirm the deny text, then repeat with a relative path and confirm it is allowed.
 - **Review:** the end-of-run review council under the `code-review` skill, run by `code-reviewer`.
 - **`docs-dev` closeout:** T4.
+
+## Completion summary
+
+**Outcome.** Delivered test-first. A conductor's valid `architect` dispatch is no longer refused, a refused one names its real cause, and an absolute `PLAN_FILE:` is still refused.
+
+**Acceptance evidence.**
+
+- T1 (RED contract tests): commit `52ed8c52`.
+- T2 (rule, facts, classifier, repeat, caller; GREEN): commit `31242c9d`. The test run reported 204 total, 204 passed, 0 failed. The task gate passed, with 5 gates and 0 failed. Step 6 changed from the packet: the `TARGET` entry was already in `resolveHeaders`, and `CallerResolver` reads it to infer `conductor`, so the planner-target guard sits on that same condition.
+- T3 (conductor path instruction; GREEN): commit `828903c3`. `ArbiterConductorContractTests` passed 8 of 8.
+- Documentation-impact review: commit `e904586e`. It changed the runbook's "Fail-closed behaviour" section and the architecture MCP fallback paragraph, which renders the same `PLAN_FILE:` header.
+- Code review: APPROVE, risk LOW, rule `KW-REVIEW-024`, 9 of 9 gates passed, no findings.
+- Documentation closeout (T4): the three harvest items below, then both documentation gates.
+
+## Closeout mapping
+
+### Decisions
+
+| ID | Destination | ADR or waiver |
+|---|---|---|
+| D1 | [architecture, HeaderBlock paragraph](../../kyber-arbiter/architecture.md#the-engine); [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) | no ADR — ADR waiver: keeps the archived Arbiter design's section 5 contract that `PLAN_FILE:` is repository-relative; adds no boundary, dependency or schema |
+| D2 | [rule reference, KW-ARB-PLANNER-001 row](../../ci-pipelines/rule-reference.md); [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) | no ADR — ADR waiver: adds answers to an existing rule; the rule id and the `malformed` answer are unchanged, and no boundary is added |
+| D3 | [rule reference, KW-ARB-PLANNER-001 row](../../ci-pipelines/rule-reference.md); [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) | no ADR — ADR waiver: restores the marker set design sections 4.3 and 4.4 already state; records no new decision |
+| D4 | [architecture, HeaderBlock paragraph](../../kyber-arbiter/architecture.md#the-engine); [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) | no ADR — ADR waiver: a rule ordering and one fact inside the existing rule; no boundary |
+| D5 | [architecture, Delivery and caller notes](../../kyber-arbiter/architecture.md#delivery-and-caller-notes) (unmarked planner dispatch passes on project-wide harnesses; `KW-ARB-AUDIT-002` reports it) | no ADR — ADR waiver: the architecture page already states this pass-through, and the change restores it; ADR 0053 is not amended |
+| D6 | [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) (`REPEAT` with no `PLAN_FILE:` counts one session) | no ADR — ADR waiver: a repeat-key fix inside the existing decision log; no boundary or schema |
+| D7 | [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) (`CALLER` shows the resolved caller) | no ADR — ADR waiver: message text on an existing envelope field |
+| D8 | [architecture](../../kyber-arbiter/architecture.md); [rule reference](../../ci-pipelines/rule-reference.md); [runbook](../../kyber-arbiter/runbook.md) (the H1 to H3 destinations) | no ADR — ADR waiver: `extends-component` on `KyberArbiter`; restores documented contract, adds no new component, boundary, dependency or schema |
+| AP1 | Documentation waiver: execution approval is transient lifecycle provenance, recorded in the Decisions table above, with no surviving architectural, operational or behavioural invariant | not applicable: documentation waiver |
+
+### Harvested items
+
+| ID | Destination | Documentation-impact | Impact-components | Last-reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [architecture, HeaderBlock paragraph and Delivery and caller notes](../../kyber-arbiter/architecture.md#the-engine), plus the MCP fallback paragraph | extends-component | KyberArbiter | 2026-11-09 | Archived |
+| H2 | [rule reference, KW-ARB-PLANNER-001 row](../../ci-pipelines/rule-reference.md) | extends-component | KyberArbiter | 2026-11-09 | Archived |
+| H3 | [runbook, Reading a planner refusal](../../kyber-arbiter/runbook.md#reading-a-planner-refusal) | extends-component | KyberArbiter | 2026-11-09 | Archived |
+
+**Not verified at closeout.** The Risks section lists a manual check: pipe a Factory `PreToolUse` payload with an absolute `PLAN_FILE:` to the built `kyber-weave-arbiter hook --harness factory`, confirm the deny text, then repeat with a relative path. No evidence for it is in the closeout record, and docs-dev did not run it.
+
+**Known edge.** An unmarked dispatch that carries a rejected `PLAN_FILE:` still passes on a project-wide harness, because it has no marker and no inferred caller. This matches D5 and was not changed here.
