@@ -90,6 +90,10 @@ readonly EXIT_SLOT_WAIT=88
 readonly EXIT_FULL_RUN_REFUSED=89
 readonly EXIT_TIMEOUT=124
 readonly POLL_INTERVAL=0.5
+# For the first FAST_EXIT_POLLS polls the wait is five slices of EXIT_CHECK_INTERVAL, each preceded by an
+# exit check (the same total as POLL_INTERVAL), so a command that finishes at once is not held for a full interval.
+readonly EXIT_CHECK_INTERVAL=0.1
+readonly FAST_EXIT_POLLS=4
 readonly KILL_GRACE=1
 readonly SLOT_POLL_INTERVAL=0.5
 readonly SLOT_DEFAULT_WAIT=540
@@ -554,16 +558,44 @@ table() {
   fi
 }
 
-# Count this user's JavaScript runtime processes (basename of comm: node, nodejs, bun, deno, tsx).
-# The count is machine-wide for this user, not relative to the wrapped command: the cap is an
+# The same table without the command-line column: pid, ppid, user, comm. The poll loop and the
+# kill path need only these four, and args is by far the widest column, so this read is several
+# times cheaper than table().
+table_light() {
+  if [[ -n "${KW_PROC_GUARD_PS:-}" ]]; then
+    "${KW_PROC_GUARD_PS}" 2>/dev/null
+  else
+    ps -axo pid=,ppid=,uid=,comm= 2>/dev/null
+  fi
+}
+
+# One table read and one awk for the whole poll. Prints "<node-count> <descendant-count>" on the
+# first line, then the pids of every descendant of the given pid, one per line.
+# The node count is this user's JavaScript runtime processes (basename of comm: node, nodejs, bun,
+# deno, tsx). It is machine-wide for this user, not relative to the wrapped command: the cap is an
 # absolute ceiling against fork-bombs, and it also counts unrelated node processes.
-count_node() {
-  table | awk -v u="${me}" '
-    $3 == u {
-      n = split($4, a, "/")
-      if (a[n] == "node" || a[n] == "nodejs" || a[n] == "bun" || a[n] == "deno" || a[n] == "tsx") c++
+poll_scan() {
+  table_light | awk -v u="${me}" -v root="$1" '
+    {
+      ppid[$1] = $2; pids[NR] = $1
+      if ($3 == u) {
+        n = split($4, a, "/")
+        if (a[n] == "node" || a[n] == "nodejs" || a[n] == "bun" || a[n] == "deno" || a[n] == "tsx") c++
+      }
     }
-    END { print c + 0 }'
+    END {
+      mark[root] = 1
+      changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= NR; i++) {
+          p = pids[i]
+          if (!(p in mark) && (ppid[p] in mark)) { mark[p] = 1; changed = 1; out[++k] = p }
+        }
+      }
+      print c + 0, k + 0
+      for (i = 1; i <= k; i++) print out[i]
+    }'
 }
 
 # Fail closed on a root that is empty, not a directory, or the filesystem root (which would match
@@ -613,19 +645,7 @@ epoch_now() {
 
 # Print the pids of every descendant of the given pid, one per line.
 descendants_of() {
-  table | awk -v root="$1" '
-    { ppid[$1] = $2; pids[NR] = $1 }
-    END {
-      mark[root] = 1
-      changed = 1
-      while (changed) {
-        changed = 0
-        for (i = 1; i <= NR; i++) {
-          p = pids[i]
-          if (!(p in mark) && (ppid[p] in mark)) { mark[p] = 1; changed = 1; print p }
-        }
-      }
-    }'
+  poll_scan "$1" | tail -n +2
 }
 
 # Pids that are never leftovers: proc-guard itself, its ancestors (the caller's own shell may be
@@ -771,10 +791,26 @@ group_members() {
   ps -axo pid=,pgid= 2>/dev/null | awk -v g="$1" -v me="${self_pid}" '$2 == g && $1 != me { print $1 }'
 }
 
-# Command line of a pid: the process table first, then the real ps.
+# Command lines of the given pids, read from one table snapshot: "<pid> <args>" per line. The
+# survivor phase refreshes it before each decision that depends on a process still being alive,
+# so a pid that exited since the last refresh is absent rather than reported from stale data.
+args_map=""
+refresh_args_map() {
+  args_map="$(table | awk -v list="${1//$'\n'/ }" '
+    BEGIN { n = split(list, parts, / +/); for (i = 1; i <= n; i++) if (parts[i] != "") want[parts[i]] = 1 }
+    ($1 in want) && !($1 in done) { done[$1] = 1; pid = $1; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print pid " " $0 }')"
+}
+
+# Command line of a pid: the snapshot from refresh_args_map first, then the real ps.
 args_of() {
-  local line
-  line="$(table | awk -v p="$1" '$1 == p { $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print; exit }')"
+  local line="" row
+  while IFS= read -r row; do
+    if [[ "${row%% *}" == "$1" ]]; then
+      line="${row#* }"
+      [[ "${line}" == "${row}" ]] && line=""
+      break
+    fi
+  done <<<"${args_map}"
   if [[ -z "${line}" ]]; then
     line="$(ps -o args= -p "$1" 2>/dev/null)" || true
   fi
@@ -1119,7 +1155,7 @@ run_guarded() {
   validate_root "${root}" || return 2
   export KW_PROC_GUARD_ROOT="${root}"
   # With the real process table, an empty read means ps failed: every cap would silently pass.
-  if [[ -z "${KW_PROC_GUARD_PS:-}" && -z "$(table)" ]]; then
+  if [[ -z "${KW_PROC_GUARD_PS:-}" && -z "$(table_light)" ]]; then
     printf 'proc-guard: cannot read the process table (ps failed); refusing to run unguarded\n' >&2
     return 2
   fi
@@ -1170,21 +1206,31 @@ run_guarded() {
   tripped=""
   trap 'kill_tree "${pid}"; exit 143' INT TERM
 
-  local tree node now kids
+  local tree node now kids scan kid polls=0
   while kill -0 "${pid}" 2>/dev/null; do
-    kids="$(descendants_of "${pid}")"
+    scan="$(poll_scan "${pid}")"
+    read -r node tree <<<"${scan%%$'\n'*}"
+    kids=""
+    [[ "${scan}" == *$'\n'* ]] && kids="${scan#*$'\n'}"
+    node="${node:-0}"
+    tree="${tree:-0}"
     if [[ -n "${kids}" ]]; then
       # shellcheck disable=SC2206
       tracked=(${kids})
-      seen+="${kids}"$'\n'
+      # Each pid is added once: a plain pattern match per descendant, no fork and no sort, so the
+      # list stays bounded by the distinct pids of the run and the cap checks are never delayed.
+      for kid in "${tracked[@]}"; do
+        case $'\n'"${seen}" in
+          *$'\n'"${kid}"$'\n'*) ;;
+          *) seen+="${kid}"$'\n' ;;
+        esac
+      done
     fi
-    tree=$(printf '%s' "${kids}" | grep -c . || true)
     if ((tree >= max_tree)); then
       tripped="max-tree"
       printf 'proc-guard: --max-tree cap tripped (%s descendants, cap %s); killing the process tree\n' "${tree}" "${max_tree}" >&2
       break
     fi
-    node="$(count_node)"
     if ((node >= max_node)); then
       tripped="max-node"
       printf 'proc-guard: --max-node cap tripped (%s node processes, cap %s); killing the process tree\n' "${node}" "${max_node}" >&2
@@ -1201,7 +1247,17 @@ run_guarded() {
       printf 'proc-guard: --timeout %ss elapsed; killing the process tree\n' "${timeout_s}" >&2
       break
     fi
-    sleep "${POLL_INTERVAL}"
+    polls=$((polls + 1))
+    if ((polls <= FAST_EXIT_POLLS)); then
+      # A short command is noticed within a tenth of a second instead of a full interval. The
+      # process table is still read once per POLL_INTERVAL, so the caps are checked as often.
+      for _ in 1 2 3 4 5; do
+        kill -0 "${pid}" 2>/dev/null || break
+        sleep "${EXIT_CHECK_INTERVAL}"
+      done
+    else
+      sleep "${POLL_INTERVAL}"
+    fi
   done
 
   if [[ -n "${tripped}" ]]; then
@@ -1264,7 +1320,8 @@ run_guarded() {
 
   # A wrapped tool (not dotnet itself) may have run dotnet inside: if any candidate is a benign
   # .NET server, ask the servers to exit now and give their clients a moment to follow.
-  if ((shutdown_attempted == 0)); then
+  if ((shutdown_attempted == 0)) && [[ -n "${candidates}" ]]; then
+    refresh_args_map "${candidates}"
     while IFS= read -r candidate; do
       [[ -z "${candidate}" ]] && continue
       if is_benign_dotnet_server "$(args_of "${candidate}")"; then
@@ -1279,6 +1336,7 @@ run_guarded() {
   # Split into benign .NET servers (only once shutdown was attempted) and real survivors.
   # A candidate with no command line has exited since the scan, so it is not a survivor.
   local survivors="" killable="" benign="" cmdline
+  [[ -n "${candidates}" ]] && refresh_args_map "${candidates}"
   while IFS= read -r candidate; do
     [[ -z "${candidate}" ]] && continue
     cmdline="$(args_of "${candidate}")"
