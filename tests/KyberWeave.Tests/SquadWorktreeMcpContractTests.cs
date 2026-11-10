@@ -156,8 +156,8 @@ public sealed class SquadWorktreeMcpContractTests
     /// <remarks>
     ///     D24/D25: the MCP servers stay bound to the canonical checkout on purpose, so their answers
     ///     describe that tree. A role with a shell asks its own worktree instead; a role without one is given
-    ///     the worktree's absolute path in its packet and reads it directly. This is the rule that keeps a
-    ///     worker from believing a branch it is not on.
+    ///     the worktree's absolute path in its packet and passes it as <c>codegraph_explore</c>'s
+    ///     <c>projectPath</c>. This is the rule that keeps a worker from believing a branch it is not on.
     /// </remarks>
     [Fact]
     public void ExecutionContractSendsShellRolesToTheWorktreeIndex()
@@ -166,6 +166,50 @@ public sealed class SquadWorktreeMcpContractTests
 
         Assert.Contains("codegraph explore", content, StringComparison.Ordinal);
         Assert.Matches(@"(?i)\bcanonical\b[^\r\n]*(?:bound|checkout|path)\b", content);
+    }
+
+    /// <summary>
+    ///     Shell-less roles ask the worktree's own index through <c>projectPath</c>, and no shipped role or
+    ///     skill tells them to read the worktree directly instead.
+    /// </summary>
+    /// <remarks>
+    ///     ADR 0061 decision 7, amended 2026-11-10: the old rule sent shell-less workers to raw file reads
+    ///     because the MCP server was bound to the canonical checkout, and agents read it as "do not use
+    ///     CodeGraph in a worktree". <c>codegraph_explore</c> takes a <c>projectPath</c> that answers from
+    ///     the nearest index at or above it, so the worktree's own index is reachable without a shell.
+    /// </remarks>
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData("products/kyber-squad/agents/review-lens.md")]
+    [InlineData("products/kyber-squad/agents/review-triage.md")]
+    [InlineData("products/kyber-squad/agents/azure-reader.md")]
+    [InlineData("products/kyber-squad/agents/research-agent.md")]
+    [InlineData("products/kyber-squad/agents/product-owner.md")]
+    [InlineData("products/kyber-squad/skills/product-owner/SKILL.md")]
+    [InlineData("products/kyber-squad/agents/architect.md")]
+    [InlineData(ArchitectureDocPath)]
+    [InlineData(McpRunbookDocPath)]
+    [InlineData("docs/kyber-squad/onboarding.md")]
+    public void ShellLessRolesAskTheWorktreeIndexThroughProjectPath(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        // The positive shape, as one pattern: the worktree path is passed as projectPath, which
+        // answers from the worktree's own index. Prose is hard-wrapped, so gaps may cross lines.
+        Assert.Matches(@"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?`projectPath`[\s\S]{0,200}?\bown index\b", content);
+
+        // The fallback is qualified, and the failure modes are named.
+        Assert.Matches(@"(?i)\bdirect(?:ly| reads?)\b[\s\S]{0,60}?\bonly when\b[\s\S]{0,60}?\bcan(?:not)? answer\b", content);
+        Assert.Contains("not-indexed", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"(?i)`(?:projectPath|cli): (?:error|not-indexed)`", content);
+        Assert.Contains("`projectPath: wrong-branch <got> vs <wanted>`", content, StringComparison.Ordinal);
+
+        // The old rule in any of its phrasings: a direct read that is not the qualified fallback.
+        Assert.DoesNotMatch(
+            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?|a file|files|the file|the named\s+file)\s+directly\b(?!\s+only\s+when)",
+            content);
+        Assert.DoesNotMatch(@"(?i)shell-less role reads the worktree path|Direct reads of that path\.", content);
     }
 
     /// <summary>

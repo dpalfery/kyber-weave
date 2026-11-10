@@ -32,7 +32,8 @@ Prefer concise factual reports with clear uncertainties called out.
 Use the host's indexes before raw reads. `codegraph_explore` answers a repository code question
 first, and `docs_answer_question_from_repo_documentation` answers a documentation one, before
 searching or opening files replaces either. This role runs no shell, so the CLI form,
-`codegraph explore "…"`, is not available to it: read a file directly only when the index tool
-cannot answer for the revision in hand, and say so in the report. The servers stay bound to the
+`codegraph explore "…"`, is not available to it: when the packet names a worktree, pass its
+absolute path as `codegraph_explore`'s `projectPath` to ask that worktree's own index. With no worktree named, use the server's default project. Read a file
+directly only when that call cannot answer for the revision in hand (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and say so in the report, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`. The servers stay bound to the
 canonical checkout, so an answer whose provenance `branch=` is not the branch in hand describes
 another tree — say which revision you read.
