@@ -533,7 +533,7 @@ public static class ArbiterCommandComposition
         }
 
         Func<Uri, string?> captured = keyResolver;
-        return new SystemOneClient(
+        return SystemOneClient.CreateForProduct(
             HttpHandler(),
             endpoint,
             config.Arbiter.Provider.Model,

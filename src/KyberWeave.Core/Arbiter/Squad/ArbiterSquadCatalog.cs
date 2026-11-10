@@ -59,6 +59,15 @@ public sealed class ArbiterSquadCatalog
     /// <summary>Loads the embedded catalog (cached).</summary>
     public static ArbiterSquadCatalog LoadEmbedded() => Embedded.Value;
 
+    /// <summary>Returns the whole embedded lens file, or null for an unknown lens.</summary>
+    public static string? EmbeddedLensText(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        Assembly assembly = typeof(ArbiterSquadCatalog).Assembly;
+        string resource = LensResourcePrefix + name + MarkdownSuffix;
+        return assembly.GetManifestResourceInfo(resource) is null ? null : ReadResource(assembly, resource);
+    }
+
     /// <summary>Derives the target class from a capability profile name.</summary>
     /// <remarks>
     /// The classes are fixed: implementation (worker, publishing-worker,

@@ -60,8 +60,10 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                 ? AnswerFor(rules, facts)
                 : rules.Where(rule => rule.Ask is not null)
                     .ToDictionary(rule => rule.Id, rule => "within-task", StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, true));
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, true, Scores));
         }
+
+        public IReadOnlyDictionary<string, ArbiterStep1Score>? Scores { get; set; }
     }
 
     private sealed class ThrowingProvider : IArbiterProvider
@@ -216,6 +218,35 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(1, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Evaluator_WritesStepOneScoresToTheDecisionRecord()
+    {
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        CountingProvider provider = new(ArbiterDirectory)
+        {
+            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
+            {
+                ["KW-ARB-ASK-001"] = new([0.9, 0.1], 0.85, 0.8),
+            },
+        };
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+            AskRule("KW-ARB-ASK-002", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        await CreateEvaluator(provider).EvaluateAsync(DelegateEvent(Prompt), config);
+
+        ArbiterDecisionRecord record = new DecisionLog(ArbiterDirectory).ReadAll()[0];
+        ArbiterDecisionRule scored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-001");
+        Assert.Equal([0.9, 0.1], scored.Probabilities!);
+        Assert.Equal(0.85, scored.Confidence);
+        Assert.Equal(0.8, scored.Threshold);
+        ArbiterDecisionRule unscored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-002");
+        Assert.Null(unscored.Probabilities);
+        Assert.Null(unscored.Confidence);
+        Assert.Null(unscored.Threshold);
     }
 
     [Fact]
