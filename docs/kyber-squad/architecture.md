@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-10
 status: current
 decided-by:
-  - adr/0066-copilot-system-prompt-override-is-machine-wide
+  - adr/0067-copilot-system-prompt-override-is-machine-wide
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -2059,7 +2059,7 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 `kyber-weave squad copilot-prompt` replaces GitHub Copilot's top-level system prompt in VS Code
 with Kyber-Weave's own prompt. It is off until a person runs `install`. It is machine-wide,
 because VS Code reads the setting only from the default profile's user `settings.json`, and one
-Agent Host serves every window ([ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md)).
+Agent Host serves every window ([ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md)).
 The operating guide is the [adoption guide](onboarding.md#copilot-system-prompt-override-opt-in);
 the doctor checks and limits are in the [runbook](copilot-prompt-runbook.md).
 
@@ -2156,7 +2156,7 @@ checks, their ids, and the log line they read are in the [runbook](copilot-promp
 
 ## Related
 
-- [ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md) — the opt-in, machine-wide Copilot system-prompt override
+- [ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md) — the opt-in, machine-wide Copilot system-prompt override
 - [Copilot prompt runbook](copilot-prompt-runbook.md) — doctor checks, the `mode=replace` line, silent fallback, and known limits
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation

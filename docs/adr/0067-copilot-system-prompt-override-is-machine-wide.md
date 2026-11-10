@@ -1,5 +1,5 @@
 ---
-id: adr/0066-copilot-system-prompt-override-is-machine-wide
+id: adr/0067-copilot-system-prompt-override-is-machine-wide
 title: The Copilot system-prompt override is an opt-in, machine-wide user setting
 doc-type: adr
 status: current
@@ -15,7 +15,7 @@ code-refs:
   - CopilotPromptFile
 ---
 
-# ADR 0066: The Copilot system-prompt override is an opt-in, machine-wide user setting
+# ADR 0067: The Copilot system-prompt override is an opt-in, machine-wide user setting
 
 ## Status
 

@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-11-10
 status: current
 decided-by:
-  - adr/0066-copilot-system-prompt-override-is-machine-wide
+  - adr/0067-copilot-system-prompt-override-is-machine-wide
 code-refs:
   - CopilotPromptProbe
   - CopilotPromptFile
@@ -20,7 +20,7 @@ This runbook covers the opt-in Copilot system-prompt override in VS Code: what t
 mean, how to tell the override is live, what happens when it silently falls back, and what it
 does not cover. How to turn it on and off is in the
 [Kyber-Squad adoption guide](onboarding.md#copilot-system-prompt-override-opt-in). Why it is
-machine-wide is in [ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md).
+machine-wide is in [ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md).
 
 ## Live verification status
 
@@ -94,7 +94,7 @@ accept a file VS Code rejects. The log check is the authority on real machines.
   `experimental` and `advanced`. VS Code may change or remove it in any release.
 - **Machine-wide.** Every Copilot chat on the machine uses the prompt, including chats in
   repositories that do not use Kyber-Weave, until `uninstall` runs. Per-project activation is not
-  possible; see [ADR 0066](../adr/0066-copilot-system-prompt-override-is-machine-wide.md).
+  possible; see [ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md).
 - **Copilot's safety text is gone for the top-level agent.** Kyber-Weave's prompt carries its own
   safety rules. Its wording is the one that is tested, not Copilot's.
 - **Copilot's per-model tuning is gone for the top-level agent.** One prompt runs on every model,

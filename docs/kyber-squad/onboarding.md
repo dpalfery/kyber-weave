@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-10
 status: current
 decided-by:
-  - adr/0066-copilot-system-prompt-override-is-machine-wide
+  - adr/0067-copilot-system-prompt-override-is-machine-wide
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
