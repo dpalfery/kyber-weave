@@ -57,7 +57,11 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+A plan is listed here while it is open and leaves when it is archived.
+
+| Plan | Status | Mode | Scale |
+|---|---|---|---|
+| [Start Copilot's parent roles as skills so VS Code workers keep their tools](2026-11-10-copilot-parent-agents-skill-fallback.md) | Ready | test-first | extends-component: KyberSquad, KyberArbiter |
 
 ## Archived Plans
 
