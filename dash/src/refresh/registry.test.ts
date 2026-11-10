@@ -474,3 +474,9 @@ describe('parserContractVersionFor — Antigravity and Copilot contracts (D12)',
     }
   })
 })
+
+describe('droid parser contract', () => {
+  it('assigns the droid harness parser contract version 2', () => {
+    expect(parserContractVersionFor({ providerName: 'droid', harnessId: 'droid' })).toBe('2')
+  })
+})

@@ -340,6 +340,164 @@ describe('droid provider', () => {
   })
 })
 
+// The session-level title rides on each call as `sessionTitle`. The field is not
+// on ParsedProviderCall yet, so the read goes through a widened type rather than
+// an `any` escape hatch.
+function sessionTitleOf(call: ParsedProviderCall): string | undefined {
+  return (call as ParsedProviderCall & { sessionTitle?: string }).sessionTitle
+}
+
+const TOKEN_SETTINGS = {
+  model: 'gpt-5',
+  tokenUsage: { inputTokens: 100, outputTokens: 50, cacheCreationTokens: 0, cacheReadTokens: 0, thinkingTokens: 0 },
+}
+
+function sessionStart(title?: string): Record<string, unknown> {
+  return { type: 'session_start', id: 'session-1', cwd: '/tmp/my-project', ...(title !== undefined ? { title } : {}) }
+}
+
+function humanPrompt(id: string, timestamp: string | undefined, text: string): Record<string, unknown> {
+  return { type: 'message', id, ...(timestamp !== undefined ? { timestamp } : {}), message: { role: 'user', content: [{ type: 'text', text }] } }
+}
+
+function toolUseCall(id: string, timestamp: string | undefined, toolUseId: string): Record<string, unknown> {
+  return {
+    type: 'message',
+    id,
+    ...(timestamp !== undefined ? { timestamp } : {}),
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Read', input: { file_path: 'a.ts' } }] },
+  }
+}
+
+function toolResultOnly(id: string, timestamp: string, toolUseId: string): Record<string, unknown> {
+  return {
+    type: 'message',
+    id,
+    timestamp,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'ok', is_error: false }] },
+  }
+}
+
+function assistantText(id: string, timestamp: string | undefined, text: string): Record<string, unknown> {
+  return { type: 'message', id, ...(timestamp !== undefined ? { timestamp } : {}), message: { role: 'assistant', content: [{ type: 'text', text }] } }
+}
+
+describe('droid provider data completeness', () => {
+  beforeEach(async () => {
+    factoryDir = await mkdtemp(join(tmpdir(), 'codeburn-droid-test-'))
+  })
+
+  afterEach(async () => {
+    await rm(factoryDir, { recursive: true, force: true })
+  })
+
+  // Human prompt at 10:00:00; tool call at 10:00:01; its result at 10:00:05;
+  // the assistant's follow-up text at 10:00:07.
+  const toolThenText = (title?: string): Record<string, unknown>[] => [
+    sessionStart(title),
+    humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'fix the login bug'),
+    toolUseCall('a1', '2026-11-09T10:00:01.000Z', 'tu-1'),
+    toolResultOnly('r1', '2026-11-09T10:00:05.000Z', 'tu-1'),
+    assistantText('a2', '2026-11-09T10:00:07.000Z', 'fixed'),
+  ]
+
+  it('pairs each emitted call with its assistant entry id', async () => {
+    const path = await writeSession({ lines: toolThenText(), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls.map((call) => call.pairingId)).toEqual(['a1', 'a2'])
+  })
+
+  it('keeps the deduplication key on the assistant entry id', async () => {
+    const path = await writeSession({ lines: toolThenText(), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls.map((call) => call.deduplicationKey)).toEqual(['droid:session-1:a1', 'droid:session-1:a2'])
+  })
+
+  it('measures the first call from the human prompt that opened the turn', async () => {
+    const path = await writeSession({ lines: toolThenText(), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls[0]?.activeDurationMs).toBe(1_000)
+  })
+
+  it('counts tool execution toward the next call, because a tool-result-only message is not a boundary', async () => {
+    const path = await writeSession({ lines: toolThenText(), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    // From the previous emitted call (10:00:01) to this call (10:00:07), through the tool result at 10:00:05.
+    expect(calls[1]?.activeDurationMs).toBe(6_000)
+  })
+
+  it('leaves activeDurationMs absent when the call has no timestamp', async () => {
+    const path = await writeSession({
+      lines: [sessionStart(), humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'), assistantText('a1', undefined, 'hello')],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+  })
+
+  it('leaves activeDurationMs absent when the call timestamp cannot be parsed', async () => {
+    const path = await writeSession({
+      lines: [sessionStart(), humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'), assistantText('a1', 'not-a-time', 'hello')],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+  })
+
+  it('leaves activeDurationMs absent when the interval to the boundary is negative', async () => {
+    const path = await writeSession({
+      lines: [sessionStart(), humanPrompt('u1', '2026-11-09T10:00:10.000Z', 'hi'), assistantText('a1', '2026-11-09T10:00:05.000Z', 'hello')],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.activeDurationMs).toBeUndefined()
+  })
+
+  it('carries the trimmed session_start title on every call', async () => {
+    const path = await writeSession({ lines: toolThenText('  Fix login bug  '), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map(sessionTitleOf)).toEqual(['Fix login bug', 'Fix login bug'])
+  })
+
+  it('leaves sessionTitle absent when the session has no title', async () => {
+    const path = await writeSession({ lines: toolThenText(), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map(sessionTitleOf)).toEqual([undefined, undefined])
+  })
+
+  it('leaves sessionTitle absent when the title is blank', async () => {
+    const path = await writeSession({ lines: toolThenText('   '), settings: TOKEN_SETTINGS })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map(sessionTitleOf)).toEqual([undefined, undefined])
+  })
+})
+
 describe('the project a Factory session is filed under', () => {
   it('strips the home directory only at a path boundary', () => {
     // A directory that merely starts with the same characters is not under

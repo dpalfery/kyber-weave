@@ -27,7 +27,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { allProviderNames } from '../providers/index.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
-import { CANONICAL_CONTENT_KEYS, validateTokens, type CanonicalRecord, type ContentPart } from '../canon/types.js'
+import { CANONICAL_CONTENT_KEYS, SESSION_LABEL_KEY, validateTokens, type CanonicalRecord, type ContentPart } from '../canon/types.js'
 import type { ReaderToolCall, ReaderToolResult, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import {
   DEFAULT_CONVENTION,
@@ -1765,4 +1765,26 @@ describe('D29 — a tool.invoke child does not inherit a lifted key it cannot ca
       expect(child.measurability).toEqual({ ...parent.measurability, duration: 'measured' })
     })
   }
+});
+
+describe('session title stamping', () => {
+  it('stamps a call session title onto the record raw as kyber.session.label', () => {
+    // sessionTitle is not on ParsedProviderCall yet; the spread widens the literal.
+    const titled = {
+      ...call({ provider: 'droid', sessionId: 's-title', deduplicationKey: 'droid:s-title:a1' }),
+      sessionTitle: 'Fix login bug',
+    } as ParsedProviderCall
+
+    const records = new Synthesizer().synthesize([titled])
+
+    expect(records[0]?.raw).toMatchObject({ [SESSION_LABEL_KEY]: 'Fix login bug' })
+  })
+
+  it('writes no session label onto a record whose call carries no title', () => {
+    const untitled = call({ provider: 'droid', sessionId: 's-untitled', deduplicationKey: 'droid:s-untitled:a1' })
+
+    const records = new Synthesizer().synthesize([untitled])
+
+    expect((records[0]?.raw as Record<string, unknown> | undefined)?.[SESSION_LABEL_KEY]).toBeUndefined()
+  })
 });
