@@ -235,15 +235,13 @@ internal static class SystemOneContracts
             && answer.TryGetProperty("noul", out JsonElement noulValue)
             && noulValue.ValueKind == JsonValueKind.Number
             && noulValue.TryGetDouble(out probability)
-            && double.IsFinite(probability)
-            && probability >= 0
-            && probability <= 1;
+            && IsUnitInterval(probability);
     }
 
     /// <summary>
     /// Reads the answer's <c>probabilities</c> in the order of <paramref name="keys"/>, since
     /// the provider's dictionary order means nothing. Returns null unless every key has a
-    /// value, so a position in the list always names the same option.
+    /// value in the 0 to 1 range, so a position in the list always names the same option.
     /// </summary>
     internal static IReadOnlyList<double>? ReadProbabilities(JsonElement answer, IReadOnlyList<string> keys)
     {
@@ -261,7 +259,7 @@ internal static class SystemOneContracts
             if (!probabilities.TryGetProperty(keys[index], out JsonElement value)
                 || value.ValueKind != JsonValueKind.Number
                 || !value.TryGetDouble(out values[index])
-                || !double.IsFinite(values[index]))
+                || !IsUnitInterval(values[index]))
             {
                 return null;
             }
@@ -269,6 +267,8 @@ internal static class SystemOneContracts
 
         return values;
     }
+
+    private static bool IsUnitInterval(double value) => value is >= 0 and <= 1;
 
     private static bool IsType(JsonElement answer, string type) =>
         answer.ValueKind == JsonValueKind.Object
@@ -286,7 +286,7 @@ internal static class SystemOneContracts
 
         if (confidenceValue.ValueKind != JsonValueKind.Number
             || !confidenceValue.TryGetDouble(out double value)
-            || !double.IsFinite(value))
+            || !IsUnitInterval(value))
         {
             return false;
         }

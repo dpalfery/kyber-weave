@@ -142,6 +142,34 @@ public sealed class ArbiterSystemOneClientTests
         Assert.Equal(0.8, score.Threshold);
     }
 
+    /// <summary>A confidence past the 0 to 1 scale must not clear a floor.</summary>
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(-0.1)]
+    public async Task Choice_ConfidenceOutsideTheScale_IsUndecidable(double confidence)
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody(confidence: confidence)));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
+    }
+
+    [Fact]
+    public async Task Scores_ProbabilityOutsideTheScale_DropsTheListAndKeepsTheConfidence()
+    {
+        string body = ChoiceBody().Replace("\"adds-work\":0.1", "\"adds-work\":1.2", StringComparison.Ordinal);
+        using StubHandler handler = new(JsonResponse(body));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        ArbiterStep1Score score = result.ScoresByRule![ChoiceRuleId];
+        Assert.Null(score.Probabilities);
+        Assert.Equal(0.85, score.Confidence);
+    }
+
     [Fact]
     public async Task Scores_ChoiceBelowFloor_StillRecordedSoTheFloorCanBeTuned()
     {
