@@ -295,7 +295,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     missing or non-object <c>mcpServers</c> yields no names, so a malformed declaration
     ///     fails closed instead of inheriting the parent session.
     /// </remarks>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    internal static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
     {
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
             servers.ValueKind != JsonValueKind.Object)

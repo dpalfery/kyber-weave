@@ -165,7 +165,23 @@ public static class CodeGraphProvisioner
         // a concurrent run may have created the index while this one waited, and re-running init over an
         // existing directory would be the wrong verb. Both run from the root so the index lands there.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
-        return VerbCheck(RunChild(root, verb, options, executor, subject: "."), options, IndexCheckId, ProvisionFlag);
+        return VerbCheck(PrepareIndex(root, verb, options, executor), options, IndexCheckId, ProvisionFlag);
+    }
+
+    /// <summary>
+    ///     Runs the chosen verb, then <c>codegraph init</c> if CodeGraph says this folder was never set up.
+    /// </summary>
+    /// <remarks>
+    ///     The folder's presence does not prove an index exists: a repository can commit
+    ///     <c>.codegraph/.gitignore</c>, so a new worktree has the folder and no index. <c>sync</c> and
+    ///     <c>index</c> both refuse that, and only <c>init</c> can fix it.
+    /// </remarks>
+    private static ChildRun PrepareIndex(string root, string verb, DoctorOptions options, IProcessExecutor executor)
+    {
+        ChildRun run = RunChild(root, verb, options, executor, subject: ".");
+        return run.NotInitialised && verb != InitVerb
+            ? RunChild(root, InitVerb, options, executor, subject: ".")
+            : run;
     }
 
     /// <summary>
@@ -206,17 +222,12 @@ public static class CodeGraphProvisioner
 
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
-        ChildRun prepared = RunChild(root, verb, options, executor, subject: ".");
-        if (!prepared.Ok)
+        ChildRun prepared = PrepareIndex(root, verb, options, executor);
+        if (!prepared.Ok && !prepared.NotInitialised)
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
             prepared = repair.Ok
-                ? RunChild(
-                    root,
-                    Directory.Exists(indexDirectory) ? SyncVerb : InitVerb,
-                    options,
-                    executor,
-                    subject: ".")
+                ? PrepareIndex(root, Directory.Exists(indexDirectory) ? SyncVerb : InitVerb, options, executor)
                 : repair;
         }
 
@@ -457,7 +468,11 @@ public static class CodeGraphProvisioner
                 return new ChildRun(verb, subject, ChildRunFailure.None, 0, null, Corrupt: false);
 
             string detail = FirstLine(result.StandardError) ?? FirstLine(result.StandardOutput) ?? "no output";
-            return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result));
+            return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result))
+            {
+                NotInitialised = (result.StandardError + "\n" + result.StandardOutput)
+                    .Contains("CodeGraph not initialized", StringComparison.OrdinalIgnoreCase)
+            };
         }
         catch (TimeoutException)
         {
@@ -470,6 +485,12 @@ public static class CodeGraphProvisioner
             return new ChildRun(verb, subject, ChildRunFailure.CouldNotStart, 0, null, Corrupt: false);
         }
     }
+
+    /// <summary>
+    ///     The fix for an index doctor cannot use. <c>git clean</c> removes only untracked and ignored files, so a
+    ///     tracked file such as a committed <c>.codegraph/.gitignore</c> survives, which deleting the folder would not.
+    /// </summary>
+    private const string ClearIndexFix = "git clean -fdx -- .codegraph and run kyber-weave doctor";
 
     /// <summary>Turns one child run into the check line for <paramref name="checkId"/>, with a remedy that runs.</summary>
     private static DoctorCheck VerbCheck(ChildRun run, DoctorOptions options, string checkId, string flag)
@@ -489,12 +510,23 @@ public static class CodeGraphProvisioner
                 $"codegraph {run.Verb} exceeded its {options.IndexTimeout.TotalSeconds:0} second limit and was stopped",
                 $"kyber-weave doctor --{flag} --index-timeout {RaisedTimeout(options)}"),
             ChildRunFailure.CouldNotStart => new DoctorCheck(checkId, false, $"{command} could not be run", command),
+            _ when run.NotInitialised && run.Verb != InitVerb => new DoctorCheck(
+                checkId,
+                false,
+                $"CodeGraph is not set up in this folder, so codegraph {run.Verb} cannot run: {run.Detail}",
+                $"codegraph {InitVerb} ."),
+            // init itself said the folder is not set up, so re-running init cannot be the fix.
+            _ when run.NotInitialised => new DoctorCheck(
+                checkId,
+                false,
+                $"codegraph {InitVerb} ran but CodeGraph still reports this folder is not set up: {run.Detail}",
+                $"{ClearIndexFix} --{flag}"),
             _ => run.Corrupt
                 ? new DoctorCheck(
                     checkId,
                     false,
                     $"codegraph {run.Verb} reports a damaged index: {run.Detail}",
-                    "remove .codegraph and run kyber-weave doctor")
+                    ClearIndexFix)
                 : new DoctorCheck(
                     checkId,
                     false,
@@ -543,7 +575,7 @@ public static class CodeGraphProvisioner
         IndexCheckId,
         false,
         ".codegraph/ is not writable or is owned by another user",
-        "remove .codegraph and run kyber-weave doctor");
+        ClearIndexFix);
 
     /// <summary>
     ///     Takes the lock by opening the file with no sharing, retrying until the deadline. The file is never
@@ -670,6 +702,9 @@ public static class CodeGraphProvisioner
     {
         /// <summary>Whether the child exited zero.</summary>
         public bool Ok => Failure is ChildRunFailure.None;
+
+        /// <summary>Whether the child said CodeGraph was never initialised in this folder.</summary>
+        public bool NotInitialised { get; init; }
     }
 
     /// <summary>Why a CodeGraph child run did not succeed.</summary>

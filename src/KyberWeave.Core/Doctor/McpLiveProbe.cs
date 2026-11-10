@@ -46,6 +46,15 @@ public static partial class McpLiveProbe
     /// <summary>The longest a child stderr line is allowed into a failure reason.</summary>
     private const int MaxDetailLength = 160;
 
+    /// <summary>The handshake failure a larger budget can actually help.</summary>
+    private const string NoAnswerWithinBudget = "the server did not answer within the MCP budget";
+
+    /// <summary>The rule id the server writes to stderr when the folder has no host configuration.</summary>
+    private const string NoHostConfigurationCode = "KW-MCP-ROOT-001";
+
+    /// <summary>How long to let stderr finish once a server has closed its output.</summary>
+    private static readonly TimeSpan ServerErrorWait = TimeSpan.FromSeconds(1);
+
     /// <summary>Runs the live proof and returns the <c>mcp.*</c> checks that ran.</summary>
     /// <param name="root">The resolved repository root that the server's provenance must name.</param>
     /// <param name="options">The MCP executable and total session budget.</param>
@@ -136,23 +145,23 @@ public static partial class McpLiveProbe
                 "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}"))
         {
             // A server that exited between starting and the first request is a failed handshake, not a crash.
-            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options));
+            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options, root));
             return;
         }
 
         if (!TryRead(session, out string? initializeReply, out string? handshakeFailure))
         {
-            checks.Add(Handshake(false, handshakeFailure!, session, options));
+            checks.Add(Handshake(false, handshakeFailure!, session, options, root));
             return;
         }
 
         if (!TryResult(initializeReply!, out _))
         {
-            checks.Add(Handshake(false, "initialize did not return a result", session, options));
+            checks.Add(Handshake(false, "initialize did not return a result", session, options, root));
             return;
         }
 
-        checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options));
+        checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options, root));
 
         if (!TrySend(session, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
             || !TrySend(
@@ -222,13 +231,34 @@ public static partial class McpLiveProbe
                 "stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check");
     }
 
-    private static DoctorCheck Handshake(bool passed, string reason, StdioSession session, DoctorOptions options)
+    private static DoctorCheck Handshake(
+        bool passed,
+        string reason,
+        StdioSession session,
+        DoctorOptions options,
+        string root)
     {
         if (passed)
             return new DoctorCheck("mcp.handshake", true, reason, null);
 
-        string detail = session.FirstErrorLine is { } line ? $" ({Truncate(line)})" : string.Empty;
-        return new DoctorCheck("mcp.handshake", false, reason + detail, TimeoutFix(options));
+        bool timedOut = string.Equals(reason, NoAnswerWithinBudget, StringComparison.Ordinal);
+        string? serverError = timedOut ? session.FirstErrorLine : session.WaitForFirstErrorLine(ServerErrorWait);
+
+        if (serverError?.StartsWith(NoHostConfigurationCode, StringComparison.Ordinal) == true)
+        {
+            return new DoctorCheck(
+                "mcp.handshake",
+                false,
+                "the docs server refused to start because this folder has no .kyber-weave/kyber-weave.yml. " +
+                "A new worktree only has that file if its base branch has it committed",
+                $"kyber-weave docs init {ShellQuote.Quote(root)}");
+        }
+
+        string detail = serverError is { } line ? $" ({Truncate(line)})" : string.Empty;
+        string fix = timedOut
+            ? TimeoutFix(options)
+            : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
+        return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
     }
 
     /// <summary>
@@ -246,7 +276,7 @@ public static partial class McpLiveProbe
         catch (TimeoutException)
         {
             line = null;
-            failure = "the server did not answer within the MCP budget";
+            failure = NoAnswerWithinBudget;
             return false;
         }
         catch (EndOfStreamException)
