@@ -1661,8 +1661,9 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
   reached, the child's process tree is killed and the check fails as `codegraph.index`.
 - **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
   write-probe inside that directory, used to test writability. A directory that is corrupt, not
-  writable, or owned by another user fails with `remove .codegraph and run kyber-weave doctor`. A
-  person makes the removal.
+  writable, or owned by another user fails with `git clean -fdx -- .codegraph and run kyber-weave
+  doctor`. That removes only untracked and ignored files, so a committed `.codegraph/.gitignore`
+  survives. A person makes the removal.
 - **Never install the binary.** See [Nothing installs CodeGraph](#nothing-installs-codegraph).
 - **Lock file in the OS temp directory.** Concurrent provisioning runs for one repository are
   serialised by a lock file named `kyber-weave-codegraph-<hash>.lock` in the OS temporary directory,

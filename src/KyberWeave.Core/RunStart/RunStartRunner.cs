@@ -47,6 +47,9 @@ public sealed class RunStartRunner
     private const string TrackOption = "--track";
     private const string WorktreeStampFormat = "yyyyMMdd'T'HHmmss'Z'";
 
+    /// <summary>The highest numeric suffix tried for runs that start in the same second.</summary>
+    private const int MaxWorktreeSuffix = 100;
+
     private readonly IProcessExecutor _executor;
     private readonly string _repositoryRoot;
 
@@ -299,8 +302,10 @@ public sealed class RunStartRunner
         string stamp = startedAt.UtcDateTime.ToString(WorktreeStampFormat, CultureInfo.InvariantCulture);
         string folder = stamp + "-" + branch.Replace('/', '-');
 
+        // Bounded: only a folder or claim that really exists moves to the next suffix, and the cap stops even a
+        // directory flooded with them. Past it the last name is returned and git reports why it cannot be used.
         string candidate = Path.Combine(container, folder);
-        for (int attempt = 2; !TryClaim(container, candidate); attempt++)
+        for (int attempt = 2; attempt <= MaxWorktreeSuffix && !TryClaim(container, candidate); attempt++)
             candidate = Path.Combine(container, folder + "-" + attempt.ToString(CultureInfo.InvariantCulture));
 
         return candidate;
@@ -344,7 +349,9 @@ public sealed class RunStartRunner
         }
         catch (IOException)
         {
-            return false;
+            // Only a claim another run holds means "taken". Any other I/O error (a full disk, a path too long)
+            // would fail every suffix the same way, so it is left for git to report.
+            return !File.Exists(ClaimPathFor(candidate));
         }
 
         // A run that finished between the check above and the claim has made the folder and dropped its claim.

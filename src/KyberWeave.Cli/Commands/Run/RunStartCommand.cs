@@ -295,10 +295,17 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 }
 
                 worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
-                created = resumeTarget is null
-                    ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                    : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
-                RunStartRunner.ReleaseWorktreeClaim(worktreePath);
+                try
+                {
+                    created = resumeTarget is null
+                        ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
+                        : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+                }
+                finally
+                {
+                    // Released whether git succeeded, failed, or threw, so no claim outlives its run.
+                    RunStartRunner.ReleaseWorktreeClaim(worktreePath);
+                }
             }
         }
 

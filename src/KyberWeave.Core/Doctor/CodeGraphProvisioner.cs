@@ -486,6 +486,12 @@ public static class CodeGraphProvisioner
         }
     }
 
+    /// <summary>
+    ///     The fix for an index doctor cannot use. <c>git clean</c> removes only untracked and ignored files, so a
+    ///     tracked file such as a committed <c>.codegraph/.gitignore</c> survives, which deleting the folder would not.
+    /// </summary>
+    private const string ClearIndexFix = "git clean -fdx -- .codegraph and run kyber-weave doctor";
+
     /// <summary>Turns one child run into the check line for <paramref name="checkId"/>, with a remedy that runs.</summary>
     private static DoctorCheck VerbCheck(ChildRun run, DoctorOptions options, string checkId, string flag)
     {
@@ -514,13 +520,13 @@ public static class CodeGraphProvisioner
                 checkId,
                 false,
                 $"codegraph {InitVerb} ran but CodeGraph still reports this folder is not set up: {run.Detail}",
-                $"remove .codegraph and run kyber-weave doctor --{flag}"),
+                $"{ClearIndexFix} --{flag}"),
             _ => run.Corrupt
                 ? new DoctorCheck(
                     checkId,
                     false,
                     $"codegraph {run.Verb} reports a damaged index: {run.Detail}",
-                    "remove .codegraph and run kyber-weave doctor")
+                    ClearIndexFix)
                 : new DoctorCheck(
                     checkId,
                     false,
@@ -569,7 +575,7 @@ public static class CodeGraphProvisioner
         IndexCheckId,
         false,
         ".codegraph/ is not writable or is owned by another user",
-        "remove .codegraph and run kyber-weave doctor");
+        ClearIndexFix);
 
     /// <summary>
     ///     Takes the lock by opening the file with no sharing, retrying until the deadline. The file is never
