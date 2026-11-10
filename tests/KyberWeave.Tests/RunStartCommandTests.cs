@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.RunStart;
 using Xunit;
 using Xunit.Sdk;
@@ -30,6 +31,134 @@ public sealed class RunStartCommandTests : IDisposable
     public void Dispose()
     {
         _probe.Dispose();
+    }
+
+    /// <summary>
+    ///     A folder left at the name an earlier run would have used does not stop a new run: the worktree
+    ///     folder carries a timestamp, while the branch keeps the shape the pull request naming check needs.
+    /// </summary>
+    [Fact]
+    public void AFolderLeftByAnEarlierRunDoesNotStopANewWorktree()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        string leftover = Path.Combine(
+            Path.GetDirectoryName(_probe.Root)!,
+            Path.GetFileName(_probe.Root) + ".worktrees",
+            "claude-fix-tighten-the-gate");
+        Directory.CreateDirectory(leftover);
+        File.WriteAllText(Path.Combine(leftover, "left-behind.txt"), "an earlier run\n");
+
+        ProbeResult result = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+
+        Assert.True(result.ExitCode == 0, $"A leftover folder must not stop the run. {result.Output}");
+        using JsonDocument document = ParseJson(result.StandardOutput);
+        Assert.Equal("claude/fix/tighten-the-gate", document.RootElement.GetProperty("branch").GetString());
+        Assert.Matches(
+            @"^\d{8}T\d{6}Z-claude-fix-tighten-the-gate$",
+            Path.GetFileName(document.RootElement.GetProperty("worktree").GetString()));
+    }
+
+    /// <summary>The folder stamp is UTC and sorts by time, and two runs in one second still get two folders.</summary>
+    [Fact]
+    public void WorktreeFolderIsStampedInUtcAndUniqueWithinASecond()
+    {
+        RunStartRunner runner = new(ProcessExecutor.WithTimeout(TimeSpan.FromSeconds(5)), _probe.Root);
+        DateTimeOffset startedAt = new(2026, 11, 10, 10, 6, 12, TimeSpan.FromHours(-5));
+
+        string first = runner.WorktreePathFor("claude/fix/x", startedAt);
+        Directory.CreateDirectory(first);
+        string second = runner.WorktreePathFor("claude/fix/x", startedAt);
+
+        Assert.Equal("20261110T150612Z-claude-fix-x", Path.GetFileName(first));
+        Assert.Equal("20261110T150612Z-claude-fix-x-2", Path.GetFileName(second));
+    }
+
+    /// <summary>
+    ///     A branch that already exists is its own failure: the same slug run twice is refused with <c>2</c>,
+    ///     and the message says how to continue that branch instead of repeating git's error.
+    /// </summary>
+    [Fact]
+    public void RefusesABranchThatAlreadyExistsAndNamesResume()
+    {
+        _probe.CreateBranchWithCommit("claude/fix/tighten-the-gate", "earlier work");
+        _probe.Git("switch", "main");
+
+        ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
+
+        Assert.True(result.ExitCode == 2, $"An existing branch must exit 2, not {result.ExitCode}. {result.Output}");
+        string message = string.Join(' ', result.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("already exists", message, StringComparison.Ordinal);
+        Assert.Contains("--resume claude/fix/tighten-the-gate", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Resuming a branch that a worktree already holds returns that worktree. Git allows a branch in only
+    ///     one worktree, so adding a second would fail.
+    /// </summary>
+    [Fact]
+    public void ResumeReturnsTheWorktreeAlreadyHoldingTheBranch()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        ProbeResult started = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+        Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
+        using JsonDocument first = ParseJson(started.StandardOutput);
+        int worktreesAfterStart = _probe.WorktreeCount();
+
+        ProbeResult resumed = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+            "--resume", "claude/fix/tighten-the-gate", "--json");
+
+        Assert.True(resumed.ExitCode == 0, $"Resuming must reuse the worktree. {resumed.Output}");
+        using JsonDocument second = ParseJson(resumed.StandardOutput);
+        Assert.Equal(
+            Path.GetFileName(first.RootElement.GetProperty("worktree").GetString()),
+            Path.GetFileName(second.RootElement.GetProperty("worktree").GetString()));
+        Assert.Equal(worktreesAfterStart, _probe.WorktreeCount());
+    }
+
+    /// <summary>
+    ///     A worktree folder deleted by hand stays registered with git and would still claim the branch, so a
+    ///     resume clears that stale entry and creates a new folder.
+    /// </summary>
+    [Fact]
+    public void ResumeRecoversWhenTheWorktreeFolderWasDeletedByHand()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        ProbeResult started = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+        Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
+        using JsonDocument first = ParseJson(started.StandardOutput);
+        Directory.Delete(first.RootElement.GetProperty("worktree").GetString()!, recursive: true);
+
+        ProbeResult resumed = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+            "--resume", "claude/fix/tighten-the-gate", "--json");
+
+        Assert.True(resumed.ExitCode == 0, $"Resuming must clear the stale entry. {resumed.Output}");
+        using JsonDocument second = ParseJson(resumed.StandardOutput);
+        Assert.True(Directory.Exists(second.RootElement.GetProperty("worktree").GetString()));
+    }
+
+    /// <summary>A prune that fails is named as the failure, rather than surfacing as git's later complaint.</summary>
+    [Fact]
+    public void ResumeNamesAFailedPrune()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        ProbeResult started = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+        Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
+        using JsonDocument first = ParseJson(started.StandardOutput);
+        Directory.Delete(first.RootElement.GetProperty("worktree").GetString()!, recursive: true);
+        _probe.WriteGitFailOn("prune", "cannot prune");
+
+        ProbeResult resumed = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+            "--resume", "claude/fix/tighten-the-gate");
+
+        Assert.True(resumed.ExitCode == 1, $"A failed prune must exit 1, not {resumed.ExitCode}. {resumed.Output}");
+        Assert.Contains("cannot prune", resumed.Output, StringComparison.Ordinal);
     }
 
     /// <summary>A well-formed request against a clean checkout is ready, and says so with <c>0</c>.</summary>

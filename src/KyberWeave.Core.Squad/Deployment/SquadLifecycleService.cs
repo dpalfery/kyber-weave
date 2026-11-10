@@ -249,6 +249,12 @@ public sealed class SquadLifecycleService
             }
 
             warnings.AddRange(DegradedFileWarnings(plan));
+            warnings.AddRange(FactoryMcpConfiguration.Warnings(
+                request.Targets,
+                request.Scope,
+                source,
+                targetRoot,
+                _stateStore.UserPaths.HomeDirectory));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -479,6 +485,12 @@ public sealed class SquadLifecycleService
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
 
             warnings.AddRange(DegradedFileWarnings(plan));
+            warnings.AddRange(FactoryMcpConfiguration.Warnings(
+                targets,
+                request.Scope,
+                source,
+                targetRoot,
+                _stateStore.UserPaths.HomeDirectory));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
