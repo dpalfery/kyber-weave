@@ -283,7 +283,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         string? caller,
         KyberWeaveConfig config)
     {
-        string callerText = $"{caller ?? "unidentified"} ({harness})";
+        string callerText = $"{record.Caller ?? caller ?? "unidentified"} ({harness})";
         IReadOnlyDictionary<string, string> headers = HeaderBlock.Parse(prompt).Headers;
 
         if (string.Equals(record.Outcome, RuleEffects.Skip, StringComparison.Ordinal))

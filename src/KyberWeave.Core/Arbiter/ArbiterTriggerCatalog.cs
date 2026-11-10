@@ -49,6 +49,7 @@ public static class ArbiterTriggerCatalog
         "delegation.prompt",
         "delegation.markers",
         "delegation.plan-file",
+        "delegation.plan-file-rejected",
         "config.planning-dirs",
     };
 

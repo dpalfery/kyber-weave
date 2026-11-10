@@ -4,7 +4,7 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-09
 code-refs:
   - droidAdapter
   - installFactoryPlugin
@@ -75,6 +75,25 @@ mapping the adapter had learned since the span was stored never reached the stor
 record could carry the measurability the derivation declared with no content behind it. The
 derived content now fills the buckets the collected content left empty, and the collected
 content still wins every bucket it holds.
+
+Amended 2026-11-09 (measured evidence): Factory's documented hook payloads carry no
+`tool_call_id` (https://docs.factory.com/reference/hooks-reference, retrieved 2026-11-09).
+`PreToolUse` carries `tool_name` and `tool_input`, and `PostToolUse` adds `tool_response`. The
+plugin's tool span therefore anchors on the session id, and every tool call of a session collapses
+onto one span. The plugin also stamps start equal to end on every span, so it measures no duration.
+The premise above that the plugin owns tool timing holds for turns and prompts only.
+
+Amended 2026-11-09 (the file source's transcript reader): the transcript content reader
+(`dash/src/synth/readers/droid.ts`) is part of the **existing file source**, not a new collection
+source. It turns each assistant message's `tool_use` and `tool_result` blocks into tool records,
+gives each assistant call its active duration, and carries the session's own title. The `droid`
+parser contract is 2, so stored sessions re-synthesise. No plugin or hook changed.
+
+Amended 2026-11-09 (the double-count rule, which answers this record's requirement for any future
+Factory collection source): **one source per session owns tool calls.** The file transcript owns
+them when it has any tool record for the session; otherwise the plugin's tool records count. A
+paired session's duration is the sum of the file source's llm-call active durations, with its tool records excluded because their time already lies inside those durations. Turns, prompts and the prompt
+consent are unchanged.
 
 ## Context
 

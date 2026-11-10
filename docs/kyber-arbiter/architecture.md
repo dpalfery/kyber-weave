@@ -93,6 +93,15 @@ embedded Squad catalog. `HeaderBlock` parses the closed routing-header set
 harness payload above the rendered `--caller`, then header inference. Plan and task identity
 come from the headers only — never inferred from the plan index.
 
+`PLAN_FILE:` is a repository-relative path. A value that starts with `/`, contains a
+backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected.
+A rejected name goes to `HeaderBlock.RejectedNames` with its value discarded, so a header
+that was sent and rejected is distinct from one that was never sent: the planner rule
+reads it as `delegation.plan-file-rejected`. A second sighting of a name leaves it absent
+whichever sighting was valid. On a planner dispatch, a rejected
+`PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
+the body cannot rescue it.
+
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
@@ -212,12 +221,14 @@ Passing mutually exclusive scope flags (`--global` and `--project`) or `--path` 
 
 ## Provider and models
 
-`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud and to a local
-Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
+`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud, to OpenRouter, and
+to a local Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
 
 | Model | Endpoint | Key | Usable input | Accuracy on Ollama's 3,880-decision comparison |
 |---|---|---|---|---|
+| `jev-1.14.0` (TypeSafe, default) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | Not published |
 | `jev-1.13.0` (TypeSafe) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | 76.0% |
+| `typesafe/jev-1.14`, `typesafe/jev-1.13` (OpenRouter) | `https://openrouter.ai/api/v1` | Required (the credential store) | The same budget as the TypeSafe ids | Not published |
 | `nimble` (Ollama, 9B) | `http://localhost:11434/v1` | None | About 8,000 tokens per question | 74.8% |
 | `tev1` (Ollama, 4B) | `http://localhost:11434/v1` | None | About 2,000 tokens | 73.3% |
 
@@ -226,6 +237,60 @@ too small for most shipped rules. The figures are from Ollama's own benchmark, a
 [Ollama's Jev-style decision models post](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models).
 Each request is budgeted before it is sent. An over-budget state makes no call, and every
 step-1 rule on the trigger answers `undecidable`.
+
+### Step-1 threshold measurement
+
+The shipped step-1 thresholds were measured on 2026-11-09 for Jev 1.13 and Jev 1.14. TypeSafe
+publishes no accuracy or calibration comparison between the two, so the figures below are
+this project's own.
+
+**Method.** 120 invented cases, 30 for each of the four step-1 rules, in
+`tests/KyberWeave.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
+them independently and agreed on all 120; no person reviewed them. Each case went through the
+production request builder, over OpenRouter, as `typesafe/jev-1.13` and `typesafe/jev-1.14`,
+in four full runs. A direct TypeSafe run was not made, so OpenRouter and TypeSafe were not
+compared.
+
+**Result.** No threshold changed.
+
+- `KW-ARB-SCOPE-002`, `KW-ARB-OWNER-002` and `KW-ARB-CLAIM-001`: no wrong answer cleared its
+  floor on either model in any run, so the floors stay at 0.8, 0.8 and 0.9. Accuracy was 29 or
+  30 of 30 per rule. Of 30 answers, Jev 1.14 cleared the floor on 24 (`SCOPE`), 26 to 28
+  (`OWNER`) and 22 or 23 (`CLAIM`). Jev 1.13 cleared it on 22 or 23, 19 to 21 and 23 to 25.
+- `KW-ARB-LENS-001`: the ceiling stays at 0.1. No lens that applies was skipped at 0.1. The
+  rule written before the measurement proposed raising it to 0.6 or 0.63, and that was not
+  adopted. A repeat run scored an applying lens at 0.55 on Jev 1.14. Without the diff summary,
+  every lens scored between 0.12 and 0.45 on both models, so a ceiling of 0.6 would skip all
+  of them.
+
+Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
+case), so a floor set for one model is not assumed to hold for another.
+
+**Model ids.** `tuned-for` is an exact match and holds TypeSafe's `jev-1.14.0` and
+`jev-1.13.0`, and OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids the
+measurement used. Any other `typesafe/` id, including a dated snapshot, warns in `doctor`.
+The state budget for a `typesafe/jev-1.*` id is TypeSafe's published limit; OpenRouter's own
+limit was not checked, and the measured cases were small. `jev-1.13.0` stays listed, and a configuration pinned to it keeps working with no
+`doctor` warning. [TypeSafe says](https://typesafe.ai/blog/jev-1-14) it intends to give
+60 days' warning before formally deprecating `jev-1.13.0`, and has set no date. Only a
+configuration that names no model moves to the new default.
+
+**Limits.**
+
+- 30 cases per rule is small: one error is about 3%.
+- On the hook route nothing fills `review.diff-summary` or `file.surroundings`, and
+  `instructions-from: lens:` has no production resolver. `KW-ARB-LENS-001` and
+  `KW-ARB-CLAIM-001` can therefore see less in real use than in this measurement. With no diff
+  summary, `KW-ARB-LENS-001` skips nothing at 0.1.
+- Decision records write no scores for step-1 answers, so thresholds cannot yet be tuned from
+  the decision log.
+- `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
+
+To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run
+`ArbiterCalibrationTests`. It makes paid calls, about one cent per run. By default it calls
+TypeSafe directly with `jev-1.13.0` and `jev-1.14.0`. To repeat the runs reported here, also
+set `KW_ARBITER_CALIBRATE_ENDPOINT` to `https://openrouter.ai/api/v1` and
+`KW_ARBITER_CALIBRATE_MODELS` to `typesafe/jev-1.13,typesafe/jev-1.14`.
 
 ## Harness facts
 
@@ -271,6 +336,14 @@ finding is surfaced as context rather than enforced. Pre-dispatch denies still b
 Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They gate only
 dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
 pass anything else through, logged with `caller: unidentified`.
+
+Caller inference from a planner target is one of those gates, and it applies only to a
+marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
+dispatch to a planner passes on `factory` and `antigravity`, and `KW-ARB-AUDIT-002`
+reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
+ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
+audit rule is how it is seen.
 
 Delivery differs per harness. On Pi a `block` before the call returns
 `{block: true, reason}`, stripped arguments are assigned onto the event input, and a
@@ -397,7 +470,9 @@ grant is built from; the executable and its argv are unchanged. Three tools:
   the hook would: the same facts, rules, ledger append and decision record, and the same allow,
   envelope or review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
   `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
-  and records `caller-source: asserted`. Because the gated agent makes the call, this path
+  and records `caller-source: asserted`. The asserted `plan-file` is rendered as a
+  `PLAN_FILE:` header, so the repository-relative rule and the `plan-file-invalid` answer
+  apply to it as they do to a hook dispatch. Because the gated agent makes the call, this path
   is advisory.
 - **`arbiter_list_effective_rules_by_trigger(trigger?)`** — lists the rule catalogue; read-only
   and closed-world.

@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -180,10 +180,16 @@ fact outside those declared states leaves the machine.
 - **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
   is not committed; a fresh clone escalates dependent tasks until architect attests, after
   user confirmation, what is complete (D31).
-- **Step-1 thresholds are tuned for Jev 1.13.** Shipped thresholds start conservative for
-  `jev-1.13.0`. `jev-1.13-free` is the free-tier id of that same model and shares those
-  floors, so `doctor` does not warn for it. Any other model warns in `doctor` until its
-  thresholds are tuned from the recorded decision log.
+- **Step-1 thresholds are measured for Jev 1.13 and Jev 1.14.** Shipped thresholds started
+  conservative for `jev-1.13.0`. A measurement on 2026-11-09 with 120 labelled cases left
+  them unchanged and moved the default model to `jev-1.14.0`; `jev-1.13.0` stays supported.
+  OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids measured, are tuned too.
+  The cases are synthetic, labelled by two Claude models, and run through OpenRouter; the
+  method and limits are in [the architecture guide](../kyber-arbiter/architecture.md). The
+  repository treats `jev-1.13-free` as the free-tier id of Jev 1.13 and it shares those
+  floors, although TypeSafe's models page, changelog and Jev 1.14 post do not list it. Any
+  other model warns in `doctor` until its thresholds are measured. The decision log cannot
+  supply that measurement yet, because it records no scores for step-1 answers.
 - **Phase PRs target an integration branch.** While the specification was open,
   `docs validate --merge-ready` reported `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2
   PRs. Each phase PR targeted the long-lived integration branch `integration/kyber-arbiter`,

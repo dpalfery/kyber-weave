@@ -79,6 +79,11 @@ const PI_PARSER_CONTRACT_VERSION = '3'
 // message id) and assistant calls stamped with that id as pairingId for pairing.
 // Version-invalidated checkpoints re-open the unit so the parts upsert (ADR 0016).
 const COMMANDCODE_PARSER_CONTRACT_VERSION = '2'
+// v2: content reader registered, one turn per assistant message keyed by its id,
+// assistant calls stamped with that id as pairingId, plus active duration and
+// session title. Version-invalidated checkpoints re-open the unit so the records
+// upsert (ADR 0016).
+const DROID_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -125,6 +130,9 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   }
   if (partial.providerName === 'commandcode' || partial.harnessId === 'commandcode') {
     return COMMANDCODE_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'droid' || partial.harnessId === 'droid') {
+    return DROID_PARSER_CONTRACT_VERSION
   }
   if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
     return SKILLS_CONTRACT_VERSION
@@ -630,6 +638,7 @@ const READER_HARNESS_IDS = new Set([
   'cursor',
   'cursor-agent',
   'commandcode',
+  'droid',
   ...KILO_HARNESS_IDS,
   'pi',
 ])

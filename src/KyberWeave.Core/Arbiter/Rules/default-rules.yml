@@ -53,7 +53,7 @@ rules:
         adds-work: The delegation asks for work the task does not describe.
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0, jev-1.13-free]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { within-task: allow, adds-work: escalate, unrelated: escalate }
 
   - id: KW-ARB-READY-001
@@ -105,7 +105,7 @@ rules:
         target: The choice equals delegation.target.
         other: Another specialist owns this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0, jev-1.13-free]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-OWNER-001=no-mapping
     effects: { target: allow, other: escalate }
 
@@ -159,17 +159,19 @@ rules:
   - id: KW-ARB-PLANNER-001
     trigger: delegate.planner
     question: Is this a recognised planner invocation?
-    answers: [recognised, malformed]
+    answers: [recognised, malformed, plan-file-invalid, plan-file-outside-planning-dirs]
     decide:
+      - when: { fact: delegation.plan-file-rejected, exists: true }
+        answer: plan-file-invalid
       - when: { fact: delegation.markers, exists: false }
         answer: malformed
       - when: { fact: delegation.plan-file, exists: false }
-        answer: malformed
+        answer: recognised
       - when: { fact: delegation.plan-file, matches: config.planning-dirs }
         answer: recognised
       - when: { fact: delegation.plan-file, exists: true }
-        answer: malformed
-    effects: { recognised: allow, malformed: escalate }
+        answer: plan-file-outside-planning-dirs
+    effects: { recognised: allow, malformed: escalate, plan-file-invalid: escalate, plan-file-outside-planning-dirs: escalate }
 
   - id: KW-ARB-PLANNER-DIFF-001
     trigger: delegate.planner.returned
@@ -217,7 +219,7 @@ rules:
       question: Does the lens apply to this change?
       instructions-from: "lens:"
       probability-below: 0.1
-      tuned-for: [jev-1.13.0, jev-1.13-free]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { applies: allow, not-applicable: skip }
 
   - id: KW-ARB-QUOTE-001
@@ -252,7 +254,7 @@ rules:
         contradicts: The quoted code contradicts the finding's claim.
         says_nothing: The quoted code says nothing about the finding's claim.
       confidence-at-least: 0.9
-      tuned-for: [jev-1.13.0, jev-1.13-free]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { supports: verify, contradicts: allow, says_nothing: allow }
 
   - id: KW-ARB-GATE-CORROBORATED-001

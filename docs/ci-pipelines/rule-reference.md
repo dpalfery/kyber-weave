@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 ---
 
 # Rule reference
@@ -272,7 +272,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-PLANREAD-001` | `delegate` | 0 | Prompt names no planning path once the routing header is removed; a documentation-profile target is exempt |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Delegation changed only its task's files |
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | The digest's `TASK_GATE` line agrees with the gate report it names: `verified` needs a `PASS` claim the report corroborates, `disagrees` and `missing` escalate |
-| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Recognised planner invocation |
+| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Planner invocation, with four answers: `recognised` (a `PLAN_FILE` under a planning directory, or a marker that needs no `PLAN_FILE`); `malformed` (no recognised marker); `plan-file-invalid` (a `PLAN_FILE` the header rejected: absolute, a `..` segment, repeated, or with a space, tab or backslash; checked before any marker); `plan-file-outside-planning-dirs` (a valid `PLAN_FILE` outside the plan, spec and todo directories) |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |

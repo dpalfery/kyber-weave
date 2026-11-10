@@ -89,6 +89,21 @@ public sealed class ArbiterConductorContractTests
     }
 
     [Fact]
+    public void PlanFileHeaders_AreRepositoryRelative()
+    {
+        // The planner refuses an absolute or escaping PLAN_FILE with plan-file-invalid, so the
+        // conductor's path rules must tell the operator to send a repository-relative path.
+        string planPath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "plan-path.md"));
+        string execution = File.ReadAllText(
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"));
+
+        Assert.Contains("repository-relative", planPath, StringComparison.Ordinal);
+        Assert.Contains("repository-relative", execution, StringComparison.Ordinal);
+        Assert.Contains("plan-file-invalid", ConductorContract, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Contract_NamesNoHarness()
     {
         string contract = ConductorContract;
