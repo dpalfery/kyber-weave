@@ -28,8 +28,8 @@
       },
       "Markdig": {
         "type": "Transitive",
-        "resolved": "1.5.0",
-        "contentHash": "oEm6N4PYFPUZiJ5e89993AE6hfC8EWRGD5M8nyoSJbwD4GgW818mjlQCk++SdTV4godaN50Ybcmm4j2Dp76oIQ=="
+        "resolved": "1.5.1",
+        "contentHash": "NtHwU5t5yKr6Gnylhs8/hlR0mOAftTFQURDz2ID8bkunxps1neOzKw0dYKKlwNuwiYIGLHjJTXK91f809Ko1ww=="
       },
       "Spectre.Console.Ansi": {
         "type": "Transitive",
@@ -44,7 +44,7 @@
       "kyberweave.core": {
         "type": "Project",
         "dependencies": {
-          "Markdig": "[1.5.0, )",
+          "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
@@ -52,7 +52,7 @@
         "type": "Project",
         "dependencies": {
           "KyberWeave.Core": "[0.1.0, )",
-          "Markdig": "[1.5.0, )",
+          "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
@@ -60,7 +60,7 @@
         "type": "Project",
         "dependencies": {
           "KyberWeave.Core": "[0.1.0, )",
-          "Markdig": "[1.5.0, )",
+          "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
       }
