@@ -63,9 +63,9 @@ public sealed record ArbiterRuleFactRef(
 /// <param name="Id">The rule id.</param>
 /// <param name="Step">The step that answered: 0 or 1.</param>
 /// <param name="Answer">The answer name, or <c>undecidable</c>.</param>
-/// <param name="Probabilities">Step-1 probabilities, when the rule scored them.</param>
+/// <param name="Probabilities">Step-1 probabilities in the rule's answer order, when the rule scored them; for <c>noul</c>, the one probability of the first answer.</param>
 /// <param name="Confidence">Step-1 confidence, when the rule reported one.</param>
-/// <param name="Threshold">The threshold the answer cleared, when there is one.</param>
+/// <param name="Threshold">The threshold the score was compared against, whether or not it cleared.</param>
 /// <param name="Effect">The answer mapped to its effect.</param>
 /// <param name="Facts">The facts the rule read, by name and label.</param>
 /// <param name="Evidence">The one-line evidence.</param>

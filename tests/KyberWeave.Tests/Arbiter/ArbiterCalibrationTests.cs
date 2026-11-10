@@ -99,8 +99,8 @@ public sealed class ArbiterCalibrationTests
                 Assert.True(reportedCost < MaxReportedCostUsd, $"Stopped at the cost cap after ${reportedCost}.");
                 ArbiterRule rule = FindRule(item.Rule);
 
-                // No instructions resolver, because production passes none.
-                SystemOneBuiltRequest built = SystemOneContracts.BuildRequest([rule], item.Facts, model, null);
+                // The same lens text production sends.
+                SystemOneBuiltRequest built = SystemOneContracts.BuildRequest([rule], item.Facts, model, LensInstructions.Resolve);
                 (HttpStatusCode status, string body) = await SendAsync(client, requestUri, key!, built.BodyJson, cancellationToken);
 
                 Dictionary<string, object?> record = new(StringComparer.Ordinal)

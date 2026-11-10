@@ -102,10 +102,39 @@ whichever sighting was valid. On a planner dispatch, a rejected
 `PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
 the body cannot rescue it.
 
+The hook route fills the facts step 1 reads. All of it runs in `HookGitFacts`, except the
+finding, which `TriggerFactBuilder` reads from the prompt:
+
+- **`review.diff-summary`** is each changed path followed by its hunk headers, measured from
+  the same base as `review.changed-paths`. It is never shortened: a summary missing the one
+  file that makes a lens apply could skip that lens, so an oversized one goes over budget and
+  answers `undecidable` instead. It is absent when nothing changed or the base cannot be read.
+- **`finding.*`** on a refutation come from the finding block whose `id` equals the `REFUTE:`
+  header. A prompt with no such block leaves them absent.
+- **`file.surroundings`** is the 20 lines either side of `finding.line`, from the working tree.
+  It is absent when the path falls outside the repository, the file is over 16 MiB, or the
+  line is past the end of the file.
+- **Lens instructions.** `instructions-from: lens:` sends the whole embedded lens file, with
+  the lens named by `lens.name` when the rule names none. An unknown lens sends the rule's
+  own question.
+
+Limits on those facts:
+
+- A repository-relative `instructions-from` path has no resolver, so such a rule sends its own
+  question.
+- `arbiter eval` is an offline dry run with no repository state, so these git and file facts
+  stay absent there.
+- `review.changed-hunks`, `file.text-at-line` and `gates.report` have no filler yet.
+
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
 appends; the CLI only reads. Prompts and code are logged as digests, never in full.
+Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
+`probabilities` (in the rule's answer order; for `noul`, one value for the first answer),
+`confidence`, and `threshold`, the floor or ceiling the score was compared against. A score
+below its floor is still recorded, beside the `undecidable` it produced. Entries are null when
+the answer could not be read, and `probabilities` is null unless every option has a value.
 
 A worker's return reaches the rules through the ledger. The post event records the report's
 `RESULT:`, `RED_EVIDENCE:` and `STATUS:` lines, and only a planner return may record
@@ -278,12 +307,9 @@ configuration that names no model moves to the new default.
 **Limits.**
 
 - 30 cases per rule is small: one error is about 3%.
-- On the hook route nothing fills `review.diff-summary` or `file.surroundings`, and
-  `instructions-from: lens:` has no production resolver. `KW-ARB-LENS-001` and
-  `KW-ARB-CLAIM-001` can therefore see less in real use than in this measurement. With no diff
-  summary, `KW-ARB-LENS-001` skips nothing at 0.1.
-- Decision records write no scores for step-1 answers, so thresholds cannot yet be tuned from
-  the decision log.
+- The measurement sent no lens text, and production now sends the whole lens file, so
+  `KW-ARB-LENS-001`'s ceiling of 0.1 has not been measured against what it now reads. The
+  harness now sends that text too, so a repeat run measures it.
 - `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
 
 To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run

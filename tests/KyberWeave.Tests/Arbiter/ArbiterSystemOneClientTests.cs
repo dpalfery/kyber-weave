@@ -126,6 +126,160 @@ public sealed class ArbiterSystemOneClientTests
             : string.Empty) +
         "}}" + (withUsage ? ",\"usage\":{\"input_tokens\":307,\"output_tokens\":20}" : string.Empty) + "}";
 
+    // ---- recorded scores ----
+
+    [Fact]
+    public async Task Scores_Choice_RecordProbabilitiesInAnswerOrderWithConfidenceAndFloor()
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody()));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        ArbiterStep1Score score = result.ScoresByRule![ChoiceRuleId];
+        Assert.Equal([0.88, 0.1, 0.02], score.Probabilities!);
+        Assert.Equal(0.85, score.Confidence);
+        Assert.Equal(0.8, score.Threshold);
+    }
+
+    /// <summary>A confidence past the 0 to 1 scale must not clear a floor.</summary>
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(-0.1)]
+    public async Task Choice_ConfidenceOutsideTheScale_IsUndecidable(double confidence)
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody(confidence: confidence)));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
+    }
+
+    [Fact]
+    public async Task Scores_ProbabilityOutsideTheScale_DropsTheListAndKeepsTheConfidence()
+    {
+        string body = ChoiceBody().Replace("\"adds-work\":0.1", "\"adds-work\":1.2", StringComparison.Ordinal);
+        using StubHandler handler = new(JsonResponse(body));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        ArbiterStep1Score score = result.ScoresByRule![ChoiceRuleId];
+        Assert.Null(score.Probabilities);
+        Assert.Equal(0.85, score.Confidence);
+    }
+
+    [Fact]
+    public async Task Scores_ChoiceBelowFloor_StillRecordedSoTheFloorCanBeTuned()
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody(confidence: 0.5)));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
+        Assert.Equal(0.5, result.ScoresByRule![ChoiceRuleId].Confidence);
+    }
+
+    [Fact]
+    public async Task Scores_Noul_RecordTheProbabilityAndCeiling()
+    {
+        const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + NoulRuleId + "\":" +
+            "{\"type\":\"noul\",\"noul\":0.07}}}";
+        using StubHandler handler = new(JsonResponse(json));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([NoulRule()], Facts());
+
+        ArbiterStep1Score score = result.ScoresByRule![NoulRuleId];
+        Assert.Equal([0.07], score.Probabilities!);
+        Assert.Null(score.Confidence);
+        Assert.Equal(0.1, score.Threshold);
+    }
+
+    [Fact]
+    public async Task Scores_ScoreWithPartialProbabilities_KeepConfidenceAndDropTheList()
+    {
+        const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + ScoreRuleId + "\":" +
+            "{\"type\":\"score\",\"score\":1.0,\"probabilities\":{\"1\":0.9},\"confidence\":0.92}}}";
+        using StubHandler handler = new(JsonResponse(json));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ScoreRule()], Facts());
+
+        ArbiterStep1Score score = result.ScoresByRule![ScoreRuleId];
+        Assert.Null(score.Probabilities);
+        Assert.Equal(0.92, score.Confidence);
+    }
+
+    [Fact]
+    public async Task Scores_UnreadableAnswer_RecordsNoScore()
+    {
+        const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + ChoiceRuleId + "\":{\"type\":\"noul\"}}}";
+        using StubHandler handler = new(JsonResponse(json));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
+
+        Assert.Empty(result.ScoresByRule!);
+    }
+
+    // ---- lens instructions ----
+
+    private static ArbiterRule LensRule(string instructionsFrom = "lens:") =>
+        NoulRule() with { Ask = NoulRule().Ask! with { InstructionsFrom = instructionsFrom } };
+
+    private static async Task<string> SentInstructions(ArbiterRule rule, ArbiterFactSet facts)
+    {
+        const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + NoulRuleId + "\":{\"type\":\"noul\",\"noul\":0.5}}}";
+        using StubHandler handler = new(JsonResponse(json));
+        using SystemOneClient client = SystemOneClient.CreateForProduct(handler, RemoteEndpoint, JevModel, 5000, null);
+        await client.AskStep1Async([rule], facts);
+        using JsonDocument body = JsonDocument.Parse(handler.Requests[0].Body);
+        return body.RootElement.GetProperty("questions").GetProperty(NoulRuleId).GetProperty("instructions").GetString()!;
+    }
+
+    [Fact]
+    public async Task ProductClient_BareLensSource_SendsTheLensNamedByTheFact()
+    {
+        string instructions = await SentInstructions(
+            LensRule(), Facts().With("lens.name", "security", ArbiterFactLabel.Asserted));
+
+        Assert.StartsWith("# Lens: security", instructions, StringComparison.Ordinal);
+        Assert.Contains("## What this lens owns", instructions, StringComparison.Ordinal);
+        Assert.EndsWith("Does the lens apply to this change?", instructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProductClient_NamedLensSource_SendsThatLens()
+    {
+        string instructions = await SentInstructions(
+            LensRule("lens:performance"), Facts().With("lens.name", "security", ArbiterFactLabel.Asserted));
+
+        Assert.StartsWith("# Lens: performance", instructions, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("no-such-lens")]
+    [InlineData("../../secret")]
+    public async Task ProductClient_UnknownLens_FallsBackToTheRuleQuestion(string lens)
+    {
+        string instructions = await SentInstructions(
+            LensRule(), Facts().With("lens.name", lens, ArbiterFactLabel.Asserted));
+
+        Assert.DoesNotContain("# Lens:", instructions, StringComparison.Ordinal);
+        Assert.StartsWith(NoulRule().Question, instructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProductClient_RepositoryPathSource_KeepsTheRuleQuestion()
+    {
+        string instructions = await SentInstructions(LensRule("docs/lens.md"), Facts());
+
+        Assert.StartsWith(NoulRule().Question, instructions, StringComparison.Ordinal);
+    }
+
     // ---- request shape ----
 
     [Fact]

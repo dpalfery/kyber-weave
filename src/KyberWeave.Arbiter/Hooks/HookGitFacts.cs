@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -34,7 +35,12 @@ namespace KyberWeave.Arbiter.Hooks;
 /// On review triggers declaring <c>review.changed-paths</c>, the hook measures the
 /// committed diff plus the dirty set against the run's recorded base (falling back to
 /// <see cref="ReviewBase"/> when no run base is recorded) and records that basis in
-/// <c>review.base-ref</c>.
+/// <c>review.base-ref</c>. <c>review.diff-summary</c> is measured from the same base.
+/// </para>
+/// <para>
+/// On a refutation, <c>file.surroundings</c> is read from the working tree around the line
+/// the finding names. The path comes from the dispatch prompt, so it must resolve inside
+/// the repository, and a finding that cannot be located leaves the fact absent.
 /// </para>
 /// </remarks>
 internal sealed class HookGitFacts(
@@ -52,6 +58,8 @@ internal sealed class HookGitFacts(
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
     private const int MaxStoredSnapshots = 256;
+    private const int SurroundingLines = 20;
+    private const long MaxSurroundingsFileBytes = 1L << 24;
     private static readonly TimeSpan SnapshotRetention = TimeSpan.FromHours(4);
     private static readonly TimeSpan PeekRetryBudget = TimeSpan.FromMilliseconds(100);
 
@@ -67,13 +75,14 @@ internal sealed class HookGitFacts(
             && IsDispatchTriggerWithReturn(classification.Trigger);
         bool needsSinceDispatch = facts.Contains("git.changed-paths.since-dispatch");
         bool needsReviewChangedPaths = facts.Contains("review.changed-paths");
+        string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
+        facts = WithSurroundings(facts, cwd);
 
         if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths)
         {
             return facts;
         }
 
-        string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
         if (isPreWithReturn)
         {
             GitSnapshot? preSnapshot = GitFacts.CaptureSnapshot(cwd);
@@ -110,9 +119,52 @@ internal sealed class HookGitFacts(
             IReadOnlyList<string> changed = [.. GitFacts.GetChangedPathsSinceBase(cwd, baseRef)];
             facts = facts.With("review.changed-paths", changed, ArbiterFactLabel.Derived);
             facts = facts.With("review.base-ref", baseRef, ArbiterFactLabel.Derived);
+            if (facts.Contains("review.diff-summary")
+                && GitFacts.GetDiffSummary(cwd, baseRef, changed) is { } summary)
+            {
+                facts = facts.With("review.diff-summary", summary, ArbiterFactLabel.Derived);
+            }
         }
 
         return facts;
+    }
+
+    private static ArbiterFactSet WithSurroundings(ArbiterFactSet facts, string cwd)
+    {
+        if (!facts.Contains("file.surroundings")
+            || !facts.TryGet("finding.file", out ArbiterFact? file)
+            || file.Value is not string path
+            || !facts.TryGet("finding.line", out ArbiterFact? line)
+            || line.Value is not int number
+            || number < 1)
+        {
+            return facts;
+        }
+
+        string? resolved = PlanPathResolver.Resolve(path, cwd);
+        if (resolved is null || !File.Exists(resolved))
+        {
+            return facts;
+        }
+
+        try
+        {
+            if (new FileInfo(resolved).Length > MaxSurroundingsFileBytes)
+            {
+                return facts;
+            }
+
+            int first = Math.Max(1, number - SurroundingLines);
+            int linesBeforeFinding = number - first;
+            string[] window = [.. File.ReadLines(resolved).Skip(first - 1).Take(linesBeforeFinding + 1 + SurroundingLines)];
+            return window.Length > linesBeforeFinding
+                ? facts.With("file.surroundings", string.Join('\n', window), ArbiterFactLabel.Derived)
+                : facts;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return facts;
+        }
     }
 
     private static bool IsDispatchTriggerWithReturn(string? trigger) =>

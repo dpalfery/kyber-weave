@@ -261,7 +261,7 @@ public sealed class ArbiterEvaluator
                 await AppendDecisionAsync(
                     classification, ev, config, effective, ledgerId, family, step0, step1,
                     ProviderKindName(config),
-                    EndpointOrigin(config), model, usage, providerStatus, outcomeAfterError,
+                    EndpointOrigin(config), model, usage, null, providerStatus, outcomeAfterError,
                     elapsed, planDigest, cancellationToken)
                     .ConfigureAwait(false);
                 _ = before;
@@ -299,7 +299,7 @@ public sealed class ArbiterEvaluator
         await AppendDecisionAsync(
             classification, ev, config, effective, ledgerId, family, step0, step1,
             ProviderKindName(config),
-            EndpointOrigin(config), model, usage, providerStatus, outcome,
+            EndpointOrigin(config), model, usage, batch?.ScoresByRule, providerStatus, outcome,
             elapsed, planDigest, cancellationToken)
             .ConfigureAwait(false);
         return new ArbiterDispatchEvaluation(trigger, outcome);
@@ -318,6 +318,7 @@ public sealed class ArbiterEvaluator
         string? endpointOrigin,
         string? model,
         ArbiterStep1Usage? usage,
+        IReadOnlyDictionary<string, ArbiterStep1Score>? scores,
         string providerStatus,
         string outcome,
         Stopwatch elapsed,
@@ -340,8 +341,10 @@ public sealed class ArbiterEvaluator
             string effect = string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)
                 ? RuleEffects.Allow
                 : MapStep1AnswerToEffect(rule, answer, family);
+            ArbiterStep1Score? score = null;
+            scores?.TryGetValue(rule.Id, out score);
             rules.Add(new ArbiterDecisionRule(
-                rule.Id, 1, answer, null, null, null, effect, [], null));
+                rule.Id, 1, answer, score?.Probabilities, score?.Confidence, score?.Threshold, effect, [], null));
         }
 
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);

@@ -182,6 +182,54 @@ public static class GitFacts
         return diff is null ? [] : ParseHunkRanges(diff);
     }
 
+    /// <summary>
+    /// Summarises a change as each changed path followed by its hunk headers, committed work
+    /// and the working tree together, so a model can judge it without the full diff.
+    /// </summary>
+    /// <returns>The summary, or null when nothing changed or the diff cannot be read.</returns>
+    public static string? GetDiffSummary(
+        string workingDirectory,
+        string @base,
+        IReadOnlyCollection<string> changedPaths,
+        string gitExecutable = "git")
+    {
+        ArgumentNullException.ThrowIfNull(changedPaths);
+        if (string.IsNullOrWhiteSpace(@base) || changedPaths.Count == 0)
+            return null;
+
+        string? mergeBase = RunGit(workingDirectory, gitExecutable, string.Empty, "merge-base", @base, "HEAD")?.Trim();
+        if (string.IsNullOrEmpty(mergeBase))
+            return null;
+
+        string? diff = RunGit(
+            workingDirectory,
+            gitExecutable,
+            string.Empty,
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            mergeBase);
+        if (diff is null)
+            return null;
+
+        Dictionary<string, List<string>> headers = ParseHunkHeaders(diff);
+        List<string> lines = [];
+        foreach (string path in changedPaths.Order(StringComparer.Ordinal))
+        {
+            lines.Add(path);
+            if (headers.TryGetValue(path, out List<string>? pathHeaders))
+                lines.AddRange(pathHeaders);
+        }
+
+        return string.Join('\n', lines);
+    }
+
     /// <summary>Captures the snapshot the ledger stores at pre-dispatch.</summary>
     /// <returns><c>HEAD</c> plus the blob id of every dirty or untracked path.</returns>
     public static GitSnapshot? CaptureSnapshot(
@@ -384,6 +432,65 @@ public static class GitFacts
         }
 
         return ranges;
+    }
+
+    private static Dictionary<string, List<string>> ParseHunkHeaders(string diff)
+    {
+        Dictionary<string, List<string>> headers = new(StringComparer.Ordinal);
+        string? oldPath = null;
+        string? path = null;
+        int bodyLinesLeft = 0;
+        using StringReader reader = new(diff);
+        while (reader.ReadLine() is { } line)
+        {
+            // Counting body lines keeps a removed "-- x" or added "++ y", which print as
+            // "--- x" and "+++ y", from being read as a file header.
+            if (bodyLinesLeft > 0)
+            {
+                if (!line.StartsWith('\\'))
+                    bodyLinesLeft--;
+                continue;
+            }
+
+            if (line.StartsWith("--- ", StringComparison.Ordinal))
+            {
+                string side = NormalizeDiffPath(line.Substring(4).Trim());
+                oldPath = side.StartsWith("a/", StringComparison.Ordinal) ? side.Substring(2) : side;
+            }
+            else if (line.StartsWith("+++ ", StringComparison.Ordinal))
+            {
+                string side = NormalizeDiffPath(line.Substring(4).Trim());
+                path = side == "/dev/null" ? oldPath : side;
+            }
+            else if (path is not null
+                && line.StartsWith("@@ ", StringComparison.Ordinal)
+                && TryParseNewSide(line, out _, out int added)
+                && TryParseOldCount(line, out int removed))
+            {
+                bodyLinesLeft = removed + added;
+                if (!headers.TryGetValue(path, out List<string>? pathHeaders))
+                {
+                    pathHeaders = [];
+                    headers[path] = pathHeaders;
+                }
+
+                pathHeaders.Add(line);
+            }
+        }
+
+        return headers;
+    }
+
+    private static bool TryParseOldCount(string header, out int count)
+    {
+        // Header shape: "@@ -a[,b] +c[,d] @@ ...". A bare "-a" covers exactly one line.
+        count = 1;
+        int plus = header.IndexOf(" +", StringComparison.Ordinal);
+        if (plus < 4)
+            return false;
+        ReadOnlySpan<char> side = header.AsSpan(4, plus - 4);
+        int comma = side.IndexOf(',');
+        return comma < 0 || int.TryParse(side.Slice(comma + 1), out count);
     }
 
     private static string NormalizeDiffPath(string path)
