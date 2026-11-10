@@ -1476,7 +1476,9 @@ export function buildSessionRow(
   // reported. It is not a turn of its own: it is not a timeline entry, not a
   // request root, not a tool invocation, and its duration is not added.
   const structureRecords = paired ? split.turnRecords : records
-  const counterRecords = paired ? split.counterRecords : []
+  // Tool invocations ride in the counter bucket for tool counting only; they carry no
+  // tokens or cost, and their time is inside the llm call, so sums skip them.
+  const counterRecords = paired ? split.counterRecords.filter((record) => record.op !== 'tool.invoke') : []
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
   // `run`, `execution` and `listHarnesses` are all keyed canonically, and

@@ -20,11 +20,11 @@ const SYNTH_PREFIX_RE = /^(?:synth|derived):/i
  * The span names the OpenCode capture plugin gives its request, step and tool spans
  * (`opencode.request`, `opencode.step`, `opencode.tool`). They name an operation, never a session.
  */
+const OPENCODE_SPAN_NAME_RE = /^opencode\.(?:request|step|tool)$/i
 /** Factory plugin span names (`factory.session`, `factory.turn`, `factory.tool`): an operation, never a session. */
 const FACTORY_SPAN_NAME_RE = /^factory\.(?:session|turn|tool)$/i
 /** Synthesized Droid session names (`droid:<token>`): a machine id, never a title. */
 const DROID_SYNTH_NAME_RE = /^droid:\S+$/i
-const OPENCODE_SPAN_NAME_RE = /^opencode\.(?:request|step|tool)$/i
 const UNSPECIFIED_MODEL_RE = /<(?:synthetic|unknown|unspecified)>|(?::|<)(?:synthetic|unknown)(?:>|$)/i
 
 /**

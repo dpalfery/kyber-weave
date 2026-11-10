@@ -530,6 +530,7 @@ export function synthesizeCall(
 
   const invokedSkills = invokedSkillsOf(call)
   const listedSkills = listedSkillsOf(call)
+  const sessionLabel = call.sessionTitle?.trim().slice(0, SESSION_LABEL_MAX_CHARS) || undefined
   const absentOutputReason = copilotAbsentOutputReason(call)
   const carriedKeys = new Set((readerTurn?.parts ?? []).map((part) => part.part))
   const measurability = {
@@ -569,7 +570,7 @@ export function synthesizeCall(
       provenance,
       ...(invokedSkills !== undefined ? { [SKILLS_INVOKED_KEY]: invokedSkills } : {}),
       ...(listedSkills !== undefined ? { [SKILLS_LISTED_KEY]: listedSkills } : {}),
-      ...(typeof call.sessionTitle === 'string' && call.sessionTitle !== '' ? { [SESSION_LABEL_KEY]: call.sessionTitle } : {}),
+      ...(sessionLabel !== undefined ? { [SESSION_LABEL_KEY]: sessionLabel } : {}),
     },
   }
 }
@@ -580,6 +581,9 @@ export function synthesizeCall(
 
 /** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
 export const MAX_TOOL_RESULT_BYTES = 65_536
+
+/** Longest session title stamped as the session label. */
+const SESSION_LABEL_MAX_CHARS = 200
 
 /** Maximum bytes of tool arguments stored in raw before truncation (64KB). */
 export const MAX_TOOL_ARGUMENTS_BYTES = 65_536

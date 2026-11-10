@@ -74,6 +74,9 @@ export const droidReader: ContentReader = {
     const lines = createInterface({ input: stream, crlfDelay: Infinity })
     let sessionId: string | undefined
     let pending: PendingTurn | undefined
+    // Mirrors the provider's `msg-N` fallback, where N counts the calls the provider has
+    // emitted so far: an assistant message with neither a tool_use nor text emits none.
+    let emittedCalls = 0
 
     try {
       for await (const line of lines) {
@@ -97,17 +100,20 @@ export const droidReader: ContentReader = {
 
         if (role === 'assistant') {
           if (pending !== undefined) yield finish(pending, sessionId)
-          const id = typeof entry['id'] === 'string' && entry['id'] !== '' ? entry['id'] : undefined
-          pending = { nativeRecordId: id ?? '', parts: [], toolCalls: [], toolResults: [] }
+          const id = typeof entry['id'] === 'string' ? entry['id'] : `msg-${emittedCalls}`
+          let emits = false
+          pending = { nativeRecordId: id, parts: [], toolCalls: [], toolResults: [] }
           let order = 0
           for (const block of blocks) {
             if (!isRecord(block)) continue
             if (block['type'] === 'text' && typeof block['text'] === 'string' && block['text'] !== '') {
+              emits = true
               pending.parts.push({ part: 'conversation_history', text: block['text'], order: order++ })
             } else if (block['type'] === 'tool_use') {
+              emits = true
               const name = typeof block['name'] === 'string' ? block['name'] : ''
               const callId = typeof block['id'] === 'string' ? block['id'] : ''
-              if (name !== '' || callId !== '') {
+              if (name !== '' && callId !== '') {
                 pending.toolCalls.push({
                   id: callId,
                   name,
@@ -117,6 +123,7 @@ export const droidReader: ContentReader = {
               }
             }
           }
+          if (emits) emittedCalls++
           continue
         }
 

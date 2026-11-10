@@ -65,8 +65,8 @@ type DroidJsonlEntry = {
   cwd?: string
 }
 
-function parseMs(timestamp: string | undefined): number | undefined {
-  if (timestamp === undefined || timestamp === '') return undefined
+function parseMs(timestamp: unknown): number | undefined {
+  if (typeof timestamp !== 'string' || timestamp === '') return undefined
   const ms = Date.parse(timestamp)
   return Number.isNaN(ms) ? undefined : ms
 }
@@ -183,7 +183,8 @@ function createParser(
           const nonSystemTexts = texts.filter(t => !t.startsWith('<system-reminder>'))
           if (nonSystemTexts.length > 0) {
             currentUserMessage = nonSystemTexts.join(' ').slice(0, 500)
-            boundaryMs = parseMs(entry.timestamp)
+            const userMs = parseMs(entry.timestamp)
+            if (userMs !== undefined) boundaryMs = userMs
           }
           continue
         }
@@ -216,7 +217,7 @@ function createParser(
             })
             pendingTools = []
             pendingBashCommands = []
-            boundaryMs = callMs
+            if (callMs !== undefined && (boundaryMs === undefined || callMs >= boundaryMs)) boundaryMs = callMs
           }
           continue
         }
