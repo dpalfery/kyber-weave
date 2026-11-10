@@ -47,9 +47,15 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
         DiagnosticReport report = new();
+        CommandHelpers.WriteUnfolded(() => Inspect(settings, report));
+
+        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
+        return report.HasErrors ? 1 : 0;
+    }
+
+    private static void Inspect(ArbiterSettings settings, DiagnosticReport report)
+    {
         _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
         string home = ArbiterCommandComposition.HomeDirectory();
         IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
@@ -68,15 +74,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckGuard(config, settings, report);
         CheckProjectHooks(settings.Path, projectEnabled, report);
         CheckAdvisoryPostDispatchTargets();
-
-        RestoreWidth(originalWidth);
-        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
-        return report.HasErrors ? 1 : 0;
     }
-
-    // The report table expands to the console width, so it must not render at the unfolded width.
-    private static void RestoreWidth(int originalWidth) =>
-        AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : KyberWeave.Cli.Rendering.ConsoleWidth.Default;
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
