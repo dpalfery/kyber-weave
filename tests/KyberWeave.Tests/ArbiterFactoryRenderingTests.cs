@@ -42,7 +42,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_EnabledAtProjectScope_HoldsTopLevelPreAndPostTaskGroups()
+    public async Task RenderAsync_EnabledAtProjectScope_HoldsTopLevelPreAndPostTaskGroupsAndAStopGroup()
     {
         SquadRenderResult result = await RenderAsync(
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
@@ -53,16 +53,22 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         // F11: the event names are the top-level keys of .factory/hooks.json (no `hooks`
         // wrapper), so each block entry is one matcher group keyed by its event container.
         Assert.Equal(
-            ["PreToolUse", "PostToolUse"],
+            ["PreToolUse", "PostToolUse", "SubagentStop"],
             block.Entries.Select(entry => entry.Container).ToArray());
 
         foreach (SquadRenderedBlockEntry entry in block.Entries)
         {
             JsonObject group = Assert.IsType<JsonObject>(entry.Entry);
-            Assert.Equal(
-                ["matcher", "hooks"],
-                group.Select(property => property.Key).ToArray());
-            Assert.Equal("Task", group["matcher"]!.GetValue<string>());
+
+            // SubagentStop is the one group with no matcher: Factory fires it on every stop, not
+            // on a named tool. The key is omitted, not set to an empty string.
+            bool isStop = entry.Container == "SubagentStop";
+            string[] expectedKeys = isStop ? ["hooks"] : ["matcher", "hooks"];
+            Assert.Equal(expectedKeys, group.Select(property => property.Key).ToArray());
+            if (!isStop)
+            {
+                Assert.Equal("Task", group["matcher"]!.GetValue<string>());
+            }
 
             JsonArray hooks = Assert.IsType<JsonArray>(group["hooks"]);
             JsonObject hook = Assert.IsType<JsonObject>(Assert.Single(hooks));
@@ -71,6 +77,204 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             Assert.Equal(HookTimeoutSeconds, hook["timeout"]!.GetValue<int>());
         }
     }
+
+    [Fact]
+    public void SpliceContent_Factory_RegistersSubagentStopGroupWithNoMatcher()
+    {
+        (string content, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory,
+            null,
+            [SquadGroup("Task")],
+            [SquadGroup("Task")],
+            [SquadGroup(matcher: null)]);
+
+        JsonObject root = Assert.IsType<JsonObject>(JsonNode.Parse(content));
+        Assert.Equal(["PreToolUse", "PostToolUse", "SubagentStop"], root.Select(property => property.Key).ToArray());
+
+        JsonObject stop = Assert.IsType<JsonObject>(Assert.Single(Assert.IsType<JsonArray>(root["SubagentStop"])));
+        Assert.Equal(["hooks"], stop.Select(property => property.Key).ToArray());
+        JsonObject hook = Assert.IsType<JsonObject>(Assert.Single(Assert.IsType<JsonArray>(stop["hooks"])));
+        Assert.Equal(ExpectedCommand, hook["command"]!.GetValue<string>());
+        Assert.Equal(HookTimeoutSeconds, hook["timeout"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void SpliceContent_Factory_ReinstallReplacesSquadStopEntryWithoutDuplicating()
+    {
+        (string first, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory, null, [SquadGroup("Task")], [SquadGroup("Task")], [SquadGroup(null)]);
+
+        (string second, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory, first, [SquadGroup("Task")], [SquadGroup("Task")], [SquadGroup(null)]);
+
+        Assert.Equal(first, second);
+        Assert.Equal(1, SquadEntryCount(second, "PreToolUse"));
+        Assert.Equal(1, SquadEntryCount(second, "PostToolUse"));
+        Assert.Equal(1, SquadEntryCount(second, "SubagentStop"));
+    }
+
+    [Fact]
+    public void SpliceContent_Factory_UpgradesTwoContainerFileAndKeepsTheUsersEntries()
+    {
+        // The shape an older Squad wrote: PreToolUse and PostToolUse only, the user's own Pre hook
+        // beside Squad's. Upgrading adds the SubagentStop container and keeps every user entry.
+        const string olderVersion = """
+            {
+              "PreToolUse": [
+                { "matcher": "Read", "hooks": [ { "type": "command", "command": "user-own-linter" } ] },
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "kyber-weave-arbiter hook --harness factory", "timeout": 5 } ] }
+              ],
+              "PostToolUse": [
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "kyber-weave-arbiter hook --harness factory", "timeout": 5 } ] }
+              ]
+            }
+            """;
+
+        (string upgraded, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory,
+            olderVersion,
+            [SquadGroup("Task")],
+            [SquadGroup("Task")],
+            [SquadGroup(null)]);
+
+        Assert.Contains("user-own-linter", upgraded, StringComparison.Ordinal);
+        Assert.Equal(1, SquadEntryCount(upgraded, "PreToolUse"));
+        Assert.Equal(1, SquadEntryCount(upgraded, "PostToolUse"));
+        Assert.Equal(1, SquadEntryCount(upgraded, "SubagentStop"));
+    }
+
+    [Fact]
+    public void SpliceContent_Factory_LeavesTheUsersOwnSubagentStopEntryAlone()
+    {
+        const string userStop = """
+            {
+              "SubagentStop": [
+                { "hooks": [ { "type": "command", "command": "user-own-stop-notifier" } ] }
+              ]
+            }
+            """;
+
+        (string spliced, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory,
+            userStop,
+            [SquadGroup("Task")],
+            [SquadGroup("Task")],
+            [SquadGroup(null)]);
+
+        JsonArray stop = Assert.IsType<JsonArray>(JsonNode.Parse(spliced)!["SubagentStop"]);
+        Assert.Equal(2, stop.Count);
+        Assert.Contains("user-own-stop-notifier", stop.ToJsonString(), StringComparison.Ordinal);
+        Assert.Equal(1, SquadEntryCount(spliced, "SubagentStop"));
+    }
+
+    [Fact]
+    public void RemoveContent_Factory_RemovesSquadStopEntryAndKeepsTheUsersOwn()
+    {
+        const string userStop = """
+            {
+              "SubagentStop": [
+                { "hooks": [ { "type": "command", "command": "user-own-stop-notifier" } ] }
+              ]
+            }
+            """;
+        (string installed, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Factory,
+            userStop,
+            [SquadGroup("Task")],
+            [SquadGroup("Task")],
+            [SquadGroup(null)]);
+
+        string removed = SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Factory, installed);
+
+        Assert.DoesNotContain(ExpectedCommand, removed, StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", removed, StringComparison.Ordinal);
+        Assert.Equal(0, SquadEntryCount(removed, "SubagentStop"));
+        Assert.Equal(0, SquadEntryCount(removed, "PreToolUse"));
+    }
+
+    [Theory]
+    [InlineData(SquadHookBlockFormat.Devin)]
+    [InlineData(SquadHookBlockFormat.Cursor)]
+    [InlineData(SquadHookBlockFormat.Codex)]
+    [InlineData(SquadHookBlockFormat.Claude)]
+    [InlineData(SquadHookBlockFormat.Antigravity)]
+    public void SpliceContent_NonFactoryFormat_RefusesASubagentStopEntry(SquadHookBlockFormat format)
+    {
+        // Only Factory's file has this container. Any other shape receiving one is a caller bug,
+        // refused rather than written under a key that harness never reads.
+        Assert.Throws<InvalidOperationException>(() => SquadHookJsonBlock.SpliceContent(
+            format,
+            null,
+            [SquadGroup("Task")],
+            [SquadGroup("Task")],
+            [SquadGroup(null)]));
+    }
+
+    [Fact]
+    public void SpliceContent_Devin_OutputStaysByteIdenticalWithTwoContainers()
+    {
+        // Devin shares Factory's root-array handling. Its file must not gain a SubagentStop
+        // container or change a byte: this literal is the pre-existing Devin output.
+        (string content, _) = SquadHookJsonBlock.SpliceContent(
+            SquadHookBlockFormat.Devin,
+            null,
+            [SquadGroup("^run_subagent$", "kyber-weave-arbiter hook --harness devin", 5)],
+            [SquadGroup("^run_subagent$", "kyber-weave-arbiter hook --harness devin", 5)]);
+
+        const string expected = """
+            {
+              "PreToolUse": [
+                {
+                  "matcher": "^run_subagent$",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "kyber-weave-arbiter hook --harness devin",
+                      "timeout": 5
+                    }
+                  ]
+                }
+              ],
+              "PostToolUse": [
+                {
+                  "matcher": "^run_subagent$",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "kyber-weave-arbiter hook --harness devin",
+                      "timeout": 5
+                    }
+                  ]
+                }
+              ]
+            }
+
+            """;
+
+        Assert.Equal(expected, content, StringComparer.Ordinal);
+    }
+
+    private static JsonObject SquadGroup(string? matcher, string command = ExpectedCommand, int timeout = HookTimeoutSeconds)
+    {
+        JsonObject group = new();
+        if (matcher is not null)
+        {
+            group["matcher"] = matcher;
+        }
+
+        group["hooks"] = new JsonArray(new JsonObject
+        {
+            ["type"] = "command",
+            ["command"] = command,
+            ["timeout"] = timeout,
+        });
+        return group;
+    }
+
+    private static int SquadEntryCount(string content, string container) =>
+        JsonNode.Parse(content)![container] is JsonArray array
+            ? array.Count(node => SquadHookJsonBlock.IsSquadEntry(SquadHookBlockFormat.Factory, node))
+            : 0;
 
     [Fact]
     public async Task RenderAsync_EnabledAtProjectScope_EntriesCarryTheWiringTimeout()
@@ -404,13 +608,92 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             d => d.Target == "factory" && d.Code == "arbiter-not-enforced");
     }
 
-    private async Task<SquadLifecycleResult> InstallAsync(string targetRoot, string applicationData)
+    [Fact]
+    public async Task Reinstall_FactoryHooks_RegistersSubagentStopOnceAndRecordsItsEntry()
+    {
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        SquadLifecycleResult installed = await InstallAsync(targetRoot, fixture.Path);
+        Assert.True(installed.Success, string.Join("; ", installed.Errors ?? []));
+
+        SquadLifecycleResult reinstalled = await UpdateAsync(targetRoot, fixture.Path);
+
+        Assert.True(reinstalled.Success, string.Join("; ", reinstalled.Errors ?? []));
+        string hooksJson = await File.ReadAllTextAsync(Path.Combine(targetRoot, ".factory/hooks.json"));
+        // One command per event: PreToolUse, PostToolUse and SubagentStop. A reinstall must not add a copy.
+        Assert.Equal(3, CountOccurrences(hooksJson, ExpectedCommand));
+        Assert.Equal(1, CountOccurrences(hooksJson, "\"SubagentStop\""));
+        SquadOwnedBlock block = Assert.Single(reinstalled.Receipt?.Blocks ?? []);
+        Assert.Contains(block.Entries, entry => entry.Container == "/SubagentStop/0");
+    }
+
+    [Fact]
+    public async Task Update_TwoContainerFactoryInstall_UpgradesToSubagentStop()
+    {
+        // An install from before this change wrote only PreToolUse and PostToolUse. The next
+        // install must add the stop registration and record it, without touching the others.
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        SquadLifecycleResult older = await InstallAsync(targetRoot, fixture.Path, subagentStop: false);
+        Assert.True(older.Success, string.Join("; ", older.Errors ?? []));
+        string hooksPath = Path.Combine(targetRoot, ".factory/hooks.json");
+        Assert.DoesNotContain("SubagentStop", await File.ReadAllTextAsync(hooksPath), StringComparison.Ordinal);
+
+        SquadLifecycleResult upgraded = await UpdateAsync(targetRoot, fixture.Path);
+
+        Assert.True(upgraded.Success, string.Join("; ", upgraded.Errors ?? []));
+        string hooksJson = await File.ReadAllTextAsync(hooksPath);
+        Assert.Equal(3, CountOccurrences(hooksJson, ExpectedCommand));
+        Assert.Equal(1, CountOccurrences(hooksJson, "\"SubagentStop\""));
+        SquadOwnedBlock block = Assert.Single(upgraded.Receipt?.Blocks ?? []);
+        Assert.Contains(block.Entries, entry => entry.Container == "/SubagentStop/0");
+    }
+
+    [Fact]
+    public async Task Uninstall_FactoryHooks_RemovesSquadSubagentStopAndKeepsTheUsersOwn()
+    {
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        string hooksPath = Path.Combine(targetRoot, ".factory/hooks.json");
+        WriteFile(hooksPath, """
+            {"SubagentStop": [{"hooks": [{"type": "command", "command": "user-own-stop-notifier"}]}]}
+            """);
+        SquadLifecycleResult installed = await InstallAsync(targetRoot, fixture.Path);
+        Assert.True(installed.Success, string.Join("; ", installed.Errors ?? []));
+
+        SquadLifecycleResult removed = await UninstallAsync(targetRoot, fixture.Path);
+
+        Assert.True(removed.Success, string.Join("; ", removed.Errors ?? []));
+        string remaining = await File.ReadAllTextAsync(hooksPath);
+        Assert.DoesNotContain(ExpectedCommand, remaining, StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", remaining, StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string text, string needle) =>
+        text.Split(needle, StringSplitOptions.None).Length - 1;
+
+    private async Task<SquadLifecycleResult> UninstallAsync(string targetRoot, string applicationData)
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = new(
             releases,
             new FactoryBlockStubRenderer(),
+            store,
+            new FixedTimeProvider(DateTimeOffset.UtcNow));
+
+        return await service.UninstallAsync(new SquadUninstallRequest(targetRoot, SquadDeploymentScope.Project));
+    }
+
+    private async Task<SquadLifecycleResult> InstallAsync(string targetRoot, string applicationData, bool subagentStop = true)
+    {
+        using FakeSquadReleaseSource releases = new();
+        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadLifecycleService service = new(
+            releases,
+            new FactoryBlockStubRenderer(subagentStop),
             store,
             new FixedTimeProvider(DateTimeOffset.UtcNow));
 
@@ -422,13 +705,13 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
     }
 
-    private async Task<SquadLifecycleResult> UpdateAsync(string targetRoot, string applicationData)
+    private async Task<SquadLifecycleResult> UpdateAsync(string targetRoot, string applicationData, bool subagentStop = true)
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = new(
             releases,
-            new FactoryBlockStubRenderer(),
+            new FactoryBlockStubRenderer(subagentStop),
             store,
             new FixedTimeProvider(DateTimeOffset.UtcNow));
 
@@ -453,7 +736,11 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
 
     /// <summary>A stand-in renderer that always emits the Factory block, isolating the
     /// lifecycle's shadowing decision from the renderer's own gating.</summary>
-    private sealed class FactoryBlockStubRenderer : ISquadRenderer
+    /// <summary>
+    /// Emits the Factory block as the real renderer does. <paramref name="includeSubagentStop"/>
+    /// set to false reproduces the two-container file an older Squad wrote, for upgrade tests.
+    /// </summary>
+    private sealed class FactoryBlockStubRenderer(bool includeSubagentStop = true) : ISquadRenderer
     {
         public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Factory];
 
@@ -471,25 +758,38 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
                 Blocks: [FactoryBlock()]));
         }
 
-        private static SquadRenderedBlock FactoryBlock() =>
-            new(
-                "factory",
-                BlockPath,
-                SquadHookBlockFormat.Factory,
-                [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(ExpectedCommand))]);
-
-        private static JsonObject MatcherGroup(string command) =>
-            new()
+        private SquadRenderedBlock FactoryBlock()
+        {
+            List<SquadRenderedBlockEntry> entries =
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(ExpectedCommand)),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(ExpectedCommand)),
+            ];
+            if (includeSubagentStop)
             {
-                ["matcher"] = "Task",
-                ["hooks"] = new JsonArray(
-                    new JsonObject
-                    {
-                        ["type"] = "command",
-                        ["command"] = command,
-                        ["timeout"] = HookTimeoutSeconds,
-                    }),
-            };
+                entries.Add(new SquadRenderedBlockEntry("SubagentStop", MatcherGroup(ExpectedCommand, matcher: null)));
+            }
+
+            return new("factory", BlockPath, SquadHookBlockFormat.Factory, entries);
+        }
+
+        private static JsonObject MatcherGroup(string command, string? matcher = "Task")
+        {
+            JsonObject group = new();
+            if (matcher is not null)
+            {
+                group["matcher"] = matcher;
+            }
+
+            group["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = command,
+                    ["timeout"] = HookTimeoutSeconds,
+                });
+            return group;
+        }
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider

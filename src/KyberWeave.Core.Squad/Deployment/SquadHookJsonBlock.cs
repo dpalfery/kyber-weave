@@ -44,6 +44,18 @@ public static class SquadHookJsonBlock
 
     private const string AntigravityGroupKey = "kyber-arbiter";
 
+    private const string PreToolUseContainer = "PreToolUse";
+
+    private const string PostToolUseContainer = "PostToolUse";
+
+    // Factory alone fires a hook when a background subagent stops. Its launch-time PostToolUse
+    // carries no worker report, so the Arbiter reads the report on this container.
+    private const string SubagentStopContainer = "SubagentStop";
+
+    private static readonly string[] PreAndPostContainers = [PreToolUseContainer, PostToolUseContainer];
+
+    private static readonly string[] AllContainers = [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer];
+
     private const string MissingReason = "missing";
 
     private const string ModifiedReason = "modified";
@@ -169,27 +181,29 @@ public static class SquadHookJsonBlock
     }
 
     /// <summary>
-    /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>
-    /// and <paramref name="postToolUse"/>, appending them at the end of each owned container
-    /// (or setting the Antigravity group key). A missing or blank file starts from the minimal
-    /// document. Returns the owned entries written.
+    /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>,
+    /// <paramref name="postToolUse"/> and, for Factory, <paramref name="subagentStop"/>, appending
+    /// them at the end of each owned container (or setting the Antigravity group key). A missing
+    /// or blank file starts from the minimal document. Returns the owned entries written.
     /// </summary>
     public static IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
         SquadHookBlockFormat format,
         string filePath,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode>? subagentStop = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(preToolUse);
         ArgumentNullException.ThrowIfNull(postToolUse);
+        RefuseForeignSubagentStop(format, subagentStop);
 
         string? existing = File.Exists(filePath) ? File.ReadAllText(filePath) : null;
         string content;
         IReadOnlyList<SquadHookOwnedEntry> owned;
         try
         {
-            (content, owned) = SpliceContent(format, existing, preToolUse, postToolUse);
+            (content, owned) = SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
         }
         catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
         {
@@ -401,6 +415,15 @@ public static class SquadHookJsonBlock
         return false;
     }
 
+    private static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
+    {
+        if (format != SquadHookBlockFormat.Factory && subagentStop is { Count: > 0 })
+        {
+            throw new InvalidOperationException(
+                $"Only the Factory hook file holds SubagentStop entries; '{Harness(format)}' does not.");
+        }
+    }
+
     /// <summary>
     /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
     /// touching the disk: the single implementation behind both <see cref="SpliceFile"/> and
@@ -409,12 +432,21 @@ public static class SquadHookJsonBlock
     /// <see cref="JsonException"/> or <see cref="InvalidOperationException"/> when the
     /// content is not a usable hook file, leaving the caller to decide how to report it.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="subagentStop"/> is accepted for Factory only. Every other format keeps
+    /// its two containers, so its file bytes never change; a non-empty list for any other
+    /// format is a caller bug and is refused rather than silently dropped.
+    /// </remarks>
     public static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceContent(
         SquadHookBlockFormat format,
         string? existing,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode>? subagentStop = null)
     {
+        RefuseForeignSubagentStop(format, subagentStop);
+        IReadOnlyList<JsonNode> stop = subagentStop ?? [];
+
         JsonObject root = ParseOrMinimal(format, existing);
         List<SquadHookOwnedEntry> owned = [];
 
@@ -434,8 +466,15 @@ public static class SquadHookJsonBlock
         }
         else
         {
+            // Only Factory's SubagentStop container is optional: a file without it gets one only
+            // when there is a stop entry to write, so a Factory file that never had one gains no key.
+            bool hadStopContainer = root.ContainsKey(SubagentStopContainer);
             var containers = OwnedArrays(format, root, create: true);
-            var managed = new[] { preToolUse, postToolUse };
+            // Positional with the containers OwnedArrays returns: create: true yields every
+            // container the format holds, in the order listed in RootContainerNames.
+            IReadOnlyList<JsonNode>[] managed = format == SquadHookBlockFormat.Factory
+                ? [preToolUse, postToolUse, stop]
+                : [preToolUse, postToolUse];
             for (int i = 0; i < containers.Count; i++)
             {
                 (string pointer, JsonArray array) = containers[i];
@@ -454,6 +493,12 @@ public static class SquadHookJsonBlock
                     string entryPointer = $"{pointer}/{array.Count - 1}";
                     owned.Add(new SquadHookOwnedEntry(entryPointer, CanonicalDigest(projected)));
                 }
+            }
+
+            if (format == SquadHookBlockFormat.Factory && stop.Count == 0 && !hadStopContainer
+                && root[SubagentStopContainer] is JsonArray { Count: 0 })
+            {
+                root.Remove(SubagentStopContainer);
             }
 
             if (format == SquadHookBlockFormat.Cursor && !root.ContainsKey("version"))
@@ -497,7 +542,8 @@ public static class SquadHookJsonBlock
 
     private static void CollectOwned(JsonObject group, string prefix, List<SquadHookOwnedEntry> owned)
     {
-        foreach (string container in new[] { "PreToolUse", "PostToolUse" })
+        // Antigravity's group never holds SubagentStop, so this reads it as absent there.
+        foreach (string container in AllContainers)
         {
             if (group[container] is JsonArray array)
             {
@@ -517,10 +563,17 @@ public static class SquadHookJsonBlock
         {
             SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude => CursorArrays(root, create),
             SquadHookBlockFormat.Codex => PrefixedArrays(root, "/hooks", create),
-            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(root, create),
+            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(format, root, create),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
     }
+
+    /// <summary>
+    /// The containers a format's root holds, in the order Squad writes them. Devin shares the
+    /// root shape with Factory but holds no SubagentStop, so only Factory gains the third name.
+    /// </summary>
+    private static string[] RootContainerNames(SquadHookBlockFormat format) =>
+        format == SquadHookBlockFormat.Factory ? AllContainers : PreAndPostContainers;
 
     private static List<(string Pointer, JsonArray Array)> CursorArrays(JsonObject root, bool create)
     {
@@ -585,16 +638,18 @@ public static class SquadHookJsonBlock
     private static List<(string Pointer, JsonArray Array)> PrefixedArrays(JsonObject root, string prefix, bool create)
     {
         JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
-        return NamedArrays(hooks, prefix, create);
+        return NamedArrays(hooks, prefix, create, PreAndPostContainers);
     }
 
-    private static List<(string Pointer, JsonArray Array)> RootArrays(JsonObject root, bool create) =>
-        NamedArrays(root, string.Empty, create);
+    private static List<(string Pointer, JsonArray Array)> RootArrays(
+        SquadHookBlockFormat format, JsonObject root, bool create) =>
+        NamedArrays(root, string.Empty, create, RootContainerNames(format));
 
-    private static List<(string Pointer, JsonArray Array)> NamedArrays(JsonObject parent, string prefix, bool create)
+    private static List<(string Pointer, JsonArray Array)> NamedArrays(
+        JsonObject parent, string prefix, bool create, IEnumerable<string> names)
     {
         List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "PreToolUse", "PostToolUse" })
+        foreach (string name in names)
         {
             JsonArray? array = parent[name] as JsonArray;
             if (array is null)

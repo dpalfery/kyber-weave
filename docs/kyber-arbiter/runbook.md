@@ -124,7 +124,7 @@ targets deliver outcomes only as context, and Antigravity and Devin deliver none
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy) lists the records.
 Antigravity cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED
 check answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
-check still runs.
+check finds nothing there, since no dispatch ever closes.
 Devin's dispatch target and prompt are read from `tool_input.profile` and
 `tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those
 argument names rest on the undocumented fact F12. A `run_subagent` dispatch missing either

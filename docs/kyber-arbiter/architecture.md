@@ -102,10 +102,49 @@ whichever sighting was valid. On a planner dispatch, a rejected
 `PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
 the body cannot rescue it.
 
+The hook route fills the facts step 1 reads. All of it runs in `HookGitFacts`, except the
+finding, which `TriggerFactBuilder` reads from the prompt:
+
+- **`review.diff-summary`** is each changed path followed by its hunk headers, measured from
+  the same base as `review.changed-paths`. It is never shortened: a summary missing the one
+  file that makes a lens apply could skip that lens, so an oversized one goes over budget and
+  answers `undecidable` instead. It is absent when nothing changed or the base cannot be read.
+- **`finding.*`** on a refutation come from the finding block whose `id` equals the `REFUTE:`
+  header. A prompt with no such block leaves them absent.
+- **`file.surroundings`** is the 20 lines either side of `finding.line`, from the working tree.
+  It is absent when the path falls outside the repository, the file is over 16 MiB, or the
+  line is past the end of the file.
+- **Lens instructions.** `instructions-from: lens:` sends the whole embedded lens file, with
+  the lens named by `lens.name` when the rule names none. An unknown lens sends the rule's
+  own question.
+
+Limits on those facts:
+
+- A repository-relative `instructions-from` path has no resolver, so such a rule sends its own
+  question.
+- `arbiter eval` is an offline dry run with no repository state, so these git and file facts
+  stay absent there.
+- `review.changed-hunks`, `file.text-at-line` and `gates.report` have no filler yet.
+
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
 appends; the CLI only reads. Prompts and code are logged as digests, never in full.
+Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
+`probabilities` (in the rule's answer order; for `noul`, one value for the first answer),
+`confidence`, and `threshold`, the floor or ceiling the score was compared against. A score
+below its floor is still recorded, beside the `undecidable` it produced. Entries are null when
+the answer could not be read, and `probabilities` is null unless every option has a value.
+
+A worker's return reaches the rules through the ledger. The post event records the report's
+`RESULT:`, `RED_EVIDENCE:` and `STATUS:` lines, and only a planner return may record
+`ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
+prompt with its headers removed, and a specialist's return takes its `TASK` from that dispatch
+because its headers were stripped before it ran. On each `delegate`, `ledger.completed-tasks`
+is the tasks of this plan whose report read `RESULT: PASS`, `ledger.red-evidence` is present
+when this task or one it depends on reported RED evidence, and `ledger.in-flight.paths` is the
+files of this session's dispatches that have not returned. A refused dispatch holds no files.
+A task counts as complete on its worker's own report: no separate reviewer confirms it.
 
 ## The rules
 
@@ -175,8 +214,9 @@ skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
 (today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
-`returns-unobservable`, which allows and is logged; the in-flight overlap check still
-runs.
+`returns-unobservable`, which allows and is logged. The in-flight overlap check finds nothing
+there, because a dispatch that never reports back would otherwise hold its files for the
+whole session.
 
 Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-011` and `KW-ARB-INSTALL-001`
 for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
@@ -210,12 +250,14 @@ Passing mutually exclusive scope flags (`--global` and `--project`) or `--path` 
 
 ## Provider and models
 
-`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud and to a local
-Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
+`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud, to OpenRouter, and
+to a local Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
 
 | Model | Endpoint | Key | Usable input | Accuracy on Ollama's 3,880-decision comparison |
 |---|---|---|---|---|
+| `jev-1.14.0` (TypeSafe, default) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | Not published |
 | `jev-1.13.0` (TypeSafe) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | 76.0% |
+| `typesafe/jev-1.14`, `typesafe/jev-1.13` (OpenRouter) | `https://openrouter.ai/api/v1` | Required (the credential store) | The same budget as the TypeSafe ids | Not published |
 | `nimble` (Ollama, 9B) | `http://localhost:11434/v1` | None | About 8,000 tokens per question | 74.8% |
 | `tev1` (Ollama, 4B) | `http://localhost:11434/v1` | None | About 2,000 tokens | 73.3% |
 
@@ -224,6 +266,57 @@ too small for most shipped rules. The figures are from Ollama's own benchmark, a
 [Ollama's Jev-style decision models post](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models).
 Each request is budgeted before it is sent. An over-budget state makes no call, and every
 step-1 rule on the trigger answers `undecidable`.
+
+### Step-1 threshold measurement
+
+The shipped step-1 thresholds were measured on 2026-11-09 for Jev 1.13 and Jev 1.14. TypeSafe
+publishes no accuracy or calibration comparison between the two, so the figures below are
+this project's own.
+
+**Method.** 120 invented cases, 30 for each of the four step-1 rules, in
+`tests/KyberWeave.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
+them independently and agreed on all 120; no person reviewed them. Each case went through the
+production request builder, over OpenRouter, as `typesafe/jev-1.13` and `typesafe/jev-1.14`,
+in four full runs. A direct TypeSafe run was not made, so OpenRouter and TypeSafe were not
+compared.
+
+**Result.** No threshold changed.
+
+- `KW-ARB-SCOPE-002`, `KW-ARB-OWNER-002` and `KW-ARB-CLAIM-001`: no wrong answer cleared its
+  floor on either model in any run, so the floors stay at 0.8, 0.8 and 0.9. Accuracy was 29 or
+  30 of 30 per rule. Of 30 answers, Jev 1.14 cleared the floor on 24 (`SCOPE`), 26 to 28
+  (`OWNER`) and 22 or 23 (`CLAIM`). Jev 1.13 cleared it on 22 or 23, 19 to 21 and 23 to 25.
+- `KW-ARB-LENS-001`: the ceiling stays at 0.1. No lens that applies was skipped at 0.1. The
+  rule written before the measurement proposed raising it to 0.6 or 0.63, and that was not
+  adopted. A repeat run scored an applying lens at 0.55 on Jev 1.14. Without the diff summary,
+  every lens scored between 0.12 and 0.45 on both models, so a ceiling of 0.6 would skip all
+  of them.
+
+Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
+case), so a floor set for one model is not assumed to hold for another.
+
+**Model ids.** `tuned-for` is an exact match and holds TypeSafe's `jev-1.14.0` and
+`jev-1.13.0`, and OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids the
+measurement used. Any other `typesafe/` id, including a dated snapshot, warns in `doctor`.
+The state budget for a `typesafe/jev-1.*` id is TypeSafe's published limit; OpenRouter's own
+limit was not checked, and the measured cases were small. `jev-1.13.0` stays listed, and a configuration pinned to it keeps working with no
+`doctor` warning. [TypeSafe says](https://typesafe.ai/blog/jev-1-14) it intends to give
+60 days' warning before formally deprecating `jev-1.13.0`, and has set no date. Only a
+configuration that names no model moves to the new default.
+
+**Limits.**
+
+- 30 cases per rule is small: one error is about 3%.
+- The measurement sent no lens text, and production now sends the whole lens file, so
+  `KW-ARB-LENS-001`'s ceiling of 0.1 has not been measured against what it now reads. The
+  harness now sends that text too, so a repeat run measures it.
+- `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
+
+To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run
+`ArbiterCalibrationTests`. It makes paid calls, about one cent per run. By default it calls
+TypeSafe directly with `jev-1.13.0` and `jev-1.14.0`. To repeat the runs reported here, also
+set `KW_ARBITER_CALIBRATE_ENDPOINT` to `https://openrouter.ai/api/v1` and
+`KW_ARBITER_CALIBRATE_MODELS` to `typesafe/jev-1.13,typesafe/jev-1.14`.
 
 ## Harness facts
 
@@ -244,7 +337,7 @@ The degradation records these outcomes produce are listed once, in the
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` |
 | Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` |
 | Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts |
-| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
 | Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` |
 | Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — |
 
@@ -331,9 +424,9 @@ Per-harness notes:
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
   `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
-  which allows and is logged, while the dependency's in-flight overlap check still runs —
-  pre-dispatch gating (plan, scope, intent, ownership, overlap) is unaffected, and
-  completion order is advisory there. The render records `arbiter-not-enforced` with
+  which allows and is logged, and the in-flight overlap check finds nothing because no
+  dispatch ever closes — the other pre-dispatch gating (plan, scope, intent, ownership) is
+  unaffected, and completion order is advisory there. The render records `arbiter-not-enforced` with
   `no-post-dispatch-feedback` for every rendered agent: post-dispatch outcomes are logged
   and reported by `audit`, never delivered back to the harness.
 - **Factory** reads the `hooks` key of `.factory/settings.json` only while
@@ -342,7 +435,12 @@ Per-harness notes:
   block and records `arbiter-not-enforced` with `settings-hooks-shadowed`, naming the fix:
   move the user's hooks into `.factory/hooks.json`, then run `squad update`. A strip writes
   `allow` with the complete `updatedInput` (every `tool_input` field copied, only `prompt`
-  rewritten); no call id is documented, so returns pair by `pair-digest`.
+  rewritten); no call id is documented, so returns pair by `pair-digest`. `Task` runs in the
+  background by default, so `PostToolUse` fires at launch with no report and records nothing.
+  The return is recorded on `SubagentStop`, which carries the report but names the task only
+  by its description, so the adapter reads the target and prompt from the parent session's
+  transcript. `SubagentStop` output reaches no conductor, so a non-allow outcome there is
+  logged and reported by `audit`.
 - **Devin** takes the target from `tool_input.profile` and the prompt from
   `tool_input.prompt`; when either is absent the dispatch is treated as unmarked and
   logged, so `audit` reports it. A strip writes `hookSpecificOutput.updatedInput:

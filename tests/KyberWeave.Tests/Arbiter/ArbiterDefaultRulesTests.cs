@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -302,6 +303,48 @@ public sealed class ArbiterDefaultRulesTests
 
             Assert.Contains("jev-1.13-free", rule.Ask.TunedFor ?? []);
         }
+    }
+
+    /// <summary>
+    /// The measured ids stay quiet in <c>doctor</c> only when every enabled step-1 rule
+    /// names them. The <c>typesafe/</c> ids are OpenRouter's names for the same releases.
+    /// </summary>
+    [Theory]
+    [InlineData("jev-1.14.0")]
+    [InlineData("typesafe/jev-1.14")]
+    [InlineData("typesafe/jev-1.13")]
+    public void MeasuredJevIds_ProduceNoUntunedModelDiagnostic(string model)
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel(model)).ToList();
+        Assert.Empty(diagnostics);
+
+        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        {
+            if (rule.Enabled && rule.Ask is not null)
+            {
+                Assert.Contains(model, rule.Ask.TunedFor ?? []);
+            }
+        }
+    }
+
+    /// <summary>A state too large for the smallest budget still fits a Jev release on either route.</summary>
+    [Theory]
+    [InlineData("jev-1.14.0", false)]
+    [InlineData("typesafe/jev-1.14", false)]
+    [InlineData("typesafe/jev-1.13", false)]
+    [InlineData("typesafe/jev-router", true)]
+    public void StateBudget_GivesJevReleasesTheJevBudget(string model, bool overBudget)
+    {
+        Assert.Equal(overBudget, StateBudget.IsOverBudget(model, 10_000, 100, 10_100, 30_300, 1));
+    }
+
+    /// <summary>
+    /// <c>jev-1.13.0</c> stays a supported pin after the default moves to 1.14.
+    /// </summary>
+    [Fact]
+    public void Jev113_StaysTunedAfterTheDefaultMoves()
+    {
+        Assert.Empty(RuleValidator.CheckModelTuning(WithModel("jev-1.13.0")));
     }
 
     /// <summary>

@@ -385,6 +385,53 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     }
 
     /// <summary>
+    /// Factory's global file carries a SubagentStop group with no matcher beside Pre and Post. A
+    /// global install then uninstall removes every Squad entry, including the stop group, and
+    /// leaves the operator's own stop hook in place.
+    /// </summary>
+    [Fact]
+    public void Uninstall_GlobalFactoryHook_RemovesSubagentStopAndKeepsTheUsersOwn()
+    {
+        string home = _home.Path;
+        string hooksPath = Path.Combine(home, ".factory", "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hooksPath)!);
+        File.WriteAllText(hooksPath, """
+            {
+              "SubagentStop": [
+                { "hooks": [ { "type": "command", "command": "user-own-stop-notifier" } ] }
+              ]
+            }
+            """);
+
+        ArbiterInstallCommand install = new();
+        CommandExecution installExecution = Capture(() => install.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = home,
+                Target = "factory",
+                Provider = "none",
+                Global = true,
+            }));
+
+        Assert.Equal(0, installExecution.ExitCode);
+        string installed = File.ReadAllText(hooksPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness factory", installed, StringComparison.Ordinal);
+        Assert.Contains("\"SubagentStop\"", installed, StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", installed, StringComparison.Ordinal);
+
+        ArbiterUninstallCommand uninstall = new();
+        CommandExecution execution = Capture(() => uninstall.Execute(
+            null!,
+            new ArbiterUninstallSettings { Path = home, Target = "factory" }));
+
+        Assert.Equal(0, execution.ExitCode);
+        string after = File.ReadAllText(hooksPath);
+        Assert.DoesNotContain("kyber-weave-arbiter hook --harness factory", after, StringComparison.Ordinal);
+        Assert.Contains("user-own-stop-notifier", after, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// OpenCode installs its owned shim under the target's true global root, not under the project
     /// convention it would otherwise guess from the home directory. A global uninstall must remove
     /// the actual plugin file and leave the home-owned operator file alone.

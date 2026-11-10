@@ -65,7 +65,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
         }
 
         string model = string.IsNullOrWhiteSpace(settings.Model)
-            ? (ArbiterKeyResolver.IsLoopbackEndpoint(endpoint) ? "nimble" : "jev-1.13.0")
+            ? (ArbiterKeyResolver.IsLoopbackEndpoint(endpoint) ? "nimble" : "jev-1.14.0")
             : settings.Model.Trim();
 
         string kindName = kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
@@ -84,7 +84,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
                 Severity.Error,
                 $"--model cannot be written to the user override: {exception.Message.Split('\n')[0]}",
                 "--model",
-                Hint: "Use a model name with no newline or control characters, for example jev-1.13.0 or nimble."));
+                Hint: "Use a model name with no newline or control characters, for example jev-1.14.0 or nimble."));
             CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
             return 1;
         }
@@ -143,7 +143,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
         if (model.StartsWith("tev1", StringComparison.Ordinal))
         {
             AnsiConsole.MarkupLine(
-                "  [yellow]warn[/] Model 'tev1' has a usable input of about 2,000 tokens, too small for most shipped rules; prefer nimble or jev-1.13.0.");
+                "  [yellow]warn[/] Model 'tev1' has a usable input of about 2,000 tokens, too small for most shipped rules; prefer nimble or jev-1.14.0.");
         }
     }
 
