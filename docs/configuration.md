@@ -537,7 +537,11 @@ The user-level `~/.kyber-weave/kyber-weave.yml` may also hold `arbiter.global.ta
 This list records which harness targets are installed at global scope, and it is valid only
 in the home config. A project config file that declares `arbiter.global` fails as
 `KW-ARB-CONFIG-011`; the project docs and runtime hook checks treat that as a project-scope
-configuration error rather than a user-level setting. At runtime, a global hook that finds a
+configuration error rather than a user-level setting. A `--global` `squad install` or
+`squad update` reads `~/.kyber-weave/kyber-weave.yml` as this user-level file, not as a
+project config, so the `arbiter.global` block it holds is accepted. This holds whatever root a
+legacy single-root global receipt anchors at. A home without that file falls back to the
+project loader, which reads a legacy root-level `kyber-weave.yml` there. At runtime, a global hook that finds a
 project config with `arbiter.enabled: true` logs `deferred-to-project`, leaves the ledger
 untouched, and lets the project-level decision win. Global state and the per-root ledger live
 under `~/.kyber-weave/arbiter/projects/<root-key>/`, while the target registry remains in the

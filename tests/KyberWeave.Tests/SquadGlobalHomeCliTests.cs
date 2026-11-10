@@ -61,6 +61,80 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
+    public void UpdateGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
+    {
+        using Harness h = NewHarness("user-level-arbiter-global");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        WriteHomeConfig(h, """
+            arbiter:
+              enabled: true
+              global:
+                targets: [codex]
+            """);
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(execution, 0);
+        Assert.DoesNotContain("KW-ARB-CONFIG-011", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(UpdatedVersion, VersionOf(GlobalLockPath(h)));
+    }
+
+    [Fact]
+    public void UpdateGlobalFailsOnAMalformedHomeConfigProvingTheHomeFileIsActuallyRead()
+    {
+        using Harness h = NewHarness("home-config-is-read");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        WriteHomeConfig(h, "arbiter: [unclosed");
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(execution, 1);
+        Assert.Contains("kyber-weave squad: error:", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InstallGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
+    {
+        using Harness h = NewHarness("install-user-level-arbiter-global");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        WriteHomeConfig(h, """
+            arbiter:
+              enabled: true
+              global:
+                targets: [codex]
+            """);
+
+        CommandExecution install = Capture(() => new SquadInstallCommand(
+                h.UserPaths,
+                h.Store,
+                h.ReleaseSource,
+                renderer,
+                false,
+                null,
+                h.GlobalRoots)
+            .Execute(null!, new SquadInstallSettings
+            {
+                Path = anchor,
+                Global = true,
+                Targets = ["codex"],
+                Version = InstalledVersion,
+                Yes = true
+            }));
+
+        AssertExit(install, 0);
+        Assert.DoesNotContain("KW-ARB-CONFIG-011", install.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UpdateGlobalWithAPathWarnsThatThePathIsIgnoredAndStillUpdates()
     {
         using Harness h = NewHarness("global-with-path");
@@ -1552,6 +1626,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Project stale = InstallProject(h, "stale", renderer);
         Directory.Delete(stale.Root, true);
         return new Fleet(h, anchor, renderer, alpha, beta, stale);
+    }
+
+    private static void WriteHomeConfig(Harness h, string yaml)
+    {
+        string path = Path.Combine(h.Home, ".kyber-weave", "kyber-weave.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, yaml);
     }
 
     private static void InstallGlobal(

@@ -118,7 +118,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // defaults and the task-gate hint below says where review gates come from. Only a
         // global run, which has no project whose gates could be missing, keeps the load
         // failure fatal.
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
+        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+            targetRoot,
+            scope,
+            stateStore.UserPaths.HomeDirectory);
         if (!configResult.Success && scope != SquadDeploymentScope.Project)
         {
             SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
