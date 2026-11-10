@@ -202,7 +202,8 @@ public sealed class SquadWorktreeMcpContractTests
         // The fallback is qualified, and the failure modes are named.
         Assert.Matches(@"(?i)\bdirect(?:ly| reads?)\b[\s\S]{0,60}?\bonly when\b[\s\S]{0,60}?\bcan(?:not)? answer\b", content);
         Assert.Contains("not-indexed", content, StringComparison.OrdinalIgnoreCase);
-        Assert.Matches(@"(?i)`(?:projectPath|cli): (?:error|not-indexed|wrong-branch)\b", content);
+        Assert.Matches(@"(?i)`(?:projectPath|cli): (?:error|not-indexed)`", content);
+        Assert.Contains("wrong-branch <got> vs <wanted>", content, StringComparison.Ordinal);
 
         // The old rule in any of its phrasings: a direct read that is not the qualified fallback.
         Assert.DoesNotMatch(
