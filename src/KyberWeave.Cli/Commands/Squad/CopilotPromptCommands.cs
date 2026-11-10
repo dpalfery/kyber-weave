@@ -41,6 +41,9 @@ internal sealed record CopilotPromptEnvironment(
     Func<string, bool> ReadAnswer,
     string? XdgConfigHome = null);
 
+/// <summary>One settings file as read: its bytes, null when it is missing, or the error that made it unusable.</summary>
+internal sealed record SettingsRead(byte[]? Document, string? Error);
+
 /// <summary>
 /// Writes the Copilot system-prompt override file and points VS Code's setting at it.
 /// </summary>
@@ -99,8 +102,15 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         foreach (VsCodeFlavour flavour in targets)
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
+            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            if (read.Error is not null)
+            {
+                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
+                continue;
+            }
+
             // A file that does not exist yet is created from an empty object: the only write that is not a splice.
-            byte[] document = CopilotPromptCommandSupport.SettingsExist(file) ? File.ReadAllBytes(file) : Encoding.UTF8.GetBytes("{}\n");
+            byte[] document = read.Document ?? Encoding.UTF8.GetBytes("{}\n");
             JsonSplicePlan plan = JsonServerSplice.Plan(document, [CopilotOverrideSettings.SettingId], CopilotOverrideSettings.StarEntry, entryJson);
 
             if (plan.Outcome == JsonSpliceOutcome.Inserted)
@@ -223,10 +233,16 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            if (!CopilotPromptCommandSupport.SettingsExist(file))
+            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            if (read.Error is not null)
+            {
+                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
+                continue;
+            }
+
+            if (read.Document is not { } document)
                 continue;
 
-            byte[] document = File.ReadAllBytes(file);
             CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
             if (state is null)
             {
@@ -357,8 +373,15 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            CopilotOverrideState? state = CopilotPromptCommandSupport.SettingsExist(file)
-                ? CopilotOverrideSettings.Read(File.ReadAllBytes(file))
+            SettingsRead read = CopilotPromptCommandSupport.ReadSettings(file);
+            if (read.Error is not null)
+            {
+                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
+                continue;
+            }
+
+            CopilotOverrideState? state = read.Document is { } document
+                ? CopilotOverrideSettings.Read(document)
                 : new CopilotOverrideState(false, null, []);
             if (state is null)
             {
@@ -421,10 +444,6 @@ internal static class CopilotPromptCommandSupport
         readAnswer,
         read("XDG_CONFIG_HOME"));
 
-    /// <summary>
-    /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
-    /// working directory, where doctor would never look.
-    /// </summary>
     /// <summary>The home directory. Throws when it is unknown, so a path is never built under the working directory.</summary>
     /// <exception cref="InvalidOperationException">No home directory is known; callers check <see cref="HasHome"/> first.</exception>
     internal static string Home(CopilotPromptEnvironment environment) =>
@@ -432,6 +451,10 @@ internal static class CopilotPromptCommandSupport
             ? throw new InvalidOperationException("No home directory is known; check HasHome before building a path.")
             : environment.HomeDirectory;
 
+    /// <summary>
+    /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
+    /// working directory, where doctor would never look.
+    /// </summary>
     internal static bool HasHome(CopilotPromptEnvironment environment)
     {
         if (!string.IsNullOrWhiteSpace(environment.HomeDirectory))
@@ -442,24 +465,26 @@ internal static class CopilotPromptCommandSupport
     }
 
     /// <summary>
-    /// True when the settings file has content to read. A symbolic link counts only when its final target exists:
-    /// <see cref="File.Exists(string)"/> is true for a dangling link, which cannot be read but can be written through.
+    /// Reads one settings file, telling a missing file apart from one that is present but unusable.
     /// </summary>
-    internal static bool SettingsExist(string file)
+    /// <remarks>
+    /// A symbolic link whose final target does not exist is missing: <see cref="File.Exists(string)"/> is true for it,
+    /// but there is nothing to read, and a write goes through it. Every probe and the read itself are guarded, so an
+    /// IO or permission failure comes back as <see cref="SettingsRead.Error"/> for the caller to report, never as a crash.
+    /// </remarks>
+    internal static SettingsRead ReadSettings(string file)
     {
-        FileInfo info = new(file);
-        if (info.LinkTarget is null)
-            return info.Exists;
-
         try
         {
-            return info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+            FileInfo info = new(file);
+            bool present = info.LinkTarget is null
+                ? info.Exists
+                : info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+            return present ? new SettingsRead(File.ReadAllBytes(file), null) : new SettingsRead(null, null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // An unresolvable link is treated as having nothing to read. The write that follows goes through the
-            // guarded AtomicFile path, which reports the same failure as a clean error instead of a crash.
-            return false;
+            return new SettingsRead(null, exception.Message);
         }
     }
 
