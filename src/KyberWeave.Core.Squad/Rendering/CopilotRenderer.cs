@@ -53,6 +53,17 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// lowering decision: the command line is rebuilt from the wiring's caller and timeout
 /// rather than reusing <see cref="SquadArbiterHook.CommandLine"/> verbatim.
 /// </para>
+/// <para>
+/// Parent roles start as skills. VS Code gives a worker only the built-in tools the selected
+/// custom agent lists, so a primary agent cannot start as an agent in normal chat with its
+/// tools and roster intact. Each primary whose fallback lowers it to a skill therefore also
+/// renders as an entry-point skill, which the human starts, and its agent file is kept beside
+/// it. The agent file is hidden from the picker, so the skill is the only way in. A primary
+/// that no agent delegates to is an entry point the human chooses, so it also sets
+/// <c>disable-model-invocation</c> and the model cannot start it on its own. A primary whose
+/// fallback omits the entry point keeps its agent file selectable, because that file is the
+/// only way in.
+/// </para>
 /// </remarks>
 public sealed class CopilotRenderer : SquadHarnessRenderer
 {
@@ -182,14 +193,100 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private protected override void RenderAgent(SquadHarnessRenderContext context, SquadAgent agent)
     {
         CopilotPlan plan = context.GetOrCreateState(CopilotPlan.Create);
+
+        // A primary that lowers to a skill is started by the human from the skill, so its agent file
+        // is hidden from the picker. A primary whose fallback omits the entry point has no skill, so its
+        // agent file is the only way in and stays selectable.
+        SquadPrimaryLowering? lowering = agent.Invocation == SquadInvocation.Primary
+            ? context.ResolvePrimaryLowering(agent, () => SkillEntryCollisionMessage(context, agent))
+            : null;
+        bool hiddenFromPicker = agent.Invocation == SquadInvocation.Subagent
+            || lowering is not SquadPrimaryLowering.Omit;
+
         context.AddPrincipal(
             RenderAgentFile(
                 context,
                 agent,
                 plan,
-                agent.Name == SquadOperatorChannel.ConductorAgentName ? plan.OperatorChannelOverlay : null),
+                agent.Name == SquadOperatorChannel.ConductorAgentName ? plan.OperatorChannelOverlay : null,
+                hiddenFromPicker,
+                IsUndispatchedParent(context, agent)),
             agent.Resources);
+
+        // The overlay stays on the agent file. The skill is the same body without it, so the entry point
+        // a human starts carries the role and not the operator channel tool entry.
+        context.AddEntryPointSkillProjection(
+            agent,
+            "an agent",
+            () => context.RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, Yaml),
+            (_, path, reused) => BuildParentEntryPointRecords(context, agent, path, reused),
+            () => []);
         context.AddDegradation(BuildPermissionDegradation(agent, context.CapabilityProfiles));
+    }
+
+    /// <summary>
+    /// A primary is undispatched when no agent in the source names it in its delegation roster. Nothing
+    /// hands it work, so it is an entry point the human chooses, and the model must not start it.
+    /// </summary>
+    private static bool IsUndispatchedParent(SquadHarnessRenderContext context, SquadAgent agent) =>
+        agent.Invocation == SquadInvocation.Primary
+        && !context.Source.Agents.Any(candidate => candidate.DelegatesTo.Contains(agent.Name));
+
+    /// <summary>The fail-closed message when a primary's entry-point skill name collides with a canonical skill.</summary>
+    private static string SkillEntryCollisionMessage(SquadHarnessRenderContext context, SquadAgent agent) =>
+        $"Cannot render primary agent '{agent.Name}' as a {context.Spec.DisplayName} entry-point " +
+        $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+        $"identity. {context.Spec.DisplayName} renders both an agent and an entry-point skill, " +
+        "so this is a fail-closed condition rather than a naming collision " +
+        "this renderer can resolve on its own.";
+
+    /// <summary>
+    /// The records for a parent that starts as a skill. The role-skill fallback says why VS Code forces
+    /// the skill and where it is, and that the agent file is kept. The permission record says the
+    /// session's tools, roster and model apply to the skill, because the skill cannot carry the profile.
+    /// The arbiter record appears only when Arbiter is enabled, since the skill has no caller identity
+    /// for the dispatch gate to read.
+    /// </summary>
+    private static IEnumerable<SquadDegradationRecord> BuildParentEntryPointRecords(
+        SquadHarnessRenderContext context,
+        SquadAgent agent,
+        string skillPath,
+        bool reusedCanonicalSkill)
+    {
+        string entryPoint = reusedCanonicalSkill
+            ? $"The same-name canonical skill at `{skillPath}` is the entry point and carries the role; " +
+              "no duplicate skill is emitted."
+            : $"The entry-point skill at `{skillPath}` carries the role.";
+
+        yield return new SquadDegradationRecord(
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "VS Code gives a worker only the built-in tools the selected agent lists, so this parent " +
+            "cannot start as an agent in normal chat with its tools and roster. " + entryPoint +
+            " The agent file is kept beside it, hidden from the picker.");
+
+        yield return new SquadDegradationRecord(
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            $"Capability decisions ({CapabilityDegradations.DescribeCapabilityDecisions(agent, context.CapabilityProfiles, context.CapabilityVocabulary)}); " +
+            "the session's tools, roster and model apply to the skill, not the canonical capability profile.");
+
+        if (context.EnabledArbiter is not null)
+        {
+            yield return new SquadDegradationRecord(
+                "copilot",
+                agent.Name,
+                agent.Name,
+                "arbiter-not-enforced",
+                agent.BodyDigest,
+                "skill-entry-no-caller");
+        }
     }
 
     private protected override void RenderCanonicalSkills(SquadHarnessRenderContext context) =>
@@ -219,7 +316,9 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         SquadHarnessRenderContext context,
         SquadAgent agent,
         CopilotPlan plan,
-        SquadOperatorChannel.Overlay? operatorChannelOverlay)
+        SquadOperatorChannel.Overlay? operatorChannelOverlay,
+        bool hiddenFromPicker,
+        bool modelInvocationLocked)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -253,12 +352,18 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
         }
 
-        if (agent.Invocation == SquadInvocation.Subagent)
+        if (hiddenFromPicker)
         {
-            // Subagents are dispatched by the conductor, not chosen directly by a human —
-            // "user-invocable: false" is Copilot's closest equivalent. Primary agents
-            // (conductor) leave this at its default (true, omitted).
+            // Subagents are dispatched by the conductor, not chosen directly by a human, and a primary
+            // that lowers to a skill is started from that skill. "user-invocable: false" is Copilot's
+            // closest equivalent. A primary whose fallback omits the entry point stays selectable.
             frontmatter["user-invocable"] = false;
+        }
+
+        if (modelInvocationLocked)
+        {
+            // An undispatched primary is started by the human, so the model cannot start it on its own.
+            frontmatter["disable-model-invocation"] = true;
         }
 
         // metadata values are kept as flat strings rather than nested arrays: GitHub's
