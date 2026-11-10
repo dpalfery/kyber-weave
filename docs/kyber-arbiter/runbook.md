@@ -112,7 +112,9 @@ observed — so grant trust at install time:
 Any internal hook error blocks the dispatch with an explicit reason carrying
 `KW-ARB-HOOK-001` — never a silent pass. On conductor triggers the block carries an
 escalation envelope for architect; the conductor dispatches architect with it and never
-retries the blocked dispatch unchanged. Timeouts are bounded by `provider.timeout-ms` plus
+retries the blocked dispatch unchanged. The exception is a refused planner dispatch
+(`KW-ARB-PLANNER-001`): its envelope names a corrected dispatch, and the conductor re-issues
+that planner dispatch instead of sending it to architect. Timeouts are bounded by `provider.timeout-ms` plus
 the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry.
 
