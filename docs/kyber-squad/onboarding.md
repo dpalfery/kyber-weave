@@ -287,8 +287,10 @@ capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](..
 entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
 omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
 list exists to prevent. App-level configuration is the other half of the same wiring and it is
-yours, not Squad's: Squad writes no Factory settings file, does not create, adopt, or check
-`.factory/mcp.json` or `~/.factory/mcp.json`, and `squad doctor` verifies neither. A droid needs
+yours, not Squad's: Squad writes no Factory settings file and does not create or adopt
+`.factory/mcp.json` or `~/.factory/mcp.json`. `squad install` and `squad update` read those files
+and print a `factory-mcp-not-configured` warning when a server the droids are allowed has no
+definition there; `squad doctor` verifies neither. A droid needs
 both halves — Squad's whitelist names a server, and your file launches it — so wire the file
 first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
 carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
