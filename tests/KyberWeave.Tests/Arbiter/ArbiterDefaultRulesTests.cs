@@ -305,15 +305,13 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     /// <summary>
-    /// The measured Jev 1.14 ids stay quiet in <c>doctor</c> only when every enabled
-    /// step-1 rule names them. <c>jev-1.14</c> is the id OpenRouter accepts for the same
-    /// release as TypeSafe's <c>jev-1.14.0</c>.
+    /// <c>jev-1.14.0</c> stays quiet in <c>doctor</c> only when every enabled
+    /// step-1 rule names it.
     /// </summary>
-    [Theory]
-    [InlineData("jev-1.14.0")]
-    [InlineData("jev-1.14")]
-    public void Jev114_ProducesNoUntunedModelDiagnostic(string model)
+    [Fact]
+    public void Jev114_ProducesNoUntunedModelDiagnostic()
     {
+        const string model = "jev-1.14.0";
         List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel(model)).ToList();
         Assert.Empty(diagnostics);
 

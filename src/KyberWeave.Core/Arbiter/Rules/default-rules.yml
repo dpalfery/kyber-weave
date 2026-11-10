@@ -53,7 +53,7 @@ rules:
         adds-work: The delegation asks for work the task does not describe.
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, jev-1.14]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0]
     effects: { within-task: allow, adds-work: escalate, unrelated: escalate }
 
   - id: KW-ARB-READY-001
@@ -105,7 +105,7 @@ rules:
         target: The choice equals delegation.target.
         other: Another specialist owns this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, jev-1.14]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0]
       when: KW-ARB-OWNER-001=no-mapping
     effects: { target: allow, other: escalate }
 
@@ -219,7 +219,7 @@ rules:
       question: Does the lens apply to this change?
       instructions-from: "lens:"
       probability-below: 0.1
-      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, jev-1.14]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0]
     effects: { applies: allow, not-applicable: skip }
 
   - id: KW-ARB-QUOTE-001
@@ -254,7 +254,7 @@ rules:
         contradicts: The quoted code contradicts the finding's claim.
         says_nothing: The quoted code says nothing about the finding's claim.
       confidence-at-least: 0.9
-      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, jev-1.14]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0]
     effects: { supports: verify, contradicts: allow, says_nothing: allow }
 
   - id: KW-ARB-GATE-CORROBORATED-001

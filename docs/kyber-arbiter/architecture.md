@@ -254,11 +254,13 @@ compared.
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.
 
-**Model ids.** `tuned-for` is an exact match, so it lists `jev-1.14.0` and also `jev-1.14`,
-the id accepted by OpenRouter for the same release. `jev-1.13.0` stays listed, and a
-configuration pinned to it keeps working with no `doctor` warning. TypeSafe says it will give
-60 days' warning before retiring it. Only a configuration that names no model moves to the
-new default.
+**Model ids.** `tuned-for` is an exact match and holds TypeSafe's ids, `jev-1.14.0` and
+`jev-1.13.0`. The measurement used OpenRouter's ids for the same releases. A configuration
+that names a `typesafe/` id is not covered: `doctor` warns and the smallest state budget
+applies. `jev-1.13.0` stays listed, and a configuration pinned to it keeps working with no
+`doctor` warning. [TypeSafe says](https://typesafe.ai/blog/jev-1-14) it intends to give
+60 days' warning before formally deprecating `jev-1.13.0`, and has set no date. Only a
+configuration that names no model moves to the new default.
 
 **Limits.**
 
@@ -271,8 +273,11 @@ new default.
   the decision log.
 - `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
 
-To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to an output file and run
-`ArbiterCalibrationTests`. It makes paid calls, about one cent per run.
+To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run
+`ArbiterCalibrationTests`. It makes paid calls, about one cent per run. By default it calls
+TypeSafe directly with `jev-1.13.0` and `jev-1.14.0`. To repeat the runs reported here, also
+set `KW_ARBITER_CALIBRATE_ENDPOINT` to `https://openrouter.ai/api/v1` and
+`KW_ARBITER_CALIBRATE_MODELS` to `typesafe/jev-1.13,typesafe/jev-1.14`.
 
 ## Harness facts
 
