@@ -11,7 +11,9 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// A droid's <c>mcpServers</c> list only filters servers Factory has already started, and Squad
 /// writes no Factory MCP config, so a missing definition leaves every droid without those tools
 /// and with no error. Factory reads <c>~/.factory/mcp.json</c> and <c>.factory/mcp.json</c> in the
-/// project and its ancestor directories (docs.factory.com/harness/mcp, checked 2026-11-10).
+/// project and its ancestor directories (docs.factory.com/harness/mcp, checked 2026-11-10). The
+/// walk does not stop at a repository boundary: Factory documents no such stop, and a config
+/// shared by several repositories under a common parent is its stated use for that level.
 /// </remarks>
 public static class FactoryMcpConfiguration
 {
@@ -47,8 +49,12 @@ public static class FactoryMcpConfiguration
             return [];
         }
 
+        List<string> unreadable = [];
         HashSet<string> configured = new(
-            ConfigPaths(scope, targetRoot, homeDirectory).SelectMany(ReadServerNames),
+            ConfigPaths(scope, targetRoot, homeDirectory)
+                .Distinct(StringComparer.Ordinal)
+                .SelectMany(path => ReadServerNames(path, unreadable))
+                .ToList(),
             StringComparer.Ordinal);
         string[] missing =
         [
@@ -63,10 +69,17 @@ public static class FactoryMcpConfiguration
         string remedy = scope == SquadDeploymentScope.Global
             ? "~/.factory/mcp.json does not define them, so droids get those tools only in projects " +
               "whose own .factory/mcp.json does. Define them in one of those files."
-            : "neither .factory/mcp.json nor ~/.factory/mcp.json defines them, so droids will not get " +
-              "those tools. Define them in one of those files.";
+            : "neither .factory/mcp.json, here or in a parent folder, nor ~/.factory/mcp.json defines " +
+              "them, so droids will not get those tools. Define them in one of those files.";
+        string broken = unreadable.Count == 0
+            ? string.Empty
+            : $" Fix these unreadable files first: {string.Join("; ", unreadable)}.";
 
-        return [$"{WarningCode}: Factory droids are allowed the MCP servers {servers}, but {remedy}"];
+        return
+        [
+            SquadLifecycleService.SanitizeTargetTokenForWarning(
+                $"{WarningCode}: Factory droids are allowed the MCP servers {servers}, but {remedy}{broken}")
+        ];
     }
 
     private static IEnumerable<string> ConfigPaths(
@@ -87,7 +100,7 @@ public static class FactoryMcpConfiguration
         }
     }
 
-    private static IReadOnlyList<string> ReadServerNames(string path)
+    private static IReadOnlyList<string> ReadServerNames(string path, List<string> unreadable)
     {
         try
         {
@@ -100,14 +113,28 @@ public static class FactoryMcpConfiguration
                 File.ReadAllText(path),
                 new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
 
-            return document.RootElement.ValueKind == JsonValueKind.Object &&
-                   document.RootElement.TryGetProperty(ServersKey, out JsonElement servers) &&
-                   servers.ValueKind == JsonValueKind.Object
-                ? [.. servers.EnumerateObject().Select(server => server.Name)]
-                : [];
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                unreadable.Add($"{path} (the top level is not a JSON object)");
+                return [];
+            }
+
+            if (!document.RootElement.TryGetProperty(ServersKey, out JsonElement servers))
+            {
+                return [];
+            }
+
+            if (servers.ValueKind != JsonValueKind.Object)
+            {
+                unreadable.Add($"{path} ({ServersKey} is not a JSON object)");
+                return [];
+            }
+
+            return [.. servers.EnumerateObject().Select(server => server.Name)];
         }
         catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
         {
+            unreadable.Add($"{path} ({exception.Message})");
             return [];
         }
     }

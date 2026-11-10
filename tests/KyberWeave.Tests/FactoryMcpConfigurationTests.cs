@@ -1,4 +1,6 @@
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -130,9 +132,72 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     {
         string directory = Path.Combine(_project, ".factory");
         Directory.CreateDirectory(directory);
-        await File.WriteAllTextAsync(Path.Combine(directory, "mcp.json"), "{ not json");
+        string file = Path.Combine(directory, "mcp.json");
+        await File.WriteAllTextAsync(file, "{ not json");
 
-        Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
+        string warning = Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
+
+        Assert.Contains("Fix these unreadable files first: ", warning, StringComparison.Ordinal);
+        Assert.Contains($"{file} (", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProjectInstall_ServersKeyIsNotAnObject_NamesTheFile()
+    {
+        string directory = Path.Combine(_project, ".factory");
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "mcp.json");
+        await File.WriteAllTextAsync(file, """{ "mcpServers": [] }""");
+
+        string warning = Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
+
+        Assert.Contains($"{file} (mcpServers is not a JSON object)", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProjectInstall_BrokenHomeConfigAboveTheProject_IsNamedOnce()
+    {
+        string directory = Path.Combine(_home, ".factory");
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "mcp.json");
+        File.WriteAllText(file, "[]");
+        string project = Path.Combine(_home, "repo");
+        Directory.CreateDirectory(project);
+
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project,
+            TestSquadCorpus.CanonicalSource,
+            project,
+            _home));
+
+        Assert.Single(warning.Split(file, StringSplitOptions.None)[1..]);
+    }
+
+    [Fact]
+    public void Warning_ServerTextWithControlCharacters_StaysOnOneLine()
+    {
+        using JsonDocument servers = JsonDocument.Parse(
+            """{ "mcpServers": { "bad\nname": { "command": "run\rit", "args": ["a\tb"] } } }""");
+        SquadSource source = TestSquadCorpus.CanonicalSource with { McpConfiguration = servers.RootElement };
+
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(
+            [SquadTarget.Factory],
+            SquadDeploymentScope.Project,
+            source,
+            _project,
+            _home));
+
+        Assert.DoesNotContain(warning, char.IsControl);
+        Assert.Contains("bad?name (run?it a?b)", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProjectInstall_NoConfigAnywhere_SaysAParentFolderCounts()
+    {
+        string warning = Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
+
+        Assert.Contains("a parent folder", warning, StringComparison.Ordinal);
     }
 
     [Fact]
