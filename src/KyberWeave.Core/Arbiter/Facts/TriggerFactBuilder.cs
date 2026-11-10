@@ -159,6 +159,8 @@ public static class TriggerFactBuilder
                 // KW-DOC-TASKS-005 accepts.
                 "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(stripped, planningDirs),
                 "delegation.plan-file" => planFile,
+                // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
+                "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,

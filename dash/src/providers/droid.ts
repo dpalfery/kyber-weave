@@ -65,6 +65,12 @@ type DroidJsonlEntry = {
   cwd?: string
 }
 
+function parseMs(timestamp: unknown): number | undefined {
+  if (typeof timestamp !== 'string' || timestamp === '') return undefined
+  const ms = Date.parse(timestamp)
+  return Number.isNaN(ms) ? undefined : ms
+}
+
 function getFactoryDir(): string {
   return process.env['FACTORY_DIR'] ?? join(homedir(), '.factory')
 }
@@ -133,11 +139,15 @@ function createParser(
       let sessionId = ''
       const sessionModelDisplay = settings.model ? stripModelPrefix(settings.model) : 'unknown'
       let currentUserMessage = ''
+      let sessionTitle: string | undefined
+      // Last point active time is measured from: a human prompt or the previous emitted call.
+      let boundaryMs: number | undefined
 
       // Collect all assistant messages with their tools
       const assistantCalls: Array<{
         id: string
         timestamp: string
+        activeDurationMs?: number
         tools: string[]
         bashCommands: string[]
       }> = []
@@ -155,6 +165,7 @@ function createParser(
 
         if (entry.type === 'session_start') {
           sessionId = entry.id ?? ''
+          if (typeof entry.title === 'string' && entry.title.trim() !== '') sessionTitle = entry.title.trim()
           continue
         }
 
@@ -172,6 +183,8 @@ function createParser(
           const nonSystemTexts = texts.filter(t => !t.startsWith('<system-reminder>'))
           if (nonSystemTexts.length > 0) {
             currentUserMessage = nonSystemTexts.join(' ').slice(0, 500)
+            const userMs = parseMs(entry.timestamp)
+            if (userMs !== undefined) boundaryMs = userMs
           }
           continue
         }
@@ -193,14 +206,18 @@ function createParser(
 
           // Only emit a call entry if there are tools or substantial text
           if (pendingTools.length > 0 || hasText) {
+            const callMs = parseMs(entry.timestamp)
+            const interval = callMs !== undefined && boundaryMs !== undefined ? callMs - boundaryMs : undefined
             assistantCalls.push({
-              id: entry.id ?? `msg-${assistantCalls.length}`,
+              id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : `msg-${assistantCalls.length}`,
               timestamp: entry.timestamp ?? '',
+              ...(interval !== undefined && interval >= 0 ? { activeDurationMs: interval } : {}),
               tools: [...pendingTools],
               bashCommands: [...pendingBashCommands],
             })
             pendingTools = []
             pendingBashCommands = []
+            if (callMs !== undefined && (boundaryMs === undefined || callMs >= boundaryMs)) boundaryMs = callMs
           }
           continue
         }
@@ -286,6 +303,9 @@ function createParser(
           deduplicationKey: dedupKey,
           userMessage: i === 0 ? currentUserMessage : '',
           sessionId,
+          pairingId: call.id,
+          ...(call.activeDurationMs !== undefined ? { activeDurationMs: call.activeDurationMs } : {}),
+          ...(sessionTitle !== undefined ? { sessionTitle } : {}),
         }
       }
     },

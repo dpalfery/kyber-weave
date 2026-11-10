@@ -112,7 +112,9 @@ observed — so grant trust at install time:
 Any internal hook error blocks the dispatch with an explicit reason carrying
 `KW-ARB-HOOK-001` — never a silent pass. On conductor triggers the block carries an
 escalation envelope for architect; the conductor dispatches architect with it and never
-retries the blocked dispatch unchanged. Timeouts are bounded by `provider.timeout-ms` plus
+retries the blocked dispatch unchanged. The exception is a refused planner dispatch
+(`KW-ARB-PLANNER-001`): its envelope names a corrected dispatch, and the conductor re-issues
+that planner dispatch instead of sending it to architect. Timeouts are bounded by `provider.timeout-ms` plus
 the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry.
 
@@ -163,6 +165,33 @@ code-reviewer calls it once before the lens fan-out and once before the refutati
 fan-out. On Squad-rendered fallback targets the tools are granted through the
 `decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
 the conductor and code-reviewer.
+
+## Reading a planner refusal
+
+A planner refusal is the Arbiter stopping a dispatch to a planner, such as `architect`,
+because the `PLAN_FILE:` or marker it carried was not acceptable. The envelope's `ANSWER`
+line names the cause, `CALLER` shows the caller the Arbiter resolved, and `NEXT` says what
+to do. The conductor re-issues the planner dispatch with the correction; it does not send
+the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answers:
+
+- **`malformed`**: the prompt has no recognised marker. Re-issue the dispatch with one, such
+  as `INTAKE:`, `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, or a `FEATURE:` and
+  `PHASE:` pair. `FINALIZE` only counts with a `PLAN_FILE:` alongside it.
+- **`plan-file-invalid`**: the `PLAN_FILE:` was sent but rejected, so it is treated as a
+  refusal even when the body has a valid marker. The usual cause is an absolute path,
+  such as a worktree path. Re-issue with the plan's repository-relative path: `/`
+  separators, no leading `/`, no `..`, no backslash, no space and no tab.
+- **`plan-file-outside-planning-dirs`**: the path is valid but is not under the plan, spec
+  or todo directories. Re-issue with a `PLAN_FILE:` under one of those directories.
+- **`recognised`** is the pass answer, not a refusal. It is the answer a corrected dispatch
+  gets: a planning-directory `PLAN_FILE:`, or a marker that needs no `PLAN_FILE:`.
+
+`REPEAT` counts earlier refusals from the same session when the dispatch has no
+`PLAN_FILE:`, because there is no plan to key on. A refusal that is the first in its session
+reads `REPEAT: 1`, whatever other sessions have done. On a harness that sends no session
+id, such as Copilot, these refusals always read `REPEAT: 1`. A `REPEAT` of 2 or more means the same
+kind of refusal came back in this session, so fix the cause rather than resending the
+dispatch unchanged.
 
 ## Setup, doctor, audit
 

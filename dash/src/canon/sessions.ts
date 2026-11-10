@@ -1476,7 +1476,9 @@ export function buildSessionRow(
   // reported. It is not a turn of its own: it is not a timeline entry, not a
   // request root, not a tool invocation, and its duration is not added.
   const structureRecords = paired ? split.turnRecords : records
-  const counterRecords = paired ? split.counterRecords : []
+  // Tool invocations ride in the counter bucket for tool counting only; they carry no
+  // tokens or cost, and their time is inside the llm call, so sums skip them.
+  const counterRecords = paired ? split.counterRecords.filter((record) => record.op !== 'tool.invoke') : []
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
   // `run`, `execution` and `listHarnesses` are all keyed canonically, and
@@ -1563,8 +1565,11 @@ export function buildSessionRow(
   })
 
   const definitions = toolDefinitionsOf(records, views)
-  const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(structureRecords), undefined, measurability)
-  const toolRecords = structureRecords.filter((r) => r.op === 'tool.invoke')
+  // A paired Factory session counts its tool calls from exactly one source: the
+  // transcript when it has any tool record, otherwise the plugin's.
+  const toolSourceRecords = paired && split.fileToolRecords.length > 0 ? split.fileToolRecords : structureRecords
+  const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(toolSourceRecords), undefined, measurability)
+  const toolRecords = toolSourceRecords.filter((r) => r.op === 'tool.invoke')
 
   const invocationCounts = new Map<string, number>()
   const errorCounts = new Map<string, number>()
@@ -1784,7 +1789,7 @@ export function buildSessionRow(
     if (!toolCallsLowerBound) {
       toolCalls = toolRecords.length
     }
-    toolsInvoked = Array.from(new Set(invocationsOf(structureRecords)))
+    toolsInvoked = Array.from(new Set(invocationsOf(toolSourceRecords)))
   } else {
     const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'
     const toolCallsAvailability = measurability?.tool_calls ?? (isClaude ? 'measured' : undefined)
@@ -1928,7 +1933,7 @@ export function buildSessionRow(
       ...(cacheCreationCoverage !== undefined
         ? { cache_creation_coverage: cacheCreationCoverage }
         : {}),
-      duration_ms: (isNested ? requestRoots : structureRecords).reduce(
+      duration_ms: (paired ? counterRecords : isNested ? requestRoots : structureRecords).reduce(
         (sum, record) => sum + record.durationMs,
         0,
       ),

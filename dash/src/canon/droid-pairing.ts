@@ -11,6 +11,10 @@
 //     settings file — knows the COUNTERS: the input, output, cache and
 //     thinking tokens the session spent.
 //
+// One session counts its tool calls from exactly one source: the transcript
+// when it has any tool record, otherwise the plugin. Its duration is the
+// transcript's too.
+//
 // The split is decided here, so the rule has one home the session derivation
 // can be held to. This module is a LEAF: it imports no behaviour at all,
 // only the shape of a record, so the rule cannot drag the engine in with it.
@@ -65,6 +69,11 @@ export type DroidSessionSplit = {
   turnRecords: CanonicalRecord[]
   /** The records that are the session's counters. */
   counterRecords: CanonicalRecord[]
+  /**
+   * The file source's tool invocations. Each also stays in `counterRecords`:
+   * tool records carry no tokens, so token and cost sums are unchanged.
+   */
+  fileToolRecords: CanonicalRecord[]
 }
 
 /**
@@ -86,7 +95,7 @@ export type DroidSessionSplit = {
  * instead of being counted.
  */
 export function splitDroidSessionRecords(records: readonly CanonicalRecord[]): DroidSessionSplit {
-  const split: DroidSessionSplit = { turnRecords: [], counterRecords: [] }
+  const split: DroidSessionSplit = { turnRecords: [], counterRecords: [], fileToolRecords: [] }
   for (const record of records) {
     if (record.harness !== DROID_HARNESS) continue
     if (record.source === PLUGIN_SOURCE) {
@@ -95,6 +104,7 @@ export function splitDroidSessionRecords(records: readonly CanonicalRecord[]): D
     }
     if (record.source.startsWith(FILE_SOURCE_PREFIX)) {
       split.counterRecords.push(record)
+      if (record.op === 'tool.invoke') split.fileToolRecords.push(record)
       continue
     }
     // A Factory record of neither source is a turn record: the split is

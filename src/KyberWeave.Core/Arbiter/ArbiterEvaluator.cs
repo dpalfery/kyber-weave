@@ -348,7 +348,7 @@ public sealed class ArbiterEvaluator
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         classification.Headers.TryGetValue("TASK", out string? task);
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
-        int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task);
+        int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task, ev.Session);
         ArbiterProviderRecord provider = new(
             providerKind,
             endpointOrigin,
