@@ -509,7 +509,7 @@ arbiter:
   provider:
     kind: none            # none (default) | systemone
     endpoint: https://api.typesafe.ai/v1   # or http://localhost:11434/v1 for Ollama
-    model: jev-1.13.0     # pinned; locally nimble or tev1
+    model: jev-1.14.0     # pinned; jev-1.13.0 stays supported; locally nimble or tev1
     timeout-ms: 3000
   rules:
     - id: KW-ARB-SCOPE-002

@@ -305,6 +305,37 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     /// <summary>
+    /// The measured Jev 1.14 ids stay quiet in <c>doctor</c> only when every enabled
+    /// step-1 rule names them. <c>jev-1.14</c> is the id OpenRouter accepts for the same
+    /// release as TypeSafe's <c>jev-1.14.0</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("jev-1.14.0")]
+    [InlineData("jev-1.14")]
+    public void Jev114_ProducesNoUntunedModelDiagnostic(string model)
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel(model)).ToList();
+        Assert.Empty(diagnostics);
+
+        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        {
+            if (rule.Enabled && rule.Ask is not null)
+            {
+                Assert.Contains(model, rule.Ask.TunedFor ?? []);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>jev-1.13.0</c> stays a supported pin after the default moves to 1.14.
+    /// </summary>
+    [Fact]
+    public void Jev113_StaysTunedAfterTheDefaultMoves()
+    {
+        Assert.Empty(RuleValidator.CheckModelTuning(WithModel("jev-1.13.0")));
+    }
+
+    /// <summary>
     /// <c>jev-1.13-free</c> is the free id of the shipped <c>jev-1.13.0</c> threshold.
     /// <c>KW-ARB-CLAIM-001</c> accepts it at the same floor.
     /// </summary>
