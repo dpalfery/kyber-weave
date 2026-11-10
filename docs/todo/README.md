@@ -118,6 +118,7 @@ last-reviewed: YYYY-MM-DD
 | [read-global-targets-yaml-failure-is-silent.md](read-global-targets-yaml-failure-is-silent.md) | Distribution | draft | `UserHostConfig.ReadGlobalTargets` turns a malformed global targets file into "no targets" without a word, and its catch filter names a YamlDotNet type first, so a failed assembly load inside the filter escapes the catch. |
 | [arbiter-hook-refresher-global-timeout-bare-catch.md](arbiter-hook-refresher-global-timeout-bare-catch.md) | KyberArbiter | draft | `ArbiterHookRefresher.ResolveGlobalTimeout` has a bare `catch` that swallows every exception, including ones the C# standard says must not be swallowed. |
 | [kyberdash-engine-failure-skips-hook-refresh.md](kyberdash-engine-failure-skips-hook-refresh.md) | Distribution | draft | A failed KyberDash engine step ends the self-update before the arbiter hook refresh runs, so the hooks stay on the previous release's source although the binaries are installed. |
+| [arbiter-return-rules-after-header-strip.md](arbiter-return-rules-after-header-strip.md) | KyberArbiter | draft | `KW-ARB-DIFF-001` and the in-flight overlap check stay blind on header-stripped dispatches, and Factory's pushed completion message is unobserved; each needs its own contract before it can block. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

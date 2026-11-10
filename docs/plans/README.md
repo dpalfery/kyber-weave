@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
+| Plan | Status | Component |
+|---|---|---|
+| [Arbiter test-first gate reads real RED evidence and honours no-test tasks](2026-11-09-arbiter-mode-red-evidence-wiring.md) | Ready | KyberArbiter |
 
 ## Archived Plans
 
