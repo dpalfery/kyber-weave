@@ -93,10 +93,39 @@ embedded Squad catalog. `HeaderBlock` parses the closed routing-header set
 harness payload above the rendered `--caller`, then header inference. Plan and task identity
 come from the headers only — never inferred from the plan index.
 
+The hook route fills the facts step 1 reads. All of it runs in `HookGitFacts`, except the
+finding, which `TriggerFactBuilder` reads from the prompt:
+
+- **`review.diff-summary`** is each changed path followed by its hunk headers, measured from
+  the same base as `review.changed-paths`. It is never shortened: a summary missing the one
+  file that makes a lens apply could skip that lens, so an oversized one goes over budget and
+  answers `undecidable` instead. It is absent when nothing changed or the base cannot be read.
+- **`finding.*`** on a refutation come from the finding block whose `id` equals the `REFUTE:`
+  header. A prompt with no such block leaves them absent.
+- **`file.surroundings`** is the 20 lines either side of `finding.line`, from the working tree.
+  It is absent when the path falls outside the repository, the file is over 16 MiB, or the
+  line is past the end of the file.
+- **Lens instructions.** `instructions-from: lens:` sends the whole embedded lens file, with
+  the lens named by `lens.name` when the rule names none. An unknown lens sends the rule's
+  own question.
+
+Limits on those facts:
+
+- A repository-relative `instructions-from` path has no resolver, so such a rule sends its own
+  question.
+- `arbiter eval` is an offline dry run with no repository state, so these git and file facts
+  stay absent there.
+- `review.changed-hunks`, `file.text-at-line` and `gates.report` have no filler yet.
+
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
 appends; the CLI only reads. Prompts and code are logged as digests, never in full.
+Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
+`probabilities` (in the rule's answer order; for `noul`, one value for the first answer),
+`confidence`, and `threshold`, the floor or ceiling the score was compared against. A score
+below its floor is still recorded, beside the `undecidable` it produced. Entries are null when
+the answer could not be read, and `probabilities` is null unless every option has a value.
 
 ## The rules
 

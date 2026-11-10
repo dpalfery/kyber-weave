@@ -506,7 +506,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         }
 
         Func<Uri, string?> keyResolver = KeyResolverFor(config);
-        return new SystemOneClient(
+        return SystemOneClient.CreateForProduct(
             new HttpClientHandler(),
             endpoint,
             config.Arbiter.Provider.Model,
