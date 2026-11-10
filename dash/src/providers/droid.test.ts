@@ -598,6 +598,50 @@ describe('droid active duration boundary review findings', () => {
   })
 })
 
+// Review finding: an empty-string or non-string assistant id is missing, so the
+// call takes the same msg-N fallback the reader gives its turn.
+describe('droid pairing id for a bad assistant id', () => {
+  beforeEach(async () => {
+    factoryDir = await mkdtemp(join(tmpdir(), 'codeburn-droid-test-'))
+  })
+
+  afterEach(async () => {
+    await rm(factoryDir, { recursive: true, force: true })
+  })
+
+  it('falls back to msg-0 when the assistant id is the empty string', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'),
+        { type: 'message', id: '', timestamp: '2026-11-09T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.pairingId).toBe('msg-0')
+  })
+
+  it('falls back to msg-0 when the assistant id is a number', async () => {
+    const path = await writeSession({
+      lines: [
+        sessionStart(),
+        humanPrompt('u1', '2026-11-09T10:00:00.000Z', 'hi'),
+        { type: 'message', id: 42, timestamp: '2026-11-09T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
+      ],
+      settings: TOKEN_SETTINGS,
+    })
+
+    const calls = await parseAll(path)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.pairingId).toBe('msg-0')
+  })
+})
+
 describe('the project a Factory session is filed under', () => {
   it('strips the home directory only at a path boundary', () => {
     // A directory that merely starts with the same characters is not under

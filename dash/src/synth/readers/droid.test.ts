@@ -208,4 +208,40 @@ describe('droidReader', () => {
     expect(calls[0]?.pairingId).toBeDefined()
     expect(turns[0]?.nativeRecordId).toBe(calls[0]?.pairingId)
   })
+
+  // Review finding: an empty-string or non-string assistant id is a missing id.
+  // Both sides must treat it as missing and fall back to the same msg-N id, not
+  // keep the bad value on one side (the reader drops "", the provider keeps 42).
+  async function pairingIdsFor(assistantId: unknown): Promise<{ nativeRecordId: string | undefined; pairingId: string | undefined }> {
+    const path = writeTranscript([
+      JSON.stringify({ type: 'session_start', id: 'session-1', cwd: '/synthetic/project' }),
+      JSON.stringify({ type: 'message', id: 'u1', timestamp: '2026-11-09T10:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }),
+      JSON.stringify({ type: 'message', id: assistantId, timestamp: '2026-11-09T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } }),
+    ])
+    writeFileSync(
+      path.replace(/\.jsonl$/, '.settings.json'),
+      JSON.stringify({ model: 'gpt-5', tokenUsage: { inputTokens: 10, outputTokens: 5, cacheCreationTokens: 0, cacheReadTokens: 0, thinkingTokens: 0 } }),
+    )
+    const turns = await readTurns(path)
+    const provider = createDroidProvider(dirname(path))
+    const calls: ParsedProviderCall[] = []
+    for await (const call of provider.createSessionParser({ path, project: 'proj', provider: 'droid' }, new Set()).parse()) {
+      calls.push(call)
+    }
+    return { nativeRecordId: turns[0]?.nativeRecordId, pairingId: calls[0]?.pairingId }
+  }
+
+  it('treats an empty-string assistant id as missing on both sides, with the same msg-0 fallback', async () => {
+    const ids = await pairingIdsFor('')
+
+    expect(ids.pairingId).toBe('msg-0')
+    expect(ids.nativeRecordId).toBe('msg-0')
+  })
+
+  it('treats a non-string assistant id as missing on both sides, with the same msg-0 fallback', async () => {
+    const ids = await pairingIdsFor(42)
+
+    expect(ids.pairingId).toBe('msg-0')
+    expect(ids.nativeRecordId).toBe('msg-0')
+  })
 })
