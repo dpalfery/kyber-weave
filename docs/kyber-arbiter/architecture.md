@@ -97,7 +97,8 @@ come from the headers only — never inferred from the plan index.
 backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected.
 A rejected name goes to `HeaderBlock.RejectedNames` with its value discarded, so a header
 that was sent and rejected is distinct from one that was never sent: the planner rule
-reads it as `delegation.plan-file-rejected`. On a marked planner dispatch, a rejected
+reads it as `delegation.plan-file-rejected`. A second sighting of a name leaves it absent
+whichever sighting was valid. On a planner dispatch, a rejected
 `PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
 the body cannot rescue it.
 
@@ -272,8 +273,8 @@ pass anything else through, logged with `caller: unidentified`.
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
 dispatch to a planner passes on `factory` and `antigravity`, and `KW-ARB-AUDIT-002`
-reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:` still infers the
-conductor and stays gated. The cost is that a conductor which drops its marker goes
+reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
 ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
 audit rule is how it is seen.
 

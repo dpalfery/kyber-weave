@@ -186,7 +186,7 @@ public static partial class TriggerClassifier
 
         if (IsGateTarget(target))
         {
-            (string? caller, string source) = ResolveCaller(ev, target, headers, targetClass);
+            (string? caller, string source) = ResolveCaller(ev, target, block, targetClass);
             return new TriggerClassification(
                 "gate.select", caller, source, target, targetClass, headers, marker, true);
         }
@@ -194,7 +194,7 @@ public static partial class TriggerClassifier
         if (!ev.IsDispatch)
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
-        (string? resolved, string resolvedSource) = ResolveCaller(ev, target, headers, targetClass);
+        (string? resolved, string resolvedSource) = ResolveCaller(ev, target, block, targetClass);
         bool marked = headers.ContainsKey("KYBER-ARBITER");
         bool unidentified = resolved is null;
 
@@ -211,9 +211,10 @@ public static partial class TriggerClassifier
     private static (string? Caller, string Source) ResolveCaller(
         ArbiterEvent ev,
         string? target,
-        IReadOnlyDictionary<string, string> headers,
+        HeaderBlock block,
         string targetClass)
     {
+        IReadOnlyDictionary<string, string> headers = block.Headers;
         string? harnessCaller = ev.HarnessCaller
             ?? (string.Equals(ev.CallerSource, ArbiterCallerSources.Harness, StringComparison.Ordinal) ? ev.Caller : null);
         string? renderedCaller = ev.RenderedCaller
@@ -225,7 +226,11 @@ public static partial class TriggerClassifier
         // not the conductor's: those hooks fire for every agent, so the target alone proves
         // nothing about the caller. Marked dispatches and trusted harnesses keep the target
         // inference, both the TARGET header below and the fallback at the end of this method.
-        bool targetInfers = headers.ContainsKey("KYBER-ARBITER") || !IsProjectWideHarness(ev.Harness);
+        // So does a rejected header: the sender tried to route, and a header that failed
+        // validation must not pass where a valid one is gated.
+        bool targetInfers = block.IsMarked
+            || block.RejectedNames.Count > 0
+            || !IsProjectWideHarness(ev.Harness);
 
         Dictionary<string, string?> resolveHeaders = new(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> pair in headers)

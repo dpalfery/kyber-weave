@@ -180,7 +180,7 @@ the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answer
 - **`plan-file-invalid`**: the `PLAN_FILE:` was sent but rejected, so it is treated as a
   refusal even when the body has a valid marker. The usual cause is an absolute path,
   such as a worktree path. Re-issue with the plan's repository-relative path: `/`
-  separators, no leading `/`, no `..`, no backslash and no space.
+  separators, no leading `/`, no `..`, no backslash, no space and no tab.
 - **`plan-file-outside-planning-dirs`**: the path is valid but is not under the plan, spec
   or todo directories. Re-issue with a `PLAN_FILE:` under one of those directories.
 - **`recognised`** is the pass answer, not a refusal. It is the answer a corrected dispatch

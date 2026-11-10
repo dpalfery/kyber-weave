@@ -95,6 +95,33 @@ public sealed class ArbiterClassificationTests
         Assert.Equal(2, block.LineCount);
     }
 
+    [Theory]
+    [InlineData("PLAN_FILE: /abs\nPLAN_FILE: docs/plans/plan.md\n\nwork", "PLAN_FILE")]
+    [InlineData("TASK: bad value\nTASK: T1\n\nwork", "TASK")]
+    public void HeaderGrammar_InvalidThenValidSightingLeavesFactAbsent(string prompt, string name)
+    {
+        HeaderBlock block = HeaderBlock.Parse(prompt);
+
+        Assert.DoesNotContain(name, block.Headers.Keys);
+        Assert.Contains(name, block.RejectedNames);
+    }
+
+    [Theory]
+    [InlineData("PLAN_FILE: /tmp/evil/docs/plans/x.md\n\nINTAKE: docs/todo/item.md")]
+    [InlineData("TASK: bad value\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: true\nKYBER-ARBITER: true\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: false\n\nWrite the plan.")]
+    public void Classification_RejectedHeaderOnProjectWideHarnessStaysGated(string prompt)
+    {
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: "architect", harness: "factory"),
+            "architect",
+            prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
+        Assert.Equal("conductor", plan.Caller);
+    }
+
     [Fact]
     public void HeaderGrammar_MalformedValuesLeaveFactAbsent()
     {

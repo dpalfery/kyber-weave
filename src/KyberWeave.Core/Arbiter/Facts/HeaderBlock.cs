@@ -80,7 +80,6 @@ public sealed partial class HeaderBlock
 
         string[] lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         Dictionary<string, string> headers = new(StringComparer.Ordinal);
-        HashSet<string> duplicated = new(StringComparer.Ordinal);
         HashSet<string> rejected = new(StringComparer.Ordinal);
         int count = 0;
 
@@ -94,11 +93,10 @@ public sealed partial class HeaderBlock
             string name = match.Groups["name"].Value;
             string value = match.Groups["value"].Value.Trim();
 
-            if (headers.ContainsKey(name) || duplicated.Contains(name))
+            if (headers.ContainsKey(name) || rejected.Contains(name))
             {
-                // A duplicate leaves the fact absent: drop the first sighting too.
+                // A duplicate leaves the fact absent, whichever sighting was valid.
                 headers.Remove(name);
-                duplicated.Add(name);
                 rejected.Add(name);
                 continue;
             }

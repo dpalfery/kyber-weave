@@ -160,7 +160,7 @@ public sealed record ArbiterEscalationEnvelope(
             if (PlannerAnswered("plan-file-invalid"))
             {
                 return "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, "
-                    + "with no leading '/', '..', backslash or space; do not send it to architect.";
+                    + "with no leading '/', '..', backslash, space or tab; do not send it to architect.";
             }
 
             if (PlannerAnswered("plan-file-outside-planning-dirs"))

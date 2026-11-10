@@ -194,7 +194,7 @@ public sealed class ArbiterEscalationEnvelopeTests
             1);
         Assert.Equal(
             "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, " +
-            "with no leading '/', '..', backslash or space; do not send it to architect.",
+            "with no leading '/', '..', backslash, space or tab; do not send it to architect.",
             envelope.RenderNext());
     }
 
