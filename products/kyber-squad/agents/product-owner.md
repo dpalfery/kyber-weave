@@ -43,8 +43,8 @@ The skill owns the phase contracts; this paragraph carries the one rule the work
 `codegraph_explore` answers a repository code question first, and its provenance must name the
 revision in hand before its answer is trusted. This role runs no shell, so the CLI form,
 `codegraph explore "…"`, is not available to it: when the packet names a worktree, pass its
-absolute path as `codegraph_explore`'s `projectPath` to ask that worktree's own index. With no worktree named, use the server's default project. When that
-call cannot answer for the revision, read the named file directly and report the gap in `GAPS`. The servers stay bound to the
+absolute path as `codegraph_explore`'s `projectPath` to ask that worktree's own index. With no worktree named, use the server's default project. Read the named
+file directly only when that call cannot answer for the revision in hand (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and report the gap in `GAPS`. The servers stay bound to the
 canonical checkout, so a `branch=` that is not the branch in hand describes another tree.
 
 ## Investigator dispatches

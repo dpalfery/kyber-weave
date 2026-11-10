@@ -195,16 +195,17 @@ public sealed class SquadWorktreeMcpContractTests
     {
         string content = ReadRepoFile(relativePath);
 
-        // The positive shape: the worktree path is what gets passed as projectPath. Prose is
-        // hard-wrapped, so the gaps may cross a line break.
-        Assert.Matches(
-            @"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?\bpath\b[\s\S]{0,60}?`projectPath`|`projectPath`[\s\S]{0,40}?\bworktree's own index\b",
-            content);
+        // The positive shape, as one pattern: the worktree path is passed as projectPath, which
+        // answers from the worktree's own index. Prose is hard-wrapped, so gaps may cross lines.
+        Assert.Matches(@"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?`projectPath`[\s\S]{0,200}?\bown index\b", content);
 
-        // The old rule in any of its phrasings: a direct read of the worktree that is not the
-        // qualified fallback ("... directly only when that call cannot answer ...").
+        // The fallback is qualified, and the failure modes are named.
+        Assert.Matches(@"(?i)\bdirect(?:ly| reads?)\b[\s\S]{0,60}?\bonly when\b[\s\S]{0,60}?\bcan(?:not)? answer\b", content);
+        Assert.Contains("not-indexed", content, StringComparison.Ordinal);
+
+        // The old rule in any of its phrasings: a direct read that is not the qualified fallback.
         Assert.DoesNotMatch(
-            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?)\s+directly\b(?!\s+only\s+when)",
+            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?|a file|files|the file|the named\s+file)\s+directly\b(?!\s+only\s+when)",
             content);
         Assert.DoesNotMatch(@"(?i)shell-less role reads the worktree path|Direct reads of that path\.", content);
     }
