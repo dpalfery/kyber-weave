@@ -375,6 +375,148 @@ public sealed class FactoryHookAdapterTests
         Assert.Equal(0, engine.PostCalls);
     }
 
+    private static string LaunchReporting(JsonNode response)
+    {
+        JsonObject root = JsonNode.Parse(Fixture("post-task-launched.json"))!.AsObject();
+        root["tool_response"] = response;
+        return root.ToJsonString();
+    }
+
+    private static string LaunchText() =>
+        JsonNode.Parse(Fixture("post-task-launched.json"))!["tool_response"]!.GetValue<string>();
+
+    [Theory]
+    [InlineData("  \n")]
+    [InlineData("\uFEFF")]
+    public void BackgroundLaunch_AfterLeadingNoise_RecordsNoReturn(string noise)
+    {
+        ContextualEngine engine = new();
+
+        Run(LaunchReporting(JsonValue.Create(noise + LaunchText())), null, engine);
+
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void BackgroundLaunch_InsideAJsonEnvelope_RecordsNoReturn()
+    {
+        ContextualEngine engine = new();
+        JsonObject envelope = new()
+        {
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
+        };
+
+        Run(LaunchReporting(envelope), null, engine);
+
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    private static string TemporaryTranscript(string content, string extension = ".jsonl")
+    {
+        string path = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + extension);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    private static string TwoLaunches(string firstTask, string secondTask)
+    {
+        string fixture = File.ReadAllText(TranscriptFixture());
+        string first = fixture.Replace("TASK: T9", "TASK: " + firstTask, StringComparison.Ordinal);
+        string second = fixture
+            .Replace("TASK: T9", "TASK: " + secondTask, StringComparison.Ordinal)
+            .Replace("toolu_bdrk_01JedzB4Bo7BUfu42oAMKSWs", "toolu_second", StringComparison.Ordinal)
+            .Replace("Repeat this line", "Second attempt", StringComparison.Ordinal);
+        return TemporaryTranscript(first.TrimEnd() + "\n" + second);
+    }
+
+    [Fact]
+    public void SubagentStop_WhenLaunchesNameDifferentTasks_RecordsNothing()
+    {
+        string transcript = TwoLaunches("T8", "T9");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WhenATaskWasRetried_TakesTheLatestLaunch()
+    {
+        string transcript = TwoLaunches("T9", "T9");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(transcript), null, engine);
+
+            Assert.Equal(1, engine.PostCalls);
+            Assert.Contains("Second attempt", engine.SeenPostPrompt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Fact]
+    public void SubagentStop_WithAnEmptyResult_ReadsTheError()
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root["task_result"] = string.Empty;
+        root["task_error"] = "RED_EVIDENCE: from-error";
+
+        Run(root.ToJsonString(), null, engine);
+
+        Assert.Equal("RED_EVIDENCE: from-error", engine.SeenPostOutput);
+    }
+
+    [Fact]
+    public void SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
+    {
+        string notTranscript = TemporaryTranscript(File.ReadAllText(TranscriptFixture()), ".txt");
+        try
+        {
+            ContextualEngine engine = new();
+
+            Run(SubagentStop(notTranscript), null, engine);
+
+            Assert.Equal(0, engine.PostCalls);
+        }
+        finally
+        {
+            File.Delete(notTranscript);
+        }
+    }
+
+    [Theory]
+    [InlineData("task_name")]
+    [InlineData("transcript_path")]
+    public void SubagentStop_MissingWhatItNeeds_PassesThroughWithoutConfig(string field)
+    {
+        ContextualEngine engine = new();
+        JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
+        root.Remove(field);
+
+        (int exit, string stdout, _) = Run(
+            root.ToJsonString(),
+            null,
+            engine,
+            _ => throw new InvalidOperationException("config must not load"));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
     private static string SubagentStop(string transcriptPath, string taskName = "capture run")
     {
         JsonObject root = JsonNode.Parse(Fixture("subagent-stop.json"))!.AsObject();

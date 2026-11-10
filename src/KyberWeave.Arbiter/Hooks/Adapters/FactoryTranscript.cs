@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Arbiter.Hooks.Adapters;
 
@@ -18,10 +20,29 @@ internal static class FactoryTranscript
 
     private const long MaxTranscriptBytes = 64L * 1024 * 1024;
 
+    /// <summary>Whether a <c>Task</c> result is the notice of a background launch.</summary>
+    /// <param name="text">The result text.</param>
+    /// <returns>True when the text opens with the launch notice.</returns>
+    public static bool IsBackgroundLaunch(string text) =>
+        text.TrimStart('\uFEFF', ' ', '\t', '\r', '\n').StartsWith(BackgroundLaunchPrefix, StringComparison.Ordinal);
+
+    /// <summary>Whether a <c>tool_response</c>, plain or enveloped, is a background launch.</summary>
+    /// <param name="response">The hook payload's response.</param>
+    /// <returns>True when any string in it opens with the launch notice.</returns>
+    public static bool IsBackgroundLaunch(JsonElement response) => response.ValueKind switch
+    {
+        JsonValueKind.String => IsBackgroundLaunch(response.GetString() ?? string.Empty),
+        JsonValueKind.Array => response.EnumerateArray().Any(IsBackgroundLaunch),
+        JsonValueKind.Object => response.EnumerateObject().Any(property => IsBackgroundLaunch(property.Value)),
+        _ => false,
+    };
+
     /// <summary>
     /// Finds the latest <c>Task</c> dispatch with this description that launched in the
     /// background. A foreground dispatch has no launch result, so it is not found and
-    /// its <c>PostToolUse</c> stays the one record of its return.
+    /// its <c>PostToolUse</c> stays the one record of its return. A description is not an
+    /// identity: launches that name different tasks cannot be told apart, so none is
+    /// returned rather than crediting the wrong task, while a retry of one task is safe.
     /// </summary>
     /// <returns>The dispatch, or null when the transcript cannot supply one.</returns>
     public static FactoryBackgroundDispatch? FindBackgroundDispatch(string transcriptPath, string description)
@@ -32,28 +53,49 @@ internal static class FactoryTranscript
         try
         {
             FileInfo file = new(transcriptPath);
-            if (!file.Exists || file.Length > MaxTranscriptBytes)
+            if (!IsTranscriptPath(transcriptPath) || !file.Exists || file.Length > MaxTranscriptBytes)
             {
                 return null;
             }
 
+            // Holds only dispatches with this description, not every tool use.
             Dictionary<string, FactoryBackgroundDispatch> dispatches = new(StringComparer.Ordinal);
-            FactoryBackgroundDispatch? latest = null;
+            List<FactoryBackgroundDispatch> launches = [];
+            long remaining = MaxTranscriptBytes;
             foreach (string line in File.ReadLines(transcriptPath))
             {
-                if (line.Contains("tool_use", StringComparison.Ordinal)
-                    || line.Contains("tool_result", StringComparison.Ordinal))
+                // The file may have grown since its length was read.
+                remaining -= Encoding.UTF8.GetByteCount(line) + 1;
+                if (remaining < 0)
                 {
-                    latest = ReadLine(line, description, dispatches) ?? latest;
+                    return null;
+                }
+
+                if (line.Contains("\"Task\"", StringComparison.Ordinal)
+                    || (dispatches.Count > 0 && line.Contains("tool_result", StringComparison.Ordinal)))
+                {
+                    if (ReadLine(line, description, dispatches) is { } launched)
+                    {
+                        launches.Add(launched);
+                    }
                 }
             }
 
-            return latest;
+            return launches.Select(TaskOf).Distinct().Count() == 1 ? launches[^1] : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return null;
         }
+    }
+
+    private static bool IsTranscriptPath(string path) =>
+        Path.IsPathRooted(path) && string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase);
+
+    private static (string? Plan, string? Task) TaskOf(FactoryBackgroundDispatch dispatch)
+    {
+        IReadOnlyDictionary<string, string> headers = HeaderBlock.Parse(dispatch.Prompt).Headers;
+        return (headers.GetValueOrDefault("PLAN_FILE"), headers.GetValueOrDefault("TASK"));
     }
 
     private static FactoryBackgroundDispatch? ReadLine(
@@ -83,7 +125,7 @@ internal static class FactoryTranscript
                 else if (string.Equals(type, "tool_result", StringComparison.Ordinal)
                     && GetString(block, "tool_use_id") is { } id
                     && dispatches.TryGetValue(id, out FactoryBackgroundDispatch? dispatch)
-                    && ResultText(block).StartsWith(BackgroundLaunchPrefix, StringComparison.Ordinal))
+                    && IsBackgroundLaunch(ResultText(block)))
                 {
                     launched = dispatch;
                 }

@@ -73,7 +73,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
         {
-            return false;
+            return string.IsNullOrWhiteSpace(GetString(payload, "task_name"))
+                || string.IsNullOrWhiteSpace(GetString(payload, "transcript_path"));
         }
 
         if (!string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
@@ -225,16 +226,16 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
                 "Malformed Factory hook event: PostToolUse on Task carries no tool_response.");
         }
 
-        string toolOutput = response.ValueKind == JsonValueKind.String
-            ? response.GetString() ?? string.Empty
-            : response.GetRawText();
-
         // A background launch carries no report. Recording it as the return would close
         // the dispatch with nothing in it, and the real return arrives on SubagentStop.
-        if (toolOutput.StartsWith(FactoryTranscript.BackgroundLaunchPrefix, StringComparison.Ordinal))
+        if (FactoryTranscript.IsBackgroundLaunch(response))
         {
             return string.Empty;
         }
+
+        string toolOutput = response.ValueKind == JsonValueKind.String
+            ? response.GetString() ?? string.Empty
+            : response.GetRawText();
 
         string? target = null;
         string prompt = string.Empty;
@@ -293,7 +294,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         string prompt = ReadGuard.IsImplementationSpecialist(dispatch.Target)
             ? HeaderBlock.Strip(dispatch.Prompt)
             : dispatch.Prompt;
-        string output = GetString(payload, "task_result") ?? GetString(payload, "task_error") ?? string.Empty;
+        string? result = GetString(payload, "task_result");
+        string output = string.IsNullOrWhiteSpace(result) ? GetString(payload, "task_error") ?? string.Empty : result;
         _ = DecidePost(payload, caller, dispatch.Target, prompt, output, config, context);
         return string.Empty;
     }
