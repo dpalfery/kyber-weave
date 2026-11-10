@@ -1978,7 +1978,7 @@ worker can be answered about another branch. The per-role rules are in the
 shell role asks its own index, a shell-less role whose packet names a worktree passes that path as `codegraph_explore`'s
 `projectPath`, which answers from that worktree's own index (with none named, the default project), and reads directly only when that call cannot answer for
 the branch in hand (an error, a not-indexed reply, or a provenance `branch=` that differs),
-naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason of its `Discovery:` line; and the
+naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in its direct-read reason (on the `Discovery:` line for a role that reports one; a review lens keeps its fixed output); and the
 architect returns `BLOCKED` naming "server root differs" so the two CLI gates run in the worktree
 before it plans.
 
