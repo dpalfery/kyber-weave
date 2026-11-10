@@ -1092,7 +1092,8 @@ and validates.
   the `mcp` proxy entry working while the enumerable per-tool names resolve to nothing. A primary
   agent lowers to `.pi/skills/<name>/SKILL.md`, whose frontmatter carries no `tools` or
   `extensions`, so `conductor` cannot hold the grant on that form and its record says so.
-  `KiloRenderer` emits `permission: {kw-docs_*: allow}` for every entitled agent. Kilo's
+  `KiloRenderer` emits `permission: {kw-docs_*: allow}` for every entitled agent, and
+  `permission: {bash: allow}` for every agent whose profile allows `process.execute`, since Kilo's default asks first. Kilo's
   permission map is an **approval** lattice, not a visibility allow-list: `allow` runs a call
   without the ask prompt and hides nothing, and only a `deny` whose pattern is `*` removes a tool
   from the model. MCP tools are keyed `{server}_{tool}` with the server name sanitized only
