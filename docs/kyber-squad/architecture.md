@@ -477,8 +477,10 @@ flowchart LR
 - **Factory MCP wiring splits between Squad and the operator, and the split is a standing rule.**
   Squad owns the **droid whitelist**: the per-droid `mcpServers` value rendered into each droid
   file Squad writes, and nothing more. Squad owns **no Factory settings file** — it does not
-  create, write, adopt, or check `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
-  (global scope), and it invents no Factory server names for an operator to have to match. Those
+  create, write, or adopt `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
+  (global scope), and it invents no Factory server names for an operator to have to match.
+  `squad install` and `squad update` only read those files, and print
+  `factory-mcp-not-configured` when a server the droids are allowed has no definition. Those
   files are user-owned, and the operator owns the app-level configuration in them. This is the
   same boundary the task-gate bullet above draws: Squad renders the artifacts it owns and
   documents the operator's half rather than writing it. The operator's half
