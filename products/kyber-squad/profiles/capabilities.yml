@@ -26,8 +26,9 @@ profiles:
       # left this headless planner unable to save the plan it exists to write.
       filesystem.write: allow
       # The shell lets the architect work inside a run's worktree, where the MCP servers
-      # (bound to the canonical checkout) cannot see its plan: it runs `kyber-weave docs
-      # validate . --merge-ready`, `kyber-weave docs drift .` and `codegraph explore "..."`.
+      # (bound to the canonical checkout) cannot see its plan: it runs the command set enumerated in
+      # agents/architect.md (the docs gates, codegraph explore, doctor --ensure, read-only git,
+      # and touch for a missing plan file).
       # ACCEPTED WIDENING: the lattice has no command or path scoping, so with filesystem.write
       # and network.read allowed the shell could in principle build, install, fetch or write
       # outside the plan, spec and todo directories. The compensating controls are the agent

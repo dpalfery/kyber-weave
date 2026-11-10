@@ -268,9 +268,9 @@ and code review of the resulting diff; none is enforced by the lattice.
 In the canonical checkout the architect may equally call the read-only MCP tools
 `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the
 `kw-docs` server ([MCP runbook](../docgraph/mcp-runbook.md)); they run the same gates against the
-server's resolved root. It compares the provenance `repo=` before trusting a pass, and leaves
+server's resolved root. It leaves
 `mergeReady` false while the plan is in the active plans folder so open-work rules such as
-`KW-DOC-LIFECYCLE-003` do not fire. It requires the response `rev=` and `branch=` to match the run, because `repo=` is shared by every worktree. If the runtime withholds the shell anyway, the architect returns
+`KW-DOC-LIFECYCLE-003` do not fire. It trusts a pass only when the response `rev=` and `branch=` equal the packet's `RUN_BASE` and `RUN_BRANCH`; `repo=` is not compared because every worktree shares it. With a shell and a missing or mismatched result it runs the CLI gates in the checkout holding the plan. If the runtime withholds the shell anyway, the architect returns
 `STATUS: BLOCKED` ("server root differs: run the docs checks in the worktree") and the conductor
 runs the CLI gates. `architect-devin` and `architect-copilot` now match the shared profile.
 
