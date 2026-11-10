@@ -73,7 +73,8 @@ A question about this repository's code goes to `codegraph_explore` first, and o
 documentation to `docs_answer_question_from_repo_documentation`. This role runs no shell and
 edits nothing, so the CLI form, `codegraph explore "…"`, is not available to it: when the request
 names a worktree, pass its absolute path as `codegraph_explore`'s `projectPath` to ask that
-worktree's own index. Read the named file directly only when that call fails, and say so under
+worktree's own index. With no worktree named, use the server's default project. Read the named
+file directly only when that call cannot answer for the revision in hand, and say so under
 `Caveats`. The `kw-docs` and `codegraph` servers
 stay bound to the canonical checkout, so an answer whose provenance `branch=` is not the branch in
 hand describes another tree.

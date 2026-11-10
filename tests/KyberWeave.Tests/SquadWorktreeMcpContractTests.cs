@@ -188,13 +188,25 @@ public sealed class SquadWorktreeMcpContractTests
     [InlineData("products/kyber-squad/agents/product-owner.md")]
     [InlineData("products/kyber-squad/skills/product-owner/SKILL.md")]
     [InlineData("products/kyber-squad/agents/architect.md")]
+    [InlineData(ArchitectureDocPath)]
+    [InlineData(McpRunbookDocPath)]
+    [InlineData("docs/kyber-squad/onboarding.md")]
     public void ShellLessRolesAskTheWorktreeIndexThroughProjectPath(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
 
-        Assert.Contains("`projectPath`", content, StringComparison.Ordinal);
-        Assert.DoesNotMatch(@"(?i)\breads? it directly\b", content);
-        Assert.DoesNotMatch(@"(?i)read that path directly and count", content);
+        // The positive shape: the worktree path is what gets passed as projectPath. Prose is
+        // hard-wrapped, so the gaps may cross a line break.
+        Assert.Matches(
+            @"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?\bpath\b[\s\S]{0,60}?`projectPath`|`projectPath`[\s\S]{0,40}?\bworktree's own index\b",
+            content);
+
+        // The old rule in any of its phrasings: a direct read of the worktree that is not the
+        // qualified fallback ("... directly only when that call cannot answer ...").
+        Assert.DoesNotMatch(
+            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?)\s+directly\b(?!\s+only\s+when)",
+            content);
+        Assert.DoesNotMatch(@"(?i)shell-less role reads the worktree path|Direct reads of that path\.", content);
     }
 
     /// <summary>

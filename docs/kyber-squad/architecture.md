@@ -1975,7 +1975,7 @@ does; the alternative was a run that proceeds as if its code search worked.
 **The worktree consequence.** The MCP servers stay bound to the canonical checkout, so a worktree's
 worker can be answered about another branch. The per-role rules are in the
 [MCP runbook](../docgraph/mcp-runbook.md#the-worktree-limitation-per-role); the short form is that a
-shell role asks its own index, a shell-less role reads the worktree path its packet names, and the
+shell role asks its own index, a shell-less role passes the worktree path its packet names as `codegraph_explore`'s `projectPath`, and the
 architect returns `BLOCKED` naming "server root differs" so the two CLI gates run in the worktree
 before it plans.
 
