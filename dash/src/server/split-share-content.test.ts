@@ -11,7 +11,7 @@ import { KyberBridge } from './bridge.js'
 // read for such a session returned nothing: the system prompt, tools and the
 // per-turn bands all vanished in the dashboard.
 
-function turn(spanId: string, harness: string, timestamp: string): CanonicalRecord {
+function turn(spanId: string, harness: string, timestamp: string, op = 'llm.invoke'): CanonicalRecord {
   return {
     spanId,
     traceId: 'trace-shared-key',
@@ -20,7 +20,7 @@ function turn(spanId: string, harness: string, timestamp: string): CanonicalReco
     source: 'synthetic',
     harness,
     name: 'chat gpt-5.6-luna',
-    op: 'llm.invoke',
+    op,
     kind: 'client',
     timestamp,
     durationMs: 100,
@@ -74,6 +74,45 @@ describe('turn content for a session split across harnesses', () => {
       expect(priv.loadContentRecords('copilot:shared-key')).toHaveLength(1)
       expect(priv.loadSessionSystemPrompts('copilot:shared-key')).toEqual([])
       expect(priv.sessionKnown('copilot:shared-key')).toBe(true)
+    } finally {
+      bridge.close()
+    }
+  })
+})
+
+describe('split-share isolation on the paths a derived session row hides', () => {
+  // No `buildSessions`: with no session payload, turn resolution falls through
+  // to the record pool, and non-turn rows exercise the system-prompt read.
+  function bare(): KyberBridge {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('span-copilot', 'copilot', '2026-11-05T10:00:00.000Z'),
+      turn('span-cli', 'copilot-cli', '2026-11-05T10:01:00.000Z'),
+      turn('start-copilot', 'copilot', '2026-11-05T09:59:00.000Z', 'session.start'),
+      turn('start-cli', 'copilot-cli', '2026-11-05T09:59:30.000Z', 'session.start'),
+    ])
+    return new KyberBridge({ canonPath: ':memory:', store })
+  }
+
+  it('does not resolve the sibling harness turn from the record pool', () => {
+    const bridge = bare()
+    try {
+      expect(bridge.assembleTurnContent('copilot:shared-key', 0)?.spanId).toBe('span-copilot')
+      expect(bridge.assembleTurnContent('copilot:shared-key', 1)).toBeNull()
+      expect(bridge.assembleTurnContent('copilot-cli:shared-key', 0)?.spanId).toBe('span-cli')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns only the own harness non-turn system prompts', () => {
+    const bridge = bare()
+    try {
+      const priv = bridge as unknown as {
+        loadSessionSystemPrompts(id: string): Array<{ spanId?: string; text: string }>
+      }
+      expect(priv.loadSessionSystemPrompts('copilot:shared-key').map((p) => p.spanId)).toEqual(['start-copilot'])
+      expect(priv.loadSessionSystemPrompts('copilot-cli:shared-key').map((p) => p.spanId)).toEqual(['start-cli'])
     } finally {
       bridge.close()
     }
