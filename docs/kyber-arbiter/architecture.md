@@ -296,12 +296,9 @@ configuration that names no model moves to the new default.
 **Limits.**
 
 - 30 cases per rule is small: one error is about 3%.
-- On the hook route nothing fills `review.diff-summary` or `file.surroundings`, and
-  `instructions-from: lens:` has no production resolver. `KW-ARB-LENS-001` and
-  `KW-ARB-CLAIM-001` can therefore see less in real use than in this measurement. With no diff
-  summary, `KW-ARB-LENS-001` skips nothing at 0.1.
-- Decision records write no scores for step-1 answers, so thresholds cannot yet be tuned from
-  the decision log.
+- The measurement sent no lens text, and production now sends the whole lens file, so
+  `KW-ARB-LENS-001`'s ceiling of 0.1 has not been measured against what it now reads. The
+  harness now sends that text too, so a repeat run measures it.
 - `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
 
 To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run
