@@ -57,7 +57,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
+No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
 
 ## Archived Plans
 

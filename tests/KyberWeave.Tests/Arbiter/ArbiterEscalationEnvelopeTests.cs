@@ -177,6 +177,50 @@ public sealed class ArbiterEscalationEnvelopeTests
     }
 
     [Fact]
+    public void Next_PlannerPlanFileInvalid_NamesTheRepositoryRelativeRule()
+    {
+        ArbiterEscalationEnvelope envelope = new(
+            "delegate.planner",
+            "conductor (harness)",
+            "product-owner",
+            "docs/plans/plan.md",
+            "T1",
+            [new ArbiterEnvelopeEntry(
+                "KW-ARB-PLANNER-001",
+                "Does the dispatch name a valid PLAN_FILE?",
+                ArbiterAnswerText.Step0("plan-file-invalid"),
+                "PLAN_FILE is absolute")],
+            "dec-10",
+            1);
+        Assert.Equal(
+            "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, " +
+            "with no leading '/', '..', backslash, space or tab; do not send it to architect.",
+            envelope.RenderNext());
+    }
+
+    [Fact]
+    public void Next_PlannerPlanFileOutside_NamesThePlanningDirectories()
+    {
+        ArbiterEscalationEnvelope envelope = new(
+            "delegate.planner",
+            "conductor (harness)",
+            "product-owner",
+            "docs/plans/plan.md",
+            "T1",
+            [new ArbiterEnvelopeEntry(
+                "KW-ARB-PLANNER-001",
+                "Does the dispatch name a PLAN_FILE inside the planning directories?",
+                ArbiterAnswerText.Step0("plan-file-outside-planning-dirs"),
+                "PLAN_FILE is docs/adr/0001.md")],
+            "dec-11",
+            1);
+        Assert.Equal(
+            "re-issue this planner dispatch with a PLAN_FILE under the plan, spec or todo directory; " +
+            "do not send it to architect.",
+            envelope.RenderNext());
+    }
+
+    [Fact]
     public void Next_InvestigateKnownCaller_ReportsInOwnResult()
     {
         foreach (string caller in new[] { "architect", "product-owner", "code-reviewer" })

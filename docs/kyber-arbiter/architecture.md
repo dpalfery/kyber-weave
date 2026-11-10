@@ -93,6 +93,15 @@ embedded Squad catalog. `HeaderBlock` parses the closed routing-header set
 harness payload above the rendered `--caller`, then header inference. Plan and task identity
 come from the headers only — never inferred from the plan index.
 
+`PLAN_FILE:` is a repository-relative path. A value that starts with `/`, contains a
+backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected.
+A rejected name goes to `HeaderBlock.RejectedNames` with its value discarded, so a header
+that was sent and rejected is distinct from one that was never sent: the planner rule
+reads it as `delegation.plan-file-rejected`. A second sighting of a name leaves it absent
+whichever sighting was valid. On a planner dispatch, a rejected
+`PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
+the body cannot rescue it.
+
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
@@ -261,6 +270,14 @@ Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They
 dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
 pass anything else through, logged with `caller: unidentified`.
 
+Caller inference from a planner target is one of those gates, and it applies only to a
+marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
+dispatch to a planner passes on `factory` and `antigravity`, and `KW-ARB-AUDIT-002`
+reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
+ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
+audit rule is how it is seen.
+
 Delivery differs per harness. On Pi a `block` before the call returns
 `{block: true, reason}`, stripped arguments are assigned onto the event input, and a
 spawn error or non-zero status blocks; after the call a `block` appends the reason as
@@ -381,7 +398,9 @@ grant is built from; the executable and its argv are unchanged. Three tools:
   the hook would: the same facts, rules, ledger append and decision record, and the same allow,
   envelope or review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
   `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
-  and records `caller-source: asserted`. Because the gated agent makes the call, this path
+  and records `caller-source: asserted`. The asserted `plan-file` is rendered as a
+  `PLAN_FILE:` header, so the repository-relative rule and the `plan-file-invalid` answer
+  apply to it as they do to a hook dispatch. Because the gated agent makes the call, this path
   is advisory.
 - **`arbiter_list_effective_rules_by_trigger(trigger?)`** — lists the rule catalogue; read-only
   and closed-world.

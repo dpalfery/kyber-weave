@@ -81,18 +81,42 @@ public sealed class ArbiterPlannerRuleTests
     }
 
     [Fact]
-    public void Planner001_PlanFileOutsideThePlanningDirectories_AnswersMalformed()
+    public void Planner001_PlanFileOutsideThePlanningDirectories_AnswersOutside()
     {
         ArbiterFactSet facts = PlannerFacts(PlannerPrompt("docs/adr/0001-arbiter-one-command-install.md"));
 
-        Assert.Equal("malformed", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.Equal("plan-file-outside-planning-dirs", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+    }
+
+    [Theory]
+    [InlineData("KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo/docs/plans/plan.md\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: true\nPLAN_FILE: docs/plans/../secrets.md\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: true\nPLAN_FILE: docs/plans/a.md\nPLAN_FILE: docs/plans/b.md\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: true\nPLAN_FILE: /tmp/evil/docs/plans/x.md\n\nINTAKE: docs/todo/item.md")]
+    [InlineData("KYBER-ARBITER: true\nPLAN_FILE: /Users/x/docs/plans/plan.md\n\nFINALIZE")]
+    public void Planner001_RejectedPlanFile_AnswersPlanFileInvalid(string prompt)
+    {
+        ArbiterFactSet facts = PlannerFacts(prompt);
+
+        Assert.Equal("plan-file-invalid", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+    }
+
+    [Theory]
+    [InlineData("INTAKE: docs/todo/item.md")]
+    [InlineData("FINDINGS:")]
+    [InlineData("STATUS: ARBITER_ESCALATION")]
+    [InlineData("FEATURE: search\nPHASE: design")]
+    public void Planner001_MarkerWithoutPlanFile_AnswersRecognised(string body)
+    {
+        ArbiterFactSet facts = PlannerFacts($"KYBER-ARBITER: true\n\n{body}");
+
+        Assert.Equal("recognised", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
     }
 
     [Fact]
-    public void Planner001_MarkedDispatchWithoutPlanFile_AnswersMalformed()
+    public void Planner001_NoMarkerAtAll_AnswersMalformed()
     {
-        const string Prompt = "KYBER-ARBITER: true\n\nINTAKE: docs/todo/item.md";
-        ArbiterFactSet facts = PlannerFacts(Prompt);
+        ArbiterFactSet facts = PlannerFacts("KYBER-ARBITER: true\n\nWrite the plan.");
 
         Assert.Equal("malformed", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
     }
