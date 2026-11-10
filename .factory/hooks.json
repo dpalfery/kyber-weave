@@ -1,0 +1,12 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "[ ! -d \"$FACTORY_PROJECT_DIR/.codegraph\" ] && command -v codegraph >/dev/null && (codegraph init \"$FACTORY_PROJECT_DIR\" >/dev/null 2>&1 &); exit 0"
+        }
+      ]
+    }
+  ]
+}
