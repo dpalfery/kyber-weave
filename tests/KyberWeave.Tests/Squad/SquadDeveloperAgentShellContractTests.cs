@@ -87,8 +87,7 @@ public sealed class SquadDeveloperAgentShellContractTests
 
         foreach (string profileName in DeveloperProfiles)
         {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[profileName];
-            Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions[ProcessExecute]);
+            Assert.Equal(SquadPermissionDecision.Allow, ShellDecision(source, profileName));
         }
     }
 
@@ -124,8 +123,7 @@ public sealed class SquadDeveloperAgentShellContractTests
 
         foreach (SquadAgent agent in source.Agents)
         {
-            bool allowsShell = source.CapabilityProfiles.Profiles[agent.CapabilityProfile]
-                .Permissions[ProcessExecute] == SquadPermissionDecision.Allow;
+            bool allowsShell = ShellDecision(source, agent.CapabilityProfile) == SquadPermissionDecision.Allow;
             SquadDeploymentFile file = Assert.Single(
                 result.Files,
                 f => f.RelativePath == $".kilo/agents/{agent.Name}.md");
@@ -135,16 +133,19 @@ public sealed class SquadDeveloperAgentShellContractTests
                 && permission.Children.ContainsKey(bash);
             Assert.True(allowsShell == rendersBash, $"'{agent.Name}': profile allows shell {allowsShell}, renders bash {rendersBash}.");
 
-            SquadDegradationRecord record = Assert.Single(
-                result.Degradations,
+            SquadDegradationRecord? record = result.Degradations.SingleOrDefault(
                 d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
+            Assert.True(record is not null, $"'{agent.Name}' has no permission-not-expressible record.");
             Assert.Equal(!allowsShell, record.Details?.Contains(ProcessExecute, StringComparison.Ordinal));
         }
     }
 
     private static Action<string, string> ToolList(string key, params string[] shellTools) => (text, agent) =>
     {
-        HashSet<string> granted = Tokens(Frontmatter(text).Children[new YamlScalarNode(key)]);
+        Assert.True(
+            Frontmatter(text).Children.TryGetValue(new YamlScalarNode(key), out YamlNode? tools),
+            $"'{agent}' has no {key} key.");
+        HashSet<string> granted = Tokens(tools);
         foreach (string tool in shellTools)
         {
             Assert.True(granted.Contains(tool), $"'{agent}' has no '{tool}' in {key}: {string.Join(", ", granted)}.");
@@ -153,8 +154,10 @@ public sealed class SquadDeveloperAgentShellContractTests
 
     private static Action<string, string> PermissionAllows(string tool) => (text, agent) =>
     {
-        YamlMappingNode permission = Assert.IsType<YamlMappingNode>(
-            Frontmatter(text).Children[new YamlScalarNode("permission")]);
+        Assert.True(
+            Frontmatter(text).Children.TryGetValue(new YamlScalarNode("permission"), out YamlNode? map),
+            $"'{agent}' has no permission map, so '{tool}' falls back to the harness default.");
+        YamlMappingNode permission = Assert.IsType<YamlMappingNode>(map);
         Assert.True(
             permission.Children.TryGetValue(new YamlScalarNode(tool), out YamlNode? value),
             $"'{agent}' has no '{tool}' entry in its permission map, so it falls back to the harness default.");
@@ -171,9 +174,27 @@ public sealed class SquadDeveloperAgentShellContractTests
     {
         int bodyStart = text.IndexOf("developer_instructions", StringComparison.Ordinal);
         string header = bodyStart < 0 ? text : text[..bodyStart];
-        Assert.False(
-            header.Contains("shell_tool", StringComparison.Ordinal),
-            $"'{agent}' sets features.shell_tool, the Codex setting that removes the shell from an agent.");
+        string[] featureKeys = header
+            .Split('\n')
+            .Select(line => line.Split('=')[0].Trim())
+            .Where(key => key.StartsWith("features", StringComparison.Ordinal)
+                || key.StartsWith("[features", StringComparison.Ordinal)
+                || key == "shell_tool")
+            .ToArray();
+        Assert.True(
+            featureKeys.Length == 0,
+            $"'{agent}' sets Codex features ({string.Join(", ", featureKeys)}), which can remove the shell from an agent.");
+    }
+
+    private static SquadPermissionDecision ShellDecision(SquadSource source, string profileName)
+    {
+        Assert.True(
+            source.CapabilityProfiles.Profiles.TryGetValue(profileName, out SquadCapabilityProfile? profile),
+            $"Capability profile '{profileName}' is not declared.");
+        Assert.True(
+            profile.Permissions.TryGetValue(ProcessExecute, out SquadPermissionDecision decision),
+            $"Capability profile '{profileName}' makes no {ProcessExecute} decision.");
+        return decision;
     }
 
     private static void CarriesNoToolRestriction(string text, string agent)

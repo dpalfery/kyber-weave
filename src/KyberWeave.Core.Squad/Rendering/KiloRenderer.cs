@@ -71,7 +71,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// <b>The exception is an allowed shell.</b> <c>process.execute: allow</c> renders as
-/// <c>bash: allow</c>. Kilo's built-in default for <c>bash</c> is <c>ask</c> for anything outside
+/// <c>permission: {bash: allow}</c>. Kilo's built-in default for <c>bash</c> is <c>ask</c> for anything outside
 /// a short list of read-only commands (verified against <c>Kilo-Org/kilocode</c>,
 /// <c>packages/opencode/src/kilocode/agent/index.ts</c>, on 2026-11-10), and a subagent under a
 /// run with no attached human has that ask refused, so without the key a developer agent cannot
