@@ -25,7 +25,7 @@ public sealed record ArbiterProviderConfig(
 {
     /// <summary>Product default: no provider, pinned endpoint and model, 3s budget.</summary>
     public static ArbiterProviderConfig DefaultNone { get; } = new(
-        ArbiterProviderKind.None, "https://api.typesafe.ai/v1", "jev-1.13.0", 3000);
+        ArbiterProviderKind.None, "https://api.typesafe.ai/v1", "jev-1.14.0", 3000);
 }
 
 /// <summary>

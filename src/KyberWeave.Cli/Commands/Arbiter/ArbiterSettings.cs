@@ -35,7 +35,7 @@ public class ArbiterSettings : AnalysisSettings
 
     /// <summary>The answering model for <c>setup</c>.</summary>
     [CommandOption("--model <MODEL>")]
-    [Description("Answering model (for example jev-1.13.0, nimble or tev1).")]
+    [Description("Answering model (for example jev-1.14.0, nimble or tev1).")]
     public string? Model { get; set; }
 
     /// <summary>Whether <c>setup</c> reads the TypeSafe key from stdin rather than a masked prompt.</summary>
