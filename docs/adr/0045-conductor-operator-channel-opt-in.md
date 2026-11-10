@@ -4,7 +4,7 @@ title: Conductor Operator Channel as an Opt-In Render-Time Overlay, and Non-Bloc
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-10
 component: KyberSquad
 code-refs:
   - SquadOperatorChannel
@@ -18,7 +18,7 @@ supersedes: []
 
 ## Status
 
-Accepted, 2026-10-27; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict. Records two decisions and one subsequent amendment. Decision 1 gives the Copilot CLI conductor an opt-in channel to the operator, added at install time only when the user turns it on, through an MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review findings are reported in the pull request rather than holding the change back. Amendment 3 records the retirement of `NEEDS_HUMAN` and associated escalate-to-human review rules.
+Accepted, 2026-10-27; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict; amended 2026-11-10 to record that in VS Code the conductor runs as a skill, where the no-shell limit is instruction-only and the overlay is absent ([ADR 0066](0066-copilot-parent-roles-start-as-skills.md)). Records two decisions and one subsequent amendment. Decision 1 gives the Copilot CLI conductor an opt-in channel to the operator, added at install time only when the user turns it on, through an MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review findings are reported in the pull request rather than holding the change back. Amendment 3 records the retirement of `NEEDS_HUMAN` and associated escalate-to-human review rules.
 
 ## Context
 
@@ -31,9 +31,12 @@ operator has set one up.
 
 Three facts constrain the design:
 
-- The conductor has no shell and no MCP access by default. Its tool list is fixed at render time,
-  so any change to what it can call must be written into its agent file when Squad installs or
-  updates.
+- The conductor's agent file has no shell and no MCP access by default. Its tool list is fixed at
+  render time, so any change to what it can call must be written into its agent file when Squad
+  installs or updates. In VS Code the conductor is started as a skill instead
+  ([ADR 0066](0066-copilot-parent-roles-start-as-skills.md)), which runs in the chat session with
+  that session's shell. The no-shell limit there is therefore instruction-only: the conductor's own
+  text tells it not to use the shell for project work.
 - Squad renders one canonical source to many harnesses. Only Copilot CLI at global scope can reach
   an operator server the user declares in `$COPILOT_HOME/mcp-config.json`.
 - Kyber-weave knows nothing about the operator's server. It can only add an MCP server to the
@@ -70,6 +73,11 @@ list. It then appends the overlay text (`agents/conductor/overlays/operator-chan
 conductor's authored body, with the validated name substituted for the placeholder
 `{{operator-channel-server}}`. Otherwise the output is byte-identical to the output without the
 feature. Parity tests pin that claim across 13 targets and 2 scopes.
+
+The overlay goes on the conductor's agent file only. The conductor skill that VS Code starts
+([ADR 0066](0066-copilot-parent-roles-start-as-skills.md)) carries no overlay text and no tool
+entry, because a skill has no tool list. `copilot --agent conductor` keeps the overlay, because it
+starts from the agent file.
 
 When the variable is `true` but the overlay cannot apply, the result is recorded, never silent. The
 outcome depends on the target and scope:
@@ -141,8 +149,8 @@ Following the 2026-11-02 owner directive, `NEEDS_HUMAN`, `always-human` path glo
   never use the channel. The default output must stay byte-identical.
 - **A separate profile or a second conductor identity.** Rejected. It changes the roster on every
   target and forks the conductor's instructions into two copies that must be kept in step.
-- **Reading `KYBER_SQUAD_OPERATOR_CHANNEL` at agent run time.** Rejected. The conductor has no shell
-  and cannot read the environment. The gate therefore has to be resolved at install time.
+- **Reading `KYBER_SQUAD_OPERATOR_CHANNEL` at agent run time.** Rejected. The conductor's agent file
+  has no shell and cannot read the environment. The gate therefore has to be resolved at install time.
 - **Keeping `NEEDS_HUMAN` and open circuit-breakers as parking holds on delivery.** Rejected for
   autonomous mode. The run then waits for a human who may not read the draft pull request, and the
   draft is already the human review. Supervised mode keeps its terminal stop.
@@ -158,9 +166,10 @@ Trust model:
   and length before use, and the raw value is never written into a rendered file. Only the validated
   name reaches the tool entry and the overlay text.
 - VS Code also reads `~/.copilot/agents`. There the `<name>/*` entry can be inert, because an
-  unrecognised tool name is ignored. The overlay text still renders, so the conductor may describe a
+  unrecognised tool name is ignored. A conductor started from the agent file may therefore describe a
   channel it cannot call. The overlay tells the conductor to say so in its final report and carry on
-  without the channel, so the run degrades rather than fails.
+  without the channel, so the run degrades rather than fails. A conductor started as the VS Code
+  skill has no overlay at all, so it does not describe a channel and does not use one.
 - A config passed through `--additional-mcp-config` is invisible to the installer. The probe reads only
   `$COPILOT_HOME/mcp-config.json`, so the feature stays off for that setup.
 - The probe follows a symlinked `mcp-config.json` to its target. A zero-length target is refused before it

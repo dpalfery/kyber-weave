@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 status: current
 decided-by:
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
@@ -311,9 +311,11 @@ flowchart TD
      skill carries the role. The two bodies differ by design, and the source validator permits
      that only for a `primary`-invocation shared identity.
    - The canonical skill is the entry point and is always emitted. A target that renders a primary
-     through an additional entry-point form (Claude, Factory) emits the agent file plus the
+     through an additional entry-point form (Claude, Factory, Copilot) emits the agent file plus the
      canonical skill and no duplicate; a target that lowers a primary onto a skill or command
      (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
+     Copilot is an additional entry-point form too: its two root wrappers keep their hidden agent
+     files and reuse the canonical skill ([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)).
    - No `role-<name>` projection is generated, and no skill projection is suppressed.
 2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, `typescript-dev`)**:
    - The canonical skill and agent serve distinct functions.
@@ -370,6 +372,38 @@ file is kept unchanged, and resources project to both principals.
 Claude is the first native target where a single agent emits two distinct principals (subagent and
 entry-point skill). Under `no-primary-agent: omit`, no entry-point skill is emitted and the agent's
 records remain unchanged.
+
+### Native Branch: Copilot with Parent Entry-Point Skills
+
+VS Code gives a worker only the built-in tools that the selected custom agent lists
+([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)). A shell-less conductor selected in
+the agent dropdown therefore leaves its workers with file reading only. So on Copilot each of the
+three parent roles, `conductor`, `bug-crusher` and `product-owner`, also renders as an entry-point
+skill that the person starts from normal chat with `/<name>`. A skill keeps the session's tools,
+so the worker it starts keeps its shell and edit tools.
+
+- The agent files stay and carry `user-invocable: false`, so the agent dropdown does not list
+  them. Every worker agent carries the same flag and nothing else changes for it. The hooks on a
+  hidden parent's agent file stay in place. They are inert while the parent is hidden, but they still
+  apply while `product-owner` runs as a subagent, so removing them for two agents would add a special case.
+- `conductor` and `bug-crusher` are undispatched, so their agent files also carry
+  `disable-model-invocation: true`. The model cannot start them as subagents. `product-owner` is
+  named in the conductor's roster, so it stays a dispatchable hidden agent.
+- `conductor` is not a shared identity, so its skill body is the agent body verbatim, with its
+  resources beside it under `skills/conductor/conductor/references/`. `bug-crusher` and
+  `product-owner` reuse their canonical skills, so no second copy is written.
+- Relative links stay relative. The skill's authored link to `conductor/references/plan-path.md`
+  resolves from `skills/conductor/SKILL.md`. A spike read the reference through that relative path
+  from a skill outside the workspace.
+- Each parent records `role-skill-fallback`, `permission-not-expressible` (the session's tools,
+  roster and model apply to the skill), and, when the Arbiter is on, `arbiter-not-enforced` with
+  the reason `skill-entry-no-caller`. The conductor's operator channel overlay stays on the agent
+  file only.
+- A parent whose fallback profile says `no-primary-agent: omit` gets no skill, so its agent file
+  stays selectable: that file is the only way in.
+
+The Copilot Arbiter wiring is covered in [section 8](#8-rendering) and in the
+[Kyber Arbiter architecture](../kyber-arbiter/architecture.md#harness-facts).
 
 **Fail-closed on an unresolvable canonical skill collision.** If a canonical skill occupies the
 entry-point identity and the agent is **not** a declared shared identity, the render fails with a
@@ -875,8 +909,10 @@ and validates.
   for every renderer against its spec.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
   owns it — `ClaudeRenderer` for `.claude/agents/*.md` and a primary-agent entry-point skill at
-  `.claude/skills/conductor/SKILL.md`, `CopilotRenderer` for `.github/agents/*.agent.md` and
-  `.github/skills/*/SKILL.md`, `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
+  `.claude/skills/conductor/SKILL.md`, `CopilotRenderer` for `.github/agents/*.agent.md`,
+  `.github/skills/*/SKILL.md`, and the three parent roles' entry-point skills at
+  `.github/skills/{conductor,bug-crusher,product-owner}/SKILL.md` with their agent files hidden
+  from the picker ([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)), `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`; a primary agent
   without a declared shared skill also gets an entry-point skill,
   `AntigravityRenderer` for native per-agent directory emission to `.agents/agents/*/agent.md` and canonical skills to `.agents/skills/*/SKILL.md` ([ADR 0022](../adr/0022-antigravity-native-agents.md)),
@@ -891,7 +927,7 @@ and validates.
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
 | `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md`; primary agents also at `.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` | Native |
-| `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md` | `.github/skills/<name>/SKILL.md` | Native |
+| `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md`; the three parent roles are hidden from the picker (`user-invocable: false`) and also at `.github/skills/<name>/SKILL.md` | `.github/skills/<name>/SKILL.md` | Native |
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
 | `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` (canonical skills and derived primary entry points) | Native |
 | `antigravity` | `AntigravityRenderer` | `.agents/agents/<name>/agent.md` | `.agents/skills/<name>/SKILL.md` | Native |
@@ -1039,7 +1075,9 @@ and validates.
   MCP is conditional on the derived grant being empty, so a granted agent records no withholding
   claim. Copilot takes the grant from canonical source rather than from a renderer: each agent's
   own `copilot-tools` frontmatter carries `kw-docs/*`, and `conductor` gains that one entry
-  there.
+  there. A skill has no tool list, so the conductor that VS Code starts as `/conductor`
+  ([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)) reaches `kw-docs` through the
+  session's servers rather than through that entry.
   `FactoryRenderer` has no tool allow-list to extend, because a Factory droid's MCP reach is a
   **server** list: its `mcpServers` key. Factory reads an omitted key as "inherit the parent
   session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
@@ -1113,7 +1151,9 @@ and validates.
   for any of the three would be a claim the harness does not honour.
 - **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:
   `CopilotRenderer` appends the `<name>/*` tool entry and the overlay text
-  (`agents/conductor/overlays/operator-channel.md`) to the conductor only when the gate holds. The gate
+  (`agents/conductor/overlays/operator-channel.md`) to the conductor's agent file only when the gate
+  holds. The conductor skill that VS Code starts carries neither, because a skill has no tool list
+  ([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)). The gate
   is `KYBER_SQUAD_OPERATOR_CHANNEL` exactly `true`, read by `SquadOperatorChannel` when install, update,
   or doctor renders; status never renders. The server name comes from `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`
   and must match `^[A-Za-z0-9._-]{1,64}$` (1 to 64 ASCII letters, digits, '.', '_' or '-'). The overlay takes the validated name in place of
@@ -1200,15 +1240,15 @@ and validates.
   structured degradation instead of a claimed mapping that might silently broaden or narrow
   what the deployed agent can actually do.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
-  `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
-  `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 150 files — 24 agents, 29 skills, plus projected
-  closures — with authored relative links resolving in the output; every skill resource
-  reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
-  packaged-only Codex skill-UI metadata. That count is the current
-  contract in [requirements](requirements.md) (KS-001 and the render requirement). The
-  earlier 48-file Copilot tree that omitted resources is historical, not current
-  behaviour.
+  `.github/agents/<name>.agent.md`, each skill's `.github/skills/<name>/SKILL.md`, and the
+  conductor's entry-point skill at `.github/skills/conductor/SKILL.md`. `SquadResourceProjection.Append`
+  then places every file that owner's Markdown links reach beside the principal, so the conductor
+  skill's references come with it. Authored relative links resolve in the output; every skill
+  resource reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
+  packaged-only Codex skill-UI metadata. The rendered file total is not restated here: the count is
+  pinned by `SquadRenderingContractTests.RenderAsync_Copilot_RendersTheRealCanonicalCorpus`, which
+  is the current contract in [requirements](requirements.md) (KS-001 and the render requirement).
+  The earlier 48-file Copilot tree that omitted resources is historical, not current behaviour.
 - **Skill canonical bytes and retained resources**: `code-review-loop` and `kilo-review-loop` are
   authored in Kyber-Squad.
   Every imported canonical raw `SKILL.md` except the
@@ -1225,7 +1265,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/<name>.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/<name>.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to slash commands), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native, with the three parent roles also as entry-point skills, [ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/<name>.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/<name>.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to slash commands), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
@@ -1242,7 +1282,10 @@ and validates.
   pre-call hook on every agent a governed dispatcher can target, so a background return is
   recorded under the launching dispatch and a non-allow outcome rides back inside the
   hand-back as `allow` with `updatedInput`), per-agent `.agent.md` hooks on `copilot` plus
-  the project-level `.github/hooks/kyber-arbiter.json`, the
+  the project-level `.github/hooks/kyber-arbiter.json`. A conductor started as the VS Code
+  skill has no hooks of its own, since a skill has no documented `hooks` key, so it is gated
+  only by the owned hook file and carries no caller identity
+  ([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)). The
   `.opencode/plugins/kyber-arbiter.ts` shim on `opencode`, the owned extension file
   `.pi/extensions/kyber-arbiter.ts` on `pi`, the `.kilo/plugin/kyber-arbiter.ts` shim on
   `kilo`, and owned blocks spliced into the shared `.codex/hooks.json` and
@@ -1385,7 +1428,7 @@ target's home root (for Codex, `agents/<name>.toml` under `$CODEX_HOME`, default
 | Codex | `.codex/agents/conductor.toml`, `.codex/agents/bug-crusher.toml`; `.codex/skills/conductor/SKILL.md`, `.codex/skills/bug-crusher/SKILL.md` |
 | Cursor | `.cursor/skills/conductor/SKILL.md`, `.cursor/skills/bug-crusher/SKILL.md` (lowered) |
 | Claude | `.claude/agents/conductor.md`, `.claude/agents/bug-crusher.md`; `.claude/skills/conductor/SKILL.md`, `.claude/skills/bug-crusher/SKILL.md` |
-| Copilot | `.github/agents/conductor.agent.md`, `.github/agents/bug-crusher.agent.md`; `.github/skills/bug-crusher/SKILL.md` |
+| Copilot | `.github/agents/conductor.agent.md`, `.github/agents/bug-crusher.agent.md`; `.github/skills/conductor/SKILL.md`, `.github/skills/bug-crusher/SKILL.md` |
 | OpenCode | `.opencode/agents/conductor.md`, `.opencode/agents/bug-crusher.md`; `.opencode/skills/bug-crusher/SKILL.md` |
 | Kilo | `.kilo/agents/conductor.md`, `.kilo/agents/bug-crusher.md`; `.kilo/skills/bug-crusher/SKILL.md` |
 | Antigravity | `.agents/agents/conductor/agent.md`, `.agents/agents/bug-crusher/agent.md`; `.agents/skills/bug-crusher/SKILL.md` |

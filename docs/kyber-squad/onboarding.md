@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-10
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -104,7 +104,7 @@ Kyber-Squad declares thirteen coding-harness targets:
 | `codex` | — | `.codex/` | Native agents + primary-agent entry-point skills | Implemented and registered |
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
 | `claude` | — | `.claude/` | Native agents + primary-agent entry-point skill | Implemented and registered |
-| `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
+| `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents + primary-agent entry-point skills (the three parent roles) | Implemented and registered |
 | `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
 | `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
 | `antigravity` | — | *Explicit or configured target only* | Native agents (directory per agent) | Implemented and registered |
@@ -117,7 +117,7 @@ Kyber-Squad declares thirteen coding-harness targets:
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
-[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
+[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native, with the three parent roles also as entry-point skills), `cursor` (native),
 `codex` (native agents with primary-agent entry-point skills), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) have renderers. All thirteen declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
@@ -223,6 +223,42 @@ verify subagent delegation within their execution environment.
 **MCP servers.**
 Subagents inherit MCP tools declared by the session. Ensure any MCP servers referenced in
 `allowed-tools` are properly declared in Claude Code settings (`mcpServers`).
+
+### Copilot notes
+
+Copilot starts the three parent roles from skills, so you start them from normal chat and the
+agent dropdown does not list them. VS Code gives a worker only the tools its selected agent lists,
+so a parent selected from the dropdown ran its workers without a shell. The GitHub Copilot app
+follows VS Code, and the Copilot CLI reads the same agent files
+([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)).
+
+**Start a parent role:**
+
+1. **`/conductor <path or request>`** runs the conductor in the chat session, with that session's
+   shell, tools and model.
+2. **`/bug-crusher <defect>`** and **`/product-owner <feature>`** start the same way.
+
+What changes when a parent starts as a skill:
+
+- The conductor's no-shell limit is instruction-only here. The conductor's own text tells it not to
+  run the shell for project work, and nothing in the rendered skill stops it.
+- `bug-crusher` and `product-owner` lose their pinned model and use the session's model.
+- The operator channel overlay is not in the skill. The Copilot CLI still starts the conductor from
+  its agent file with the overlay, through `copilot --agent conductor`.
+- The Arbiter gates a skill-started conductor only through the owned Copilot hook file
+  (`~/.copilot/hooks/kyber-arbiter.json` at user scope, or `.github/hooks/kyber-arbiter.json` at
+  project scope). The skill carries no caller identity. This needs `chat.useHooks` on and a trusted
+  workspace.
+- Workers are unchanged. The conductor dispatches them as hidden agents, and each keeps its tools.
+
+**Confirm after install.** Only you can check these in VS Code. No script in this repository runs
+them, so an item you have not checked is not verified.
+
+1. `/conductor`, `/bug-crusher` and `/product-owner` appear in the slash menu, and none of the three
+   appears in the agent dropdown.
+2. A real `/conductor` run in an unselected chat has a worker run a shell command and edit a file.
+3. With `chat.useHooks` on in a trusted workspace, the Arbiter denies a bad dispatch and shows why.
+4. The GitHub Copilot app starts `/conductor` the same way and no longer lists the parents.
 
 ### Pi notes
 
@@ -1125,7 +1161,7 @@ install`, `squad install`, and `squad update` print the applicable step:
 | Harness | Trust step |
 |---|---|
 | Claude | Accept the workspace trust dialog. `claude -p` sessions never count and stay unenforced. |
-| Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
+| Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. This also governs the owned hook file that gates a conductor started as the `/conductor` skill, which has no hooks of its own. |
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. Global hook (`~/.codex/hooks.json`) requires a one-time user trust review. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
 | ZCode | Ensure `hooks.enabled: true` is set in `~/.zcode/cli/config.json`. Reported as `hooks-disabled-by-harness` when missing or false; otherwise uses MCP fallback `kyber-weave-arbiter serve`. |
@@ -1538,7 +1574,7 @@ files plus their retained supplemental resources, together with the Kyber-Weave 
 Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 150 files on Copilot today — with authored relative links resolving inside
+beside its principal, with the Copilot total pinned by the render contract test rather than stated here, and with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

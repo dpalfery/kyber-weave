@@ -2,7 +2,7 @@
 id: plans/2026-11-10-copilot-parent-agents-skill-fallback
 title: Start Copilot's parent roles as skills so VS Code workers keep their tools
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-10
@@ -15,7 +15,7 @@ impact-components: [KyberSquad, KyberArbiter]
 
 # Start Copilot's parent roles as skills so VS Code workers keep their tools
 
-**Status: Ready.** Approved for execution under autonomy `autonomous` (decision AP1 below). Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberSquad` and `KyberArbiter`.
+**Status: Archived — complete 2026-11-10.** Approved for execution under autonomy `autonomous` (decision AP1 below). Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberSquad` and `KyberArbiter`.
 
 **Bottom line.** In VS Code's Copilot chat, a worker keeps a built-in tool only if the agent selected in the chat also lists it. The conductor lists no shell or edit tools on purpose, so every worker it starts can only read files, and the run stops with `STATUS: TOOL_FAILURE no shell`. This plan makes the three parent roles (`conductor`, `bug-crusher`, `product-owner`) start as skills in normal chat, with `/conductor` and so on, and hides them from the VS Code dropdown. A short spike runs first and picks one of three pre-agreed outcomes.
 
@@ -57,7 +57,7 @@ Permanent state, preserved across the plan's whole lifecycle. D1 to D7 are the o
 | D17 | How is this recorded? | New ADR 0066 for the Copilot render decision. ADR 0045 is edited in place for D7 and D15. ADR 0036 is edited in place to name Copilot. | The ADR index says a new ADR is for a decision on a different subject. The render decision is a different subject from the operator channel, as ADR 0034 was for Factory. | ANSWERED — autonomous decision by architect 2026-11-10. Covered by the ADR index rules. |
 | AP1 | Approve and execute | Approved: this plan and its Test contract (T0 to T4), at the declared scale, `extends-component` on `KyberSquad` and `KyberArbiter`. | The conductor returned `AUTONOMOUS_APPROVAL: approve-and-execute` under resolved autonomy `autonomous` (Config Reg `<autonomy>`), accepting D8 to D17 as recommended. Docs checks in the worktree before finalization: `docs validate --merge-ready` reported only `KW-DOC-LIFECYCLE-003` on this active plan, expected until closeout; `docs drift` reported no findings. | ANSWERED — autonomous: recommendation accepted 2026-11-10; explicit conductor gate `approve-and-execute`. |
 
-### Spike outcome table (D8)
+## Spike outcome table (D8)
 
 | Q1 `--agent` with `user-invocable: false` | Q2 same-name agent and skill | Q3 hidden agent loads own-name skill | `SPIKE_BRANCH` |
 |---|---|---|---|
@@ -270,3 +270,68 @@ graph TD
 
 - **Review:** the end-of-run review council under the `code-review` skill, run by `code-reviewer`.
 - **`docs-dev` closeout:** T4.
+
+## Completion summary
+
+**Completed 2026-11-10.** Branch A shipped. The spike chose it: `copilot --agent` runs an agent marked `user-invocable: false`, and a same-name agent and skill coexist in the Copilot runtime bundled with VS Code. All three parent agent files stay hidden, and the three parents also render as entry-point skills. Workers are unchanged.
+
+| Task | Result |
+|---|---|
+| T0 spike | `SPIKE_BRANCH: A`. Q1 pass, Q2 pass, Q3 not asked. `DISABLE_MODEL_INVOCATION: keep`. `RELATIVE_REFERENCE: ok`. `HOOK_PAYLOAD_SHAPE: cli`. `HOOK_DISPATCH_TOOL: task`. Run through the Copilot SDK runtime bundled with VS Code, not the chat window. |
+| T1 RED | Contract tests added in the `$F` classes, failing on assertions with no compile error. |
+| T2 GREEN | Commit `888ecec9`, `src/KyberWeave.Core.Squad/Rendering/CopilotRenderer.cs` only. `CopilotHookAdapter` needed no change, because `task` was already a dispatch. 466 targeted tests passed and the task gate passed. |
+| T3 live | Under VS Code's conditions, from a real render: the `conductor` skill loaded, `conductor/references/plan-path.md` was read through its relative path, and a `github-devops` worker ran `echo SHELL-OK` and created then edited `probe.txt` to `bye`. `copilot --agent conductor` printed READY, but it loaded the user-level agent file, so the rendered hidden file was not proven under `--agent`. |
+| T4 closeout | Harvest H1 to H5 below. The corpus render test `RenderAsync_Copilot_RendersTheRealCanonicalCorpus` passed at closeout. Closeout changed no code, so that is the T2 code. `docs validate` and `docs drift` were run after the archival move (see the closeout digest). |
+
+### Not verified
+
+Only a real VS Code chat window can check these. The owner confirms them after install; the checklist is in [onboarding](../../kyber-squad/onboarding.md#copilot-notes).
+
+1. `/conductor`, `/bug-crusher` and `/product-owner` appear in the slash menu, and none of the three appears in the agent dropdown.
+2. A real `/conductor` run in an unselected chat has a worker run a shell command and edit a file.
+3. With `chat.useHooks` on in a trusted workspace, the Arbiter denies a bad dispatch and shows why.
+4. The GitHub Copilot app starts `/conductor` the same way and no longer lists the parents.
+
+The rendered Copilot file total is not stated in the canonical docs. The render contract test pins it, and this closeout did not take a number from a standalone render.
+
+## Closeout mapping
+
+**Completed 2026-11-10.** Archived under `docs/archive/plans/`. Every decision D1 to D17 and AP1 maps to a destination below, and every Design harvest item H1 to H5 is mapped in the second table. Documentation-impact is `extends-component`, impact components are KyberSquad and KyberArbiter, and last-reviewed is 2026-11-10 for every row.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 1; [kyber-squad/architecture.md](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills); [requirements](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) Copilot row | extends-component | KyberSquad | 2026-11-10 | archived |
+| D2 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 3 (workers unchanged) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D3 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 2 (agent files kept, hidden) and decision 6 (branch A shipped); alternatives rejected in the same record | extends-component | KyberSquad | 2026-11-10 | archived |
+| D4 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 2 (`product-owner` stays dispatchable); [architecture §3 Copilot subsection](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D5 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) consequences (model pin lost); [requirements](../../kyber-squad/requirements.md#non-broadening-guarantee) accepted-loss paragraph; [onboarding Copilot notes](../../kyber-squad/onboarding.md#copilot-notes) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D6 | [onboarding Copilot notes](../../kyber-squad/onboarding.md#copilot-notes) (the app follows VS Code); [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) context (the shared agent folder) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D7 | [ADR 0045](../../adr/0045-conductor-operator-channel-opt-in.md) Context, Decision 1 and Consequences, edited in place; [requirements](../../kyber-squad/requirements.md#non-broadening-guarantee) accepted-loss paragraph; [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) consequences | extends-component | KyberSquad | 2026-11-10 | archived |
+| D8 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 6 records the outcome (branch A). Documentation waiver for the spike mechanism: transient probe scaffolding, and the behaviour it measured is recorded in the ADR. | extends-component | KyberSquad | 2026-11-10 | archived |
+| D9 | Documentation waiver: applies only if branch C shipped. Branch A shipped, so the direct start of `/product-owner` is not in question. No surviving invariant beyond the outcome recorded in ADR 0066. | extends-component | KyberSquad | 2026-11-10 | archived |
+| D10 | [architecture §3 Copilot subsection](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills) (body verbatim, resources under `skills/conductor/conductor/references/`) and [architecture §8](../../kyber-squad/architecture.md#8-rendering) dispatch bullet. No ADR — ADR waiver: applies the entry-point projection that ADR 0034 and ADR 0036 already record. | extends-component | KyberSquad | 2026-11-10 | archived |
+| D11 | [architecture §3 Copilot subsection](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills) (relative links stay relative, `RELATIVE_REFERENCE: ok`). No ADR — ADR waiver: relies on the existing per-target link rule. | extends-component | KyberSquad | 2026-11-10 | archived |
+| D12 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) decision 2 (`disable-model-invocation` on undispatched parents); [architecture §3 Copilot subsection](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills); [requirements](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) Copilot row | extends-component | KyberSquad | 2026-11-10 | archived |
+| D13 | [Kyber Arbiter architecture](../../kyber-arbiter/architecture.md#harness-facts) harness table (skill-entry row) and Delivery and caller notes; [runbook](../../kyber-arbiter/runbook.md#hooks) Hooks section and trust table; [requirements](../../kyber-squad/requirements.md#harness-behaviour-the-product-relies-on) Arbiter row; `skill-entry-no-caller` in the [degradation taxonomy](../../kyber-squad/requirements.md#degradation-taxonomy) | extends-component | KyberArbiter, KyberSquad | 2026-11-10 | archived |
+| D14 | [architecture §3 Copilot subsection](../../kyber-squad/architecture.md#native-branch-copilot-with-parent-entry-point-skills) (hooks on a hidden parent's agent file stay) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D15 | [ADR 0045](../../adr/0045-conductor-operator-channel-opt-in.md) Decision 1 (overlay on the agent file only); [architecture §8 operator overlay bullet](../../kyber-squad/architecture.md#8-rendering); [onboarding Copilot notes](../../kyber-squad/onboarding.md#copilot-notes) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D16 | No ADR — ADR waiver: `CopilotToolCatalog` is unchanged, and [ADR 0017](../../adr/0017-copilot-deterministic-tool-order.md) already states that Copilot tool membership comes from `copilot-tools`. Documentation waiver: no-design-change for the catalog; the agent's tools remain the agent file's concern. | extends-component | KyberSquad | 2026-11-10 | archived |
+| D17 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) (new); [ADR 0045](../../adr/0045-conductor-operator-channel-opt-in.md) and [ADR 0036](../../adr/0036-primary-agent-canonical-skill-entry-point.md) edited in place; [ADR index](../../adr/README.md) rows | extends-component | KyberSquad | 2026-11-10 | archived |
+| AP1 | Documentation waiver: approval provenance only (autonomous approval and the execution record). Historical, with no surviving invariant beyond the decisions above. | extends-component | KyberSquad, KyberArbiter | 2026-11-10 | archived |
+
+### Design harvest mapping
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0066](../../adr/0066-copilot-parent-roles-start-as-skills.md) (new), with the index row; ADR 0045 and ADR 0036 edited in place | extends-component | KyberSquad | 2026-11-10 | archived |
+| H2 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md): §3 Copilot subsection, §8 output table, dispatch bullet, operator overlay bullet, Copilot emit paragraph, entry-file table | extends-component | KyberSquad | 2026-11-10 | archived |
+| H3 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md): degradation taxonomy examples, Copilot matrix row, accepted-loss paragraph, the conductor-shell and Arbiter rows | extends-component | KyberSquad | 2026-11-10 | archived |
+| H4 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md): targets table, coverage text, Copilot notes with the four post-install checks, trust-step row | extends-component | KyberSquad | 2026-11-10 | archived |
+| H5 | [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md) harness table, Delivery and caller notes, global matrix row; [kyber-arbiter/runbook.md](../../kyber-arbiter/runbook.md) Hooks section and trust table | extends-component | KyberArbiter | 2026-11-10 | archived |
+
+### Wording corrections made in the same change
+
+- Copilot's conductor is no longer described as having no shell in VS Code. The limit is stated as the agent file's, with the skill-run exception recorded.
+- Copilot's entry-point skill is listed in the entry-file table and in the rendered-output description.
+- The Arbiter's VS Code dispatch observed in the 2026-11-10 runtime reproduction is `task` in the CLI payload shape. The earlier `runSubagent` remains for agent-file hooks only.
+- Each file-count sentence that disagreed (149 and 150) now points at the render contract test instead of stating a number.

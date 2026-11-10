@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -58,6 +58,12 @@ carrying the `KYBER-ARBITER: true` marker and carries no `--caller`. `codex`, `c
 `factory`, `devin` and `antigravity` are owned entries spliced into a shared hook file;
 `pi` and `kilo` are whole owned files, `.pi/extensions/kyber-arbiter.ts` and
 `.kilo/plugin/kyber-arbiter.ts`.
+
+A conductor that VS Code starts as the `/conductor` skill has no hooks of its own, so the owned
+Copilot CLI hook file is the only thing that gates its dispatches, and it carries no caller
+identity. Expect `arbiter-not-enforced` with the reason `skill-entry-no-caller` for it.
+Its gate needs the same trust as the agent-file hooks, described under
+[trust steps](#trust-steps).
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 
@@ -97,7 +103,7 @@ observed — so grant trust at install time:
 | Harness | Trust gate |
 |---|---|
 | Claude | Accept the workspace trust dialog for the project. `claude -p` sessions never count: headless runs execute no project sub-agent frontmatter hooks and stay unenforced. |
-| Copilot in VS Code | Open the project as a trusted workspace and keep `chat.useHooks` enabled, or the hooks stay off. |
+| Copilot in VS Code | Open the project as a trusted workspace and keep `chat.useHooks` enabled, or the hooks stay off. The owned hook file that gates a `/conductor` skill run is off on the same terms. |
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
 | Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |

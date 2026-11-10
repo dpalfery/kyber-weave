@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 ---
 
 # Kyber-Weave Plan Inventory
@@ -59,9 +59,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 A plan is listed here while it is open and leaves when it is archived.
 
-| Plan | Status | Mode | Scale |
-|---|---|---|---|
-| [Start Copilot's parent roles as skills so VS Code workers keep their tools](2026-11-10-copilot-parent-agents-skill-fallback.md) | Ready | test-first | extends-component: KyberSquad, KyberArbiter |
+No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
 
 ## Archived Plans
 

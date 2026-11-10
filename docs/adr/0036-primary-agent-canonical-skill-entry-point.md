@@ -4,7 +4,7 @@ title: A Primary Agent Sharing a Canonical Skill Identity Reuses the Skill as It
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-10
 ---
 
 # ADR 0036: A Primary Agent Sharing a Canonical Skill Identity Reuses the Skill as Its Entry Point
@@ -52,10 +52,14 @@ fail-closed throw and the `role-` prefix does not exist for this shape.
    renderer resolves suppression per identity: a **subagent** shared identity suppresses its skill; a
    **primary** shared identity emits it.
 
-3. **A target that adds an entry-point form skips the duplicate instead of failing closed.** Claude
-   and Factory emit the agent file (subagent / droid) plus the canonical skill and **no** derived
-   entry-point skill. The canonical skill at `.claude/skills/<name>/SKILL.md` (or `.factory/...`) is
-   the entry point; emitting a second file at that path would overwrite the role with the wrapper.
+3. **A target that adds an entry-point form skips the duplicate instead of failing closed.** Claude,
+   Factory and Copilot emit the agent file (subagent / droid / agent) plus the canonical skill and
+   **no** derived entry-point skill. The canonical skill at `.claude/skills/<name>/SKILL.md`,
+   `.factory/skills/<name>/SKILL.md` or `.github/skills/<name>/SKILL.md` is the entry point;
+   emitting a second file at that path would overwrite the role with the wrapper. On Copilot the
+   agent file is kept but hidden from the picker (`user-invocable: false`), because VS Code gives a
+   worker only the tools the selected agent lists, so the skill is the way in
+   ([ADR 0066](0066-copilot-parent-roles-start-as-skills.md)).
 
 4. **A target that lowers a primary reuses the canonical skill instead of lowering.** Cursor, Pi,
    ZCode, Devin, and Warp emit the canonical skill and no projection of their own — no lowered skill,

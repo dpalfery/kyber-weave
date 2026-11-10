@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -329,7 +329,8 @@ The degradation records these outcomes produce are listed once, in the
 | Harness | Phase | What Squad renders | Dispatch tool | Caller identity | Target and prompt |
 |---|---|---|---|---|---|
 | Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` |
-| Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` |
+| Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` on agent-file hooks; the 2026-11-10 runtime reproduction sent `task` in the owned file's CLI shape | Rendered `--caller` on agent-file hooks; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt`; the CLI shape carries `agent_type`, `prompt` |
+| Copilot in VS Code, skill entry | 1 | Nothing of its own: the `/conductor` skill has no `hooks` key, so the owned `.github/hooks/kyber-arbiter.json` (or the user-scope `~/.copilot/hooks/kyber-arbiter.json`) gates it | `task` (CLI shape, observed 2026-11-10) | None. The skill carries no caller identity, so only the marker and header inference apply (`skill-entry-no-caller`) | `agent_type`, `prompt` |
 | Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` |
 | OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
 | Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
@@ -343,7 +344,7 @@ The degradation records these outcomes produce are listed once, in the
 
 Notes on the table:
 
-On Claude and Copilot in VS Code the caller is trusted, so gating does not depend on the
+On Claude, and on an agent-file dispatch in Copilot in VS Code, the caller is trusted, so gating does not depend on the
 marker — though Squad agents still write `KYBER-ARBITER: true` on every hooked dispatch,
 and `audit` reports a missing one. Hooks render at user scope by default (recording installed
 targets in `arbiter.global.targets`), or at project scope when `--project` is passed and
@@ -358,6 +359,15 @@ On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
 
 ### Delivery and caller notes
+
+A conductor that VS Code starts as the `/conductor` skill
+([ADR 0066](../adr/0066-copilot-parent-roles-start-as-skills.md)) has no caller identity, and it
+has no hooks of its own. Its dispatches are gated only by the owned Copilot hook file, and the
+rendered parent records `arbiter-not-enforced` with the reason `skill-entry-no-caller`. The
+2026-11-10 reproduction ran through the Copilot runtime bundled with VS Code, not the chat window,
+and it saw the dispatch as `task` in the CLI payload shape, which the owned file's adapter already
+handles. Whether the chat window delivers the event is not yet verified. The gate needs
+`chat.useHooks` on and a trusted workspace.
 
 Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They gate only
 dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
@@ -462,7 +472,7 @@ Research verified against vendor documentation governs the user-level global hoo
 | Harness | Global hook location (verified) | Owned artifact | Layers merge or override? | Block-on-dispatch / trust notes | Tier and group | Evidence |
 |---|---|---|---|---|---|---|
 | Claude Code | `~/.claude/settings.json` (user-owned settings) | owned marked block inside the user's settings file | project `.claude/settings.json` also runs, but waits on workspace trust | `preToolUse` deny: yes | enforced-global | [Claude settings](https://code.claude.com/docs/en/settings.md) · [Claude hooks](https://code.claude.com/docs/en/hooks.md) |
-| Copilot CLI and Copilot in VS Code | `~/.copilot/hooks/kyber-arbiter.json` (or `$COPILOT_HOME/hooks`); JSON `version: 1` | owned file `~/.copilot/hooks/kyber-arbiter.json` | sources policy > user > project > plugins all run | `preToolUse` deny: yes; VS Code requires `chat.useHooks` and a trusted workspace (Preview). VS Code `runSubagent` tool dispatch unconfirmed by name → degraded `dispatch-unconfirmed` | enforced-global (CLI); enforced-global, degraded (VS Code) | [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference) · [VS Code agent hooks](https://code.visualstudio.com/docs/agent-customization/hooks) |
+| Copilot CLI and Copilot in VS Code | `~/.copilot/hooks/kyber-arbiter.json` (or `$COPILOT_HOME/hooks`); JSON `version: 1` | owned file `~/.copilot/hooks/kyber-arbiter.json` | sources policy > user > project > plugins all run | `preToolUse` deny: yes; VS Code requires `chat.useHooks` and a trusted workspace (Preview). VS Code agent-file dispatch (`runSubagent`) unconfirmed by name → degraded `dispatch-unconfirmed`; the 2026-11-10 runtime reproduction sent a skill-started conductor's dispatch to the owned file as `task` in the CLI shape, with no caller identity | enforced-global (CLI); enforced-global, degraded (VS Code) | [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference) · [VS Code agent hooks](https://code.visualstudio.com/docs/agent-customization/hooks) |
 | Codex | `~/.codex/hooks.json` or `~/.codex/config.toml` | owned block in `~/.codex/hooks.json` | all sources load, none replaces | one-time user trust review required; `[features] hooks=false` disables; blocking applies to tool hooks | enforced-global | [Codex hooks](https://developers.openai.com/codex/hooks) |
 | Cursor | `~/.cursor/hooks.json` | owned entries in `~/.cursor/hooks.json` | auto-reloads; global-vs-project precedence unstated | exit code 2 blocks; `preToolUse` supported | enforced-global | [Cursor hooks](https://cursor.com/docs/hooks) |
 | Antigravity | `~/.gemini/config/hooks.json`; project `.agents/hooks.json` | owned group in `~/.gemini/config/hooks.json` | no merge policy documented | `PreToolUse` decision `deny` | enforced-global | [Antigravity hooks](https://antigravity.google/docs/hooks.md) |

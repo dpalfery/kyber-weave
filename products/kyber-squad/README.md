@@ -160,8 +160,8 @@ bounded Critical/Major remediation loop, and the plan and specification closeout
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
-linked resource: a fresh Copilot render now emits the 53 principal files plus each owner's linked
-resources (150 files total). Every skill resource reaches every render except
+linked resource: a fresh Copilot render now emits the 53 principal files, the conductor's
+entry-point skill, and each owner's linked resources (the total is pinned by the render contract test). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
