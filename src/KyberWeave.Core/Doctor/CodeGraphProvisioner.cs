@@ -223,7 +223,7 @@ public static class CodeGraphProvisioner
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
         ChildRun prepared = PrepareIndex(root, verb, options, executor);
-        if (!prepared.Ok)
+        if (!prepared.Ok && !prepared.NotInitialised)
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
             prepared = repair.Ok
@@ -476,7 +476,7 @@ public static class CodeGraphProvisioner
             return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result))
             {
                 NotInitialised = (result.StandardError + "\n" + result.StandardOutput)
-                    .Contains("not initialized", StringComparison.OrdinalIgnoreCase)
+                    .Contains("CodeGraph not initialized", StringComparison.OrdinalIgnoreCase)
             };
         }
         catch (TimeoutException)
@@ -509,11 +509,10 @@ public static class CodeGraphProvisioner
                 $"codegraph {run.Verb} exceeded its {options.IndexTimeout.TotalSeconds:0} second limit and was stopped",
                 $"kyber-weave doctor --{flag} --index-timeout {RaisedTimeout(options)}"),
             ChildRunFailure.CouldNotStart => new DoctorCheck(checkId, false, $"{command} could not be run", command),
-            _ when run.NotInitialised => new DoctorCheck(
+            _ when run.NotInitialised && run.Verb != InitVerb => new DoctorCheck(
                 checkId,
                 false,
-                $"CodeGraph is not set up in this folder, so codegraph {run.Verb} cannot run. " +
-                ".codegraph/ exists but holds no index",
+                $"CodeGraph is not set up in this folder, so codegraph {run.Verb} cannot run: {run.Detail}",
                 $"codegraph {InitVerb} ."),
             _ => run.Corrupt
                 ? new DoctorCheck(

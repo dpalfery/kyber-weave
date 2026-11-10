@@ -270,20 +270,31 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 ? runner.CreateBranchInPlace(target, startRef)
                 : runner.SwitchToBranch(target);
         }
-        else if (resumeTarget is not null &&
-                 RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget) is { } held &&
-                 Directory.Exists(held))
-        {
-            // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
-            worktreePath = held;
-            created = new GitOutcome(0, string.Empty, string.Empty);
-        }
         else
         {
-            worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
-            created = resumeTarget is null
-                ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+            string? held = resumeTarget is null
+                ? null
+                : RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget);
+            if (held is not null && Directory.Exists(held))
+            {
+                // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
+                worktreePath = held;
+                created = new GitOutcome(0, string.Empty, string.Empty);
+            }
+            else
+            {
+                // A folder deleted by hand stays registered and would still claim the branch. Pruning removes
+                // only entries whose folder is gone.
+                if (held is not null)
+                {
+                    runner.Git("worktree", "prune");
+                }
+
+                worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
+                created = resumeTarget is null
+                    ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
+                    : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+            }
         }
 
         if (!created.Succeeded)

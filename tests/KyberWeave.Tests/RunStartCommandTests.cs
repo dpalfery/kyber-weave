@@ -118,6 +118,29 @@ public sealed class RunStartCommandTests : IDisposable
         Assert.Equal(worktreesAfterStart, _probe.WorktreeCount());
     }
 
+    /// <summary>
+    ///     A worktree folder deleted by hand stays registered with git and would still claim the branch, so a
+    ///     resume clears that stale entry and creates a new folder.
+    /// </summary>
+    [Fact]
+    public void ResumeRecoversWhenTheWorktreeFolderWasDeletedByHand()
+    {
+        _probe.AppendLine("README.md", "uncommitted work");
+        ProbeResult started = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+        Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
+        using JsonDocument first = ParseJson(started.StandardOutput);
+        Directory.Delete(first.RootElement.GetProperty("worktree").GetString()!, recursive: true);
+
+        ProbeResult resumed = _probe.RunStart(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+            "--resume", "claude/fix/tighten-the-gate", "--json");
+
+        Assert.True(resumed.ExitCode == 0, $"Resuming must clear the stale entry. {resumed.Output}");
+        using JsonDocument second = ParseJson(resumed.StandardOutput);
+        Assert.True(Directory.Exists(second.RootElement.GetProperty("worktree").GetString()));
+    }
+
     /// <summary>A well-formed request against a clean checkout is ready, and says so with <c>0</c>.</summary>
     [Fact]
     public void ExitsZeroOnAReadyRun()

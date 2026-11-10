@@ -384,8 +384,10 @@ example `…/kyber-weave.worktrees/20261110T150612Z-claude-fix-arbiter-global-bl
 operator's edits stay on the branch they were made for, and no branch moves under another worker.
 The timestamp (`yyyyMMddTHHmmssZ`) keeps a repeat run off an earlier folder and sorts by time; two
 runs in one second take a `-2` suffix. Only the folder is stamped, never the branch. A resumed branch
-keeps its own branch and is never renamed: if a worktree already holds it, the run continues there,
-and otherwise it gets a new timestamped folder.
+keeps its own branch and is never renamed. When it needs a worktree, the run continues in the one
+already holding the branch, and otherwise creates a new timestamped folder. A clean checkout with no
+other worktree resumes in place. If the holding folder was deleted by hand, the run clears git's
+stale entry with `git worktree prune` first.
 
 **`--json` keys.** One object on stdout, for a caller that dispatches the step and reads its result:
 

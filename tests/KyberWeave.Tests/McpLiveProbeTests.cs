@@ -223,9 +223,14 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
             Root,
-            arguments => arguments.Contains("--version", StringComparer.Ordinal)
-                ? DoctorHarness.Ok("1.5.0")
-                : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root));
+            arguments =>
+            {
+                if (arguments.Contains("--version", StringComparer.Ordinal))
+                    return DoctorHarness.Ok("1.5.0");
+                return arguments.Contains("init", StringComparer.Ordinal)
+                    ? new ProcessResult(1, string.Empty, "disk full")
+                    : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root);
+            });
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
@@ -237,7 +242,35 @@ public sealed class McpLiveProbeTests : IDisposable
         DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
         Assert.False(index.Passed);
         Assert.Contains("not set up", index.Reason, StringComparison.Ordinal);
+        Assert.Contains("CodeGraph not initialized", index.Reason, StringComparison.Ordinal);
         Assert.Equal("codegraph init .", index.Fix);
+    }
+
+    /// <summary>
+    /// Another message that merely contains "not initialized" is an ordinary failure. Running <c>init</c> for it would
+    /// hide the real error behind advice about a folder that is fine.
+    /// </summary>
+    [Fact]
+    public void Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? new ProcessResult(1, string.Empty, "telemetry not initialized, sync failed")
+                : DoctorHarness.Ok("1.5.0"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Provision,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        Assert.Equal("codegraph sync .", DoctorHarness.CheckNamed(report, "codegraph.index").Fix);
+        Assert.DoesNotContain(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
     }
 
     /// <summary>

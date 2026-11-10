@@ -1655,8 +1655,8 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
   is the **repair** step, never the routine one: it rebuilds the whole index for no new
   information, and `--ensure` is the only mode that runs it, once, after a failed step. A
   `.codegraph/` folder that was never initialised, such as one holding only a committed
-  `.gitignore`, makes `sync` refuse, so the run executes `codegraph init .` instead. If that also
-  reports the folder is not set up, doctor prints `codegraph init .` as the fix.
+  `.gitignore`, makes `sync` refuse, so the run executes `codegraph init .` instead and reports
+  that command's result.
 - **Bounded.** Each child is bounded by `--index-timeout` (default 600 seconds). When the bound is
   reached, the child's process tree is killed and the check fails as `codegraph.index`.
 - **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
