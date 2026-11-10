@@ -30,8 +30,8 @@ public sealed class ProcGuardPollCostTests
 
         ProcessResult result = RunGuard(["run", "--", "sleep", "2"], logPath);
 
-        int reads = File.ReadAllLines(logPath).Length;
-        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.ExitCode == 0, $"guard exited {result.ExitCode}: {result.StandardError}");
+        int reads = CountReads(logPath, result);
         Assert.True(reads <= 7, $"expected at most 7 process-table reads, saw {reads}");
     }
 
@@ -49,9 +49,15 @@ public sealed class ProcGuardPollCostTests
         ProcessResult result = RunGuard(["run", "--", "sh", "-c", "exit 0"], logPath);
         watch.Stop();
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.ExitCode == 0, $"guard exited {result.ExitCode}: {result.StandardError}");
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"guard took {watch.Elapsed}");
-        Assert.True(File.ReadAllLines(logPath).Length <= 4, "an immediate exit needs at most four table reads");
+        Assert.True(CountReads(logPath, result) <= 4, "an immediate exit needs at most four table reads");
+    }
+
+    private static int CountReads(string logPath, ProcessResult result)
+    {
+        Assert.True(File.Exists(logPath), $"the guard never read the process table fixture: {result.StandardError}");
+        return File.ReadAllLines(logPath).Length;
     }
 
     private static void SkipIfBashUnavailable()

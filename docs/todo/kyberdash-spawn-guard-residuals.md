@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-10-30
 ---
 
 # Close the known residuals of the KyberDash spawn guard and process ledger

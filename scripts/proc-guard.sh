@@ -645,19 +645,7 @@ epoch_now() {
 
 # Print the pids of every descendant of the given pid, one per line.
 descendants_of() {
-  table_light | awk -v root="$1" '
-    { ppid[$1] = $2; pids[NR] = $1 }
-    END {
-      mark[root] = 1
-      changed = 1
-      while (changed) {
-        changed = 0
-        for (i = 1; i <= NR; i++) {
-          p = pids[i]
-          if (!(p in mark) && (ppid[p] in mark)) { mark[p] = 1; changed = 1; print p }
-        }
-      }
-    }'
+  poll_scan "$1" | tail -n +2
 }
 
 # Pids that are never leftovers: proc-guard itself, its ancestors (the caller's own shell may be
@@ -1218,7 +1206,7 @@ run_guarded() {
   tripped=""
   trap 'kill_tree "${pid}"; exit 143' INT TERM
 
-  local tree node now kids scan prev_kids="" polls=0 slice
+  local tree node now kids scan kid polls=0
   while kill -0 "${pid}" 2>/dev/null; do
     scan="$(poll_scan "${pid}")"
     read -r node tree <<<"${scan%%$'\n'*}"
@@ -1229,12 +1217,14 @@ run_guarded() {
     if [[ -n "${kids}" ]]; then
       # shellcheck disable=SC2206
       tracked=(${kids})
-      # Steady state (the same descendants as the last poll) adds nothing; a change merges and
-      # de-duplicates, so the list holds each pid once however long the run is.
-      if [[ "${kids}" != "${prev_kids}" ]]; then
-        seen="$(printf '%s\n%s\n' "${seen}" "${kids}" | sort -u | grep . || true)"$'\n'
-        prev_kids="${kids}"
-      fi
+      # Each pid is added once: a plain pattern match per descendant, no fork and no sort, so the
+      # list stays bounded by the distinct pids of the run and the cap checks are never delayed.
+      for kid in ${kids}; do
+        case $'\n'"${seen}" in
+          *$'\n'"${kid}"$'\n'*) ;;
+          *) seen+="${kid}"$'\n' ;;
+        esac
+      done
     fi
     if ((tree >= max_tree)); then
       tripped="max-tree"
@@ -1261,7 +1251,7 @@ run_guarded() {
     if ((polls <= FAST_EXIT_POLLS)); then
       # A short command is noticed within a tenth of a second instead of a full interval. The
       # process table is still read once per POLL_INTERVAL, so the caps are checked as often.
-      for slice in 1 2 3 4 5; do
+      for _ in 1 2 3 4 5; do
         kill -0 "${pid}" 2>/dev/null || break
         sleep "${EXIT_CHECK_INTERVAL}"
       done
