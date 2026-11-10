@@ -27,7 +27,7 @@ lock="${TMPDIR:-/tmp}/kw-codegraph-index-${key}-${sum}.lock"
 if ! mkdir "$lock" 2>/dev/null; then
   owner="$(cat "$lock/pid" 2>/dev/null)"
   case "$owner" in
-    '' | 0 | *[!0-9]*) [ -n "$(find "$lock" -maxdepth 0 -mmin -2 2>/dev/null)" ] && exit 0 ;;
+    '' | 0* | *[!0-9]*) [ -n "$(find "$lock" -maxdepth 0 -mmin -2 2>/dev/null)" ] && exit 0 ;;
     *) if [ -n "$(find "$lock" -maxdepth 0 -mmin -15 2>/dev/null)" ]; then
          kill -0 "$owner" 2>/dev/null && exit 0
        fi ;;
@@ -37,23 +37,24 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 # Claim the lock with this script's pid and a token; the build replaces the pid with its own below.
 token="$$.$RANDOM$RANDOM"
-printf '%s\n' "$$" >"$lock/pid" 2>/dev/null && printf '%s\n' "$token" >"$lock/token" 2>/dev/null || {
-  # The lock cannot record its owner (read-only or full disk): build without it rather than not at all.
+if ! { printf '%s\n' "$$" >"$lock/pid" && printf '%s\n' "$token" >"$lock/token"; } 2>/dev/null; then
+  # The lock cannot record its owner (read-only or full disk). Two builds must never run at once, so none runs.
   rm -rf "$lock" 2>/dev/null
-  lock=""
-}
-# The build's output is one run's worth, cut to 100 KB, in the user's cache directory. With no HOME
-# there is no log, and never a /tmp path.
+  exit 0
+fi
+# The build's output replaces the previous run's, so the log holds one run. With no HOME there is no
+# log, and never a /tmp path. The output is not piped through anything that could close early: a
+# SIGPIPE would kill the build mid-index.
 log=/dev/null
 if [ -n "${HOME:-}" ] && mkdir -p "$HOME/.cache/kyber-weave" 2>/dev/null; then
   log="$HOME/.cache/kyber-weave/codegraph-index.log"
 fi
 (
-  codegraph init "$root" 2>&1 | head -c 102400 >"$log" 2>/dev/null
+  codegraph init "$root" >"$log" 2>&1
   # Remove the lock only if it is still this build's: a build that outlived its lock must not delete a successor's.
-  if [ -n "$lock" ] && [ "$(cat "$lock/token" 2>/dev/null)" = "$token" ]; then
+  if [ "$(cat "$lock/token" 2>/dev/null)" = "$token" ]; then
     rm -rf "$lock" 2>/dev/null
   fi
 ) &
-[ -n "$lock" ] && printf '%s\n' "$!" >"$lock/pid" 2>/dev/null
+printf '%s\n' "$!" >"$lock/pid" 2>/dev/null
 exit 0
