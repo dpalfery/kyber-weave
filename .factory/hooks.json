@@ -4,7 +4,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$FACTORY_PROJECT_DIR/scripts/codegraph-session-index.sh\""
+          "command": "[ -n \"$FACTORY_PROJECT_DIR\" ] && bash \"$FACTORY_PROJECT_DIR/scripts/codegraph-session-index.sh\"; exit 0"
         }
       ]
     }

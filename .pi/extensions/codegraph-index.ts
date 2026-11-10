@@ -8,6 +8,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async () => {
     const script = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "codegraph-session-index.sh");
-    spawn("bash", [script], { stdio: "ignore", detached: true }).unref();
+    try {
+      spawn("bash", [script], { stdio: "ignore", detached: true })
+        .on("error", () => {})
+        .unref();
+    } catch {
+      // Indexing is best-effort: a missing bash must not stop the host from loading.
+    }
   });
 }

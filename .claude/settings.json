@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/codegraph-session-index.sh\""
+            "command": "[ -n \"$CLAUDE_PROJECT_DIR\" ] && bash \"$CLAUDE_PROJECT_DIR/scripts/codegraph-session-index.sh\"; exit 0"
           },
           {
             "type": "command",

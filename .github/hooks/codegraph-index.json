@@ -4,7 +4,7 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "bash \"$(git rev-parse --show-toplevel)/scripts/codegraph-session-index.sh\"",
+        "bash": "root=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] && bash \"$root/scripts/codegraph-session-index.sh\"; exit 0",
         "timeoutSec": 30
       }
     ]

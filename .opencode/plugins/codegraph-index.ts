@@ -10,6 +10,12 @@ const script = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "script
 export default {
   id: "codegraph-index",
   async setup() {
-    spawn("bash", [script], { stdio: "ignore", detached: true }).unref();
+    try {
+      spawn("bash", [script], { stdio: "ignore", detached: true })
+        .on("error", () => {})
+        .unref();
+    } catch {
+      // Indexing is best-effort: a missing bash must not stop the host from loading.
+    }
   },
 };

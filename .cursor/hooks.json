@@ -19,7 +19,9 @@
     ],
     "sessionStart": [
       {
-        "command": "bash \"$(git rev-parse --show-toplevel)/scripts/codegraph-session-index.sh\""
+        "command": "root=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] && bash \"$root/scripts/codegraph-session-index.sh\"; exit 0",
+        "timeout": 10,
+        "failClosed": false
       }
     ]
   }
