@@ -61,6 +61,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
 
+    // VS Code limits a worker's built-in tools to those of the selected agent. The conductor
+    // holds these for its workers only; the rendered guard hook denies its own use of them.
+    private static readonly string[] GuardedConductorTools = ["search", "execute", "edit", "web"];
+
     /// <summary>The warning code for an agent body over the Copilot cap. Install and update show it only when the operator channel overlay was applied.</summary>
     internal const string AgentBodyTooLongCode = "agent-body-too-long";
 
@@ -235,7 +239,9 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
 
         // The overlay's tool entry is added after normalisation, so the catalog order stays canonical
         // and the entry sits at the end of the list. It is present only when the overlay is.
-        List<string> tools = [.. CopilotToolCatalog.Normalize(agent.CopilotTools)];
+        bool guardedConductor = agent.Name == SquadOperatorChannel.ConductorAgentName && context.EnabledArbiter is not null;
+        List<string> tools = [.. CopilotToolCatalog.Normalize(
+            guardedConductor ? agent.CopilotTools.Concat(GuardedConductorTools) : agent.CopilotTools)];
         if (operatorChannelOverlay is not null)
         {
             tools.Add(operatorChannelOverlay.ToolEntry);
@@ -283,9 +289,18 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         frontmatter["metadata"] = metadata;
 
         SquadArbiterHook? arbiterHook = plan.ArbiterHooks.FirstOrDefault(hook => hook.Caller == agent.Name);
-        if (arbiterHook is not null)
+        Dictionary<string, object?>? hooks = arbiterHook is null
+            ? null
+            : ArbiterHooksFrontmatter(plan.Dispatchers.Contains(agent.Name), arbiterHook, context.Scope);
+        if (guardedConductor)
         {
-            frontmatter["hooks"] = ArbiterHooksFrontmatter(plan.Dispatchers.Contains(agent.Name), arbiterHook, context.Scope);
+            hooks ??= new Dictionary<string, object?>(StringComparer.Ordinal);
+            AddConductorGuard(hooks, operatorChannelOverlay, context.EnabledArbiter!.HookTimeoutSeconds);
+        }
+
+        if (hooks is not null)
+        {
+            frontmatter["hooks"] = hooks;
         }
 
         string authoredBody = plan.GlobalAgentsRoot is null
@@ -366,6 +381,29 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         }
 
         return hooks;
+    }
+
+    /// <summary>Adds the conductor guard, which denies the conductor's own project work and restates its workflow.</summary>
+    /// <remarks>
+    /// These keys use the Copilot hook format, not the VS Code one the Arbiter gate uses, because
+    /// the guard answers in Copilot's format and <c>userPromptTransformed</c> has no VS Code name.
+    /// </remarks>
+    private static void AddConductorGuard(
+        Dictionary<string, object?> hooks,
+        SquadOperatorChannel.Overlay? operatorChannelOverlay,
+        int timeoutSeconds)
+    {
+        string? allowedServer = operatorChannelOverlay?.ToolEntry.Replace("/*", string.Empty, StringComparison.Ordinal);
+        string command = ArbiterHookWiring.GuardCommandLine(allowedServer);
+        Dictionary<string, object?> entry = new(StringComparer.Ordinal)
+        {
+            ["type"] = "command",
+            ["bash"] = command,
+            ["powershell"] = command,
+            ["timeoutSec"] = timeoutSeconds,
+        };
+        hooks["preToolUse"] = new List<object?> { entry };
+        hooks["userPromptTransformed"] = new List<object?> { entry };
     }
 
     private static Dictionary<string, object?> HookEntry(SquadArbiterHook hook, SquadDeploymentScope scope) => new(StringComparer.Ordinal)
