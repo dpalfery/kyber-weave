@@ -901,7 +901,15 @@ public sealed class CopilotRendererTests
         Assert.True(
             description.Length <= 1024,
             $"'{parentName}' skill description is {description.Length} characters; the limit is 1,024.");
-        Assert.Equal(agent.Description, description);
+        // A shared identity's skill is the canonical skill, so it carries the canonical skill's description.
+        // The conductor has no canonical skill: its entry-point skill is derived from its agent.
+        bool sharedIdentity = parentName is "bug-crusher" or "product-owner";
+        string expectedDescription = sharedIdentity
+            ? TestSquadCorpus.ExpectedRenderText(
+                SquadTarget.Copilot,
+                Assert.Single(TestSquadCorpus.CanonicalSource.Skills, s => s.Name == parentName).Description)
+            : agent.Description;
+        Assert.Equal(expectedDescription, description);
 
         string[] lines = frontmatter.Split('\n');
         int descriptionLine = Array.FindIndex(lines, l => l.StartsWith("description:", StringComparison.Ordinal));
@@ -930,7 +938,14 @@ public sealed class CopilotRendererTests
                 result.Files,
                 f => f.RelativePath == $".github/skills/{identity}/SKILL.md");
 
-            Assert.Contains(canonical.InstructionBody.Trim(), ReadBody(skill), StringComparison.Ordinal);
+            // The renderer replaces the {{harness}} placeholder with the target token; the expected body
+            // carries that substitution, and no placeholder may survive into the rendered skill.
+            string renderedBody = ReadBody(skill);
+            Assert.DoesNotContain("{{harness}}", renderedBody, StringComparison.Ordinal);
+            Assert.Contains(
+                TestSquadCorpus.ExpectedRenderText(SquadTarget.Copilot, canonical.InstructionBody).Trim(),
+                renderedBody,
+                StringComparison.Ordinal);
         }
     }
 

@@ -137,12 +137,24 @@ public sealed class SquadRenderingContractTests
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
 
+        // A primary parent's entry-point skill records role-skill-fallback and its permission-not-expressible
+        // note; those two codes on a primary identity are owned by the parent-skill tests. Every other
+        // record stays subject to the strict check below.
+        HashSet<string> primaryIdentities = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Primary)
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        SquadDegradationRecord[] degradations = result.Degradations
+            .Where(d => !(primaryIdentities.Contains(d.CanonicalIdentity)
+                          && (d.Code == "role-skill-fallback" || d.Code == "permission-not-expressible")))
+            .ToArray();
+
         Assert.NotEmpty(expectedNarrowed);
         Assert.Equal(
             expectedNarrowed,
-            result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+            degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
 
-        foreach (SquadDegradationRecord degradation in result.Degradations)
+        foreach (SquadDegradationRecord degradation in degradations)
         {
             Assert.Equal("copilot", degradation.Target);
             Assert.Equal("safety-narrowed", degradation.Code);
