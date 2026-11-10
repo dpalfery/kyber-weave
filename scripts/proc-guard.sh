@@ -1219,7 +1219,7 @@ run_guarded() {
       tracked=(${kids})
       # Each pid is added once: a plain pattern match per descendant, no fork and no sort, so the
       # list stays bounded by the distinct pids of the run and the cap checks are never delayed.
-      for kid in ${kids}; do
+      for kid in "${tracked[@]}"; do
         case $'\n'"${seen}" in
           *$'\n'"${kid}"$'\n'*) ;;
           *) seen+="${kid}"$'\n' ;;
