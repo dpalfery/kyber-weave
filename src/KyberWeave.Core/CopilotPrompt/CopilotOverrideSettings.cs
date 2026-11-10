@@ -68,7 +68,7 @@ public static class CopilotOverrideSettings
 
     /// <summary>Reads the override state from a settings file's bytes.</summary>
     /// <param name="document">The settings file's bytes, byte-order mark included.</param>
-    /// <returns>The state, or null when the bytes are not JSON even leniently.</returns>
+    /// <returns>The state, or null when the bytes are not a JSON object even leniently.</returns>
     public static CopilotOverrideState? Read(byte[] document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -87,10 +87,13 @@ public static class CopilotOverrideSettings
         }
     }
 
-    private static CopilotOverrideState FromRoot(JsonElement root)
+    private static CopilotOverrideState? FromRoot(JsonElement root)
     {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty(SettingId, out JsonElement overrides)
+        // VS Code loads only an object as settings; any other JSON is as unusable as text that does not parse.
+        if (root.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (!root.TryGetProperty(SettingId, out JsonElement overrides)
             || overrides.ValueKind != JsonValueKind.Object)
         {
             return new CopilotOverrideState(false, null, []);

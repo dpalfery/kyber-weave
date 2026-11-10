@@ -244,7 +244,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
             if (state is null)
             {
-                refusals.Add($"{file} is not readable JSON, so it was left unchanged.");
+                refusals.Add($"{file} is not a readable JSON object, so it was left unchanged.");
                 continue;
             }
 
@@ -386,7 +386,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
                 : new CopilotOverrideState(false, null, []);
             if (state is null)
             {
-                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not readable JSON.");
+                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not a readable JSON object.");
                 unreadable = true;
                 continue;
             }

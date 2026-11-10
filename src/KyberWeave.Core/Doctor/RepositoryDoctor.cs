@@ -158,20 +158,7 @@ public static class RepositoryDoctor
     /// <remarks>
     ///     One side is an environment variable, which is arbitrary text, and <c>Path.GetFullPath</c> throws on an
     ///     empty string, a NUL, or a too-long path. A home directory that is not a path is not the repository root.
-    ///     Path identity follows the platform: Windows and a case-insensitive macOS volume fold case.
+    ///     Uses the same rule as the Copilot prompt commands, so the two never disagree about a path.
     /// </remarks>
-    private static bool SamePath(string left, string right)
-    {
-        try
-        {
-            return string.Equals(
-                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        }
-        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
-        {
-            return false;
-        }
-    }
+    private static bool SamePath(string left, string right) => CopilotPromptFile.SamePath(left, right);
 }

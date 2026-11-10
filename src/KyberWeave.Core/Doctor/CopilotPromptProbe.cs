@@ -64,12 +64,12 @@ public static partial class CopilotPromptProbe
             CopilotOverrideState? state = read.Document is { } document ? CopilotOverrideSettings.Read(document) : null;
             if (read.Document is not null && state is null)
             {
-                // Present but not JSON: install and uninstall refuse this file, so reinstalling is not the fix.
+                // Present but not a JSON object: install and uninstall refuse this file, so reinstalling is not the fix.
                 anyUnreadable = true;
                 checks.Add(new DoctorCheck(
                     $"copilot.prompt.{label}.setting",
                     false,
-                    $"the settings file {settingsFile} is not readable JSON",
+                    $"the settings file {settingsFile} is not a readable JSON object",
                     $"fix the JSON in {settingsFile}, then run kyber-weave doctor"));
                 continue;
             }
@@ -148,7 +148,8 @@ public static partial class CopilotPromptProbe
                 ? new DoctorCheck(id, true, null, null)
                 : new DoctorCheck(id, false, $"the newest log's last system message is {mode}, not {ReplaceMode}; restart VS Code and run kyber-weave doctor again", "kyber-weave doctor");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return Inconclusive(id, "the AgentHost log could not be read");
         }
@@ -206,34 +207,36 @@ public static partial class CopilotPromptProbe
         name.StartsWith("agenthost", StringComparison.OrdinalIgnoreCase)
         && name.EndsWith(".log", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The <c>mode=</c> token of the last matching line across the files, or null when none matches.</summary>
-    private static string? LastResolvedMode(IEnumerable<string> logFiles)
+    /// <summary>
+    /// The <c>mode=</c> token of the newest matching line across the files, or null when it cannot be known.
+    /// </summary>
+    /// <remarks>
+    /// Files are read newest-first (the reverse of their sorted order) and the first file with a match wins. Only the
+    /// last <see cref="LogTailBytes"/> of a file is read. A file that was cut and has no match in its tail stops the
+    /// search with null: its mode line may sit before the tail, so an older file's mode would be stale.
+    /// </remarks>
+    private static string? LastResolvedMode(IReadOnlyList<string> logFiles)
     {
-        string? mode = null;
-        foreach (string file in logFiles)
+        for (int index = logFiles.Count - 1; index >= 0; index--)
         {
-            foreach (string line in TailLines(file))
-            {
-                if (!line.Contains("Resolved system message:", StringComparison.Ordinal))
-                    continue;
-                Match match = ResolvedModeLine().Match(line);
-                if (match.Success)
-                    mode = match.Groups["mode"].Value;
-            }
+            string? mode = LastModeInTail(logFiles[index], out bool cut);
+            if (mode is not null)
+                return mode;
+            if (cut)
+                return null;
         }
 
-        return mode;
+        return null;
     }
 
     /// <summary>
-    /// The complete lines in the last <see cref="LogTailBytes"/> of a log. Only the newest line matters, and an
-    /// AgentHost log grows for as long as VS Code runs, so the probe never reads a whole one.
+    /// The last <c>mode=</c> token in the final <see cref="LogTailBytes"/> of one log, streamed line by line.
     /// </summary>
     /// <remarks>VS Code holds the log open for writing, so the file is opened with read-write sharing.</remarks>
-    private static IEnumerable<string> TailLines(string file)
+    private static string? LastModeInTail(string file, out bool cut)
     {
         using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        bool cut = stream.Length > LogTailBytes;
+        cut = stream.Length > LogTailBytes;
         if (cut)
             stream.Seek(-LogTailBytes, SeekOrigin.End);
 
@@ -241,10 +244,17 @@ public static partial class CopilotPromptProbe
         if (cut)
             reader.ReadLine(); // The first line is partial: the seek landed inside it.
 
-        List<string> lines = [];
+        string? mode = null;
         while (reader.ReadLine() is { } line)
-            lines.Add(line);
-        return lines;
+        {
+            if (!line.Contains("Resolved system message:", StringComparison.Ordinal))
+                continue;
+            Match match = ResolvedModeLine().Match(line);
+            if (match.Success)
+                mode = match.Groups["mode"].Value;
+        }
+
+        return mode;
     }
 
     [GeneratedRegex(@"Resolved system message: (?<mode>mode=\S+)", RegexOptions.CultureInvariant)]

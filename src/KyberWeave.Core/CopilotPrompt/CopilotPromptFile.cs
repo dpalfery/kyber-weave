@@ -91,15 +91,29 @@ public static class CopilotPromptFile
     }
 
     /// <summary>
-    /// True when two paths name the same prompt file. Windows and macOS file systems ignore case by default, so a
-    /// settings entry that differs from the install path only in case still names this install's file there.
+    /// True when two paths name the same file: both are made absolute and normalised, trailing separators are
+    /// dropped, and case is ignored only on Windows. The doctor's home check uses the same rule.
     /// </summary>
     /// <param name="left">One path.</param>
     /// <param name="right">The other path.</param>
-    /// <returns>True when the paths are equal under the host's usual case rules.</returns>
-    public static bool SamePath(string left, string right) =>
-        string.Equals(
-            left,
-            right,
-            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    /// <returns>True when the normalised paths are equal; false when either cannot be normalised.</returns>
+    /// <remarks>
+    /// Normalising makes a settings entry written with forward slashes on Windows match. Case is not folded on macOS,
+    /// because a case-sensitive APFS volume can hold two files whose names differ only in case; there a mismatch
+    /// only makes install refuse, which is the safe direction.
+    /// </remarks>
+    public static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 }
