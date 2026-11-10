@@ -889,6 +889,12 @@ kyber-weave squad copilot-prompt uninstall --yes
 Turning it on is not a project setting. Do not add it to a project's `.vscode/settings.json`:
 VS Code ignores that key there.
 
+**Using the conductor.** In a repository with `.kyber-weave/kyber-weave.yml`, the prompt asks the
+model to ask you to switch to the `conductor` agent in the agent picker for non-trivial work, rather
+than starting the conductor itself. The conductor is an agent you select, not a skill. The agent-scoped
+deny hook from PR 576, recorded as "The Copilot conductor holds tools a hook denies it", guards it
+beside the prompt.
+
 ### Check that it is live
 
 Run `kyber-weave doctor`. When the override is on, it adds `copilot.prompt.*` checks. The newest

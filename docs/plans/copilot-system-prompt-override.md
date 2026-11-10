@@ -21,15 +21,15 @@ impact-components: [KyberSquad]
 
 ## Problem and goal
 
-**Problem.** Copilot's default top-level prompt, about 22,000 characters and larger with host additions, pushes the top-level agent to do the work itself rather than route it. Kyber-Weave's two existing guards work around that: a `preToolUse` hook that blocks a rogue top-level agent, and starting from a skill rather than a selected agent. VS Code has an internal setting that replaces the prompt outright.
+**Problem.** Copilot's default top-level prompt, about 22,000 characters and larger with host additions, pushes the top-level agent to do the work itself rather than route it. Kyber-Weave's guard works around that: PR 576's agent-scoped deny hook, which blocks the conductor from doing work it should route, with the conductor kept as an agent the person selects. VS Code has an internal setting that replaces the prompt outright.
 
 **Goal.**
 
 1. One opt-in Kyber-Weave command, off by default, replaces the top-level system prompt in VS Code stable and Insiders, and one command undoes it.
-2. The prompt ships in the package, is short, is safe without Copilot's own safety text, routes to the conductor skill in a Kyber-Weave repository, and stays useful in a plain chat.
+2. The prompt ships in the package, is short, is safe without Copilot's own safety text, asks the person to select the conductor agent for non-trivial work in a Kyber-Weave repository, and stays useful in a plain chat.
 3. Other entries and comments in `settings.json` survive.
 4. `kyber-weave doctor` reports the silent failure, where a missing file or bad YAML falls back to Copilot's default prompt.
-5. The hook and the skill start stay as they are. A prompt is instruction-only and does not change the tool filter behind the skill start.
+5. PR 576's agent-scoped deny hook stays as it is, beside the prompt. A prompt is instruction-only and does not change what a custom agent may call.
 
 ## Decisions
 
@@ -56,7 +56,7 @@ Permanent state, preserved across the plan's whole lifecycle.
 | ID | Target component | Target doc type | Durable design item |
 |---|---|---|---|
 | H1 | KyberSquad | adr | New ADR: optional machine-wide replacement of the Copilot prompt through an application-scope VS Code setting, why per-project is impossible, and the rejected alternatives (Q1, D10). |
-| H2 | KyberSquad | architecture | The opt-in state, prompt embedding and refresh, settings splice, and how the prompt coexists with the hook and skill start (D3 to D7). |
+| H2 | KyberSquad | architecture | The opt-in state, prompt embedding and refresh, settings splice, and how the prompt coexists with PR 576's agent-scoped deny hook (D3 to D7). |
 | H3 | KyberSquad | onboarding | How to turn it on and off, its machine-wide effect, and the retest needed on each VS Code update. |
 | H4 | KyberSquad | reference | `squad copilot-prompt` verbs, flags and exit codes, in `docs/cli-command-surface.md`. |
 | H5 | KyberSquad | runbook | The doctor checks, the `mode=replace` log line, silent fallback, and the known limits (D8, D9). |
@@ -103,7 +103,7 @@ The source analysis above is static. The live run that confirms it is under "Sco
 - Fallback is silent: `[PromptOverride] Failed to read prompt override file` or `Failed to parse prompt override`, once as a warning (`agentHostMain.js:1206`).
 - On success: `[Copilot:<session>] Resolved system message: mode=replace (content length N)` (`agentHostMain.js:1211`, `:1196`).
 - Log directory shape: `<user-data>/logs/<timestamp>/` (`agentHostMain.js:1465`). The report names the file `agenthost.log`; the local search did not find that string, so T3 matches `agenthost*.log` at any depth and T4 confirms the name.
-- The PR 576 hook and the skill-start work are not in this base commit. This plan does not touch either.
+- PR 576's agent-scoped deny hook is not in this base commit, and this plan does not touch it. The skill-start change (PR 579) was closed unmerged, so the conductor stays an agent the person selects.
 
 ## Test contract (test-first)
 
@@ -217,7 +217,7 @@ T4 ran on 2026-11-10 with the owner present, on VS Code Insiders 1.146.0-insider
 - **V3, HydraFusion Cascade (not observed).** The Auto session stayed on Auto's default `balance` tier (model `gpt-6-luna`) and never engaged the Fusion tier. No `session.fusion_resolved` event appeared, so the `repair` phase was not recorded. Cascade coverage stays a stated limit.
 - **Cleanup.** `uninstall --flavour insiders --yes` exited `0`, removed the `*` entry and deleted the prompt file. It leaves an empty `"chat.agentHost.copilot.modelCapabilityOverrides": {}` object in `settings.json`, which is harmless and is documented. The owner's real VS Code settings and `~/.copilot` were not touched; none of them references the scratch path.
 
-**Finding, a known interaction and not a defect of this change.** The released Kyber-Squad (v0.1.8-rc.24) installs the conductor as an agent only, not as a skill. The prompt's "load the `conductor` skill" instruction therefore had nothing to load, and the model fell back to dispatching the conductor agent. The skill-start change (PR 579) is the fix path. Until it ships, routing works through the conductor agent.
+**Finding, a known interaction and not a defect of this change.** The conductor is an agent the person selects, not a skill. In the live check, without the conductor selected, the model offered to dispatch the conductor agent itself. The prompt now asks the person to switch to the conductor agent in the agent picker for non-trivial work, which replaces that offer. PR 576's agent-scoped deny hook, recorded as "The Copilot conductor holds tools a hook denies it", guards the conductor beside the prompt.
 
 **Acceptance.** V1 and V2 pass. V3 is recorded as not observed, which the plan permits. No V1 or V2 failure sends the plan back for rework.
 
@@ -226,7 +226,7 @@ T4 ran on 2026-11-10 with the owner present, on VS Code Insiders 1.146.0-insider
 - **VS Code changes or removes the setting.** It is labelled experimental, and its predecessor was removed in 1.144. Doctor reports the fallback; onboarding says to retest on each update.
 - **Safety text is gone for the top-level agent.** Kyber-Weave's prompt must carry its own. Workers keep Copilot's.
 - **Machine-wide effect.** Every Copilot chat changes, including in other repositories and after Kyber-Weave stops being used, until `uninstall` runs.
-- **Prompt branching is an instruction.** A model can ignore it. The hook and skill start stay for that reason.
+- **Prompt branching is an instruction.** A model can ignore it. PR 576's agent-scoped deny hook stays for that reason.
 - **Lost per-model tuning.** One prompt runs on every model, including under Auto.
 - **VS Code's YAML parser differs from YamlDotNet.** Doctor's parse can pass a file VS Code rejects. V1 proves the shipped file against the real parser, and the log check catches it on real machines.
 - **Enterprise policy** may block the setting. Not checked.
@@ -234,7 +234,7 @@ T4 ran on 2026-11-10 with the owner present, on VS Code Insiders 1.146.0-insider
 ## Out of scope
 
 - Per-project activation (see Q1).
-- Changes to the `preToolUse` hook or the skill start.
+- Changes to PR 576's agent-scoped deny hook, or to the tools the conductor agent holds.
 - The Copilot Chat extension's own agent mode, which has no override since VS Code 1.144.
 - Copilot CLI, and remote or SSH VS Code sessions.
 - `toolDescriptions` overrides.

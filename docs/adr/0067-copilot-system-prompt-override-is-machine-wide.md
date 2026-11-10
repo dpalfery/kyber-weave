@@ -29,9 +29,10 @@ The results are in the [runbook](../kyber-squad/copilot-prompt-runbook.md#live-v
 
 GitHub Copilot's top-level chat agent in VS Code starts from a default system prompt of about
 22,000 characters, larger with host additions. That prompt pushes the top-level agent to do the
-work itself rather than route it to Kyber-Weave's conductor. Kyber-Weave already has two guards
-for this: a `preToolUse` hook that blocks a rogue top-level agent, and starting work from a skill.
-Neither changes the prompt.
+work itself rather than route it to Kyber-Weave's conductor. Kyber-Weave's guard for this is an
+agent-scoped deny hook that PR 576 adds, recorded as "The Copilot conductor holds tools a hook denies
+it". The conductor is a custom agent the person selects in the agent picker. Neither the guard nor
+the agent selection changes the prompt.
 
 VS Code has an internal user setting, `chat.agentHost.copilot.modelCapabilityOverrides`. A `*`
 entry in it with a `promptOverrideFile` replaces the top-level system prompt. The facts that
@@ -90,14 +91,14 @@ written. A `*` entry that names another file is refused and never overwritten. D
 - The setting is labelled experimental, and its predecessor was removed in VS Code 1.144. VS Code
   may change or remove it. Doctor reports the silent fallback, and each VS Code update needs a
   retest. That retest is documented in the Kyber-Squad onboarding guide.
-- Routing is an instruction to the model, and a model can ignore it. The `preToolUse` hook and the
-  skill start therefore stay as they are.
+- Routing is an instruction to the model, and a model can ignore it. The agent-scoped deny hook from
+  PR 576 therefore stays in place, and the prompt coexists with it. The prompt does not replace it.
 - HydraFusion Cascade coverage is not established. The live check ran Auto sessions that stayed on the
   balance tier and never engaged Cascade, so it is unknown whether Cascade's repair phase carries the
   custom prompt. It stays a stated limit.
-- The released Kyber-Squad installs the conductor as an agent only, so the prompt's conductor skill
-  is not present until the skill-start change (PR 579) ships. The model dispatches the conductor agent
-  in the meantime.
+- The conductor is an agent the person selects, not a skill. Without it selected, the model offered
+  to dispatch the conductor agent itself. The prompt now asks the person to switch to the conductor
+  agent in the agent picker for non-trivial work, instead of starting it.
 - The state is two files with no receipt. Deleting the prompt file by hand without removing the
   `*` entry leaves VS Code pointing at a missing file, which falls back silently to Copilot's default
   prompt. Doctor is the only detector.

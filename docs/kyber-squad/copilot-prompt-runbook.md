@@ -51,10 +51,12 @@ prompt for the throwaway profile was denied, and sign-in still worked.
   never engaged the Fusion tier, so no `session.fusion_resolved` event appeared. Cascade coverage
   is still an open limit, and no statement is made about the `repair` phase.
 
-**Known interaction.** The released Kyber-Squad (v0.1.8-rc.24) installs the conductor as an agent
-only, not as a skill. The prompt's "load the `conductor` skill" instruction therefore has nothing to
-load until the skill-start change (PR 579) ships. The model fell back to dispatching the conductor
-agent. This is an interaction with the released package, not a defect of this change.
+**Known interaction.** The conductor is a custom agent the person selects in the agent picker, not a
+skill. In the live check, without the conductor selected, the model offered to dispatch the
+conductor agent itself. The prompt now asks the person to switch to the conductor agent for
+non-trivial work in a Kyber-Weave repository, instead of starting it. The agent-scoped deny hook
+from PR 576, recorded as "The Copilot conductor holds tools a hook denies it", guards the conductor
+beside the prompt.
 
 ## Doctor checks
 
@@ -119,11 +121,11 @@ accept a file VS Code rejects. The log check is the authority on real machines.
   including under Auto.
 - **Worker agents keep Copilot's prompt.** Only the top-level chat agent is replaced.
 - **Routing is an instruction.** The model can ignore the conductor branch of the prompt. The
-  `preToolUse` hook and the skill start stay in place to catch that.
+  agent-scoped deny hook from PR 576 stays in place beside the prompt to catch that.
 - **HydraFusion Cascade coverage is not established.** The live check did not observe Cascade, so
   whether its `repair` phase carries the custom prompt is unknown. See the live verification status above.
-- **Conductor skill not yet shipped.** Until the skill-start change ships, the prompt's conductor
-  skill has nothing to load in the released package, and the model dispatches the conductor agent.
+- **The conductor must be selected.** The conductor is an agent the person selects in the agent
+  picker. Without it selected, the prompt asks the person to switch rather than starting it.
 - **Enterprise policy may block the setting.** This was not checked.
 - **Out of scope.** Copilot CLI, remote and SSH VS Code sessions, the Copilot Chat extension's own
   agent mode, and `toolDescriptions` overrides.

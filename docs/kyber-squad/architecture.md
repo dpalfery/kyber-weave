@@ -2132,14 +2132,18 @@ Uninstall removes the settings entries first and deletes the prompt file second,
 left pointing at a file that was already removed. A refusal in any file stops the whole uninstall
 before anything is written, so the prompt file is never removed while a setting still depends on it.
 
-### Coexistence with the hook and the skill start
+### Coexistence with the agent-scoped guard
 
 The prompt is instruction-only. It changes what the top-level agent is told, not what it may call.
-So the Kyber-Weave guards that already exist stay in place:
+The guard that stops a conductor from doing work it should route is PR 576's agent-scoped deny
+hook, recorded in the decision "The Copilot conductor holds tools a hook denies it". That guard
+stays in place beside the prompt:
 
-- The `preToolUse` hook, when deployed, still blocks a top-level agent that does work it should
-  route to a worker.
-- The skill start is unchanged, including its tool filter.
+- Copilot keeps the conductor, bug-crusher and product-owner as custom agents with full tools. The
+  agent-scoped deny hook (`kyber-weave-arbiter guard`) denies the tools each one must not use.
+- The conductor is an agent the person selects in the agent picker. It is not a skill, and the
+  prompt does not start it. Without it selected, the model offered to dispatch the conductor agent
+  itself; the prompt now asks the person to switch to the conductor agent for non-trivial work.
 - Workers dispatched through `task` keep Copilot's own prompt, because only the top-level agent's
   prompt is replaced.
 
