@@ -301,7 +301,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         // Concrete lowering snapshots
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
         AssertPermissions(
             result,
             "architect",
@@ -316,7 +316,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["glob"] = "allow",
                 ["list"] = "allow",
                 ["edit"] = "allow",
-                ["bash"] = "deny",
+                ["bash"] = "allow",
                 ["webfetch"] = "allow",
                 ["websearch"] = "allow",
                 ["external_directory"] = "deny",

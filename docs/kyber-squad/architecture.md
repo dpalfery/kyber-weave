@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-09
 status: current
 decided-by:
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
@@ -248,27 +248,31 @@ entitlement rule in §8, so which servers an agent can call is a rendering contr
 lattice decision — and a grant that reaches past a profile's own decision is recorded as an
 accepted widening where it is made, not folded into the taxonomy.
 
-### Architect documentation gates through MCP
+### Architect shell and documentation gates
 
-The shared `architect` capability profile holds `process.execute: deny` on every target — not
-`allow`. `Deny` withholds the shell with no prompt; it is the narrowest execute setting in the
-lattice above. That grant is not how the architect satisfies its `PLAN_READY` documentation checks.
+The shared `architect` capability profile holds `process.execute: allow` on every target
+(changed 2026-11-09; it was `deny`). The shell exists because the MCP servers stay bound to the
+canonical checkout and cannot see a plan written into a run's worktree. In the worktree the
+architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
+`codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
+`filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
+body enumerates the only commands it may run and forbids edits to code, tests, configuration and
+pipelines, and the Arbiter still classifies the role as planning-only.
 
-After plan writes, the architect obtains **schema conformance** and **entity drift** by
-calling the read-only MCP tools `docs_validate_governed_document_schema` and
-`docs_detect_drift_between_documents_and_code` on the `kw-docs` documentation server
-bound to this checkout ([MCP runbook](../docgraph/mcp-runbook.md)). The
-tools run the same gates as `kyber-weave docs validate` and `kyber-weave docs drift` against
-the server's resolved root; they are not a shell grant, a new capability in the lattice, an
-argv allow-list, or a Cursor read-only exception. Any client of that server may call them;
-using them does not widen `process.execute`.
+This is an accepted widening with residual risk. The lattice has no command or path scoping, so
+with `filesystem.write` and `network.read` allowed beside it, nothing but the agent body stops
+the shell from building, installing, fetching or writing outside the plan, spec and todo
+directories. The compensating controls are the body's command list, the Arbiter classification,
+and code review of the resulting diff; none is enforced by the lattice.
 
-While the plan remains in the active plans folder, the architect leaves `mergeReady` false on
-`docs_validate_governed_document_schema` so open-work rules such as `KW-DOC-LIFECYCLE-003` do not fire. It compares
-the provenance `root=` to this checkout before trusting a pass. Target-scoped profiles such
-as `architect-devin` and `architect-copilot` are unchanged: Devin still resolves
-`architect-devin` for file creation on that target, and Copilot still resolves
-`architect-copilot` where the shared profile withholds execution without granting a shell.
+In the canonical checkout the architect may equally call the read-only MCP tools
+`docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the
+`kw-docs` server ([MCP runbook](../docgraph/mcp-runbook.md)); they run the same gates against the
+server's resolved root. It leaves
+`mergeReady` false while the plan is in the active plans folder so open-work rules such as
+`KW-DOC-LIFECYCLE-003` do not fire. It trusts a pass only when the response `rev=` and `branch=` equal the packet's `RUN_BASE` and `RUN_BRANCH`; `repo=` (the git directory) must equal the architect's own `git rev-parse --git-common-dir`, which rejects another repository such as a fork; it cannot tell worktrees apart, which is why `rev=` and `branch=` are checked too. With no shell the comparison cannot run and only conductor-supplied `DOCS_CHECKS` are accepted. With a shell and a missing or mismatched result it runs the CLI gates in the checkout holding the plan. If the runtime withholds the shell anyway, the architect returns
+`STATUS: BLOCKED` ("server root differs: run the docs checks in the worktree") and the conductor
+runs the CLI gates. `architect-devin` and `architect-copilot` now match the shared profile.
 
 ---
 
