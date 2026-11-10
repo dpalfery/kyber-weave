@@ -196,6 +196,7 @@ public static class SquadHookJsonBlock
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(preToolUse);
         ArgumentNullException.ThrowIfNull(postToolUse);
+        RefuseForeignSubagentStop(format, subagentStop);
 
         string? existing = File.Exists(filePath) ? File.ReadAllText(filePath) : null;
         string content;
@@ -414,6 +415,15 @@ public static class SquadHookJsonBlock
         return false;
     }
 
+    private static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
+    {
+        if (format != SquadHookBlockFormat.Factory && subagentStop is { Count: > 0 })
+        {
+            throw new InvalidOperationException(
+                $"Only the Factory hook file holds SubagentStop entries; '{Harness(format)}' does not.");
+        }
+    }
+
     /// <summary>
     /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
     /// touching the disk: the single implementation behind both <see cref="SpliceFile"/> and
@@ -434,12 +444,8 @@ public static class SquadHookJsonBlock
         IReadOnlyList<JsonNode> postToolUse,
         IReadOnlyList<JsonNode>? subagentStop = null)
     {
+        RefuseForeignSubagentStop(format, subagentStop);
         IReadOnlyList<JsonNode> stop = subagentStop ?? [];
-        if (format != SquadHookBlockFormat.Factory && stop.Count > 0)
-        {
-            throw new InvalidOperationException(
-                $"Only the Factory hook file holds SubagentStop entries; '{Harness(format)}' does not.");
-        }
 
         JsonObject root = ParseOrMinimal(format, existing);
         List<SquadHookOwnedEntry> owned = [];

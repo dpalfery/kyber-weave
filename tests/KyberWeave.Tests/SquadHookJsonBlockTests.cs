@@ -55,6 +55,20 @@ public sealed class SquadHookJsonBlockTests
                 [CursorEntry("kyber-weave-arbiter hook --harness cursor", "Edit", 10, false)])
             : ([ManagedGroup(format, "pre-matcher")], [ManagedGroup(format, "post-matcher")]);
 
+    [Fact]
+    public void SpliceFile_SubagentStopForAnotherFormat_NamesTheCallerBug()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "kw-hook-" + Guid.NewGuid().ToString("N") + ".json");
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Cursor);
+
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
+            () => SquadHookJsonBlock.SpliceFile(SquadHookBlockFormat.Cursor, path, pre, post, pre));
+
+        Assert.Contains("Only the Factory", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("does not parse", failure.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(path));
+    }
+
     private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) UserEntries(SquadHookBlockFormat format) =>
         format == SquadHookBlockFormat.Cursor
             ? ([CursorEntry("user-linter --fast", "Edit", 3, false)],
