@@ -165,14 +165,67 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     }
 
     [Fact]
-    public async Task AbsoluteAndRelativePlanPaths_NameTheSamePlan()
+    public async Task AnAbsolutePlanPath_IsNoPlanHeader_SoItsReportCountsForNoPlan()
     {
         await Dispatch("test-dev", Prompt("T1", "/repo/" + Plan));
         await Return("test-dev", Prompt("T1", "/repo/" + Plan), PassReport);
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("ready", Answer("KW-ARB-READY-001"));
+        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+    }
+
+    [Fact]
+    public async Task APlanSharingOnlyAPathSuffix_IsAnotherPlan()
+    {
+        await Dispatch("test-dev", Prompt("T1", "plans/x.md"));
+        await Return("test-dev", Prompt("T1", "plans/x.md"), PassReport);
+
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+    }
+
+    [Fact]
+    public async Task AnAttestationNamingNoPlan_CountsForNoPlan()
+    {
+        InFlightLedger ledger = new(ArbiterDirectory);
+        DateTimeOffset at = DateTimeOffset.UtcNow;
+        await ledger.AppendAsync(
+            new ArbiterLedgerEvent(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "factory", "s1", ArbiterLedgerPhases.Post)
+            {
+                Returns = new ArbiterReturnMarkers(Attested: ["T1=complete"]),
+            });
+
+        Assert.Empty(ledger.CompletedTasks(Plan));
+        Assert.Equal(["T1"], ledger.CompletedTasks());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("none")]
+    [InlineData("None")]
+    [InlineData("n/a")]
+    [InlineData("N/A \u2014 docs only")]
+    public async Task ReportWithoutEvidence_IsNotRedEvidence(string value)
+    {
+        await Dispatch("test-dev", Prompt("T1"));
+        await Return("test-dev", Prompt("T1"), $"STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: {value}\n");
+
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+    }
+
+    [Fact]
+    public async Task EvidenceThatStartsWithNone_IsStillEvidence()
+    {
+        await Dispatch("test-dev", Prompt("T1"));
+        await Return("test-dev", Prompt("T1"), "STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: none of the 6 tests pass\n");
+
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
@@ -225,6 +278,17 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [InlineData("N/A", "Not applicable")]
     [InlineData("Not applicable", "Not applicable")]
     [InlineData("none — read-only check", "Not applicable")]
+    [InlineData("\u2014", "Not applicable")]
+    [InlineData("-", "Not applicable")]
+    [InlineData("N/A (docs)", "Not applicable")]
+    [InlineData("None \u2014 documentation task", "Not applicable")]
+    [InlineData("Not a test task \u2014 read-only verification", "Not applicable")]
+    [InlineData("No-test task: closeout", "Not applicable")]
+    [InlineData("No RED.", "Not applicable")]
+    [InlineData("No product RED.", "Not applicable")]
+    [InlineData("not required", "Not applicable")]
+    [InlineData("none of the listed tests pass", "none of the listed tests pass")]
+    [InlineData("Not a separate RED \u2014 T1 is the evidence", "Not a separate RED \u2014 T1 is the evidence")]
     [InlineData("Test fails with X", "Test fails with X")]
     public void RedEvidenceRequirement_ReadsEveryNoTestSpelling(string cell, string expected)
     {
@@ -264,6 +328,12 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         Assert.Equal("PASS", markers?.TaskReview);
         Assert.Equal("6 failed", markers?.RedEvidence);
         Assert.Equal("PASS", markers?.PlannerStatus);
+    }
+
+    [Fact]
+    public void Markers_BlankRedEvidenceIsAbsent()
+    {
+        Assert.Null(ReturnMarkerParser.Parse("RED_EVIDENCE:   \n", readAttestations: false));
     }
 
     [Fact]

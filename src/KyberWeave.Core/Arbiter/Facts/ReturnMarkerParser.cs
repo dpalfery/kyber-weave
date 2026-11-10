@@ -29,7 +29,7 @@ internal static partial class ReturnMarkerParser
 
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
-        string? red = LastGroup(RedEvidenceRegex(), text);
+        string? red = LastGroup(RedEvidenceRegex(), text) is { Length: > 0 } evidence ? evidence : null;
         string? status = LastGroup(StatusRegex(), text);
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
         return review is null && red is null && status is null && attested is null

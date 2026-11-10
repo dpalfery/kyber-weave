@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -74,7 +74,7 @@ public sealed record PlanTask(
 /// <param name="OutOfScope">Backticked paths under the <c>Out of scope</c> headings, taken by the path rule.</param>
 /// <param name="ContractRows">The rows of the Test or verification contract table, keyed by their task-id cell.</param>
 /// <param name="Diagnostics">Parse findings: KW-ARB-PARSE-001 for unknown dependency tokens, KW-ARB-PARSE-002 for tasks that list no files.</param>
-public sealed partial record PlanDocument(
+public sealed record PlanDocument(
     string? Status,
     string DevelopmentMode,
     bool HasTasks,
@@ -107,11 +107,8 @@ public sealed partial record PlanDocument(
             return null;
         }
 
-        return NoRedEvidenceRegex().IsMatch(cell) ? "Not applicable" : cell;
+        return NoRedEvidence.IsStatedBy(cell) ? "Not applicable" : cell;
     }
-
-    [GeneratedRegex(@"^(n/?a|none|not[ -]applicable)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex NoRedEvidenceRegex();
 
     /// <summary>The parse findings raised while reading the document.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; init; } = Diagnostics ?? [];

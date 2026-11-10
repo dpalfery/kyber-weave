@@ -346,7 +346,7 @@ public sealed class InFlightLedger
 
     /// <summary>
     /// The tasks with RED evidence: a returned <c>test-dev</c> output whose
-    /// <c>RED_EVIDENCE:</c> value is anything but <c>none</c>, or an
+    /// <c>RED_EVIDENCE:</c> value states evidence, or an
     /// attestation <c>&lt;task&gt;=red</c> (D31).
     /// </summary>
     /// <param name="planFile">When set, only returns for this plan count.</param>
@@ -386,7 +386,7 @@ public sealed class InFlightLedger
                 headers = pre.Headers;
             }
 
-            if (planFile is null || headers?.PlanFile is null || SamePlan(headers.PlanFile, planFile))
+            if (planFile is null || (headers?.PlanFile is { } named && SamePlan(named, planFile)))
             {
                 returns.Add((post, headers?.Task));
             }
@@ -395,15 +395,8 @@ public sealed class InFlightLedger
         return returns;
     }
 
-    /// <summary>A plan may be named repository-relative in one dispatch and absolute in another.</summary>
-    private static bool SamePlan(string left, string right)
-    {
-        string a = NormalizePlan(left);
-        string b = NormalizePlan(right);
-        return string.Equals(a, b, StringComparison.Ordinal)
-            || a.EndsWith("/" + b, StringComparison.Ordinal)
-            || b.EndsWith("/" + a, StringComparison.Ordinal);
-    }
+    private static bool SamePlan(string left, string right) =>
+        string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
 
     private static string NormalizePlan(string path)
     {
@@ -429,7 +422,7 @@ public sealed class InFlightLedger
         string? red = e.Returns?.RedEvidence;
         if (task is not null
             && red is not null
-            && !string.Equals(red.Trim(), "none", StringComparison.Ordinal))
+            && !NoRedEvidence.IsStatedBy(red))
         {
             tasks.Add(task);
         }
