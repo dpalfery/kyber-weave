@@ -4,7 +4,7 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "command -v kyber-weave >/dev/null 2>&1 && root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" && [ -n \"$root\" ] && { (cd \"$root\" && kyber-weave doctor --ensure . >/dev/null 2>&1 &); }; exit 0",
+        "bash": "command -v kyber-weave >/dev/null 2>&1 && root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" && [ -n \"$root\" ] && { (cd \"$root\" && kyber-weave doctor --ensure . >/dev/null 2>&1 </dev/null &); }; exit 0",
         "timeoutSec": 10
       }
     ]

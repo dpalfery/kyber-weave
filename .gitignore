@@ -28,8 +28,9 @@ test-results/
 .dotnet-home/
 
 # APM deploy target. Skills are authored in .apm/skills/ and `apm install` copies
-# them to .agents/skills/, so that is generated output — including skills from other packages.
-.agents/skills/
+# them here, so this is generated output — including skills from other packages.
+.agents/*
+!.agents/hooks.json
 apm_modules/
 # Cursor MCP secrets (keep .cursor/mcp.json tracked)
 .cursor/**/*.env

@@ -12,17 +12,17 @@ public sealed class SessionStartIndexHookTests
 {
     private const string Ensure = "kyber-weave doctor --ensure";
 
-    /// <summary>Hook file, the JSON property that names its command, and the command's event key.</summary>
-    public static TheoryData<string, string> JsonHooks => new()
+    /// <summary>Hook file, the JSON property that holds its command, and the session-start event key it must sit under.</summary>
+    public static TheoryData<string, string, string> JsonHooks => new()
     {
-        { ".claude/settings.json", "command" },
-        { ".factory/hooks.json", "command" },
-        { ".codex/hooks.json", "command" },
-        { ".commandcode/settings.json", "command" },
-        { ".devin/hooks.v1.json", "command" },
-        { ".agents/hooks.json", "command" },
-        { ".cursor/hooks.json", "command" },
-        { ".github/hooks/codegraph-index.json", "bash" },
+        { ".claude/settings.json", "command", "SessionStart" },
+        { ".factory/hooks.json", "command", "SessionStart" },
+        { ".codex/hooks.json", "command", "SessionStart" },
+        { ".commandcode/settings.json", "command", "SessionStart" },
+        { ".devin/hooks.v1.json", "command", "SessionStart" },
+        { ".agents/hooks.json", "command", "SessionStart" },
+        { ".cursor/hooks.json", "command", "sessionStart" },
+        { ".github/hooks/codegraph-index.json", "bash", "sessionStart" },
     };
 
     public static TheoryData<string> Shims => new()
@@ -35,12 +35,12 @@ public sealed class SessionStartIndexHookTests
     /// <summary>A session-start hook that does not run the ensure command leaves the index unbuilt.</summary>
     [Theory]
     [MemberData(nameof(JsonHooks))]
-    public void HookRunsDoctorEnsureInTheBackgroundAndAlwaysExitsZero(string file, string property)
+    public void HookRunsDoctorEnsureInTheBackgroundAndAlwaysExitsZero(string file, string property, string eventKey)
     {
-        string command = FindCommand(file, property);
+        string command = FindCommand(file, property, eventKey);
 
         Assert.Contains(Ensure, command, StringComparison.Ordinal);
-        Assert.Contains(">/dev/null 2>&1 &", command, StringComparison.Ordinal);
+        Assert.Contains(">/dev/null 2>&1 </dev/null &", command, StringComparison.Ordinal);
         Assert.EndsWith("exit 0", command, StringComparison.Ordinal);
         Assert.Contains("command -v kyber-weave", command, StringComparison.Ordinal);
         Assert.DoesNotContain("$(git rev-parse --show-toplevel)", command, StringComparison.Ordinal);
@@ -49,10 +49,10 @@ public sealed class SessionStartIndexHookTests
     /// <summary>A hook with a long timeout would delay session start while the index builds.</summary>
     [Theory]
     [MemberData(nameof(JsonHooks))]
-    public void HookDeclaresNoLongTimeout(string file, string property)
+    public void HookDeclaresNoLongTimeout(string file, string property, string eventKey)
     {
         using JsonDocument doc = Load(file);
-        JsonElement entry = FindEntry(doc.RootElement, property);
+        JsonElement entry = FindEntry(doc.RootElement, property, eventKey);
         foreach (string name in new[] { "timeout", "timeoutSec" })
         {
             if (entry.TryGetProperty(name, out JsonElement t))
@@ -78,14 +78,26 @@ public sealed class SessionStartIndexHookTests
     private static JsonDocument Load(string file) =>
         JsonDocument.Parse(File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, file)));
 
-    private static string FindCommand(string file, string property)
+    private static string FindCommand(string file, string property, string eventKey)
     {
         using JsonDocument doc = Load(file);
-        return FindEntry(doc.RootElement, property).GetProperty(property).GetString()!;
+        string? command = FindEntry(doc.RootElement, property, eventKey).GetProperty(property).GetString();
+        return command ?? throw new InvalidOperationException($"{file}: '{property}' is not a string.");
     }
 
-    private static JsonElement FindEntry(JsonElement root, string property)
+    private static JsonElement FindEntry(JsonElement root, string property, string eventKey)
     {
+        JsonElement scope = default;
+        foreach (JsonProperty e in Walk(root))
+        {
+            if (e.Name == eventKey)
+                scope = e.Value;
+        }
+
+        if (scope.ValueKind == JsonValueKind.Undefined)
+            throw new InvalidOperationException($"No '{eventKey}' event key found.");
+        root = scope;
+
         foreach (JsonProperty p in Walk(root))
         {
             if (p.Name == property && p.Value.ValueKind == JsonValueKind.String
