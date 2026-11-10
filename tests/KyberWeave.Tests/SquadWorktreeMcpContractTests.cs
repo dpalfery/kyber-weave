@@ -156,8 +156,8 @@ public sealed class SquadWorktreeMcpContractTests
     /// <remarks>
     ///     D24/D25: the MCP servers stay bound to the canonical checkout on purpose, so their answers
     ///     describe that tree. A role with a shell asks its own worktree instead; a role without one is given
-    ///     the worktree's absolute path in its packet and reads it directly. This is the rule that keeps a
-    ///     worker from believing a branch it is not on.
+    ///     the worktree's absolute path in its packet and passes it as <c>codegraph_explore</c>'s
+    ///     <c>projectPath</c>. This is the rule that keeps a worker from believing a branch it is not on.
     /// </remarks>
     [Fact]
     public void ExecutionContractSendsShellRolesToTheWorktreeIndex()
@@ -166,6 +166,35 @@ public sealed class SquadWorktreeMcpContractTests
 
         Assert.Contains("codegraph explore", content, StringComparison.Ordinal);
         Assert.Matches(@"(?i)\bcanonical\b[^\r\n]*(?:bound|checkout|path)\b", content);
+    }
+
+    /// <summary>
+    ///     Shell-less roles ask the worktree's own index through <c>projectPath</c>, and no shipped role or
+    ///     skill tells them to read the worktree directly instead.
+    /// </summary>
+    /// <remarks>
+    ///     ADR 0061 decision 7, amended 2026-11-10: the old rule sent shell-less workers to raw file reads
+    ///     because the MCP server was bound to the canonical checkout, and agents read it as "do not use
+    ///     CodeGraph in a worktree". <c>codegraph_explore</c> takes a <c>projectPath</c> that answers from
+    ///     the nearest index at or above it, so the worktree's own index is reachable without a shell.
+    /// </remarks>
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData("products/kyber-squad/agents/review-lens.md")]
+    [InlineData("products/kyber-squad/agents/review-triage.md")]
+    [InlineData("products/kyber-squad/agents/azure-reader.md")]
+    [InlineData("products/kyber-squad/agents/research-agent.md")]
+    [InlineData("products/kyber-squad/agents/product-owner.md")]
+    [InlineData("products/kyber-squad/skills/product-owner/SKILL.md")]
+    [InlineData("products/kyber-squad/agents/architect.md")]
+    public void ShellLessRolesAskTheWorktreeIndexThroughProjectPath(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        Assert.Contains("`projectPath`", content, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?i)\breads? it directly\b", content);
+        Assert.DoesNotMatch(@"(?i)read that path directly and count", content);
     }
 
     /// <summary>

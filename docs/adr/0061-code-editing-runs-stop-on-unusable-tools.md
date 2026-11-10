@@ -87,8 +87,11 @@ reason to expect it to try.
    `.codegraph/` into a worktree stands.
 7. **The MCP servers stay bound to the canonical checkout, and the per-role rules carry the
    consequence.** A worker with a shell asks its own index with `codegraph explore` in that shell;
-   a worker with no shell is given the worktree's absolute path in its packet and reads it
-   directly; the architect returns `BLOCKED` naming "server root differs" so the two CLI docs gates
+   a worker with no shell is given the worktree's absolute path in its packet and passes it as
+   `codegraph_explore`'s `projectPath`, which answers from the nearest `.codegraph/` index at or
+   above that path — the worktree's own, once `doctor --ensure` has run there. It reads files
+   directly only when that call fails, and counts each such read with the reason. The servers'
+   default root stays the canonical checkout; `projectPath` overrides it per call. The architect returns `BLOCKED` naming "server root differs" so the two CLI docs gates
    run in the worktree before it plans. Every docs response gains `branch=` and `repo=` in its
    provenance line, and the comparison rule becomes **compare `repo=`, not `root=`**: a different
    `root=` with the same `repo=` is another worktree of this repository, and only a different
@@ -138,6 +141,11 @@ reason to expect it to try.
   `SquadCanonicalContentTests` pins the stop wording rather than the "warn and continue" wording it
   used to pin. The reversal is the owner's decision, dated 2026-11-07, and a future reader finding
   the old sentence is reading text that no longer ships.
+- Decision 7 first told a shell-less worker to read the worktree directly and skip CodeGraph,
+  because the server was bound to the canonical checkout. `codegraph_explore` takes a
+  `projectPath`, and a call naming a worktree was measured answering from that worktree's own
+  index (CodeGraph 1.5.0, Claude Code). The owner amended decision 7 on 2026-11-10;
+  `SquadWorktreeMcpContractTests` rejects the old "reads it directly" wording.
 - Work still open: [issue 221](https://github.com/dpalfery/kyber-weave/issues/221), a read-only
   fact-finder for a shell-less architect, stands. A worktree created after the docs server starts
   is outside that server's reach.
