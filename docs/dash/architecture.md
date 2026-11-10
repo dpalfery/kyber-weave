@@ -880,21 +880,29 @@ derivation calls — and it **splits by what each source can measure**; it never
 | token totals (input, output, cache read, cache creation) and the availability that gates them | the **file rows** | the file source is the only source of counters, and its counters are a session-level total split evenly across assistant calls — a session fact, never a turn fact |
 | cost | the turn records **and** the counter records | the file row carries the only priced cost — the plugin rows carry none — and the two record sets are disjoint, so pricing the union prices nothing twice |
 
-The split is **total**: every Factory record lands in exactly one of three buckets, and
-`splitDroidSessionRecords` is the one place that assigns them.
+The split is **total over two buckets**: every Factory record lands in exactly one of them, the
+**turn records** or the **counter records**, and `splitDroidSessionRecords` is the one place that
+assigns them. The two buckets are disjoint, so nothing is priced twice.
 
 - **Turn records** — the plugin's records, and any Factory record of neither source, so a record
   is never dropped.
 - **Counter records** — the file source's records, identified by the `codeburn/` source prefix.
-- **File tool records** — the counter records that are tool invocations. They also stay in the
-  counter records; tool records carry no tokens, so the token and cost sums do not change.
+
+The **file tool records** are not a third bucket. They are a view into the counter records: the
+file source's `tool.invoke` records, returned alongside the split so the session derivation can
+decide the tool-call source (the transcript's tool records when there are any, otherwise the
+plugin's). The session derivation excludes `tool.invoke` records from the counter records it uses
+for duration, tokens, cost, models and context. Tool records carry no tokens or cost, and their
+time lies inside the parent llm call, so only the tool count reads them.
 
 The file row in a paired session is a **counter carrier**: it contributes its counters and its
 cost, and, for a session whose transcript has tool calls, its tool invocations and its duration.
 It is not a turn, not a timeline entry and not a request root. A paired session's tool source is
 one source only: the file tool records when there are any, otherwise the plugin's tool records.
-Its duration is the sum of the file records' durations, which the active-duration rule in
-[the Factory file source](telemetry-inventory.md#what-the-file-source-measures) defines.
+Its duration is the sum of the file source's llm (non-tool) counter records' active durations,
+which the active-duration rule in
+[the Factory file source](telemetry-inventory.md#what-the-file-source-measures) defines. Tool
+records are excluded, because their time already lies inside those durations.
 
 Two more figures follow the same split. The **cost** is one figure over the union of the turn
 records and the counter records — disjoint sets, so nothing is priced twice — and the cost-basis

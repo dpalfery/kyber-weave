@@ -92,7 +92,7 @@ parser contract is 2, so stored sessions re-synthesise. No plugin or hook change
 Amended 2026-11-09 (the double-count rule, which answers this record's requirement for any future
 Factory collection source): **one source per session owns tool calls.** The file transcript owns
 them when it has any tool record for the session; otherwise the plugin's tool records count. A
-paired session's duration is the sum of the file source's durations. Turns, prompts and the prompt
+paired session's duration is the sum of the file source's llm-call active durations, with its tool records excluded because their time already lies inside those durations. Turns, prompts and the prompt
 consent are unchanged.
 
 ## Context
