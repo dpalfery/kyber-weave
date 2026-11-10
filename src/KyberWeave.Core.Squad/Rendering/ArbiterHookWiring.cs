@@ -233,6 +233,20 @@ public static class ArbiterHookWiring
         return AppendScope($"{CommandName} hook --harness {harnessToken}", scope);
     }
 
+    /// <summary>Builds the Copilot conductor guard command line.</summary>
+    /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="allowedMcpServer"/> is not a plain token.</exception>
+    public static string GuardCommandLine(string? allowedMcpServer = null)
+    {
+        if (allowedMcpServer is null)
+        {
+            return $"{CommandName} guard";
+        }
+
+        ValidateHarnessToken(allowedMcpServer);
+        return $"{CommandName} guard --allow-mcp {allowedMcpServer}";
+    }
+
     private static string AppendScope(string commandLine, SquadDeploymentScope scope)
     {
         return scope == SquadDeploymentScope.Global

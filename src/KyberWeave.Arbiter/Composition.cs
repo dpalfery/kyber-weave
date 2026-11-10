@@ -95,8 +95,14 @@ public static class Composition
             }
         }
 
+        if (args.Length > 0 && string.Equals(args[0], "guard", StringComparison.Ordinal))
+        {
+            string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+            return ConductorGuard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));
+        }
+
         await stderr.WriteLineAsync(
-            "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] | kyber-weave-arbiter --version.")
+            "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] | kyber-weave-arbiter guard [--allow-mcp <server>] | kyber-weave-arbiter --version.")
             .ConfigureAwait(false);
         return 2;
     }

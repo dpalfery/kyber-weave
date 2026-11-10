@@ -89,6 +89,12 @@ The Kilo plugin shim resolves and verifies the repo root from its own plugin loc
 into both the spawn `cwd` and the envelope `cwd`, and blocks clearly when no root resolves —
 never spawning with a possibly-wrong cwd.
 
+## The Copilot conductor guard
+
+When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
+
+A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard needs no configuration, and `arbiter.enabled: false` in a repository does not turn it off.
+
 ## Trust steps
 
 A hook that never runs enforces nothing, and the audit cannot see dispatches no hook
