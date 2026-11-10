@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
+| Plan | Status | Summary |
+|---|---|---|
+| [Arbiter planner refusal reasons](2026-11-09-arbiter-planner-refusal-reasons.md) | Ready | Stops the Arbiter refusing valid `architect` dispatches and makes each refusal name its real cause. |
 
 ## Archived Plans
 
