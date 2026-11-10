@@ -256,15 +256,21 @@ canonical checkout and cannot see a plan written into a run's worktree. In the w
 architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
 `codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
 `filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
-body forbids edits to code, tests, configuration and pipelines, and the Arbiter still classifies
-the role as planning-only. Only the tool list gained the shell.
+body enumerates the only commands it may run and forbids edits to code, tests, configuration and
+pipelines, and the Arbiter still classifies the role as planning-only.
+
+This is an accepted widening with residual risk. The lattice has no command or path scoping, so
+with `filesystem.write` and `network.read` allowed beside it, nothing but the agent body stops
+the shell from building, installing, fetching or writing outside the plan, spec and todo
+directories. The compensating controls are the body's command list, the Arbiter classification,
+and code review of the resulting diff; none is enforced by the lattice.
 
 In the canonical checkout the architect may equally call the read-only MCP tools
 `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the
 `kw-docs` server ([MCP runbook](../docgraph/mcp-runbook.md)); they run the same gates against the
 server's resolved root. It compares the provenance `repo=` before trusting a pass, and leaves
 `mergeReady` false while the plan is in the active plans folder so open-work rules such as
-`KW-DOC-LIFECYCLE-003` do not fire. A harness that gives the architect no shell still returns
+`KW-DOC-LIFECYCLE-003` do not fire. It requires the response `rev=` and `branch=` to match the run, because `repo=` is shared by every worktree. If the runtime withholds the shell anyway, the architect returns
 `STATUS: BLOCKED` ("server root differs: run the docs checks in the worktree") and the conductor
 runs the CLI gates. `architect-devin` and `architect-copilot` now match the shared profile.
 

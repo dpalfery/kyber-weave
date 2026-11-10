@@ -27,12 +27,14 @@ profiles:
       filesystem.write: allow
       # The shell lets the architect work inside a run's worktree, where the MCP servers
       # (bound to the canonical checkout) cannot see its plan: it runs `kyber-weave docs
-      # validate . --merge-ready`, `kyber-weave docs drift .`, `codegraph explore "..."` and
-      # computes a plan's execution-digest. It is not permission to implement: writes stay
-      # instruction-scoped to the plan, spec and todo directories, and the Arbiter still
-      # classifies the role as planning-only. allow rather than ask because ask narrows to
-      # deny on Claude, Pi and ZCode. The architect-copilot and architect-devin envelopes
-      # below now match this decision.
+      # validate . --merge-ready`, `kyber-weave docs drift .` and `codegraph explore "..."`.
+      # ACCEPTED WIDENING: the lattice has no command or path scoping, so with filesystem.write
+      # and network.read allowed the shell could in principle build, install, fetch or write
+      # outside the plan, spec and todo directories. The compensating controls are the agent
+      # body's enumerated command list and write boundary, the Arbiter's planning-only
+      # classification of the role, and the code-review gates over the resulting diff; none is
+      # enforced by the lattice. allow rather than ask because ask narrows to deny on Claude,
+      # Pi and ZCode. The architect-copilot and architect-devin envelopes below equal this.
       process.execute: allow
       network.read: allow
       network.publish: deny
@@ -49,8 +51,7 @@ profiles:
   # This target-specific validation envelope exists only because Copilot represents the
   # imported Hotshot architect contract as an exact tool allow-list without an ask state.
   # Agents reference it through copilot-capability-profile; validation rejects assigning it
-  # as a shared capability-profile, so Claude, Cursor, Codex, and other targets retain the
-  # architect profile's process.execute: deny semantics.
+  # as a shared capability-profile. It now equals the shared architect profile.
   architect-copilot:
     target: copilot
     permissions:
@@ -63,8 +64,8 @@ profiles:
       delegate: allow
       decision.query: deny
   # Devin authoring envelope: Devin subagents run non-interactively without prompt
-  # capabilities, so the shared architect profile's process.execute: deny matches Devin's
-  # effective withholding. Devin CLI also has no
+  # capabilities, so the envelope states allow explicitly rather than relying on the shared
+  # profile (which also allows it now). Devin CLI also has no
   # standalone file creation tool (edit fails when the file does not exist, and apply_patch
   # requires agent.codex_tools). Granting process.execute: allow lets architect initialize
   # nonexistent plan files (via exec/touch) before editing and run

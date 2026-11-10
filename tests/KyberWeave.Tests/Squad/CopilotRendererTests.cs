@@ -74,7 +74,7 @@ public sealed class CopilotRendererTests
     /// </summary>
     [Theory]
     [InlineData("architect")]
-    public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
+    public void ArchitectCopilotMatchesSharedShellGrant(string agentName)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == agentName);

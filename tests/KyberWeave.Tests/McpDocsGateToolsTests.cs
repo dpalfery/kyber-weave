@@ -274,7 +274,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     }
 
     [Fact]
-    public void SharedArchitectProfileGrantsProcessExecuteForWorktreeGatesOnly()
+    public void SharedArchitectProfileGrantsProcessExecute()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadCapabilityProfile architect = source.CapabilityProfiles.Profiles["architect"];
@@ -282,9 +282,10 @@ public sealed class McpDocsGateToolsTests : IDisposable
         Assert.True(
             architect.Permissions.TryGetValue("process.execute", out SquadPermissionDecision decision),
             "The shared architect profile must declare process.execute.");
-        // The shell exists so the architect can run the CLI gates and the CodeGraph CLI in a
-        // worktree; it is not permission to implement, so writes stay instruction-scoped and
-        // the Arbiter keeps the role planning-only. ask would narrow to deny on some targets.
+        // The shell lets the architect run the CLI gates and the CodeGraph CLI in a worktree.
+        // The lattice cannot scope commands; the agent body's command list and the Arbiter
+        // classification (not pinned here) are the controls. ask would narrow to deny on
+        // some targets.
         Assert.Equal(SquadPermissionDecision.Allow, decision);
     }
 
