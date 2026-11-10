@@ -33,23 +33,47 @@ function turn(spanId: string, harness: string, timestamp: string): CanonicalReco
   }
 }
 
-describe('turn content for a session split across harnesses', () => {
-  it('serves the captured system prompt for the harness-qualified session id', async () => {
-    const store = new CanonStore(':memory:')
-    store.upsertMany([
-      turn('span-copilot', 'copilot', '2026-11-05T10:00:00.000Z'),
-      turn('span-cli', 'copilot-cli', '2026-11-05T10:01:00.000Z'),
-    ])
-    await buildSessions(store)
-    const split = store.sessionIdentities().shareOf('copilot:shared-key')
-    expect(split).toEqual({ key: 'shared-key', harness: 'copilot' })
+async function fixture(): Promise<{ store: CanonStore; bridge: KyberBridge }> {
+  const store = new CanonStore(':memory:')
+  store.upsertMany([
+    turn('span-copilot', 'copilot', '2026-11-05T10:00:00.000Z'),
+    turn('span-cli', 'copilot-cli', '2026-11-05T10:01:00.000Z'),
+  ])
+  await buildSessions(store)
+  return { store, bridge: new KyberBridge({ canonPath: ':memory:', store }) }
+}
 
-    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+describe('turn content for a session split across harnesses', () => {
+  it.each([
+    ['copilot:shared-key', 'span-copilot', 'span-cli'],
+    ['copilot-cli:shared-key', 'span-cli', 'span-copilot'],
+  ])('serves only its own share for %s', async (sessionId, own, sibling) => {
+    const { store, bridge } = await fixture()
     try {
-      const content = bridge.assembleTurnContent('copilot:shared-key', 0)
-      expect(content).not.toBeNull()
-      const system = content!.blocks.find((b) => b.key === 'system_prompt')
-      expect(system?.text).toContain('system prompt of span-copilot')
+      expect(store.sessionIdentities().shareOf(sessionId)).toBeDefined()
+      const system = bridge.assembleTurnContent(sessionId, 0)?.blocks.find((b) => b.key === 'system_prompt')
+      expect(system?.text).toContain(`system prompt of ${own}`)
+      expect(system?.text).not.toContain(sibling)
+      // The sibling harness's turn is not this share's second turn.
+      expect(bridge.assembleTurnContent(sessionId, 1)).toBeNull()
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('refuses a sibling harness span and keeps the share known only by its own records', async () => {
+    const { bridge } = await fixture()
+    try {
+      const priv = bridge as unknown as {
+        loadContentRecords(id: string, span?: string): unknown[]
+        loadSessionSystemPrompts(id: string): unknown[]
+        sessionKnown(id: string): boolean
+      }
+      expect(priv.loadContentRecords('copilot:shared-key', 'span-cli')).toEqual([])
+      expect(priv.loadContentRecords('copilot:shared-key', 'span-copilot')).toHaveLength(1)
+      expect(priv.loadContentRecords('copilot:shared-key')).toHaveLength(1)
+      expect(priv.loadSessionSystemPrompts('copilot:shared-key')).toEqual([])
+      expect(priv.sessionKnown('copilot:shared-key')).toBe(true)
     } finally {
       bridge.close()
     }

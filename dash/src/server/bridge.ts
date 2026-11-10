@@ -1635,9 +1635,10 @@ export class KyberBridge {
     sessionId: string,
     db: DatabaseSync | undefined,
   ): TurnResolutionPool | null {
-    sessionId = this.recordKeyOf(sessionId)
+    const scope = this.recordScopeOf(sessionId)
+    sessionId = scope.key
     if (this.store) {
-      const records = this.store.recordsForSession(sessionId)
+      const records = this.store.recordsForSession(sessionId).filter((r) => this.inScope(scope, r.harness))
       const turnRecords = records.filter((r) => r.op === 'llm.invoke')
       const pool = turnRecords.length > 0 ? turnRecords : records
       const entries = pool.map((r) => ({
@@ -1649,9 +1650,9 @@ export class KyberBridge {
     }
     if (this.hasTable(db, 'records')) {
       try {
-        const rows = db!
+        const rows = (db!
           .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
-          .all(sessionId) as Record<string, unknown>[]
+          .all(sessionId) as Record<string, unknown>[]).filter((r) => this.inScope(scope, r.harness))
         const turnRows = rows.filter((r) => r.op === 'llm.invoke')
         const pool = turnRows.length > 0 ? turnRows : rows
         // DB rows predate the descriptor shape: `index` may arrive as a
@@ -1785,7 +1786,8 @@ export class KyberBridge {
     excludeSpans?: string | Set<string>,
   ): Array<{ text: string; spanId?: string; timestamp?: string }> {
     if (!sessionId) return []
-    sessionId = this.recordKeyOf(sessionId)
+    const scope = this.recordScopeOf(sessionId)
+    sessionId = scope.key
     const isExcluded = (spanId: string): boolean => {
       if (excludeSpans === undefined) return false
       if (typeof excludeSpans === 'string') return spanId === excludeSpans
@@ -1793,7 +1795,7 @@ export class KyberBridge {
     }
     if (this.store) {
       return this.store
-        .systemPromptPartsForSession(sessionId, excludeSpans)
+        .systemPromptPartsForSession(sessionId, excludeSpans, scope.harness)
         .map(({ spanId, text, timestamp }) => (timestamp === undefined ? { text, spanId } : { text, spanId, timestamp }))
     }
     const db = this.getDb()
@@ -1801,12 +1803,12 @@ export class KyberBridge {
     try {
       const rows = db!
         .prepare(
-          'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+          'SELECT span_id, op, harness, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
-        .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+        .all(sessionId) as { span_id: unknown; op: unknown; harness: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
       const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
       for (const row of rows) {
-        if (row.op === 'llm.invoke') continue
+        if (row.op === 'llm.invoke' || !this.inScope(scope, row.harness)) continue
         const spanId = String(row.span_id)
         if (isExcluded(spanId)) continue
         const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
@@ -1868,7 +1870,10 @@ export class KyberBridge {
     if (ownDb !== sessionDb && this.sessionRowExists(ownDb, sessionId)) return true
     // Records without a derived session row still make the session real —
     // otherwise a span miss on an unbuilt session would 404 as "unknown".
-    if (this.store) return this.store.recordsForSession(this.recordKeyOf(sessionId)).length > 0
+    if (this.store) {
+      const scope = this.recordScopeOf(sessionId)
+      return this.store.recordsForSession(scope.key).some((r) => this.inScope(scope, r.harness))
+    }
     return this.loadContentRecordsFromDb(sessionId).length > 0
   }
 
@@ -1877,21 +1882,26 @@ export class KyberBridge {
    * just to return one band; `recordsForSession` otherwise.
    */
   private loadContentRecords(sessionId: string, spanId?: string): ContentSourceRecord[] {
-    sessionId = this.recordKeyOf(sessionId)
+    const scope = this.recordScopeOf(sessionId)
+    sessionId = scope.key
     if (this.store) {
       if (spanId) {
         const record = this.store.get(spanId)
         if (record === undefined) return []
-        if (sessionKeyOf(record) !== sessionId) return []
+        if (sessionKeyOf(record) !== sessionId || !this.inScope(scope, record.harness)) return []
         return [toContentSource(record)]
       }
-      return this.store.recordsForSession(sessionId).map(toContentSource)
+      return this.store
+        .recordsForSession(sessionId)
+        .filter((r) => this.inScope(scope, r.harness))
+        .map(toContentSource)
     }
     return this.loadContentRecordsFromDb(sessionId, spanId)
   }
 
   private loadContentRecordsFromDb(sessionId: string, spanId?: string): ContentSourceRecord[] {
-    sessionId = this.recordKeyOf(sessionId)
+    const scope = this.recordScopeOf(sessionId)
+    sessionId = scope.key
     const db = this.getDb()
     if (!this.hasTable(db, 'records')) return []
 
@@ -1907,7 +1917,7 @@ export class KyberBridge {
             : row.trace_id !== null && row.trace_id !== undefined
               ? String(row.trace_id)
               : null
-        if (key !== sessionId) return []
+        if (key !== sessionId || !this.inScope(scope, row.harness)) return []
         return [
           {
             spanId: String(row.span_id),
@@ -1928,7 +1938,7 @@ export class KyberBridge {
           'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
         .all(sessionId) as Record<string, unknown>[]
-      return rows.map((row) => ({
+      return rows.filter((row) => this.inScope(scope, row.harness)).map((row) => ({
         spanId: String(row.span_id),
         sessionKey: sessionId,
         parentSpanId: parentSpanIdOf(row),
@@ -1940,7 +1950,7 @@ export class KyberBridge {
         const rows = db!
           .prepare('SELECT * FROM records WHERE trace_id = ? ORDER BY timestamp')
           .all(sessionId) as Record<string, unknown>[]
-        return rows.map((row) => ({
+        return rows.filter((row) => this.inScope(scope, row.harness)).map((row) => ({
           spanId: String(row.span_id),
           sessionKey: sessionId,
           parentSpanId: parentSpanIdOf(row),
@@ -1996,16 +2006,22 @@ export class KyberBridge {
     }
   }
 
-  /** Persisted share ids for the current store — same table `buildRuns` reads. */
   /**
-   * The key records are stored under for a session id. A canonical key that
-   * spans several harnesses is split into one session per harness named
-   * `${harness}:${key}`; that id is no record's key, so every record read
-   * resolves it back to the key first. Plain ids resolve to themselves.
+   * Where a session id's records live. A canonical key that spans several
+   * harnesses is split into one session per harness named `${harness}:${key}`;
+   * that id is no record's key, so reads resolve it to the raw key AND the
+   * harness share it stands for. A plain id is its own key with no harness
+   * scope. Resolved by exact id lookup, so nested-colon keys stay unambiguous.
    */
-  private recordKeyOf(sessionId: string): string {
-    if (!sessionId.includes(':')) return sessionId
-    return this.sessionIdentities().shareOf(sessionId)?.key ?? sessionId
+  private recordScopeOf(sessionId: string): { key: string; harness?: string } {
+    const share = sessionId.includes(':') ? this.sessionIdentities().shareOf(sessionId) : undefined
+    return share === undefined ? { key: sessionId } : { key: share.key, harness: share.harness }
+  }
+
+  /** Whether a record's harness belongs to the scope's share (always true when unscoped). */
+  private inScope(scope: { harness?: string }, recordHarness: unknown): boolean {
+    if (scope.harness === undefined) return true
+    return canonicalHarnessId(String(recordHarness)) === normalizeHarnessName(scope.harness)
   }
 
   private sessionIdentities(): SessionIdentities {
