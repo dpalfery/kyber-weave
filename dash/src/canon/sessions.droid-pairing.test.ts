@@ -527,7 +527,7 @@ describe('the Factory session pairing rule', () => {
     }
   })
 
-  it('pairs a plugin row reported under the plugin\'s own service name with the file row, so the file row is no turn and adds no duration', async () => {
+  it('pairs a plugin row reported under the plugin\'s own service name with the file row, so the file row is no turn and the session duration is the file-source duration', async () => {
     await writeFactorySession(SESSION_ID, { model: MODEL, tokenUsage: parentTokenUsage() })
 
     const store = new CanonStore(':memory:')
@@ -550,9 +550,10 @@ describe('the Factory session pairing rule', () => {
       // reported: it is not a turn of its own, so it is not a timeline entry.
       expect(summary.turn_count).toBe(1)
 
-      // And its duration is not added to the session's: the session's duration
-      // is its turns' duration.
-      expect(summary.duration_ms).toBe(PLUGIN_TURN_DURATION_MS)
+      // Plugin spans are zero-width, so the session's duration is the sum of
+      // its file-source durations: the file row's own duration, and not the
+      // plugin turn's reported millis added on top.
+      expect(summary.duration_ms).toBe(FILE_ROW_DURATION_MS)
       expect(summary.duration_ms).not.toBe(PLUGIN_TURN_DURATION_MS + FILE_ROW_DURATION_MS)
     } finally {
       store.close()
@@ -780,7 +781,11 @@ describe('the Factory source precedence rule', () => {
     const store = new CanonStore(':memory:')
     try {
       ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
-      store.upsertMany([await fileRow(SESSION_ID)])
+      // The file row's duration is set explicitly so the session's duration is
+      // a known figure: it is the sum of the file-source durations.
+      const file = await fileRow(SESSION_ID)
+      file.durationMs = FILE_ROW_DURATION_MS
+      store.upsertMany([file])
 
       await buildSessions(store)
 
@@ -791,9 +796,9 @@ describe('the Factory source precedence rule', () => {
       // call, not a second turn of it.
       expect(summary.turn_count).toBe(1)
 
-      // And the plugin source owns the session's structure: its span carries
-      // the session's duration.
-      expect(summary.duration_ms).toBe(1000)
+      // The session's duration is the sum of its file-source durations; the
+      // plugin turn's zero-width span adds nothing to it.
+      expect(summary.duration_ms).toBe(FILE_ROW_DURATION_MS)
 
       // The file source knows the counters: the paired session reports the
       // file row's own totals and their own availability, never the plugin
