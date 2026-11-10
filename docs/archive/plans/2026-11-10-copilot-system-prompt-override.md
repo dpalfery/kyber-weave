@@ -2,7 +2,7 @@
 id: plans/copilot-system-prompt-override
 title: Opt-in replacement of GitHub Copilot's top-level system prompt in VS Code
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-10
@@ -15,7 +15,7 @@ impact-components: [KyberSquad]
 
 # Opt-in replacement of GitHub Copilot's top-level system prompt in VS Code
 
-**Status: Ready. Approved by the owner 2026-11-10 (decision AP1).** Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberSquad`.
+**Status: Archived, 2026-11-10.** Approved by the owner 2026-11-10 (decision AP1). Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberSquad`.
 
 **Bottom line.** VS Code does not let this setting be set per project. Its source declares it application scope, its workspace and folder settings parser drops application-scope keys, and one background process serves every window. A live test confirmed it: a project-only value forwards as `{}`. The owner chose one machine-wide user setting, and one prompt whose text tells the model to use Kyber-Weave routing only when the open repository has `.kyber-weave/kyber-weave.yml`.
 
@@ -242,3 +242,50 @@ T4 ran on 2026-11-10 with the owner present, on VS Code Insiders 1.146.0-insider
 ## Verification gates and review
 
 Each developer task ends with its own `task-gate` run. The end-of-run review council reviews the whole change under the `code-review` skill. `docs-dev` closes out under T5.
+
+## Completion summary
+
+**Completed 2026-11-10.** Every task is delivered and the plan is archived.
+
+- **Implementation.** T1 skeleton (`057c4899`), T2 red contract tests (`616c8f61`), and T3 green implementation (`2e66ddd1`, amended on origin). The task gate passed, with 82 contract tests passing.
+- **Live check.** T4 ran on 2026-11-10 with the owner present (results in [Live verification](#live-verification)). V1 and V2 pass. V3, HydraFusion Cascade, was not observed and stays a stated limit.
+- **Design reversal.** The owner reversed the skill fallback. PR 579 ("start Copilot's parent roles as skills") was closed unmerged. The conductor is an agent the person selects in the agent picker. PR 576's agent-scoped deny hook guards it, recorded in the ADR "The Copilot conductor holds tools a hook denies it", which is not on this branch. The prompt asks the person to switch to the conductor agent for non-trivial work, in commit `d0723503`.
+- **Superseded task text.** The T3 objective, the T4 setup line and the T4 V2 line still say "conductor skill". That is the approved wording, kept deliberately because the plan's execution digest binds task text and the task file is removed at closeout. The conductor-agent wording replaced it in commit `d0723503`.
+- **End-of-run review.** The council returned REQUEST_CHANGES with one Major finding. The release policy test `SquadPackAndReleaseTests.ReleaseArtifact_AssertsCliAndMcpArchivesContainNoEmbeddedSquadCorpus` did not allow the new embedded prompt. It was fixed in `1ddd41e5` with a narrow allowance. The full suite before that fix ran 7041 tests: 7012 passed, 28 skipped, and 1 failed, which is that test.
+- **Gate not evidenced.** The `inspectcode` gate timed out after 900 s with no evidence. The owner chose to rely on CI rather than re-run it locally.
+- **Documentation-impact review.** `DOCS_REVIEW: update`. Every recommendation is applied in the closeout commit: H1 to H5 are written to the destinations below, and the `squad copilot-prompt` rows and exit codes are in the CLI reference.
+- **Follow-ups, not fixed.** The Linux path ignores `XDG_CONFIG_HOME`. Doctor reads the home directory as `HOME`, then `USERPROFILE`, while install uses the user profile folder. `AtomicFile` replaces a symlinked `settings.json` with a regular file.
+
+**Acceptance criteria.** H1 to H5 appear in the named documents: [ADR 0067](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md), [architecture, section 11](../../kyber-squad/architecture.md#11-copilot-system-prompt-override-opt-in-machine-wide), [onboarding](../../kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in), [CLI command surface](../../cli-command-surface.md), and the [runbook](../../kyber-squad/copilot-prompt-runbook.md). The task file is removed. Both documentation gates are run at closeout, and their results are recorded in the closeout report.
+
+## Closeout mapping
+
+Every decision and harvest item maps to its destination. Each row states its documentation impact, impact components, last-reviewed date and archive status.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| Q1 | [ADR 0067, Decision](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md); [architecture, section 11](../../kyber-squad/architecture.md#11-copilot-system-prompt-override-opt-in-machine-wide) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D2 | [ADR 0067, Alternatives considered](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md) (no flag on `squad install`); [CLI command surface, `squad copilot-prompt` rows](../../cli-command-surface.md) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D3 | [architecture, Opt-in state](../../kyber-squad/architecture.md#opt-in-state); no ADR — ADR waiver: the no-receipt state refines ADR 0067's decision | extends-component | KyberSquad | 2026-11-10 | archived |
+| D4 | [architecture, Prompt embedding and refresh](../../kyber-squad/architecture.md#prompt-embedding-and-refresh); no ADR — ADR waiver: follows the embedded-resource pattern and ADR 0065's rule for post-update steps | extends-component | KyberSquad | 2026-11-10 | archived |
+| D5 | [architecture, Settings splice and refusal rule](../../kyber-squad/architecture.md#settings-splice-and-refusal-rule); no ADR — ADR waiver: reuses `JsonServerSplice` and `AtomicFile`, both existing patterns | extends-component | KyberSquad | 2026-11-10 | archived |
+| D6 | [architecture, Settings splice and refusal rule](../../kyber-squad/architecture.md#settings-splice-and-refusal-rule); [CLI exit codes](../../cli-command-surface.md#exit-codes); no ADR — ADR waiver: refusal detail within ADR 0067's decision | extends-component | KyberSquad | 2026-11-10 | archived |
+| D7 | [architecture, Opt-in state](../../kyber-squad/architecture.md#opt-in-state) (detection per build); no ADR — ADR waiver: per-platform path detail | extends-component | KyberSquad | 2026-11-10 | archived |
+| D8 | [runbook, Doctor checks](../../kyber-squad/copilot-prompt-runbook.md#doctor-checks); no ADR — ADR waiver: diagnostic detail | extends-component | KyberSquad | 2026-11-10 | archived |
+| D9 | [runbook, Known limits](../../kyber-squad/copilot-prompt-runbook.md#known-limits); [ADR 0067, Consequences](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md) | extends-component | KyberSquad | 2026-11-10 | archived |
+| D10 | [ADR 0067](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md): the record itself | extends-component | KyberSquad | 2026-11-10 | archived |
+| AP1 | Documentation waiver: owner approval record, transient, with no surviving invariant; the approved test contract stays in this archived plan. No ADR — ADR waiver: process decision | extends-component | KyberSquad | 2026-11-10 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0067](../../adr/0067-copilot-system-prompt-override-is-machine-wide.md) and its row in the [ADR index](../../adr/README.md) | extends-component | KyberSquad | 2026-11-10 | archived |
+| H2 | [architecture, section 11](../../kyber-squad/architecture.md#11-copilot-system-prompt-override-opt-in-machine-wide): opt-in state, prompt embedding and refresh, settings splice, and coexistence with PR 576's guard | extends-component | KyberSquad | 2026-11-10 | archived |
+| H3 | [onboarding, Copilot system prompt override (opt-in)](../../kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in): turning it on and off, the machine-wide effect, and the retest after each VS Code update | extends-component | KyberSquad | 2026-11-10 | archived |
+| H4 | [CLI command surface](../../cli-command-surface.md): the three `squad copilot-prompt` verbs, their flags, and their exit codes | extends-component | KyberSquad | 2026-11-10 | archived |
+| H5 | [runbook](../../kyber-squad/copilot-prompt-runbook.md): doctor checks, the `mode=replace` log line, silent fallback, and known limits | extends-component | KyberSquad | 2026-11-10 | archived |
+
+The task file `copilot-system-prompt-override.tasks.json` was removed at closeout.
