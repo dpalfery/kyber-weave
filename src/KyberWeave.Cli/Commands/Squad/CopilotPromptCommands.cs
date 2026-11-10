@@ -30,14 +30,16 @@ public sealed class CopilotPromptSettings : CommandSettings
 
 /// <summary>
 /// The real environment a Copilot system-prompt command runs in: the home and application-data
-/// directories, the platform, whether a person can answer a prompt, and how answers are read.
+/// directories, the platform, whether a person can answer a prompt, how answers are read, and the
+/// <c>XDG_CONFIG_HOME</c> value that moves VS Code's user data on Linux.
 /// </summary>
 internal sealed record CopilotPromptEnvironment(
-    string HomeDirectory,
+    string? HomeDirectory,
     string? AppDataDirectory,
     OSPlatform Platform,
     bool IsInteractive,
-    Func<string, bool> ReadAnswer);
+    Func<string, bool> ReadAnswer,
+    string? XdgConfigHome = null);
 
 /// <summary>
 /// Writes the Copilot system-prompt override file and points VS Code's setting at it.
@@ -66,6 +68,8 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -86,7 +90,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             return 1;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         string entryJson = "{\"promptOverrideFile\": " + JsonSerializer.Serialize(promptPath) + "}";
         List<(string File, byte[] Document)> writes = [];
         List<string> alreadySet = [];
@@ -95,8 +99,15 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         foreach (VsCodeFlavour flavour in targets)
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            if (read.Error is not null)
+            {
+                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
+                continue;
+            }
+
             // A file that does not exist yet is created from an empty object: the only write that is not a splice.
-            byte[] document = File.Exists(file) ? File.ReadAllBytes(file) : Encoding.UTF8.GetBytes("{}\n");
+            byte[] document = read.Document ?? Encoding.UTF8.GetBytes("{}\n");
             JsonSplicePlan plan = JsonServerSplice.Plan(document, [CopilotOverrideSettings.SettingId], CopilotOverrideSettings.StarEntry, entryJson);
 
             if (plan.Outcome == JsonSpliceOutcome.Inserted)
@@ -152,9 +163,10 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             // The prompt file goes first, so VS Code never reads a setting that points at a file that is not there yet.
             AtomicFile.WriteAllText(promptPath, CopilotPromptFile.EmbeddedText());
             foreach ((string file, byte[] document) in writes)
-                AtomicFile.WriteAllBytes(file, document);
+                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             CopilotPromptCommandSupport.Fail($"could not write the prompt or a settings file: {ex.Message}");
             return 1;
@@ -197,6 +209,8 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -210,21 +224,27 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             return 2;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         List<(string File, byte[] Document)> removals = [];
         List<string> refusals = [];
 
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            if (!File.Exists(file))
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            if (read.Error is not null)
+            {
+                refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
+                continue;
+            }
+
+            if (read.Document is not { } document)
                 continue;
 
-            byte[] document = File.ReadAllBytes(file);
             CopilotOverrideState? state = CopilotOverrideSettings.Read(document);
             if (state is null)
             {
-                refusals.Add($"{file} is not readable JSON, so it was left unchanged.");
+                refusals.Add($"{file} is not a readable JSON object, so it was left unchanged.");
                 continue;
             }
 
@@ -278,11 +298,12 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         {
             // The settings go first, so a setting never points at a prompt file this command has already deleted.
             foreach ((string file, byte[] document) in removals)
-                AtomicFile.WriteAllBytes(file, document);
+                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
             if (promptInstalled)
                 File.Delete(promptPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             CopilotPromptCommandSupport.Fail($"could not finish the uninstall: {ex.Message}");
             return 1;
@@ -323,6 +344,8 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
         CopilotPromptEnvironment environment = _environment ?? CopilotPromptCommandSupport.RealEnvironment();
+        if (!CopilotPromptCommandSupport.HasHome(environment))
+            return 2;
 
         if (!CopilotPromptCommandSupport.TryParseFlavour(settings.Flavour, out VsCodeFlavour? requested))
         {
@@ -330,12 +353,13 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             return 2;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         CopilotPromptCommandSupport.Say(File.Exists(promptPath)
             ? $"Prompt file: installed at {Markup.Escape(promptPath)}."
             : $"Prompt file: not installed (expected {Markup.Escape(promptPath)}).");
 
         IReadOnlyList<VsCodeFlavour> detected = CopilotPromptCommandSupport.DetectedTargets(environment, null);
+        bool unreadable = false;
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
             if (requested is not null && requested.Value != flavour)
@@ -349,12 +373,21 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            CopilotOverrideState? state = File.Exists(file)
-                ? CopilotOverrideSettings.Read(File.ReadAllBytes(file))
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            if (read.Error is not null)
+            {
+                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
+                unreadable = true;
+                continue;
+            }
+
+            CopilotOverrideState? state = read.Document is { } document
+                ? CopilotOverrideSettings.Read(document)
                 : new CopilotOverrideState(false, null, []);
             if (state is null)
             {
-                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not readable JSON.");
+                CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} is not a readable JSON object.");
+                unreadable = true;
                 continue;
             }
 
@@ -368,7 +401,8 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
         }
 
-        return 0;
+        // A settings file status cannot read is a fault, as it is for install and uninstall: exit 1 so a caller sees it.
+        return unreadable ? 1 : 0;
     }
 
     private static string DescribeStarEntry(CopilotOverrideState state, string promptPath)
@@ -391,12 +425,47 @@ internal static class CopilotPromptCommandSupport
     private const string Prefix = "kyber-weave squad copilot-prompt";
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>
-    internal static CopilotPromptEnvironment RealEnvironment() => new(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        Environment.GetEnvironmentVariable("APPDATA"),
+    internal static CopilotPromptEnvironment RealEnvironment() => EnvironmentFrom(
+        Environment.GetEnvironmentVariable,
         OperatingSystem.IsWindows() ? OSPlatform.Windows : OperatingSystem.IsMacOS() ? OSPlatform.OSX : OSPlatform.Linux,
         !Console.IsInputRedirected,
         question => AnsiConsole.Confirm(question, false));
+
+    /// <summary>
+    /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
+    /// the prompt file where install wrote it. A null home means neither variable names an absolute directory.
+    /// </summary>
+    internal static CopilotPromptEnvironment EnvironmentFrom(
+        Func<string, string?> read,
+        OSPlatform platform,
+        bool isInteractive,
+        Func<string, bool> readAnswer) => new(
+        CopilotPromptHome.FromEnvironment(read),
+        read("APPDATA"),
+        platform,
+        isInteractive,
+        readAnswer,
+        read("XDG_CONFIG_HOME"));
+
+    /// <summary>The home directory. Throws when it is unknown, so a path is never built under the working directory.</summary>
+    /// <exception cref="InvalidOperationException">No home directory is known; callers check <see cref="HasHome"/> first.</exception>
+    internal static string Home(CopilotPromptEnvironment environment) =>
+        string.IsNullOrWhiteSpace(environment.HomeDirectory)
+            ? throw new InvalidOperationException("No home directory is known; check HasHome before building a path.")
+            : environment.HomeDirectory;
+
+    /// <summary>
+    /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
+    /// working directory, where doctor would never look.
+    /// </summary>
+    internal static bool HasHome(CopilotPromptEnvironment environment)
+    {
+        if (!string.IsNullOrWhiteSpace(environment.HomeDirectory))
+            return true;
+
+        Fail("no home directory is known. Set HOME (or USERPROFILE on Windows) to an absolute path and run the command again.");
+        return false;
+    }
 
     /// <summary>Parses <c>--flavour</c>. Null means the option was not given, so every detected build is in scope.</summary>
     internal static bool TryParseFlavour(string? text, out VsCodeFlavour? flavour)
@@ -422,12 +491,12 @@ internal static class CopilotPromptCommandSupport
     /// <summary>The detected builds in scope: all of them, or only the one the person named.</summary>
     internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, VsCodeFlavour? requested)
     {
-        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(environment.HomeDirectory, environment.AppDataDirectory, environment.Platform);
+        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
         return requested is null ? detected : detected.Where(flavour => flavour == requested.Value).ToList();
     }
 
     internal static string SettingsFileOf(VsCodeFlavour flavour, CopilotPromptEnvironment environment) =>
-        VsCodeUserSettingsPaths.SettingsFile(flavour, environment.HomeDirectory, environment.AppDataDirectory, environment.Platform);
+        VsCodeUserSettingsPaths.SettingsFile(flavour, Home(environment), environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
 
     internal static string FlavourLabel(VsCodeFlavour flavour) =>
         flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
@@ -435,7 +504,7 @@ internal static class CopilotPromptCommandSupport
     /// <summary>True when the state's <c>*</c> entry names this install's prompt file. Only such an entry is ours.</summary>
     internal static bool PointsAtPrompt(CopilotOverrideState? state, string promptPath) =>
         state?.StarPromptFile is not null
-        && string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal);
+        && CopilotPromptFile.SamePath(state.StarPromptFile, promptPath);
 
     /// <summary>Writes one line of console output. Callers escape any value from a file or the operator.</summary>
     internal static void Say(string markup) =>

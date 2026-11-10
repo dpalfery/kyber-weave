@@ -12,6 +12,9 @@ code-refs:
   - CopilotPromptProbe
   - CopilotPromptFile
   - CopilotOverrideSettings
+  - CopilotPromptHome
+  - VsCodeUserSettingsPaths
+  - AtomicFile
 ---
 
 # Copilot system-prompt override runbook
@@ -58,6 +61,27 @@ non-trivial work in a Kyber-Weave repository, instead of starting it. The agent-
 from PR 576, recorded as "The Copilot conductor holds tools a hook denies it", guards the conductor
 beside the prompt.
 
+## Where the files are
+
+- **Home directory.** `install`, `uninstall`, `status` and `doctor` read `HOME`, then
+  `USERPROFILE`. Surrounding spaces are trimmed. A value starting with `/` counts as absolute on every
+  platform; any other relative value, or a blank one, counts as unset. On
+  Windows with `HOME` set, such as under Git Bash, all of them use `HOME`, so doctor checks the
+  prompt file where install wrote it. When neither names an absolute directory, the commands exit
+  `2` and write nothing, and doctor skips the Copilot checks.
+- **Prompt file.** `<home>/.kyber-weave/copilot/system-prompt.yaml`.
+- **VS Code settings file.** `<user-data>/User/settings.json`, where `<user-data>` is:
+  - macOS: `<home>/Library/Application Support/Code` (or `Code - Insiders`).
+  - Windows: `%APPDATA%\Code`, or `<home>\AppData\Roaming\Code` when `APPDATA` is unset.
+  - Linux: `$XDG_CONFIG_HOME/Code` when `XDG_CONFIG_HOME`, trimmed, is an absolute path, as VS Code
+    does. Otherwise `<home>/.config/Code`. A relative value is ignored, as the XDG base-directory
+    specification requires.
+- **Symlinked `settings.json`.** When `settings.json` is a symbolic link, for example into a
+  dotfiles repository, `install` and `uninstall` write through it. The file the link points to is
+  updated, and the link stays a link. A link that points at a missing file creates that file.
+  Only the VS Code settings write follows links. Every other file Kyber-Weave writes replaces a
+  link with a regular file and leaves the link's old target alone.
+
 ## Doctor checks
 
 `kyber-weave doctor` adds these checks only when the prompt file is installed. Without the file it
@@ -66,8 +90,8 @@ adds nothing, so a machine that never opted in sees no new output.
 | Check | Passes when | Fails when | Fix |
 |---|---|---|---|
 | `copilot.prompt.setting` | Some detected VS Code settings file points its `*` entry at the installed prompt file. | No detected settings file points at it. Reported once, without a build label. | `kyber-weave squad copilot-prompt install --yes` |
-| `copilot.prompt.<stable\|insiders>.setting` | That build's `*` entry names the installed prompt file. | Not reported for a build that does not point at it. | As above |
-| `copilot.prompt.<stable\|insiders>.file` | The prompt file is readable YAML with exactly one document, a non-empty `systemPrompt`, and no key other than `systemPrompt` and `toolDescriptions`. | The file is unreadable, not YAML, has another key, or has no usable `systemPrompt`. The reason names the problem. | As above |
+| `copilot.prompt.<stable\|insiders>.setting` | That build's `*` entry names the installed prompt file. | That build's settings file is present but cannot be read (for example a directory or a file without read permission) or is not a JSON object. Not reported for a build that does not point at it. | Fix the file's permissions, type or JSON, then run `kyber-weave doctor` |
+| `copilot.prompt.<stable\|insiders>.file` | The prompt file is readable YAML with exactly one document, a non-empty `systemPrompt`, and no key other than `systemPrompt` and `toolDescriptions`, and a `toolDescriptions` that is a mapping. | The file is unreadable, not YAML, has another key, or has no usable `systemPrompt`. The reason names the problem. | As above |
 | `copilot.prompt.<stable\|insiders>.log` | The newest AgentHost log's last `Resolved system message` line shows `mode=replace`. | The last line shows another mode. The reason says to restart VS Code and run doctor again. | `kyber-weave doctor` |
 
 The `.log` check is inconclusive, not failed, when there is no log folder yet, or the newest log has
@@ -90,7 +114,7 @@ VS Code logs the mode it actually applied for each session:
 `mode=replace` is the only proof that the override is live. The settings file can name the right
 prompt file while VS Code ignores it. The doctor reads the last such line in the newest log
 folder: `<user-data>/logs/<newest timestamp folder>/`. It searches that folder, at any depth, for
-files named `agenthost*.log`, and skips links.
+files named `agenthost*.log`, and skips links. It reads only the last 4 MB of each file, newest file first. If the newest file is longer than that and its tail has no such line, the check is inconclusive rather than using an older file.
 
 A `mode` other than `replace` means the default prompt is in use for that session, even though the
 settings are right.

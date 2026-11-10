@@ -165,4 +165,40 @@ public sealed class CopilotPromptProbeTests : IDisposable
         Assert.All(lenient, check => Assert.True(check.Passed, check.Reason));
         Assert.Equal(failures, lenient.Count(check => check.Reason?.StartsWith("warning:", StringComparison.Ordinal) == true));
     }
+
+    /// <summary>Tokens stand for host-absolute paths under the temp home: "{a}" and "{b}" are two different directories.</summary>
+    [Theory]
+    [InlineData("{a}", "{b}", "{a}")]
+    [InlineData(null, "{b}", "{b}")]
+    [InlineData("", "{b}", "{b}")]
+    [InlineData(" {a} ", null, "{a}")]
+    [InlineData("relative/home", "{b}", "{b}")]
+    [InlineData("/unix/home", "{b}", "/unix/home")]
+    [InlineData("relative/home", "relative/profile", null)]
+    [InlineData("  ", null, null)]
+    [InlineData(null, null, null)]
+    public void FromEnvironment_PrefersAbsoluteHomeThenUserProfile(string? home, string? userProfile, string? expected)
+    {
+        string? Expand(string? token) => token
+            ?.Replace("{a}", Path.Combine(Home, "a"), StringComparison.Ordinal)
+            .Replace("{b}", Path.Combine(Home, "b"), StringComparison.Ordinal);
+        Dictionary<string, string?> variables = new() { ["HOME"] = Expand(home), ["USERPROFILE"] = Expand(userProfile) };
+
+        Assert.Equal(Expand(expected), CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)));
+    }
+
+    [Fact]
+    public void Run_LinuxWithXdgConfigHome_ReadsSettingsUnderIt()
+    {
+        WritePrompt(ValidPrompt);
+        string xdgConfigHome = Path.Combine(Home, "xdg-config");
+        string settings = VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, xdgConfigHome);
+        Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        string file = JsonSerializer.Serialize(PromptPath);
+        File.WriteAllText(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
+
+        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, xdgConfigHome);
+
+        Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.setting" && check.Passed);
+    }
 }

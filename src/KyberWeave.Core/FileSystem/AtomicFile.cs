@@ -36,6 +36,14 @@ namespace KyberWeave.Core.FileSystem;
 /// and the sweep failed, and the message reports only the sweep. The caller needs to know why the
 /// document was never written; the temporary left behind is the smaller harm.
 /// </para>
+/// <para>
+/// By default a target that is a symbolic link is replaced by a regular file, and the file the link named
+/// is left untouched. A caller writing a file people commonly keep as a link, such as VS Code's
+/// <c>settings.json</c> in a dotfiles repository, opts in to writing through instead: the link's final
+/// target is replaced and the link itself stays. Writing through is opt-in because it writes to wherever
+/// the link points, so it belongs only where the operator owns the link. The temporary is created beside
+/// the final target, so the rename stays within one volume. A dangling link creates its target.
+/// </para>
 /// </remarks>
 public static class AtomicFile
 {
@@ -54,11 +62,12 @@ public static class AtomicFile
     /// <summary>Writes <paramref name="content"/> to <paramref name="path"/> atomically.</summary>
     /// <param name="path">The file to create or replace.</param>
     /// <param name="content">The complete bytes the file ends up holding.</param>
+    /// <param name="writeThroughSymlink">True to replace the file a symbolic link at <paramref name="path"/> points to, keeping the link.</param>
     /// <exception cref="InvalidOperationException">The path has no parent directory.</exception>
-    public static void WriteAllBytes(string path, byte[] content)
+    public static void WriteAllBytes(string path, byte[] content, bool writeThroughSymlink = false)
     {
         ArgumentNullException.ThrowIfNull(content);
-        Write(path, temporaryPath => File.WriteAllBytes(temporaryPath, content));
+        Write(path, writeThroughSymlink, temporaryPath => File.WriteAllBytes(temporaryPath, content));
     }
 
     /// <summary>
@@ -71,10 +80,10 @@ public static class AtomicFile
     public static void WriteAllText(string path, string content)
     {
         ArgumentNullException.ThrowIfNull(content);
-        Write(path, temporaryPath => File.WriteAllText(temporaryPath, content, PlainUtf8));
+        Write(path, writeThroughSymlink: false, temporaryPath => File.WriteAllText(temporaryPath, content, PlainUtf8));
     }
 
-    private static void Write(string path, Action<string> writeTemporary)
+    private static void Write(string path, bool writeThroughSymlink, Action<string> writeTemporary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(writeTemporary);
@@ -84,6 +93,8 @@ public static class AtomicFile
         // and CreateDirectory("") throws instead of writing beside the working directory the caller
         // meant.
         string destination = Path.GetFullPath(path);
+        if (writeThroughSymlink)
+            destination = ResolveLinks(destination);
         string directory = Path.GetDirectoryName(destination)
             ?? throw new InvalidOperationException($"The path '{path}' has no parent directory.");
 
@@ -99,6 +110,22 @@ public static class AtomicFile
         {
             Discard(temporaryPath);
         }
+    }
+
+    /// <summary>
+    /// Follows a symbolic link at <paramref name="destination"/> to its final target, so the write replaces
+    /// the file the link names instead of the link. A path that is not a link is returned unchanged.
+    /// </summary>
+    /// <param name="destination">The fully qualified path the caller asked to write.</param>
+    private static string ResolveLinks(string destination)
+    {
+        // LinkTarget is null for a regular file and for a path that does not exist; ResolveLinkTarget throws on the latter.
+        FileInfo file = new(destination);
+        if (file.LinkTarget is null)
+            return destination;
+
+        FileSystemInfo? target = file.ResolveLinkTarget(returnFinalTarget: true);
+        return target is null ? destination : Path.GetFullPath(target.FullName);
     }
 
     /// <summary>

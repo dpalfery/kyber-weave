@@ -76,12 +76,44 @@ public static class CopilotPromptFile
                     return $"{SystemPromptKey} must be a non-empty string";
                 hasSystemPrompt = true;
             }
-            else if (key != ToolDescriptionsKey)
+            else if (key == ToolDescriptionsKey)
+            {
+                if (entry.Value is not YamlMappingNode)
+                    return $"{ToolDescriptionsKey} must be a mapping of tool names to descriptions";
+            }
+            else
             {
                 return $"'{key}' is not a key VS Code reads; only {SystemPromptKey} and {ToolDescriptionsKey} are allowed";
             }
         }
 
         return hasSystemPrompt ? null : $"{SystemPromptKey} is missing";
+    }
+
+    /// <summary>
+    /// True when two paths name the same file: both are made absolute and normalised, trailing separators are
+    /// dropped, and case is ignored only on Windows. The doctor's home check uses the same rule.
+    /// </summary>
+    /// <param name="left">One path.</param>
+    /// <param name="right">The other path.</param>
+    /// <returns>True when the normalised paths are equal; false when either cannot be normalised.</returns>
+    /// <remarks>
+    /// Normalising makes a settings entry written with forward slashes on Windows match. Case is not folded on macOS,
+    /// because a case-sensitive APFS volume can hold two files whose names differ only in case; there a mismatch
+    /// only makes install refuse, which is the safe direction.
+    /// </remarks>
+    public static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

@@ -37,9 +37,10 @@ public static class VsCodeUserSettingsPaths
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose layout applies.</param>
+    /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value on Linux; ignored unless absolute, and ignored on other platforms.</param>
     /// <returns>The absolute path <c>&lt;user-data&gt;/User/settings.json</c>.</returns>
-    public static string SettingsFile(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform) =>
-        Path.Combine(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform), "User", "settings.json");
+    public static string SettingsFile(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null) =>
+        Path.Combine(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome), "User", "settings.json");
 
     /// <summary>
     /// Returns the user-data directory that one VS Code build uses on the given platform.
@@ -48,8 +49,9 @@ public static class VsCodeUserSettingsPaths
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose layout applies.</param>
+    /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value on Linux; ignored unless absolute, and ignored on other platforms.</param>
     /// <returns>The absolute user-data directory for the build.</returns>
-    public static string UserDataDirectory(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform)
+    public static string UserDataDirectory(VsCodeFlavour flavour, string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null)
     {
         string build = flavour == VsCodeFlavour.Insiders ? "Code - Insiders" : "Code";
         if (platform == OSPlatform.OSX)
@@ -64,7 +66,15 @@ public static class VsCodeUserSettingsPaths
             return Path.Combine(roaming, build);
         }
 
-        return Path.Combine(homeDirectory, ".config", build);
+        // VS Code on Linux keeps its user data under XDG_CONFIG_HOME when that is set. The XDG base-directory
+        // specification says a relative value is invalid and must be ignored, so only an absolute one counts.
+        // A leading '/' is the Linux test, so the Linux layout resolves the same from any host.
+        string? xdg = xdgConfigHome?.Trim();
+        string configRoot = !string.IsNullOrEmpty(xdg)
+            && (xdg.StartsWith('/') || Path.IsPathFullyQualified(xdg))
+            ? xdg
+            : Path.Combine(homeDirectory, ".config");
+        return Path.Combine(configRoot, build);
     }
 
     /// <summary>
@@ -73,13 +83,14 @@ public static class VsCodeUserSettingsPaths
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose layout applies.</param>
+    /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value on Linux; ignored unless absolute, and ignored on other platforms.</param>
     /// <returns>The detected builds, in a stable order. Empty when neither build is installed.</returns>
-    public static IReadOnlyList<VsCodeFlavour> Detect(string homeDirectory, string? appDataDirectory, OSPlatform platform)
+    public static IReadOnlyList<VsCodeFlavour> Detect(string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null)
     {
         List<VsCodeFlavour> detected = [];
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
-            if (Directory.Exists(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform)))
+            if (Directory.Exists(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome)))
                 detected.Add(flavour);
         }
 

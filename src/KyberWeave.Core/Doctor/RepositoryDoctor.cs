@@ -49,9 +49,10 @@ public static class RepositoryDoctor
                 notRepository,
                 "run kyber-weave doctor from inside a git repository"));
 
-        // HOME is the Unix answer; USERPROFILE is the Windows one. An environment variable can also be set to an
-        // empty value, and an empty path makes GetFullPath throw; a blank home simply cannot be the repository.
-        string? home = environment("HOME") ?? environment("USERPROFILE");
+        // HOME is the Unix answer; USERPROFILE is the Windows one. A blank value counts as unset, because an empty
+        // path makes GetFullPath throw. The install command resolves home through the same helper, so the probe below
+        // looks for the prompt file where install wrote it.
+        string? home = CopilotPromptHome.FromEnvironment(environment);
         if (!string.IsNullOrWhiteSpace(home) && SamePath(repositoryRoot, home))
             return Refused(repositoryRoot, mode, new DoctorCheck(
                 "repository.root",
@@ -79,7 +80,7 @@ public static class RepositoryDoctor
         // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
         // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
         if (!string.IsNullOrWhiteSpace(home))
-            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform())];
+            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), environment("XDG_CONFIG_HOME"))];
 
         int exitCode = codegraph.BinaryMissing
             ? 3
@@ -157,20 +158,7 @@ public static class RepositoryDoctor
     /// <remarks>
     ///     One side is an environment variable, which is arbitrary text, and <c>Path.GetFullPath</c> throws on an
     ///     empty string, a NUL, or a too-long path. A home directory that is not a path is not the repository root.
-    ///     Path identity follows the platform: Windows and a case-insensitive macOS volume fold case.
+    ///     Uses the same rule as the Copilot prompt commands, so the two never disagree about a path.
     /// </remarks>
-    private static bool SamePath(string left, string right)
-    {
-        try
-        {
-            return string.Equals(
-                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        }
-        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
-        {
-            return false;
-        }
-    }
+    private static bool SamePath(string left, string right) => CopilotPromptFile.SamePath(left, right);
 }
