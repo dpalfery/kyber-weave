@@ -251,13 +251,13 @@ public static partial class McpLiveProbe
                 false,
                 "the docs server refused to start because this folder has no .kyber-weave/kyber-weave.yml. " +
                 "A new worktree only has that file if its base branch has it committed",
-                $"kyber-weave docs init \"{root}\"");
+                $"kyber-weave docs init {ShellQuote.Quote(root)}");
         }
 
         string detail = serverError is { } line ? $" ({Truncate(line)})" : string.Empty;
         string fix = timedOut
             ? TimeoutFix(options)
-            : $"read the server's own error: {options.McpExecutable} --repo-root \"{root}\"";
+            : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
         return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
     }
 

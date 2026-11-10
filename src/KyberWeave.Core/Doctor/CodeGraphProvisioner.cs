@@ -227,12 +227,7 @@ public static class CodeGraphProvisioner
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
             prepared = repair.Ok
-                ? RunChild(
-                    root,
-                    Directory.Exists(indexDirectory) ? SyncVerb : InitVerb,
-                    options,
-                    executor,
-                    subject: ".")
+                ? PrepareIndex(root, Directory.Exists(indexDirectory) ? SyncVerb : InitVerb, options, executor)
                 : repair;
         }
 
@@ -514,6 +509,12 @@ public static class CodeGraphProvisioner
                 false,
                 $"CodeGraph is not set up in this folder, so codegraph {run.Verb} cannot run: {run.Detail}",
                 $"codegraph {InitVerb} ."),
+            // init itself said the folder is not set up, so re-running init cannot be the fix.
+            _ when run.NotInitialised => new DoctorCheck(
+                checkId,
+                false,
+                $"codegraph {InitVerb} ran but CodeGraph still reports this folder is not set up: {run.Detail}",
+                $"remove .codegraph and run kyber-weave doctor --{flag}"),
             _ => run.Corrupt
                 ? new DoctorCheck(
                     checkId,

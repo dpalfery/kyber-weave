@@ -211,9 +211,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // resuming is the way to continue the branch.
         if (resume is null && (runner.HasLocalBranch(branch) || runner.HasRemoteBranch(branch)))
         {
-            return Refuse(
-                $"A branch named '{branch}' already exists. To continue it, re-run with --resume {branch}. " +
-                "To start separate work, choose a different --slug.");
+            return Refuse(BranchExists(branch));
         }
 
         // The finished tasks come from the resumed branch's own commits, read while it is still the branch
@@ -300,8 +298,14 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 created = resumeTarget is null
                     ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
                     : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+                RunStartRunner.ReleaseWorktreeClaim(worktreePath);
             }
         }
+
+        // The check before creation can lose to another run of the same slug. That loser gets the same refusal
+        // and exit code as a branch that existed from the start, not a generic git failure.
+        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
+            return Refuse(BranchExists(branch));
 
         if (!created.Succeeded)
         {
@@ -608,6 +612,10 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             }
         }
     }
+
+    private static string BranchExists(string branch) =>
+        $"A branch named '{branch}' already exists. To continue it, re-run with --resume {branch}. " +
+        "To start separate work, choose a different --slug.";
 
     private static int Refuse(string message)
     {

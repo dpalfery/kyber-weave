@@ -284,7 +284,8 @@ public sealed class RunStartRunner
     ///     The name starts with a UTC timestamp so a repeat of the same branch never lands on an earlier
     ///     folder and a listing sorts by time. The stamp has no colon, which Windows forbids in a file name.
     ///     Only the folder is stamped: the branch keeps the shape the pull request naming check requires. Two
-    ///     runs in one second take a numeric suffix.
+    ///     runs in one second take a numeric suffix. The returned path is claimed with a <c>.claim</c> file beside
+    ///     it; the caller removes that with <see cref="ReleaseWorktreeClaim" /> once git has run.
     /// </remarks>
     public string WorktreePathFor(string branch, DateTimeOffset startedAt)
     {
@@ -299,11 +300,62 @@ public sealed class RunStartRunner
         string folder = stamp + "-" + branch.Replace('/', '-');
 
         string candidate = Path.Combine(container, folder);
-        for (int attempt = 2; Path.Exists(candidate); attempt++)
+        for (int attempt = 2; !TryClaim(container, candidate); attempt++)
             candidate = Path.Combine(container, folder + "-" + attempt.ToString(CultureInfo.InvariantCulture));
 
         return candidate;
     }
+
+    /// <summary>Removes the claim <see cref="WorktreePathFor" /> took, once git has made the folder or failed to.</summary>
+    /// <param name="worktreePath">The path <see cref="WorktreePathFor" /> returned.</param>
+    public static void ReleaseWorktreeClaim(string worktreePath)
+    {
+        try
+        {
+            File.Delete(ClaimPathFor(worktreePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A claim left behind only makes a later run in the same second take the next suffix.
+        }
+    }
+
+    /// <summary>
+    ///     Claims <paramref name="candidate" /> with a file only one process can create, so two runs in the same
+    ///     second never pick the same folder. Checking that the folder is absent is not enough on its own: both
+    ///     runs would see it absent before either created it.
+    /// </summary>
+    private static bool TryClaim(string container, string candidate)
+    {
+        if (Path.Exists(candidate))
+            return false;
+
+        try
+        {
+            Directory.CreateDirectory(container);
+            using (new FileStream(ClaimPathFor(candidate), FileMode.CreateNew, FileAccess.Write))
+            {
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // An unwritable container cannot hold a claim; git reports that folder's real error when it tries.
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+
+        // A run that finished between the check above and the claim has made the folder and dropped its claim.
+        if (!Path.Exists(candidate))
+            return true;
+
+        ReleaseWorktreeClaim(candidate);
+        return false;
+    }
+
+    private static string ClaimPathFor(string worktreePath) => worktreePath + ".claim";
 
     /// <summary>The worktree that has <paramref name="branch" /> checked out, or null when none does.</summary>
     /// <param name="porcelain">The output of <c>git worktree list --porcelain</c>.</param>
