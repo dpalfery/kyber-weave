@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -716,6 +717,49 @@ internal static class SquadCommandComposition
                 $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
 
         return home;
+    }
+
+    /// <summary>
+    ///     Loads the host configuration a Squad verb reads. A global run always reads the home directory's
+    ///     <c>.kyber-weave/kyber-weave.yml</c> as the user-level file that records <c>arbiter.global.targets</c>,
+    ///     whatever root its receipt anchors at; reading it as a project config would reject that block as
+    ///     <c>KW-ARB-CONFIG-011</c>. Only a project-scope run loads <paramref name="targetRoot" /> as a project.
+    /// </summary>
+    /// <param name="targetRoot">The root the run is anchored at.</param>
+    /// <param name="scope">Whether the run is global or project scope.</param>
+    /// <param name="homeDirectory">The home directory the run's user paths name.</param>
+    public static KyberWeaveConfigLoadResult TryLoadScopeConfig(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        string homeDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(targetRoot))
+            return KyberWeaveConfigLoadResult.Fail("The target root must not be empty.", null);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+            return KyberWeaveConfigLoadResult.Fail("The home directory must not be empty.", null);
+
+        try
+        {
+            if (scope != SquadDeploymentScope.Global)
+                return KyberWeaveConfigLoader.TryLoad(targetRoot);
+
+            // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or
+            // the root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
+            string home = Path.GetFullPath(homeDirectory);
+            KyberWeaveConfigLoadResult user = KyberWeaveConfigLoader.TryLoadUserConfig(home);
+
+            // Only a home with no user-level file falls back, and only to the explicit legacy root-level file, so a
+            // user file created meanwhile is never re-probed and read as a project config.
+            if (user.ConfigPath is not null && File.Exists(user.ConfigPath))
+                return user;
+
+            string legacy = Path.Combine(home, "kyber-weave.yml");
+            return File.Exists(legacy) ? KyberWeaveConfigLoader.TryLoad(home, legacy) : user;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, null);
+        }
     }
 
     /// <summary>

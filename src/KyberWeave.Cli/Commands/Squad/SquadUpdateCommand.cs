@@ -407,7 +407,10 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
 
         // Load configuration if present
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(run.TargetRoot);
+        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+            run.TargetRoot,
+            run.Scope,
+            stateStore.UserPaths.HomeDirectory);
         if (!configResult.Success)
         {
             SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
