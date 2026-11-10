@@ -34,7 +34,7 @@ public sealed class CopilotPromptSettings : CommandSettings
 /// <c>XDG_CONFIG_HOME</c> value that moves VS Code's user data on Linux.
 /// </summary>
 internal sealed record CopilotPromptEnvironment(
-    string HomeDirectory,
+    string? HomeDirectory,
     string? AppDataDirectory,
     OSPlatform Platform,
     bool IsInteractive,
@@ -90,7 +90,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
             return 1;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         string entryJson = "{\"promptOverrideFile\": " + JsonSerializer.Serialize(promptPath) + "}";
         List<(string File, byte[] Document)> writes = [];
         List<string> alreadySet = [];
@@ -216,7 +216,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
             return 2;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         List<(string File, byte[] Document)> removals = [];
         List<string> refusals = [];
 
@@ -338,7 +338,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             return 2;
         }
 
-        string promptPath = CopilotPromptFile.InstalledPath(environment.HomeDirectory);
+        string promptPath = CopilotPromptFile.InstalledPath(CopilotPromptCommandSupport.Home(environment));
         CopilotPromptCommandSupport.Say(File.Exists(promptPath)
             ? $"Prompt file: installed at {Markup.Escape(promptPath)}."
             : $"Prompt file: not installed (expected {Markup.Escape(promptPath)}).");
@@ -407,14 +407,14 @@ internal static class CopilotPromptCommandSupport
 
     /// <summary>
     /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
-    /// the prompt file where install wrote it. An empty home means neither variable names an absolute directory.
+    /// the prompt file where install wrote it. A null home means neither variable names an absolute directory.
     /// </summary>
     internal static CopilotPromptEnvironment EnvironmentFrom(
         Func<string, string?> read,
         OSPlatform platform,
         bool isInteractive,
         Func<string, bool> readAnswer) => new(
-        CopilotPromptHome.FromEnvironment(read) ?? string.Empty,
+        CopilotPromptHome.FromEnvironment(read),
         read("APPDATA"),
         platform,
         isInteractive,
@@ -425,6 +425,13 @@ internal static class CopilotPromptCommandSupport
     /// False, after saying why, when no home directory is known. Writing then would put the prompt file under the
     /// working directory, where doctor would never look.
     /// </summary>
+    /// <summary>The home directory. Throws when it is unknown, so a path is never built under the working directory.</summary>
+    /// <exception cref="InvalidOperationException">No home directory is known; callers check <see cref="HasHome"/> first.</exception>
+    internal static string Home(CopilotPromptEnvironment environment) =>
+        string.IsNullOrWhiteSpace(environment.HomeDirectory)
+            ? throw new InvalidOperationException("No home directory is known; check HasHome before building a path.")
+            : environment.HomeDirectory;
+
     internal static bool HasHome(CopilotPromptEnvironment environment)
     {
         if (!string.IsNullOrWhiteSpace(environment.HomeDirectory))
@@ -444,7 +451,16 @@ internal static class CopilotPromptCommandSupport
         if (info.LinkTarget is null)
             return info.Exists;
 
-        return info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+        try
+        {
+            return info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // An unresolvable link is treated as having nothing to read. The write that follows goes through the
+            // guarded AtomicFile path, which reports the same failure as a clean error instead of a crash.
+            return false;
+        }
     }
 
     /// <summary>Parses <c>--flavour</c>. Null means the option was not given, so every detected build is in scope.</summary>
@@ -471,12 +487,12 @@ internal static class CopilotPromptCommandSupport
     /// <summary>The detected builds in scope: all of them, or only the one the person named.</summary>
     internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, VsCodeFlavour? requested)
     {
-        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(environment.HomeDirectory, environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
+        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
         return requested is null ? detected : detected.Where(flavour => flavour == requested.Value).ToList();
     }
 
     internal static string SettingsFileOf(VsCodeFlavour flavour, CopilotPromptEnvironment environment) =>
-        VsCodeUserSettingsPaths.SettingsFile(flavour, environment.HomeDirectory, environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
+        VsCodeUserSettingsPaths.SettingsFile(flavour, Home(environment), environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
 
     internal static string FlavourLabel(VsCodeFlavour flavour) =>
         flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";

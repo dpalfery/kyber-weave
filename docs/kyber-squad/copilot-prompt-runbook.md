@@ -64,7 +64,8 @@ beside the prompt.
 ## Where the files are
 
 - **Home directory.** `install`, `uninstall`, `status` and `doctor` read `HOME`, then
-  `USERPROFILE`. Surrounding spaces are trimmed, and a blank or relative value counts as unset. On
+  `USERPROFILE`. Surrounding spaces are trimmed. A value starting with `/` counts as absolute on every
+  platform; any other relative value, or a blank one, counts as unset. On
   Windows with `HOME` set, such as under Git Bash, all of them use `HOME`, so doctor checks the
   prompt file where install wrote it. When neither names an absolute directory, the commands exit
   `2` and write nothing, and doctor skips the Copilot checks.
@@ -72,7 +73,7 @@ beside the prompt.
 - **VS Code settings file.** `<user-data>/User/settings.json`, where `<user-data>` is:
   - macOS: `<home>/Library/Application Support/Code` (or `Code - Insiders`).
   - Windows: `%APPDATA%\Code`, or `<home>\AppData\Roaming\Code` when `APPDATA` is unset.
-  - Linux: `$XDG_CONFIG_HOME/Code` when `XDG_CONFIG_HOME` is set to an absolute path, as VS Code
+  - Linux: `$XDG_CONFIG_HOME/Code` when `XDG_CONFIG_HOME`, trimmed, is an absolute path, as VS Code
     does. Otherwise `<home>/.config/Code`. A relative value is ignored, as the XDG base-directory
     specification requires.
 - **Symlinked `settings.json`.** When `settings.json` is a symbolic link, for example into a

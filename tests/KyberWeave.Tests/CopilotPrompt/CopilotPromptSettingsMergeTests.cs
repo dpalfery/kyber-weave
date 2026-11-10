@@ -423,12 +423,14 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         Assert.Equal(Path.Combine(Home, "xdg-config"), environment.XdgConfigHome);
     }
 
-    [Fact]
-    public void SettingsFile_Linux_HonoursLinuxAbsoluteXdgConfigHomeFromAnyHost()
+    [Theory]
+    [InlineData("/xdg-config")]
+    [InlineData("  /xdg-config  ")]
+    public void SettingsFile_Linux_HonoursLinuxAbsoluteXdgConfigHomeFromAnyHost(string xdgConfigHome)
     {
         string expected = Path.Combine("/xdg-config", "Code", "User", "settings.json");
 
-        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, "/xdg-config"));
+        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, xdgConfigHome));
     }
 
     [Fact]
@@ -452,7 +454,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_NoHomeDirectory_RefusesAndWritesNothing()
     {
         DetectFlavour(VsCodeFlavour.Stable);
-        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(string.Empty, null, OSPlatform.OSX, true, _ => false));
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false));
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
@@ -463,11 +465,11 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     }
 
     [Fact]
-    public void EnvironmentFrom_NoAbsoluteHome_LeavesHomeEmptyRatherThanFallingBack()
+    public void EnvironmentFrom_NoAbsoluteHome_LeavesHomeNullRatherThanFallingBack()
     {
         CopilotPromptEnvironment environment = CopilotPromptCommandSupport.EnvironmentFrom(
             name => name == "HOME" ? "relative/home" : null, OSPlatform.Linux, false, _ => false);
 
-        Assert.Equal(string.Empty, environment.HomeDirectory);
+        Assert.Null(environment.HomeDirectory);
     }
 }

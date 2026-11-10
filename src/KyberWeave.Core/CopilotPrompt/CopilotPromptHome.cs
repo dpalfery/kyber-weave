@@ -12,7 +12,8 @@ namespace KyberWeave.Core.CopilotPrompt;
 public static class CopilotPromptHome
 {
     /// <summary>
-    /// Returns <c>HOME</c>, else <c>USERPROFILE</c>, trimmed. A blank or relative value counts as unset,
+    /// Returns <c>HOME</c>, else <c>USERPROFILE</c>, trimmed. A value starting with <c>/</c> counts as absolute on
+    /// every host. A blank or relative value counts as unset,
     /// because a relative home would put the prompt file under whatever directory the command ran in.
     /// Null when neither names an absolute directory.
     /// </summary>
@@ -32,6 +33,10 @@ public static class CopilotPromptHome
     private static string? Absolute(string? value)
     {
         string? trimmed = value?.Trim();
-        return string.IsNullOrEmpty(trimmed) || !Path.IsPathFullyQualified(trimmed) ? null : trimmed;
+        if (string.IsNullOrEmpty(trimmed))
+            return null;
+
+        // A leading '/' is absolute on Unix and is what Git Bash and MSYS put in HOME on Windows.
+        return trimmed.StartsWith('/') || Path.IsPathFullyQualified(trimmed) ? trimmed : null;
     }
 }

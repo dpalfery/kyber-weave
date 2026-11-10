@@ -173,6 +173,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
     [InlineData("", "{b}", "{b}")]
     [InlineData(" {a} ", null, "{a}")]
     [InlineData("relative/home", "{b}", "{b}")]
+    [InlineData("/unix/home", "{b}", "/unix/home")]
     [InlineData("relative/home", "relative/profile", null)]
     [InlineData("  ", null, null)]
     [InlineData(null, null, null)]
