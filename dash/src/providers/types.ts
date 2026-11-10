@@ -130,6 +130,8 @@ export type ParsedProviderCall = {
   // canonicalize a linked worktree to its main repository.
   workingDirectory?: string
   activeDurationMs?: number
+  // The harness-recorded session title, stamped as the session label.
+  sessionTitle?: string
   activeGeneratedTokens?: number
   toolWaitMs?: number
 }

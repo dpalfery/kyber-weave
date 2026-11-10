@@ -137,3 +137,22 @@ describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
     })
   }
 })
+
+// MiniMax M3.1 Flash: most Factory Droid sessions run it, and it had no bundled rate. The rate
+// comes from MiniMax's pricing page (retrieved 2026-11-09) and must carry its provenance beside it.
+describe('MiniMax M3.1 Flash bundled rate', () => {
+  const snap = snapshot as unknown as Record<string, (number | null)[]>
+
+  it('carries MiniMax-M3.1-Flash at 0.15 / 0.60 per 1M input/output, no cache write, cache read 0.015 per 1M', () => {
+    expect(snap['MiniMax-M3.1-Flash']).toEqual([0.15e-6, 0.6e-6, null, 0.015e-6])
+  })
+
+  it('cites the MiniMax pricing page and the 2026-11-09 retrieval for the added entry', () => {
+    const prov = JSON.parse(readFileSync(new URL('./pricing-provenance.json', import.meta.url), 'utf8')) as Record<
+      string,
+      { source: string; retrieved: string }
+    >
+    expect(prov['MiniMax-M3.1-Flash']?.source).toMatch(/^https:\/\/platform\.minimax\.io\//)
+    expect(prov['MiniMax-M3.1-Flash']?.retrieved).toBe('2026-11-09')
+  })
+})

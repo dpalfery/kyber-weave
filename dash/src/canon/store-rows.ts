@@ -5,7 +5,7 @@
 import { QUARANTINE_UNKNOWN_SOURCES, sourceSpellingsForHarness } from './measurability.js'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
-import { contentFromParts } from './types.js'
+import { SESSION_LABEL_KEY, contentFromParts } from './types.js'
 import type { OtlpMetric, OtlpScope } from '../otel/receiver.js'
 import { decompressColumn } from './compressed-column.js'
 import { parseJsonObject } from './session-read.js'
@@ -750,6 +750,7 @@ export const PROJECTED_ATTRIBUTE_KEYS: ReadonlySet<string> = new Set([
   'gen_ai.response.model',
   'gen_ai.request.model',
   'model',
+  SESSION_LABEL_KEY,
   'gen_ai.agent.name',
   'agent.name',
   'vcs.repository.name',

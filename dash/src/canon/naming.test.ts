@@ -166,3 +166,23 @@ describe('formatSessionId, scoped subagent ids', () => {
     expect(claude).not.toBe(formatSessionId(`${parent}#agent-b9c20b1941858c779`))
   })
 })
+
+describe('factory and droid machine labels', () => {
+  it('identifies the Factory plugin span names as machine labels', () => {
+    expect(isMachineLabel('factory.turn')).toBe(true)
+    expect(isMachineLabel('factory.session')).toBe(true)
+    expect(isMachineLabel('factory.tool')).toBe(true)
+  })
+
+  it('identifies a droid model-name label as a machine label', () => {
+    expect(isMachineLabel('droid:minimax-m3.1-flash')).toBe(true)
+  })
+
+  it('keeps a droid label that is a human sentence as a human label', () => {
+    expect(isMachineLabel('droid: fix the build')).toBe(false)
+  })
+
+  it('titles a droid session with a model-name label as a Droid session, not the machine name', () => {
+    expect(formatSessionTitle({ label: 'droid:minimax-m3.1-flash', harness: 'droid' })).toBe('Droid session')
+  })
+})

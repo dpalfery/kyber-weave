@@ -35,6 +35,9 @@ const MODELS_DEV_FIRST_PARTY = new Set([
 const MANUAL_ENTRIES = {
   'MiniMax-M2.7':           [0.3e-6, 1.2e-6, 0.375e-6, 0.06e-6],
   'MiniMax-M2.7-highspeed': [0.6e-6, 2.4e-6, 0.375e-6, 0.06e-6],
+  // Official MiniMax M3.1 Flash rate. Source: https://platform.minimax.io/docs/guides/pricing (retrieved 2026-11-09).
+  // Tuple order: input, output, cacheWrite, cacheRead; null cacheWrite = no published rate.
+  'MiniMax-M3.1-Flash':    [0.15e-6, 0.6e-6, null, 0.015e-6],
   // LiteLLM PR #27056 is not merged yet. Source: https://api-docs.deepseek.com/quick_start/pricing
   'deepseek-v4-flash':      [1.4e-7, 2.8e-7, 0, 2.8e-9],
   'deepseek-v4-pro':        [4.35e-7, 8.7e-7, 0, 3.625e-9],
