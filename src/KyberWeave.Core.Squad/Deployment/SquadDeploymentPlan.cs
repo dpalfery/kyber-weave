@@ -1063,7 +1063,7 @@ public sealed class SquadDeploymentPlan
 
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             bool existsAsFile = File.Exists(fullPath);
             string spliced;
@@ -1072,7 +1072,7 @@ public sealed class SquadDeploymentPlan
             {
                 byte[] currentBytes = File.ReadAllBytes(fullPath);
                 string currentText = DecodeBlockText(relativePath, currentBytes);
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post);
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Exact(
                     relativePath,
                     block.Target,
@@ -1085,7 +1085,7 @@ public sealed class SquadDeploymentPlan
                 if (Directory.Exists(fullPath))
                     throw UnmanagedCollision(relativePath);
 
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post);
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
             }
@@ -1151,7 +1151,7 @@ public sealed class SquadDeploymentPlan
             renderedIdentities.Add(identity);
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
             {
@@ -1163,7 +1163,7 @@ public sealed class SquadDeploymentPlan
                     byte[] currentBytes = File.ReadAllBytes(fullPath);
                     string currentText = DecodeBlockText(relativePath, currentBytes);
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, currentText, pre, post);
+                        block.Format, relativePath, currentText, pre, post, subagentStop);
                     preconditions.Add(SquadFilePrecondition.Exact(
                         relativePath,
                         block.Target,
@@ -1179,7 +1179,7 @@ public sealed class SquadDeploymentPlan
                 else
                 {
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, null, pre, post);
+                        block.Format, relativePath, null, pre, post, subagentStop);
                     preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                     mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                     nextBlocks.Add(new SquadOwnedBlock(
@@ -1202,7 +1202,7 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
             {
                 (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                    block.Format, relativePath, null, pre, post);
+                    block.Format, relativePath, null, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                 nextBlocks.Add(new SquadOwnedBlock(
@@ -1225,7 +1225,7 @@ public sealed class SquadDeploymentPlan
             }
 
             (string rewritten, IReadOnlyList<SquadHookOwnedEntry> rewrittenOwned) = SpliceBlockContent(
-                block.Format, relativePath, currentJson, pre, post);
+                block.Format, relativePath, currentJson, pre, post, subagentStop);
             preconditions.Add(SquadFilePrecondition.Exact(
                 relativePath,
                 block.Target,
@@ -1383,16 +1383,17 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Splits a rendered block's entries into the pre and post hook containers by their
-    /// logical container name. Anything else is a renderer bug, refused before it can
-    /// silently land in the wrong container.
+    /// Splits a rendered block's entries into the pre, post and (Factory only) SubagentStop hook
+    /// containers by their logical container name. Anything else is a renderer bug, refused
+    /// before it can silently land in the wrong container.
     /// </summary>
-    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) SplitBlockEntries(
+    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post, IReadOnlyList<JsonNode> SubagentStop) SplitBlockEntries(
         SquadRenderedBlock block)
     {
         ArgumentNullException.ThrowIfNull(block.Entries);
         List<JsonNode> pre = [];
         List<JsonNode> post = [];
+        List<JsonNode> subagentStop = [];
         foreach (SquadRenderedBlockEntry entry in block.Entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
@@ -1412,6 +1413,21 @@ public sealed class SquadDeploymentPlan
             if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
             {
                 post.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "SubagentStop", StringComparison.OrdinalIgnoreCase))
+            {
+                // Only Factory's hook file has this container; a renderer that names it for any
+                // other shape would otherwise write a key that harness never reads.
+                if (block.Format != SquadHookBlockFormat.Factory)
+                {
+                    throw new SquadDeploymentConflictException(
+                        $"Rendered Squad block '{block.RelativePath}' names SubagentStop, which only " +
+                        "the Factory hook file holds. Fix the upstream render before deploying it.");
+                }
+
+                subagentStop.Add(entry.Entry);
                 continue;
             }
 
@@ -1458,7 +1474,7 @@ public sealed class SquadDeploymentPlan
                 $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
         }
 
-        return (pre, post);
+        return (pre, post, subagentStop);
     }
 
     private static IReadOnlyList<SquadHookDrift> FindBlockDrift(
@@ -1530,11 +1546,12 @@ public sealed class SquadDeploymentPlan
         string relativePath,
         string? existingJson,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode> subagentStop)
     {
         try
         {
-            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse);
+            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse, subagentStop);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {

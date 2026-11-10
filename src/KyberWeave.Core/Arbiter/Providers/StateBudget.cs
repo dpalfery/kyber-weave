@@ -36,6 +36,14 @@ public static class StateBudget
     /// <summary>The smallest known budget, applied to unknown models.</summary>
     public const int SmallestKnownBudgetTokens = Tev1Tokens;
 
+    /// <summary>
+    /// Whether the model is a Jev release: TypeSafe's <c>jev-*</c>, or OpenRouter's
+    /// <c>typesafe/jev-1.*</c>. OpenRouter's <c>typesafe/jev-router</c> is not one.
+    /// </summary>
+    internal static bool IsJevModel(string model) =>
+        model.StartsWith("jev-", StringComparison.OrdinalIgnoreCase)
+        || model.StartsWith("typesafe/jev-1.", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Estimates tokens as ⌈UTF-8 bytes ÷ 3⌉.</summary>
     public static int EstimateTokens(int utf8Bytes)
     {
@@ -71,7 +79,7 @@ public static class StateBudget
             return true;
         }
 
-        if (model.StartsWith("jev-", StringComparison.OrdinalIgnoreCase))
+        if (IsJevModel(model))
         {
             return stateTokens + longestQuestionTokens > JevStatePlusLongestQuestionTokens
                 || totalRequestTokens > JevTotalRequestTokens;

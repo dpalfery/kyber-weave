@@ -249,6 +249,49 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     }
 
     /// <summary>
+    /// A global Factory hook file written before the stop registration existed holds only
+    /// PreToolUse and PostToolUse. The refresh must rewrite them and add SubagentStop, and must
+    /// keep the user's own hook beside them.
+    /// </summary>
+    [Fact]
+    public void Refresh_AddsSubagentStopToAnExistingGlobalFactoryHook()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["factory"]);
+        string hookPath = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        File.WriteAllText(hookPath, """
+            {
+              "PreToolUse": [
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness factory --scope global", "timeout": 5 } ] },
+                { "matcher": "Read", "hooks": [ { "type": "command", "command": "user-own-linter" } ] }
+              ],
+              "PostToolUse": [
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness factory --scope global", "timeout": 5 } ] }
+              ]
+            }
+            """);
+
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(_ => { }, environment);
+        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("\"SubagentStop\"", content, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter hook --harness factory --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+        Assert.Contains("user-own-linter", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Update-time refresh follows the user config gate: an already-installed global hook is refreshed
     /// only for harnesses named in <c>arbiter.global.targets</c>, and it never rewrites foreign bytes.
     /// </summary>
