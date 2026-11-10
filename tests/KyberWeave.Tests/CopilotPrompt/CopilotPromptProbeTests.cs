@@ -165,4 +165,32 @@ public sealed class CopilotPromptProbeTests : IDisposable
         Assert.All(lenient, check => Assert.True(check.Passed, check.Reason));
         Assert.Equal(failures, lenient.Count(check => check.Reason?.StartsWith("warning:", StringComparison.Ordinal) == true));
     }
+
+    [Theory]
+    [InlineData("/home/a", "/profile/b", "/home/a")]
+    [InlineData(null, "/profile/b", "/profile/b")]
+    [InlineData("", "/profile/b", "/profile/b")]
+    [InlineData("  ", null, null)]
+    [InlineData(null, null, null)]
+    public void FromEnvironment_PrefersNonBlankHomeThenUserProfile(string? home, string? userProfile, string? expected)
+    {
+        Dictionary<string, string?> variables = new() { ["HOME"] = home, ["USERPROFILE"] = userProfile };
+
+        Assert.Equal(expected, CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)));
+    }
+
+    [Fact]
+    public void Run_LinuxWithXdgConfigHome_ReadsSettingsUnderIt()
+    {
+        WritePrompt(ValidPrompt);
+        string xdgConfigHome = Path.Combine(Home, "xdg-config");
+        string settings = VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, xdgConfigHome);
+        Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        string file = JsonSerializer.Serialize(PromptPath);
+        File.WriteAllText(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
+
+        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, xdgConfigHome);
+
+        Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.setting" && check.Passed);
+    }
 }

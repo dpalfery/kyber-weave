@@ -12,6 +12,9 @@ code-refs:
   - CopilotPromptProbe
   - CopilotPromptFile
   - CopilotOverrideSettings
+  - CopilotPromptHome
+  - VsCodeUserSettingsPaths
+  - AtomicFile
 ---
 
 # Copilot system-prompt override runbook
@@ -57,6 +60,23 @@ conductor agent itself. The prompt now asks the person to switch to the conducto
 non-trivial work in a Kyber-Weave repository, instead of starting it. The agent-scoped deny hook
 from PR 576, recorded as "The Copilot conductor holds tools a hook denies it", guards the conductor
 beside the prompt.
+
+## Where the files are
+
+- **Home directory.** `install`, `uninstall` and `doctor` read `HOME`, then `USERPROFILE`, and skip
+  a blank value. Only when both are unset does `install` fall back to the system profile folder. On
+  Windows with `HOME` set, such as under Git Bash, all three use `HOME`, so doctor checks the prompt
+  file where install wrote it.
+- **Prompt file.** `<home>/.kyber-weave/copilot/system-prompt.yaml`.
+- **VS Code settings file.** `<user-data>/User/settings.json`, where `<user-data>` is:
+  - macOS: `<home>/Library/Application Support/Code` (or `Code - Insiders`).
+  - Windows: `%APPDATA%\Code`, or `<home>\AppData\Roaming\Code` when `APPDATA` is unset.
+  - Linux: `$XDG_CONFIG_HOME/Code` when `XDG_CONFIG_HOME` is set to an absolute path, as VS Code
+    does. Otherwise `<home>/.config/Code`. A relative value is ignored, as the XDG base-directory
+    specification requires.
+- **Symlinked `settings.json`.** When `settings.json` is a symbolic link, for example into a
+  dotfiles repository, `install` and `uninstall` write through it. The file the link points to is
+  updated, and the link stays a link. A link that points at a missing file creates that file.
 
 ## Doctor checks
 

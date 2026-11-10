@@ -25,13 +25,14 @@ public static partial class CopilotPromptProbe
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose VS Code layout applies.</param>
+    /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value, which moves the VS Code user data on Linux.</param>
     /// <returns>The checks in report order. Empty when the override is not in use.</returns>
     /// <remarks>
     /// Without an installed prompt file there is nothing to check, so a repository that never opted in sees no
     /// new output. In <see cref="DoctorMode.Ensure"/> every failure becomes a warning that passes, as the other
     /// doctor checks do for a repository that opted out of stopping.
     /// </remarks>
-    public static IReadOnlyList<DoctorCheck> Run(DoctorMode mode, string homeDirectory, string? appDataDirectory, OSPlatform platform)
+    public static IReadOnlyList<DoctorCheck> Run(DoctorMode mode, string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null)
     {
         ArgumentNullException.ThrowIfNull(homeDirectory);
 
@@ -43,14 +44,14 @@ public static partial class CopilotPromptProbe
         bool anyFlavourPoints = false;
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
-            string settingsFile = VsCodeUserSettingsPaths.SettingsFile(flavour, homeDirectory, appDataDirectory, platform);
+            string settingsFile = VsCodeUserSettingsPaths.SettingsFile(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
             CopilotOverrideState? state = ReadState(settingsFile);
             if (state?.StarPromptFile is null || !string.Equals(state.StarPromptFile, promptPath, StringComparison.Ordinal))
                 continue;
 
             anyFlavourPoints = true;
             string label = flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
-            string userData = VsCodeUserSettingsPaths.UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform);
+            string userData = VsCodeUserSettingsPaths.UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
             checks.Add(new DoctorCheck($"copilot.prompt.{label}.setting", true, null, null));
             checks.Add(FileCheck(label, promptPath));
             checks.Add(LogCheck(label, userData));

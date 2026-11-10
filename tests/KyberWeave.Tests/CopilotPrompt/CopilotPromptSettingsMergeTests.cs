@@ -325,4 +325,101 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
         Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(flavour, Home, appData, OSPlatform.Windows));
     }
+
+    [Theory]
+    [InlineData(VsCodeFlavour.Stable, "Code")]
+    [InlineData(VsCodeFlavour.Insiders, "Code - Insiders")]
+    public void SettingsFile_Linux_HonoursAbsoluteXdgConfigHome(VsCodeFlavour flavour, string buildDirectory)
+    {
+        string xdgConfigHome = Path.Combine(Home, "xdg-config");
+        string expected = Path.Combine(xdgConfigHome, buildDirectory, "User", "settings.json");
+
+        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(flavour, Home, null, OSPlatform.Linux, xdgConfigHome));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("relative/config")]
+    public void SettingsFile_Linux_IgnoresBlankOrRelativeXdgConfigHome(string xdgConfigHome)
+    {
+        string expected = Path.Combine(Home, ".config", "Code", "User", "settings.json");
+
+        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, xdgConfigHome));
+    }
+
+    [Fact]
+    public void SettingsFile_MacOs_IgnoresXdgConfigHome()
+    {
+        string expected = Path.Combine(Home, "Library", "Application Support", "Code", "User", "settings.json");
+
+        Assert.Equal(expected, VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.OSX, Path.Combine(Home, "xdg-config")));
+    }
+
+    [Fact]
+    public void Detect_Linux_FindsBuildUnderXdgConfigHome()
+    {
+        string xdgConfigHome = Path.Combine(Home, "xdg-config");
+        Directory.CreateDirectory(Path.Combine(xdgConfigHome, "Code"));
+
+        Assert.Equal([VsCodeFlavour.Stable], VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, xdgConfigHome));
+        Assert.Empty(VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux));
+    }
+
+    [Fact]
+    public void Install_SymlinkedSettingsFile_WritesThroughToTargetAndKeepsLink()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
+        string dotfiles = Path.Combine(Home, "dotfiles");
+        Directory.CreateDirectory(dotfiles);
+        string target = Path.Combine(dotfiles, "vscode-settings.json");
+        File.WriteAllText(target, "{}");
+        DetectFlavour(VsCodeFlavour.Stable);
+        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+
+        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
+        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(target)));
+        Assert.Single(Directory.GetFiles(dotfiles));
+    }
+
+    [Fact]
+    public void Uninstall_SymlinkedSettingsFile_WritesThroughToTargetAndKeepsLink()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
+        string dotfiles = Path.Combine(Home, "dotfiles");
+        Directory.CreateDirectory(dotfiles);
+        string target = Path.Combine(dotfiles, "vscode-settings.json");
+        File.WriteAllText(target, "{}");
+        DetectFlavour(VsCodeFlavour.Stable);
+        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+        Assert.Equal(0, Install(new CopilotPromptSettings { Yes = true }).Result);
+
+        CapturedConsoleExecution<int> execution = Uninstall(new CopilotPromptSettings { Yes = true });
+
+        Assert.Equal(0, execution.Result);
+        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
+        Assert.DoesNotContain(StarEntry, ModelIdsOf(File.ReadAllBytes(target)));
+    }
+
+    [Fact]
+    public void EnvironmentFrom_HomeAndUserProfileDiffer_UsesHomeLikeDoctor()
+    {
+        string other = Path.Combine(Home, "profile");
+        Dictionary<string, string?> variables = new()
+        {
+            ["HOME"] = Home,
+            ["USERPROFILE"] = other,
+            ["XDG_CONFIG_HOME"] = Path.Combine(Home, "xdg-config"),
+        };
+
+        CopilotPromptEnvironment environment = CopilotPromptCommandSupport.EnvironmentFrom(
+            name => variables.GetValueOrDefault(name), OSPlatform.Linux, false, _ => false);
+
+        Assert.Equal(Home, environment.HomeDirectory);
+        Assert.Equal(CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)), environment.HomeDirectory);
+        Assert.Equal(Path.Combine(Home, "xdg-config"), environment.XdgConfigHome);
+    }
 }

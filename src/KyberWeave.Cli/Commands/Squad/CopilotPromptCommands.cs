@@ -30,14 +30,16 @@ public sealed class CopilotPromptSettings : CommandSettings
 
 /// <summary>
 /// The real environment a Copilot system-prompt command runs in: the home and application-data
-/// directories, the platform, whether a person can answer a prompt, and how answers are read.
+/// directories, the platform, whether a person can answer a prompt, how answers are read, and the
+/// <c>XDG_CONFIG_HOME</c> value that moves VS Code's user data on Linux.
 /// </summary>
 internal sealed record CopilotPromptEnvironment(
     string HomeDirectory,
     string? AppDataDirectory,
     OSPlatform Platform,
     bool IsInteractive,
-    Func<string, bool> ReadAnswer);
+    Func<string, bool> ReadAnswer,
+    string? XdgConfigHome = null);
 
 /// <summary>
 /// Writes the Copilot system-prompt override file and points VS Code's setting at it.
@@ -391,12 +393,27 @@ internal static class CopilotPromptCommandSupport
     private const string Prefix = "kyber-weave squad copilot-prompt";
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>
-    internal static CopilotPromptEnvironment RealEnvironment() => new(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        Environment.GetEnvironmentVariable("APPDATA"),
+    internal static CopilotPromptEnvironment RealEnvironment() => EnvironmentFrom(
+        Environment.GetEnvironmentVariable,
         OperatingSystem.IsWindows() ? OSPlatform.Windows : OperatingSystem.IsMacOS() ? OSPlatform.OSX : OSPlatform.Linux,
         !Console.IsInputRedirected,
         question => AnsiConsole.Confirm(question, false));
+
+    /// <summary>
+    /// Builds the environment from environment variables. Home resolves as doctor resolves it, so doctor finds
+    /// the prompt file where install wrote it; the system profile folder is the last resort.
+    /// </summary>
+    internal static CopilotPromptEnvironment EnvironmentFrom(
+        Func<string, string?> read,
+        OSPlatform platform,
+        bool isInteractive,
+        Func<string, bool> readAnswer) => new(
+        CopilotPromptHome.FromEnvironment(read) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        read("APPDATA"),
+        platform,
+        isInteractive,
+        readAnswer,
+        read("XDG_CONFIG_HOME"));
 
     /// <summary>Parses <c>--flavour</c>. Null means the option was not given, so every detected build is in scope.</summary>
     internal static bool TryParseFlavour(string? text, out VsCodeFlavour? flavour)
@@ -422,12 +439,12 @@ internal static class CopilotPromptCommandSupport
     /// <summary>The detected builds in scope: all of them, or only the one the person named.</summary>
     internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, VsCodeFlavour? requested)
     {
-        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(environment.HomeDirectory, environment.AppDataDirectory, environment.Platform);
+        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(environment.HomeDirectory, environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
         return requested is null ? detected : detected.Where(flavour => flavour == requested.Value).ToList();
     }
 
     internal static string SettingsFileOf(VsCodeFlavour flavour, CopilotPromptEnvironment environment) =>
-        VsCodeUserSettingsPaths.SettingsFile(flavour, environment.HomeDirectory, environment.AppDataDirectory, environment.Platform);
+        VsCodeUserSettingsPaths.SettingsFile(flavour, environment.HomeDirectory, environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
 
     internal static string FlavourLabel(VsCodeFlavour flavour) =>
         flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";

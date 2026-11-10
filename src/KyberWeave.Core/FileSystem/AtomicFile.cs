@@ -36,6 +36,12 @@ namespace KyberWeave.Core.FileSystem;
 /// and the sweep failed, and the message reports only the sweep. The caller needs to know why the
 /// document was never written; the temporary left behind is the smaller harm.
 /// </para>
+/// <para>
+/// A target that is a symbolic link is written through: the link's final target is replaced and the
+/// link itself stays. Renaming over the link instead would turn it into a regular file and silently cut
+/// the file off from where it is kept, such as a dotfiles repository. The temporary is created beside
+/// the final target, so the rename stays within one volume. A dangling link creates its target.
+/// </para>
 /// </remarks>
 public static class AtomicFile
 {
@@ -83,7 +89,7 @@ public static class AtomicFile
         // name. GetDirectoryName("candidates.json") is the empty string rather than a directory,
         // and CreateDirectory("") throws instead of writing beside the working directory the caller
         // meant.
-        string destination = Path.GetFullPath(path);
+        string destination = ResolveLinks(Path.GetFullPath(path));
         string directory = Path.GetDirectoryName(destination)
             ?? throw new InvalidOperationException($"The path '{path}' has no parent directory.");
 
@@ -99,6 +105,22 @@ public static class AtomicFile
         {
             Discard(temporaryPath);
         }
+    }
+
+    /// <summary>
+    /// Follows a symbolic link at <paramref name="destination"/> to its final target, so the write replaces
+    /// the file the link names instead of the link. A path that is not a link is returned unchanged.
+    /// </summary>
+    /// <param name="destination">The fully qualified path the caller asked to write.</param>
+    private static string ResolveLinks(string destination)
+    {
+        // LinkTarget is null for a regular file and for a path that does not exist; ResolveLinkTarget throws on the latter.
+        FileInfo file = new(destination);
+        if (file.LinkTarget is null)
+            return destination;
+
+        FileSystemInfo? target = file.ResolveLinkTarget(returnFinalTarget: true);
+        return target is null ? destination : Path.GetFullPath(target.FullName);
     }
 
     /// <summary>
