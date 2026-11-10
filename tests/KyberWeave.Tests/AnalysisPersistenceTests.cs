@@ -640,6 +640,7 @@ public sealed class AnalysisPersistenceTests
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite lock fixture.");
 
+        bool acquired = false;
         try
         {
             process.StandardInput.WriteLine(
@@ -691,6 +692,8 @@ public sealed class AnalysisPersistenceTests
                     $"sqlite lock fixture did not acquire an immediate transaction. Output: '{line}', Error: '{stderr}'.");
             }
 
+            acquired = true;
+
             beforeProbe?.Invoke(process);
 
             DateTime deadline = DateTime.UtcNow.AddSeconds(probeTimeoutSeconds);
@@ -712,18 +715,21 @@ public sealed class AnalysisPersistenceTests
         catch (Exception primaryException)
         {
             List<Exception> cleanupFailures = [];
-            try
+            if (acquired)
             {
-                if (!process.HasExited)
+                try
                 {
                     process.StandardInput.WriteLine("ROLLBACK;");
                     process.StandardInput.Close();
-                    process.WaitForExit(5_000);
+                    if (!process.HasExited)
+                    {
+                        process.WaitForExit(5_000);
+                    }
                 }
-            }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException)
-            {
-                cleanupFailures.Add(ex);
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
+                {
+                    cleanupFailures.Add(ex);
+                }
             }
 
             try
