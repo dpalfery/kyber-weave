@@ -25,6 +25,7 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ModelTargetResolverTests : IDisposable
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
+    private const string ScopeRule = "KW-ARB-SCOPE-002";
     private const string Plan = "docs/plans/x.md";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string Harness = "claude";
@@ -49,7 +50,11 @@ public sealed class ModelTargetResolverTests : IDisposable
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal);
+            Dictionary<string, string> answers = new(StringComparer.Ordinal)
+            {
+                // The primary's scope question: the delegation asks only for the plan task's work, so it allows.
+                [ScopeRule] = "within-task",
+            };
             Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
             if (Hard)
             {
@@ -67,8 +72,9 @@ public sealed class ModelTargetResolverTests : IDisposable
             facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
-                .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
+                .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
@@ -79,23 +85,27 @@ public sealed class ModelTargetResolverTests : IDisposable
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
     }
 
-    private static KyberWeaveConfig Config(string mode = "enforce", ArbiterModelTargetingConfig? targeting = null) => new()
+    private static KyberWeaveConfig Config(string mode = "enforce", ArbiterModelTargetingConfig? targeting = null)
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        ArbiterModelTargetingConfig modelTargeting = targeting ?? new ArbiterModelTargetingConfig(
+            mode,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["easy"] = "fast",
+                ["standard"] = "general",
+                ["hard"] = "deep-planning",
+            },
+            ["fast", "general", "deep-planning"]);
+        return new()
         {
-            Enabled = true,
-            ModelTargeting = targeting ?? new ArbiterModelTargetingConfig(
-                mode,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["easy"] = "fast",
-                    ["standard"] = "general",
-                    ["hard"] = "deep-planning",
-                },
-                ["fast", "general", "deep-planning"]),
-        },
-        Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
-    };
+            Arbiter = ArbiterConfig.ProductDefaults with
+            {
+                Enabled = true,
+                ModelTargeting = modelTargeting,
+            },
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
+    }
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
@@ -135,6 +145,10 @@ public sealed class ModelTargetResolverTests : IDisposable
         ArbiterDispatchEvaluation result = Assert.Single(
             (await Evaluator(provider ?? new HardProvider()).EvaluateAsync(
                 ev, config ?? Config(), null, TestContext.Current.CancellationToken)).Dispatches);
+        ArbiterDecisionRecord primary = Assert.Single(
+            new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate");
+        string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
+        Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
         ArbiterDecisionRecord record = Assert.Single(
             new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
         return (record, result);
@@ -146,7 +160,8 @@ public sealed class ModelTargetResolverTests : IDisposable
     private void WriteTable(
         string? generalToken = "t-general",
         bool includeAgent = true,
-        string harness = Harness)
+        string harness = Harness,
+        string? deepToken = "t-deep")
     {
         Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
@@ -158,7 +173,7 @@ public sealed class ModelTargetResolverTests : IDisposable
             {
                 ["fast"] = "t-fast",
                 ["general"] = generalToken,
-                ["deep-planning"] = "t-deep",
+                ["deep-planning"] = deepToken,
             },
             includeAgent
                 ? new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
@@ -264,7 +279,8 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task ProfileWithNoToken_SaysNoToken()
     {
-        WriteTable(generalToken: null);
+        // The hard difficulty resolves to deep-planning, so that profile is the one left without a token.
+        WriteTable(deepToken: null);
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
 

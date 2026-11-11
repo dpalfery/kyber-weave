@@ -23,6 +23,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string LadderRule = "KW-ARB-LADDER-001";
+    private const string ScopeRule = "KW-ARB-SCOPE-002";
     private const string Plan = "docs/plans/x.md";
     private const string Trigger = "delegate.model";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
@@ -57,7 +58,9 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         {
             CallCount++;
             AskedRuleIds.AddRange(rules.Select(rule => rule.Id));
-            if (Fault is not null)
+            // The fault is the difficulty provider's, so it is raised only for the secondary's question. The
+            // primary's scope question is answered, so the primary still allows and the secondary is reached.
+            if (Fault is not null && rules.Any(rule => rule.Id == DifficultyRule))
             {
                 throw Fault;
             }
@@ -69,6 +72,12 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
                 {
                     answers[rule.Id] = answer;
                 }
+            }
+
+            // The primary's scope question: the delegation asks only for the plan task's work, so the primary allows.
+            if (rules.Any(rule => rule.Id == ScopeRule))
+            {
+                answers[ScopeRule] = "within-task";
             }
 
             return Task.FromResult(new ArbiterStep1BatchResult(
@@ -87,8 +96,9 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
             facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
-                .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
+                .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
@@ -151,7 +161,11 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         await Evaluator(provider).EvaluateAsync(
             Dispatch(observesReturns), Config(mode), null, TestContext.Current.CancellationToken);
 
-        return Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == Trigger);
+        IReadOnlyList<ArbiterDecisionRecord> records = new DecisionLog(ArbiterDirectory).ReadAll();
+        ArbiterDecisionRecord primary = Assert.Single(records, record => record.Trigger == "delegate");
+        string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
+        Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
+        return Assert.Single(records, record => record.Trigger == Trigger);
     }
 
     private static ArbiterDecisionRule RuleOf(ArbiterDecisionRecord record, string id) =>
@@ -322,7 +336,6 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     public async Task Ladder_PriorFailedBelowTheTop_StepsUpAndRetargets()
     {
         await SeedAttemptAsync("fast", "FAIL");
-
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(new ScriptedProvider(), mode: "enforce");
 
         ArbiterDecisionRule rule = RuleOf(record, LadderRule);
