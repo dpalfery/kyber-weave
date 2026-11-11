@@ -293,4 +293,24 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Assert.DoesNotContain(SentinelSecret, ledgerText, StringComparison.Ordinal);
         Assert.DoesNotContain(SentinelSecret, decisionsText, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A store directory's own time does not move when a file inside it is appended to, so retention must read the
+    /// time of the items, not the directory. A run appended to recently survives the sweep even when its directory is
+    /// old. Failure this guards: a review active for more than the retention window loses its findings mid-run,
+    /// because only the directory's time is read.
+    /// </summary>
+    [Fact]
+    public async Task ARunAppendedToRecentlyIsNotSweptWhenItsDirectoryIsOld()
+    {
+        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        await store.AppendFindingAsync("RUN-OLD", "id: old-1\nclaim: first");
+        string runDirectory = Assert.Single(Directory.GetDirectories(Path.Combine(ArbiterDirectory, "stores")));
+        Directory.SetLastWriteTimeUtc(runDirectory, Now.UtcDateTime.AddDays(-30));
+
+        await store.AppendFindingAsync("RUN-OLD", "id: old-2\nclaim: recent");
+        await store.AppendFindingAsync("RUN-NEW", "id: new-1\nclaim: fresh");
+
+        Assert.Contains(store.ReadFindings("RUN-OLD"), item => item.Contains("id: old-2", StringComparison.Ordinal));
+    }
 }

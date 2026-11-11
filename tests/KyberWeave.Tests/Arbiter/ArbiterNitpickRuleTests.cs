@@ -290,7 +290,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding), ConfigWith([Shipped(NitpickRule)]));
 
-        Assert.NotEqual(RuleEffects.Drop, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     /// <summary>A substantive answer keeps the finding.</summary>
@@ -330,7 +330,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding), ConfigWith([Enforced(NitpickRule)]));
 
-        Assert.NotEqual(RuleEffects.Drop, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     /// <summary>An unsure answer keeps the finding; only a confident nitpick drops it.</summary>
@@ -346,7 +346,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding), ConfigWith([Enforced(NitpickRule)]));
 
-        Assert.NotEqual(RuleEffects.Drop, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     /// <summary>With the provider set to <c>none</c> nothing is asked, so the finding is kept.</summary>
@@ -358,7 +358,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding), ConfigWith([Enforced(NitpickRule)]));
 
-        Assert.NotEqual(RuleEffects.Drop, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     /// <summary>A Critical finding is never asked and never dropped, even when the provider would say nitpick.</summary>
@@ -375,7 +375,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
             LensReturn(CriticalFinding), ConfigWith([Enforced(NitpickRule)]));
 
         Assert.Equal(0, provider.CallCount);
-        Assert.NotEqual(RuleEffects.Drop, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     // ---- Rendering and annotate precedence (acceptance: one line per dropped finding) ----
@@ -533,5 +533,64 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
     public void TheRefuterGateFollowsTheFilterShadowState()
     {
         Assert.Equal(Shipped(NitpickRule).Shadow, Shipped(RefuterRule).Shadow);
+    }
+
+    /// <summary>
+    /// A lens may write its severity in any case. A <c>critical</c>, <c>Critical</c> or <c>CRITICAL</c> finding is
+    /// substantive at step 0, so it is never sent to the provider and never dropped. Failure this guards: a
+    /// lowercase severity falls through to step 1, and an enforced nitpick answer drops a critical defect.
+    /// </summary>
+    [Theory]
+    [InlineData("critical")]
+    [InlineData("Critical")]
+    [InlineData("CRITICAL")]
+    public async Task ACriticalFindingOfAnyCaseIsNeverSentToTheProviderOrDropped(string severity)
+    {
+        ScriptedProvider provider = new()
+        {
+            AnswerByRuleId = new Dictionary<string, string>(StringComparer.Ordinal) { [NitpickRule] = Nitpick },
+            ScoreByRuleId = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
+            {
+                [NitpickRule] = new ArbiterStep1Score(null, 0.9, 0.85),
+            },
+        };
+        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        string finding = "id: crit-1\nseverity: " + severity + "\nfile: src/Widget.cs\nline: 12\nclaim: null deref";
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
+            LensReturn(finding), ConfigWith([Enforced(NitpickRule)]));
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
+    }
+
+    /// <summary>
+    /// The store keys a finding by its lens-qualified id (<c>correctness/nit-1</c>), and a refutation names it the
+    /// same way. A finding the filter dropped must read as dropped when its refuter is judged, so the refuter is
+    /// denied. Failure this guards: the refutation's bare slug never matches the stored id, so the drop is invisible
+    /// and a refuter runs against a finding the filter already set aside.
+    /// </summary>
+    [Fact]
+    public async Task ARefuterForAFindingDroppedUnderItsLensIdIsDenied()
+    {
+        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        await store.AppendFindingAsync(ReviewRun, ReturnedFinding.StoredText(
+            "id: correctness/nit-1\nseverity: Minor\nfile: src/Widget.cs\nline: 12\nclaim: naming", dropped: true));
+        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScriptedProvider());
+        ArbiterEvent refute = new()
+        {
+            Harness = "claude",
+            Phase = "pre",
+            Target = "review-lens",
+            Prompt = "KYBER-ARBITER: true\nREVIEW_RUN: " + ReviewRun + "\nREFUTE: correctness/nit-1\n\n" +
+                     "id: correctness/nit-1\nfile: src/Widget.cs\nline: 12\nclaim: naming",
+            HarnessCaller = "code-reviewer",
+            IsDispatch = true,
+            Session = "session-1",
+        };
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(refute, ConfigWith([Enforced(RefuterRule)]));
+
+        Assert.Equal(RuleEffects.Verify, Assert.Single(result.Dispatches).Outcome);
     }
 }

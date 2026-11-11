@@ -228,6 +228,90 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         Assert.False(block.Delivered);
     }
 
+    private const string FailureRule = "KW-ARB-FAILURE-001";
+
+    /// <summary>A rework dispatch: its first body line is the <c>FAILURE-CLUSTER:</c> marker.</summary>
+    private const string Rework =
+        "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\n" +
+        "FAILURE-CLUSTER: cluster-a\n\nFAILURE:\nbuild broke at Widget.cs:12\n\nImplement T2 again.";
+
+    /// <summary>Answers the hard difficulty and within-task scope, and the failure question as <c>same</c> above its floor.</summary>
+    private sealed class SameFailureProvider : IArbiterProvider
+    {
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default)
+        {
+            Dictionary<string, string> answers = new(StringComparer.Ordinal)
+            {
+                [ScopeRule] = "within-task",
+                [DifficultyRule] = "hard",
+                [FailureRule] = "same",
+            };
+            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
+            {
+                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
+                [FailureRule] = new(null, 0.9, 0.85),
+            };
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
+        }
+    }
+
+    /// <summary>The model targeting of <see cref="Config(string)"/>, with the same-failure rule enforced rather than shadowed.</summary>
+    private static KyberWeaveConfig EnforcedFailureConfig() => new()
+    {
+        Arbiter = ArbiterConfig.ProductDefaults with
+        {
+            Enabled = true,
+            Rules = ArbiterConfig.ProductDefaults.Rules
+                .Select(rule => string.Equals(rule.Id, FailureRule, StringComparison.Ordinal) ? rule with { Shadow = false } : rule)
+                .ToList(),
+            ModelTargeting = new ArbiterModelTargetingConfig(
+                "enforce",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["easy"] = "fast",
+                    ["standard"] = "general",
+                    ["hard"] = "deep-planning",
+                },
+                ["fast", "general", "deep-planning"]),
+        },
+        Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+    };
+
+    /// <summary>
+    /// A repeated rework that the same-failure advisory annotates still carries the model its targeting resolved.
+    /// The advisory never denies, so the token the harness would have received must survive it. Failure this
+    /// guards: the advisory branch returns before the model is resolved, so the repeated attempt runs on the wrong
+    /// model with no record of why.
+    /// </summary>
+    [Fact]
+    public void ASameFailureAdvisoryKeepsTheResolvedModelOnTheRework()
+    {
+        WriteTable();
+        SameFailureProvider provider = new();
+        KyberWeaveConfig config = EnforcedFailureConfig();
+        HookOutcome first = Engine(provider).DecidePreDispatch(
+            "claude", "conductor", "csharp-dev", Rework, config, Context(),
+            toolCallId: "tool-27", sessionId: "s1", dispatchModel: null);
+        Assert.True(
+            first.Kind == HookOutcomeKind.Allow,
+            $"expected the first rework to be allowed, got {first.Kind}: {first.Reason}");
+
+        HookOutcome repeat = Engine(provider).DecidePreDispatch(
+            "claude", "conductor", "csharp-dev", Rework, config, Context(),
+            toolCallId: "tool-28", sessionId: "s1", dispatchModel: null);
+
+        Assert.True(
+            repeat.Kind == HookOutcomeKind.AllowWithNote,
+            $"expected AllowWithNote for the repeated rework, got {repeat.Kind}: {repeat.Reason}");
+        Assert.StartsWith("ARBITER_SAME_FAILURE: yes", repeat.Reason, StringComparison.Ordinal);
+        Assert.Equal("opus", repeat.ModelToken);
+        Assert.NotNull(repeat.ModelBlock);
+    }
+
     private static string AgentDispatchPayload()
     {
         JsonNode root = JsonNode.Parse(File.ReadAllText(Path.Combine(

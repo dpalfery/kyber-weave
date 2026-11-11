@@ -380,7 +380,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
-        Assert.NotEqual(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     /// <summary>
@@ -397,7 +397,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Shipped(DuplicateRule)]));
 
-        Assert.NotEqual(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
+        Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
     // ---- Refuter outcome and denial (acceptance: denial reason, outcome recorded against the finding id) ----
@@ -470,5 +470,38 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
                 .ToDictionary(rule => rule.Id, _ => new ArbiterStep1Score(null, confidence, rules[0].Ask!.ConfidenceAtLeast), StringComparer.Ordinal);
             return new ArbiterStep1BatchResult(inside.AnswersByRule, inside.Model, inside.Usage, inside.RequestSent, scores);
         }
+    }
+
+    /// <summary>
+    /// A refuted finding is stored under its lens-qualified id (<c>correctness/nit-2</c>), and its own stored item sits
+    /// on the same file and line as the refutation. The prior list holds the earlier findings only, so the duplicate
+    /// rule is asked about the earlier finding and never about the refuted finding itself. Failure this guards: the
+    /// refuted finding is listed as its own earlier finding, and the rule is asked to match it against itself.
+    /// </summary>
+    [Fact]
+    public async Task ARefutedFindingIsNeverAskedAboutAsItsOwnEarlierFinding()
+    {
+        await SeedAsync(
+            ThisRun,
+            "id: correctness/nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept",
+            "id: correctness/nit-2\nfile: src/Widget.cs\nline: 12\nclaim: naming\nstatus: kept");
+        BatchDuplicateProvider provider = new(_ => DifferentDefect);
+        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvent refute = new()
+        {
+            Harness = "claude",
+            Phase = "pre",
+            Target = "review-lens",
+            Prompt = "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: correctness/" + Refuted + "\n\n" +
+                     "id: correctness/" + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming",
+            HarnessCaller = "code-reviewer",
+            IsDispatch = true,
+            Session = "session-1",
+        };
+
+        await evaluator.EvaluateAsync(refute, ConfigWith([Enforced(DuplicateRule)]));
+
+        string asked = Assert.Single(provider.Asked);
+        Assert.Contains("id: correctness/nit-1", asked, StringComparison.Ordinal);
     }
 }

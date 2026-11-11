@@ -384,7 +384,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord triage = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == TriageTrigger);
         ArbiterDecisionRule rule = Assert.Single(triage.Rules, r => r.Id == TriageRule);
         Assert.Equal(Answered, rule.WouldEffect);
@@ -400,7 +400,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
         Assert.False(result.IsError);
     }
 
@@ -414,7 +414,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
         Assert.False(result.IsError);
     }
 
@@ -428,7 +428,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     // ---- Intake through the evaluator ----
@@ -478,7 +478,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             IntakePlanner(), ConfigWith([Shipped(IntakeRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     /// <summary>An intake answer below the floor is undecidable and the planner runs as before.</summary>
@@ -491,7 +491,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
 
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     // ---- Docs-impact through the evaluator ----
@@ -522,7 +522,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 
         Assert.Equal(0, provider.CallCount);
-        Assert.NotEqual(Answered, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     /// <summary>

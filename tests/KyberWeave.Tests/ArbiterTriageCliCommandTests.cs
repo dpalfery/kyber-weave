@@ -88,6 +88,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Use [red]this[/] and [bogus", execution.Output, StringComparison.Ordinal);
     }
 
     private static CommandExecution Capture(Func<int> execute)
