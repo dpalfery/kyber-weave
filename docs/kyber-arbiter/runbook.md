@@ -58,9 +58,11 @@ With no project config, the user-level config is used and the per-root ledger li
 
 **Claude's user-level block after updating.** A release with the Claude fix does not change the block on
 its own: `kyber-weave update` refreshes only the harnesses listed in `arbiter.global.targets`, and a machine
-that installed Claude before may not list it there. After updating, run the install once with the provider
-kind you have configured (`none` below; a user on another provider passes that kind, so the provider is
-left unchanged):
+that installed Claude before may not list it there. After updating, run the install once, passing the
+`provider.kind` that `~/.kyber-weave/kyber-weave.yml` already holds (`none` below), because the install
+writes that file's kind and omitting the option writes `none`. It never touches the per-user override
+`~/.config/kyber-weave/arbiter.yml`, which is where a machine's real provider, model and endpoint usually
+live, so those stay as they are:
 
 ```bash
 kyber-weave arbiter install --target claude --provider none --yes
