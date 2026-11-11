@@ -5,6 +5,7 @@
 import { SOURCE_STATE_SQL } from './source-state.js'
 import { REFRESH_RUN_SQL } from './refresh-run.js'
 import { compressColumn, type CompressedColumn } from './compressed-column.js'
+import { FILE_SOURCE_PREFIX } from './measurability.js'
 import { parseJsonObject, turnObjectOf } from './session-read.js'
 import { DETECTOR_VERSION, RECORDS_WRITE_MARKER_KEY, SESSION_TURN_TABLE_SQL, createSessionDenormIndex } from './store-schema.js'
 import { decompressRaw, sessionSummaryOf } from './store-rows.js'
@@ -550,11 +551,11 @@ function duplicateCallGroups(db: Database): DuplicateCallGroup[] {
     .prepare(
       `SELECT r.harness AS harness, r.session_id AS session_id, r.timestamp AS timestamp, r.name AS name
          FROM records r JOIN record_provenance p ON p.span_id = r.span_id
-        WHERE r.source LIKE 'codeburn/%' AND r.op = 'llm.invoke'
+        WHERE r.source LIKE ? AND r.op = 'llm.invoke'
         GROUP BY r.harness, r.session_id, r.timestamp, r.name
        HAVING COUNT(DISTINCT p.imported_at_utc) > 1`,
     )
-    .all() as { harness: string; session_id: string | null; timestamp: string; name: string }[]
+    .all(`${FILE_SOURCE_PREFIX}%`) as { harness: string; session_id: string | null; timestamp: string; name: string }[]
   return rows.map((row) => ({
     harness: row.harness,
     sessionId: row.session_id,
@@ -602,9 +603,9 @@ function repairDuplicateGroup(db: Database, group: DuplicateCallGroup): number {
       `SELECT r.span_id AS span_id, r.trace_id AS trace_id, r.raw AS raw, p.imported_at_utc AS imported
          FROM records r JOIN record_provenance p ON p.span_id = r.span_id
         WHERE r.harness = ? AND r.session_id IS ? AND r.timestamp = ? AND r.name = ?
-          AND r.source LIKE 'codeburn/%' AND r.op = 'llm.invoke'`,
+          AND r.source LIKE ? AND r.op = 'llm.invoke'`,
     )
-    .all(group.harness, group.sessionId, group.timestamp, group.name) as {
+    .all(group.harness, group.sessionId, group.timestamp, group.name, `${FILE_SOURCE_PREFIX}%`) as {
     span_id: string
     trace_id: string
     raw: unknown

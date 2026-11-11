@@ -414,7 +414,7 @@ describe('the canon store as the native OTLP metrics destination', () => {
       // migration step of its own (v22 -> v23).
       expect(SCHEMA_SQL).toMatch(/CREATE TABLE IF NOT EXISTS\s+\w*metric/i)
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(23)
+      expect(SCHEMA_VERSION).toBe(24)
     } finally {
       store.close()
     }
