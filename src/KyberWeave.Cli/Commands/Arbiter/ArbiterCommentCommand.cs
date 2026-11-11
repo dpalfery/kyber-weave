@@ -44,8 +44,9 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         }
 
         string root = System.IO.Path.GetFullPath(settings.Root);
-        // The same containment the served tool applies: a cited path that leaves the repository root is refused, not read.
-        if (!settings.Summary && FileTextFacts.ResolveWithinRoot(ArbiterRepoRoot.Find(root), settings.Path) is null)
+        // The same containment the served tool applies: a cited path that leaves the root is refused, not read. The check
+        // and the triage read use one root, the --root the settings name, so a path cannot pass one and fail the other.
+        if (!settings.Summary && FileTextFacts.ResolveWithinRoot(root, settings.Path) is null)
         {
             AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
             return 1;
