@@ -9,8 +9,9 @@ public static class ModelTokenAliases
     private const string Claude = "claude";
 
     /// <summary>
-    /// The alias a model token writes as: an accepted alias writes as it is, and a full model identifier
-    /// (<c>claude-&lt;family&gt;-...</c>) whose family is accepted writes that family. Null when neither holds.
+    /// The alias a model token writes as, in the accepted set's own spelling. The token is trimmed and matched
+    /// to an accepted alias ignoring case. A full model identifier (<c>claude-&lt;family&gt;-&lt;version&gt;</c>)
+    /// writes its family, when the family is accepted and the version is not blank. Null when neither holds.
     /// </summary>
     /// <param name="token">The model token from the targets table.</param>
     /// <param name="accepted">The aliases the harness accepts.</param>
@@ -19,16 +20,49 @@ public static class ModelTokenAliases
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(accepted);
 
-        if (accepted.Contains(token))
+        string trimmed = token.Trim();
+        if (trimmed.Length == 0)
         {
-            return token;
+            return null;
         }
 
-        string[] parts = token.Split('-');
-        return parts.Length > 1
-            && string.Equals(parts[0], Claude, StringComparison.Ordinal)
-            && accepted.Contains(parts[1])
-                ? parts[1]
-                : null;
+        if (AcceptedSpelling(trimmed, accepted) is { } alias)
+        {
+            return alias;
+        }
+
+        string prefix = Claude + "-";
+        if (!trimmed.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string rest = trimmed[prefix.Length..];
+        int dash = rest.IndexOf('-', StringComparison.Ordinal);
+        if (dash < 0 || string.IsNullOrWhiteSpace(rest[(dash + 1)..]))
+        {
+            return null;
+        }
+
+        return AcceptedSpelling(rest[..dash], accepted);
+    }
+
+    /// <summary>The accepted set's spelling of <paramref name="text"/>, matched ignoring case; null when none matches.</summary>
+    private static string? AcceptedSpelling(string text, IReadOnlySet<string> accepted)
+    {
+        if (accepted.Contains(text))
+        {
+            return text;
+        }
+
+        foreach (string candidate in accepted)
+        {
+            if (string.Equals(candidate, text, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 }
