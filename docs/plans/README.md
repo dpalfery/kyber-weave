@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
+| Plan | Status | Scale | Summary |
+|---|---|---|---|
+| [Developers prevent malformed-input defects instead of leaving them for review](2026-11-11-dev-input-site-rules.md) | Ready | `extends-component` (KyberSquad, ReviewCouncil) | Developers fill the reviewer's input-site table at their exit gate and fix a reported defect's whole class; the coding standards gain `KW-STD-INPUT-001` (parsers fail closed); every fix for a verified-real review finding ships with a test that fails without it. |
 
 ## Archived Plans
 
