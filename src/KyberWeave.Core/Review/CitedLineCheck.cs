@@ -22,27 +22,61 @@ public static class CitedLineCheck
     /// <param name="finding">The finding to check.</param>
     public static CitedLineResult Check(string repositoryRoot, ReviewFinding finding)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(finding);
+        return Check(repositoryRoot, [finding])[0];
+    }
 
-        // The path comes from a seat's text, so only a file inside the repository, reached without a symbolic
-        // link, is read. Anything else is left as the seat wrote it.
-        if (!IsRepositoryRelative(finding.File)
-            || !DocsRootPath.IsContainedFile(repositoryRoot, finding.File, []))
+    /// <summary>Checks every finding against the working tree, reading each cited file once.</summary>
+    /// <param name="repositoryRoot">The absolute repository root the findings' paths are relative to.</param>
+    /// <param name="findings">The findings to check.</param>
+    /// <returns>One result per finding, in the order given.</returns>
+    public static IReadOnlyList<CitedLineResult> Check(string repositoryRoot, IReadOnlyList<ReviewFinding> findings)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(findings);
+
+        Dictionary<string, FileLines> files = new(StringComparer.Ordinal);
+        List<CitedLineResult> results = new(findings.Count);
+        foreach (ReviewFinding finding in findings)
         {
-            return CitedLineResult.Unchanged(finding);
+            if (!files.TryGetValue(finding.File, out FileLines? file))
+            {
+                file = ReadFile(repositoryRoot, finding.File);
+                files[finding.File] = file;
+            }
+
+            results.Add(file.Lines is { } lines
+                ? CheckLine(finding, lines)
+                : CitedLineResult.Unverified(finding, file.Problem ?? "the cited file could not be read"));
         }
 
-        string[] lines;
+        return results;
+    }
+
+    /// <summary>
+    /// The cited file's lines, or why they were not read. The path comes from a seat's text, so only a file inside
+    /// the repository, reached without a symbolic link, is read.
+    /// </summary>
+    private static FileLines ReadFile(string repositoryRoot, string path)
+    {
+        if (!IsRepositoryRelative(path))
+            return new FileLines(null, $"{path} is not a path inside the repository, so it was not read");
+
+        if (!DocsRootPath.IsContainedFile(repositoryRoot, path, []))
+            return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
+
         try
         {
-            lines = File.ReadAllLines(Path.Combine(repositoryRoot, finding.File));
+            return new FileLines(File.ReadAllLines(Path.Combine(repositoryRoot, path)), null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return CitedLineResult.Unchanged(finding);
+            return new FileLines(null, $"{path} could not be read: {ex.Message}");
         }
+    }
 
+    private static CitedLineResult CheckLine(ReviewFinding finding, string[] lines)
+    {
         if (finding.Line <= lines.Length)
             return CitedLineResult.Unchanged(finding);
 
@@ -72,6 +106,8 @@ public static class CitedLineCheck
                     : $"{matches.Length} lines hold the excerpt, so which one it means cannot be told"));
     }
 
+    private sealed record FileLines(string[]? Lines, string? Problem);
+
     private static bool IsRepositoryRelative(string path) =>
         !string.IsNullOrWhiteSpace(path)
         && !Path.IsPathRooted(path)
@@ -82,14 +118,21 @@ public static class CitedLineCheck
 /// <param name="Finding">The finding, with its line moved when the check relocated it.</param>
 /// <param name="Kind">Whether the line was left, moved, or could not be repaired.</param>
 /// <param name="OriginalLine">The line the seat cited.</param>
-/// <param name="Reason">Why the line could not be repaired, when it could not.</param>
+/// <param name="Reason">Why the line could not be repaired or checked, when it could not.</param>
 public sealed record CitedLineResult(ReviewFinding Finding, CitedLineKind Kind, int OriginalLine, string? Reason)
 {
-    /// <summary>The finding's line exists, or its file could not be checked.</summary>
+    /// <summary>The finding's line exists in its file.</summary>
     public static CitedLineResult Unchanged(ReviewFinding finding)
     {
         ArgumentNullException.ThrowIfNull(finding);
         return new CitedLineResult(finding, CitedLineKind.Unchanged, finding.Line, null);
+    }
+
+    /// <summary>The finding's file could not be read, so its line was not checked.</summary>
+    public static CitedLineResult Unverified(ReviewFinding finding, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return new CitedLineResult(finding, CitedLineKind.Unverified, finding.Line, reason);
     }
 
     /// <summary>The finding was moved to the one line holding its excerpt.</summary>
@@ -117,5 +160,11 @@ public enum CitedLineKind
     Relocated,
 
     /// <summary>The line does not exist and could not be repaired, so the finding is dropped.</summary>
-    Unresolved
+    Unresolved,
+
+    /// <summary>
+    /// The cited file is missing, outside the repository, or unreadable, so the line was not checked and the
+    /// finding is left as the seat wrote it.
+    /// </summary>
+    Unverified
 }

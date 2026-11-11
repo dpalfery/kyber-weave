@@ -226,7 +226,7 @@ public static class VerdictEngine
                 Severity.Warning,
                 $"Gate '{gate.Id}' was NOT RUN to a result ({gate.Summary}), so what it checks is unverified.",
                 gate.Id,
-                Hint: "Re-run the gate on its own with 'review gates --gate <id>', or raise its timeout-seconds."));
+                Hint: $"Re-run the gate on its own with 'review gates --gate {gate.Id}'."));
         }
 
         bool failed = false;

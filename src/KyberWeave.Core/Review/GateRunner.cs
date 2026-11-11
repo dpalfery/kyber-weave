@@ -23,6 +23,8 @@ namespace KyberWeave.Core.Review;
 /// </remarks>
 public static class GateRunner
 {
+    private const string DeadlineKey = "review.council-deadline-seconds";
+
     private static readonly ArbiterRule GateSelectRule =
         ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
 
@@ -42,7 +44,7 @@ public static class GateRunner
     /// <param name="deadline">
     /// The wall-clock budget for the whole run, or null for none. Each gate runs for the shorter of its own
     /// timeout and the time left; the gate the deadline cuts, and every gate not yet started, is reported as
-    /// <see cref="GateOutcome.DeadlinePassed"/>. Only the full council run passes one.
+    /// <see cref="GateOutcome.DeadlinePassed"/>. Only <c>review gates --deadline</c> passes one.
     /// </param>
     /// <remarks>
     /// The deadline is opt-in rather than read from <paramref name="config"/>, because a single named gate, a task
@@ -75,14 +77,15 @@ public static class GateRunner
             else if (deadline is { } budget && timeLeft <= TimeSpan.Zero)
                 result = DeadlinePassedBeforeStart(gate, budget);
             else
-                result = MissingRequirement(gate, workingDirectory) ?? RunOne(gate, workingDirectory, timeLeft);
+                result = MissingRequirement(gate, workingDirectory)
+                         ?? RunOne(gate, workingDirectory, deadline is { } limit ? new RunBudget(limit, timeLeft) : null);
             results.Add(result);
 
             if (stopOnBlockingFailure
                 && gate.Blocking
                 && !result.Passed
                 && result.NotApplicableReason is null
-                && !VerdictEngine.IsStoppedForTime(result))
+                && !(deadline is not null && VerdictEngine.IsStoppedForTime(result)))
                 break;
         }
 
@@ -238,16 +241,19 @@ public static class GateRunner
             gate.Id,
             gate.Blocking,
             -1,
-            $"not started: the council deadline of {deadline.TotalSeconds:0} seconds had passed",
+            $"not started: the council deadline of {deadline.TotalSeconds:0} seconds ({DeadlineKey}) had passed",
             0,
             Outcome: GateOutcome.DeadlinePassed);
 
-    private static GateResult RunOne(ReviewGate gate, string workingDirectory, TimeSpan? timeLeft)
+    private static GateResult RunOne(ReviewGate gate, string workingDirectory, RunBudget? budget)
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, timeLeft);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget);
     }
+
+    /// <summary>The run deadline and the time left on it when a gate starts.</summary>
+    private sealed record RunBudget(TimeSpan Deadline, TimeSpan? TimeLeft);
 
     /// <summary>
     /// The directory a gate starts in: the repository root, or the gate's declared subdirectory of it.
@@ -268,7 +274,7 @@ public static class GateRunner
         int timeoutSeconds,
         string workingDirectory,
         bool failOnOutput,
-        TimeSpan? timeLeft = null)
+        RunBudget? budget = null)
     {
         if (!Directory.Exists(workingDirectory))
         {
@@ -297,8 +303,8 @@ public static class GateRunner
 
         long start = Stopwatch.GetTimestamp();
         TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
-        bool deadlineFirst = timeLeft is { } left && left < ownTimeout;
-        TimeSpan timeout = timeLeft is { } budget && deadlineFirst ? budget : ownTimeout;
+        bool deadlineFirst = budget?.TimeLeft is { } left && left < ownTimeout;
+        TimeSpan timeout = deadlineFirst && budget?.TimeLeft is { } remaining ? remaining : ownTimeout;
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
@@ -321,7 +327,8 @@ public static class GateRunner
                 id,
                 blocking,
                 -1,
-                $"stopped by the council deadline after {timeout.TotalSeconds:0} seconds: {ex.Message}",
+                $"stopped at the council deadline of {budget?.Deadline.TotalSeconds:0} seconds ({DeadlineKey}) " +
+                $"after running {timeout.TotalSeconds:0} seconds: {ex.Message}",
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.DeadlinePassed);
         }

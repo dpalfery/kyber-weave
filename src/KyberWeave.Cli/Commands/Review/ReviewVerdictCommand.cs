@@ -39,6 +39,10 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     private const string PriorFindingsFile = "findings.json";
     private const string Subject = "review";
 
+    /// <summary>The <c>Index fallback:</c> modes the seat contract defines; a wrong-branch mode carries the branches after it.</summary>
+    private static readonly string[] KnownIndexFallbackModes =
+        ["projectPath: error", "projectPath: not-indexed", "projectPath: wrong-branch"];
+
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewVerdictSettings settings, CancellationToken cancellationToken)
     {
@@ -260,6 +264,19 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     /// </summary>
     private static void ReportDiscoveryGap(SeatOutput seat, DiagnosticReport report)
     {
+        if (seat.IndexFallback is { } mode && !KnownIndexFallbackModes.Any(known =>
+                mode.StartsWith(known, StringComparison.Ordinal)))
+        {
+            report.Add(new Diagnostic(
+                DiscoveryGap,
+                Severity.Warning,
+                $"{seat.Lens}.md names index fallback mode '{mode}', which the seat contract does not define. " +
+                "The verdict does not depend on it.",
+                seat.Lens,
+                Hint: $"Name one of: {string.Join(", ", KnownIndexFallbackModes)}, or leave the line out when the " +
+                      "index answered."));
+        }
+
         string? gap = seat.Discovery switch
         {
             null => "wrote no 'Discovery: codegraph N, docs N, direct reads N' line",
@@ -436,9 +453,10 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         List<DroppedFinding> dropped)
     {
         List<ReviewFinding> kept = new(findings.Count);
-        foreach (ReviewFinding finding in findings)
+        IReadOnlyList<CitedLineResult> results = CitedLineCheck.Check(root, findings);
+        foreach (CitedLineResult result in results)
         {
-            CitedLineResult result = CitedLineCheck.Check(root, finding);
+            ReviewFinding finding = result.Finding;
             switch (result.Kind)
             {
                 case CitedLineKind.Relocated:
@@ -466,6 +484,21 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
                     kept.Add(result.Finding);
                     break;
             }
+        }
+
+        // One line per file, not per finding: a seat that cites one missing file many times has one problem.
+        foreach (IGrouping<string, CitedLineResult> file in results
+                     .Where(result => result.Kind == CitedLineKind.Unverified)
+                     .GroupBy(result => result.Finding.File, StringComparer.Ordinal))
+        {
+            CitedLineResult first = file.First();
+            report.Add(new Diagnostic(
+                CitedLine,
+                Severity.Info,
+                $"The cited lines of {string.Join(", ", file.Select(result => $"'{result.Finding.Id}'"))} were not " +
+                $"checked: {first.Reason}.",
+                first.Finding.Lens,
+                Hint: "Check the cited file by hand, or run the verdict from the repository the seats reviewed."));
         }
 
         return kept;

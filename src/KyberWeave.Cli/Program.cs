@@ -320,7 +320,7 @@ app.Configure(config =>
 
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
-            .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
+            .WithExample("review", "verdict", ".", "--seats", "seats", "--gates", "gates.json", "--out", "findings.json");
     });
 
     // Run Lifecycle Command Branch — the step before anyone investigates or plans: fetch, pick the base,

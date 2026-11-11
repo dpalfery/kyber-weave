@@ -57,6 +57,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return ClientInputExitCode;
         }
 
+        // --deadline bounds the council's whole run. A named gate is a deliberate re-check outside that budget, and a
+        // task-gate run is one developer's check, so neither may be cut by it.
+        if (settings.Deadline && (settings.Gate.Length > 0 || settings.Agent is not null))
+        {
+            WriteClientInputError(
+                $"{InvalidInput}: --deadline bounds the full council run, so it cannot be combined with " +
+                (settings.Gate.Length > 0 ? "--gate, which re-checks named gates outside that budget." :
+                    "--agent, which runs one agent's task gates."));
+            return ClientInputExitCode;
+        }
+
         // --gate selects from review.gates, and --agent selects from review.task-gates. A run cannot be both,
         // so it is refused rather than silently resolving to one of them.
         if (settings.Gate.Length > 0 && settings.Agent is not null)
@@ -221,9 +232,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
         // configuration of their own and the runner itself stays unchanged. The changed set and base
         // are still passed so applies-when is evaluated from the same facts include was selected on.
-        // The council deadline bounds only the full council run: a gate named with --gate is a deliberate
-        // re-check outside the council's budget, and a run without --council is not spending it.
-        TimeSpan? deadline = settings.Council && settings.Gate.Length == 0
+        // The run deadline is opt-in with --deadline, so CI, task gates and pre-push keep their behaviour: there, a
+        // blocking gate stopped by its own timeout is a failure. --deadline is refused with --gate before this.
+        TimeSpan? deadline = settings.Deadline
             ? TimeSpan.FromSeconds(config.Review.CouncilDeadlineSeconds)
             : null;
         GateReport gates = GateRunner.Run(
@@ -235,13 +246,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             deadline);
 
         foreach (GateResult gate in gates.Gates)
-            AddGateDiagnostic(report, gate);
+            AddGateDiagnostic(report, gate, settings.Deadline);
 
         report.AddMetric("gates", gates.Gates.Count);
         report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
-                                                         && !VerdictEngine.IsStoppedForTime(g)));
+                                                         && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g))));
         report.AddMetric("not-applicable", gates.Gates.Count(g => g.NotApplicableReason is not null));
-        report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
+        if (settings.Deadline)
+            report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(gates), ReportWriteFailed, report);
 
@@ -344,7 +356,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         TaskGateRun run = GateRunner.RunTaskGates(plan.Gates, root, settings.Fix, settings.StopOnFailure);
 
         foreach (GateResult gate in run.Report.Gates)
-            AddGateDiagnostic(report, gate);
+            AddGateDiagnostic(report, gate, timeIsNotRun: false);
 
         foreach (GateResult fix in run.FixFailures)
             report.Add(new Diagnostic(
@@ -354,7 +366,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 fix.Id));
 
         report.AddMetric("gates", run.Report.Gates.Count);
-        report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed && !VerdictEngine.IsStoppedForTime(g)));
+        report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(run.Report), ReportWriteFailed, report);
 
@@ -472,10 +484,11 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// <summary>
     ///     Reports one gate. A gate whose program never started is <see cref="GateNotStarted" />, kept apart from a
     ///     check that ran and failed (<see cref="ReviewGateOutcome.Failed" />), because they are fixed in different places.
-    ///     A gate that time stopped is <see cref="GateNotRun" />, a warning: it reached no result, so it neither
-    ///     passed nor failed and does not decide the exit code.
+    ///     Under <c>--deadline</c>, a gate that time stopped is <see cref="GateNotRun" />, a warning: it reached no
+    ///     result, so it neither passed nor failed and does not decide the exit code. Without it, a timed-out gate
+    ///     is a failed check, as it always was, so CI and task gates keep failing on a gate that hangs.
     /// </summary>
-    private static void AddGateDiagnostic(DiagnosticReport report, GateResult gate)
+    private static void AddGateDiagnostic(DiagnosticReport report, GateResult gate, bool timeIsNotRun)
     {
         string detail = $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)";
 
@@ -489,14 +502,19 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return;
         }
 
-        if (VerdictEngine.IsStoppedForTime(gate))
+        if (timeIsNotRun && VerdictEngine.IsStoppedForTime(gate))
         {
+            // A deadline cut is the council running out of budget, not a slow gate, so raising the gate's own
+            // timeout would change nothing; the remedy is to run it alone.
+            string hint = gate.Outcome == GateOutcome.DeadlinePassed
+                ? $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}'."
+                : $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}', or give it a longer time limit.";
             report.Add(new Diagnostic(
                 GateNotRun,
                 Severity.Warning,
                 $"{detail}. NOT RUN to a result, so what it checks is unverified.",
                 gate.Id,
-                Hint: $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}', or raise its timeout-seconds."));
+                Hint: hint));
             return;
         }
 
