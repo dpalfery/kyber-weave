@@ -281,7 +281,7 @@ public sealed class ArbiterEvaluator
             && facts.TryGet("finding.id", out ArbiterFact? refuted)
             && refuted.Value is string refutedId)
         {
-            refutedSlug = FindingSlug(refutedId);
+            refutedSlug = ReturnedFinding.IdKey(refutedId);
             IReadOnlyList<string> stored = ReviewStore(config).ReadFindings(reviewRun);
             facts = TriggerFactBuilder.WithDroppedStatus(facts, refutedSlug, stored);
             facts = TriggerFactBuilder.WithPriorFindings(facts, refutedSlug, stored);
@@ -432,7 +432,7 @@ public sealed class ArbiterEvaluator
             && HeaderBlock.Parse(prompt).Headers.TryGetValue("REFUTE", out string? refuteHeader))
         {
             await ReviewStore(config)
-                .AppendRefutationOutcomeAsync(reviewRun, FindingSlug(refuteHeader), RefutationOutcome.Parse(ev.ToolOutput), cancellationToken)
+                .AppendRefutationOutcomeAsync(reviewRun, ReturnedFinding.IdKey(refuteHeader), RefutationOutcome.Parse(ev.ToolOutput), cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -733,13 +733,6 @@ public sealed class ArbiterEvaluator
             await store.AppendFindingAsync(reviewRun, ReturnedFinding.StoredText(findings[index].Text, dropped[index]))
                 .ConfigureAwait(false);
         }
-    }
-
-    /// <summary>A refutation's finding slug: the part after the lens in <c>&lt;lens&gt;/&lt;slug&gt;</c>.</summary>
-    private static string FindingSlug(string refute)
-    {
-        int slash = refute.LastIndexOf('/');
-        return slash < 0 ? refute : refute[(slash + 1)..];
     }
 
     /// <summary>The id of the earlier finding a stored candidate text names, or null when the text names none.</summary>
