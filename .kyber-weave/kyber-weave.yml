@@ -77,6 +77,9 @@ review:
     # Debug build added nothing to its findings and wrote into obj/ beside the gates below.
     # `requires-paths` keeps that honest when the gate is run on its own: without a restore the
     # analyzer would resolve nothing, exit 0 and read as a clean run, so it does not start.
+    # The path proves a restore happened, not that it is current: in the declared order `build`
+    # has just restored. Run alone with `--gate inspectcode` after package references changed,
+    # run `--gate build` with it.
     # `--jobs=4` because the full test run beside it is load-sensitive: on an 18-core machine
     # four analysis threads took 108 seconds against 91 unbounded, with the same findings.
     # `scripts/report-gate.sh` because on macOS 27.3 Beta the analyzer writes its whole report

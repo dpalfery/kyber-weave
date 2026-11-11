@@ -639,6 +639,17 @@ when at least one gate declares `include`. When git cannot list the changes, eve
 runs unscoped and the report says why (`KW-REVIEW-034`, Info): fetch the full history,
 or name a base that exists with `--base`.
 
+Before any repository gate starts, the runner prepares the CodeGraph index of the tree it was
+pointed at: `codegraph init` when the tree has none, `codegraph sync` otherwise, through the same
+code path as `kyber-weave doctor --ensure`. A git worktree does not share another checkout's index,
+so a review in a fresh worktree would otherwise have none and its lenses would fall back to raw
+file reads or be answered from another branch. The result is `KW-REVIEW-038`: Info when the index was created
+or synced; Warning, naming `kyber-weave doctor --ensure <tree>`, when it could not be prepared. The
+gates still run either way: a review is a read-only run, and
+[ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) keeps those going without an
+index. A repository without governed docs is not checked. `--agent` runs are not checked either: a task gate measures
+one worker's change and consults no index.
+
 For whole-repository audits and CI verification, `--all` executes all declared gates matching
 the host OS unconditionally (`changed = null`), bypassing `include:` path filtering. Combining
 `--all` with contradictory scoping options (`--agent`, `--base`, `--paths` or `--gate`) is refused
@@ -718,7 +729,9 @@ persisting the AST and project caches across local runs and reducing warm inspec
 The gate is declared straight after `build` and is `concurrent`, so it overlaps the test run. It passes
 `--no-build`, because `build` has already restored and compiled the tree, and `--jobs=4`, to keep load off
 the test run beside it. It declares `requires-paths` on a restore output, so run on its own on an unrestored
-tree it does not start instead of exiting zero having resolved nothing.
+tree it does not start instead of exiting zero having resolved nothing. That check proves a restore
+happened, not that it is current: a run of `--gate inspectcode` alone after package references changed
+needs `--gate build` with it.
 
 Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
 then never exits, because .NET does not return from closing a listening socket while another thread is
