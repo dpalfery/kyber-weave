@@ -735,10 +735,25 @@ needs `--gate build` with it.
 
 Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
 then never exits, because .NET does not return from closing a listening socket while another thread is
-blocked accepting on it. The wrapper removes any report an earlier run left, then stops the analyzer only
-when this run's report ends with `</Report>` and has not changed for 20 seconds, and exits zero. A hang
-before the report is complete still runs to `timeout-seconds` and is reported as timed out, and a zero exit
-with no complete report fails.
+blocked accepting on it. The wrapper removes any report an earlier run left, then stops the analyzer once this run's report is
+complete, and exits zero. The argv names exactly one finish mode. `--ends-with <text>` (this gate) completes
+when the report ends with `</Report>` and stops once it has not changed for `--grace` seconds (default 20).
+`--contains <text>` completes when a fixed-string search of the whole report finds the text and stops
+`--grace` seconds after the text is first seen, whether or not the report keeps growing, because a log that
+keeps writing after its finish line would otherwise never settle. An optional `--timeout <seconds>` limits
+the whole run: when it elapses before the run counts as done, the wrapper stops the command's whole process
+tree, says so on standard error, and exits 124, while a run already done before the limit still passes. The
+script must stay bash 3.2 compatible, the `/bin/bash` on macOS, and its contract tests run it under that shell.
+A hang before the report is complete still runs to `timeout-seconds` and is reported as timed out when no
+`--timeout` is set, and a zero exit with no complete report fails.
+
+This repository's optional `cleanupcode` fix pass runs `--no-build` through this wrapper, keyed on the
+`Close solution instance` line of a `--LogFile` log, because the tool never exits on this machine and
+`--no-build` skips the pre-build step where the first hang occurs; that finish line is also written after a
+failed cleanup, so the command adds `! grep -q "Failed to run cleanup"` on the same log and fails when the
+line is present, and a finish line alone never proves the cleanup succeeded, so the task gate's verify passes
+stay the judge. The C# coding standard's `## Completion` section holds the exact command, and the wrapper
+workaround is removed once the tool exits on its own.
 
 #### Test and build gates run under the process watchdog
 
