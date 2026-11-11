@@ -1,3 +1,4 @@
+using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
@@ -178,7 +179,8 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
 
         string json = tools.ClassifyBotReviewComment("docs/guide.md", 2, null!, null);
 
-        Assert.Contains("\"error\"", json, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(json);
+        Assert.True(document.RootElement.TryGetProperty("error", out _), $"expected an error property, got: {json}");
     }
 
     /// <summary>Raw input cannot break a digest's one-line-per-field shape: a newline in it adds no field.</summary>
