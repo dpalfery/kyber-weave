@@ -216,9 +216,12 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         }
     }
 
-    /// <summary>Waits up to ten seconds for the stub's record to name <paramref name="needle"/>, then returns the record.</summary>
+    /// <summary>
+    /// Waits up to ten seconds for a complete stub record naming <paramref name="needle"/>, then returns the record.
+    /// The stub writes its arguments before its working directory, so a record is complete only once both are there.
+    /// </summary>
     private Task<string> WaitForInvocationAsync(string needle) =>
-        WaitUntilAsync(text => text.Contains(needle, StringComparison.Ordinal));
+        WaitUntilAsync(text => ParseRecords(text).Any(record => record.Args.Contains(needle, StringComparison.Ordinal)));
 
     /// <summary>
     /// Waits up to ten seconds for the invocation record to satisfy <paramref name="ready"/>, then returns the record.
