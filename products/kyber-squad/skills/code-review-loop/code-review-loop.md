@@ -24,6 +24,11 @@ the review URL; pull requests and merge requests are called PRs below.
 
 ## Fix and validate
 
+For each bot review comment, call `arbiter_classify_bot_review_comment` with its path, line, body
+and commit before changing code. A `real` answer is fixed as below. A `nitpick` or
+`already-fixed` answer is not fixed: reply with the reason and resolve the thread. An unsure
+answer is `real`.
+
 Use the repository's prescribed code and documentation discovery tools before text
 search. Make the smallest change that addresses the actual concern and preserve
 existing fixes. Do not broaden dependencies, policy, or scope merely to satisfy a bot.

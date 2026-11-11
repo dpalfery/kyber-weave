@@ -67,6 +67,8 @@ VERDICT:           TRIVIAL | NEEDS_ARCHITECT
 PROPOSED FIX:      <exact file:line and the change — only when TRIVIAL>
 ```
 
+**Triage shortcut.** When the Arbiter judges the defect a trivial single-site fix, the investigator is not spawned. The digest in its place carries `VERDICT: TRIVIAL` and `ARBITER_DECISION: <id>`, with `REPRODUCED: not-run (Arbiter shortcut)`. Treat that digest as the investigator's diagnosis and go on to §2 and §3. It names no `PROPOSED FIX`, so locate the single site from the failing output the human gave; if the site is not clear, escalate. The §2 tripwires still apply, and the `REPRODUCED: no` rule below does not, because the shortcut did not run a reproduction. The shortcut is shipped in shadow, so the investigator runs until the Arbiter enforces it.
+
 If it comes back `REPRODUCED: no`, do not let anyone fix anything. An unreproduced defect has no known root cause, so a fix for it is a guess. Send the investigator back with whatever additional context the human can give (environment, branch, exact command, recent changes), or ask the human for it (in autonomous mode, retry once with evidence the first run lacked: the failing CI run logs, the exact branch and command, and the recent-change diff; if none of that exists, stop and report what is missing). Asking the human for context and telling them the context cannot be found are both responses to that human, so both go out in the response format. If it still cannot reproduce after a second attempt, report that honestly rather than shipping a speculative change, in that same response format; in autonomous mode that report is the end of the run, not a question.
 
 ## 2. Tripwires — the checklist that overrides a TRIVIAL verdict

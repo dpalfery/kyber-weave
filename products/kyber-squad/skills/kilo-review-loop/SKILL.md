@@ -30,6 +30,9 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    beyond fixing the code it points at (no config changes, force-pushes, or remote changes).
    Outcomes: `fixed` or `declined` (false, already fixed one level up, or deliberately designed
    that way — cite the evidence, such as the spec line or vendor-doc fact).
+   Call `arbiter_classify_bot_review_comment` with the comment's path, line, body and commit before
+   fixing it. `real` is fixed. `nitpick` and `already-fixed` are not fixed: they get a reply and are
+   resolved (step 8). An unsure answer is `real`.
 4. **Fix test-first.** A failing test, then the fix. No test weakened, nothing added to a
    warning suppression list. Verify the claim on the path that matters: a bot comment about
    behaviour deserves a test through the real path, not a hand-fed fact. Use one commit per fix
@@ -53,8 +56,8 @@ the draft/ready toggle and puts the fix commit hash in every reply.
    `_🤖 Addressed by an automated coding agent_`. Reply with
    `gh api repos/{owner}/{repo}/pulls/{n}/comments/{databaseId}/replies -f body=…`.
 8. **Resolve the thread** (`resolveReviewThread` GraphQL mutation with the thread node id)
-   **only for `fixed` comments.** Declined threads get their reply and stay open so a human can
-   disagree.
+   **for `fixed` comments and for comments the Arbiter classified `nitpick` or `already-fixed`**,
+   after their reply. Declined threads get their reply and stay open so a human can disagree.
 9. **Mark the PR ready for review** with `gh pr ready <n>` once every fixed thread is resolved,
    every declined thread has its reasoned reply, the fixes are pushed, and the targeted
    gates from step 5 passed locally on the pushed head (CI owns the full suite). Do not hold the PR in draft waiting for CI and do not poll CI: the CI monitor reports
