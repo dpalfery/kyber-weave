@@ -36,7 +36,8 @@ public sealed class CitedLineCheckTests : IDisposable
 
         CitedLineResult result = CitedLineCheck.Check(_root, Finding("../outside.cs", line: 99, excerpt: "int b;"));
 
-        Assert.NotEqual(CitedLineKind.Relocated, result.Kind);
+        Assert.Equal(CitedLineKind.Unverified, result.Kind);
+        Assert.NotNull(result.Reason);
         Assert.Equal(99, result.Finding.Line);
     }
 
@@ -49,7 +50,8 @@ public sealed class CitedLineCheckTests : IDisposable
 
         CitedLineResult result = CitedLineCheck.Check(_root, Finding(rooted, line: 99, excerpt: "int b;"));
 
-        Assert.NotEqual(CitedLineKind.Relocated, result.Kind);
+        Assert.Equal(CitedLineKind.Unverified, result.Kind);
+        Assert.NotNull(result.Reason);
         Assert.Equal(99, result.Finding.Line);
     }
 
@@ -59,7 +61,8 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/Missing.cs", line: 99, excerpt: "int b;"));
 
-        Assert.NotEqual(CitedLineKind.Relocated, result.Kind);
+        Assert.Equal(CitedLineKind.Unverified, result.Kind);
+        Assert.NotNull(result.Reason);
         Assert.Equal(99, result.Finding.Line);
     }
 

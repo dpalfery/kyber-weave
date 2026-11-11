@@ -29,6 +29,35 @@ internal static class ReviewDiagnosticAssert
             $"Expected a {code} diagnostic. Output:{Environment.NewLine}{output}");
     }
 
+    /// <summary>Every message the output carries under this rule id, in output order, so a fact can count them or read them.</summary>
+    public static List<string> MessagesWithCode(string output, string code)
+    {
+        using JsonDocument document = JsonDocument.Parse(JsonPayload(output));
+        List<string> messages = [];
+        CollectMessages(document.RootElement, code, messages);
+        return messages;
+    }
+
+    private static void CollectMessages(JsonElement element, string code, List<string> messages)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+                CollectMessages(item, code, messages);
+            return;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+            return;
+
+        if (element.TryGetProperty("code", out JsonElement foundCode) && foundCode.GetString() == code
+            && element.TryGetProperty("message", out JsonElement foundMessage))
+            messages.Add(foundMessage.GetString() ?? string.Empty);
+
+        foreach (JsonProperty property in element.EnumerateObject())
+            CollectMessages(property.Value, code, messages);
+    }
+
     private static string JsonPayload(string output)
     {
         char[] opening = ['{', '['];

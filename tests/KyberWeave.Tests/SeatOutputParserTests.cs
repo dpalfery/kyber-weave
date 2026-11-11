@@ -388,6 +388,240 @@ public sealed class SeatOutputParserTests
     }
 
     // -----------------------------------------------------------------------------------------
+    // The flat reader. Each input here is one strict YAML refuses (a ": " inside a plain value, or
+    // a quoted value followed by more text), so the flat reader is the one that reads it.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Prose before the first finding is text where a finding should start. The refusal names the line and column,
+    /// so the reviewer can find the sentence that is not part of the list.
+    /// </summary>
+    [Fact]
+    public void ATextLineWhereAFindingShouldStartIsRefusedWithItsLineAndColumn()
+    {
+        string text = Lines(
+            "Here is my review of the change.",
+            "- id: correctness/a",
+            "  claim: The rule says: never drop it.");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("text where a finding should start", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 1, column 1", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A line indented under a finding that is not a field of it, and does not continue the value above it, is
+    /// refused at its own line and column.
+    /// </summary>
+    [Fact]
+    public void ANonFieldLineInsideAFindingIsRefusedWithItsLineAndColumn()
+    {
+        string text = Lines(
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  claim: The rule says: never drop it.",
+            " stray text");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("not a field of its finding", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 8, column 2", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A value that is two quoted words is not one quoted value. The flat reader keeps the text as written, so the
+    /// finding says what the seat said.
+    /// </summary>
+    [Fact]
+    public void AValueThatIsTwoQuotedWordsKeepsItsText()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(claim: "\"a\", \"b\"")));
+
+        Assert.Equal("\"a\", \"b\"", Assert.Single(seat.Findings).Claim);
+    }
+
+    /// <summary>
+    /// A value wholly quoted is unquoted on the flat path, and its escapes are read. The inputs are forced onto the
+    /// flat path by a second value with a ": " in it.
+    /// </summary>
+    [Theory]
+    [InlineData("\"The loop bound.\"", "The loop bound.")]
+    [InlineData("'It''s done.'", "It's done.")]
+    [InlineData("\"say \\\"hi\\\"\"", "say \"hi\"")]
+    public void AWhollyQuotedValueIsUnquotedOnTheFlatPath(string written, string expected)
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FlatForced(claim: written)));
+
+        Assert.Equal(expected, Assert.Single(seat.Findings).Claim);
+    }
+
+    /// <summary>
+    /// Strict YAML reads <c>[Fact]</c> as a sequence, which is not text. A seat that wrote it meant the text, so
+    /// the field is read as that text rather than the whole seat being refused.
+    /// </summary>
+    [Fact]
+    public void AFlowSequenceValueIsReadAsItsTextNotRefused()
+    {
+        List<string> body = FindingLines().Select(line => line.StartsWith("  excerpt:", StringComparison.Ordinal)
+            ? "  excerpt: [Fact]"
+            : line).ToList();
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal("[Fact]", Assert.Single(seat.Findings).Excerpt);
+    }
+
+    /// <summary>
+    /// A field written twice in one finding is refused, naming the field and the line of the second one. Silently
+    /// keeping the last value would lose the first one without a word.
+    /// </summary>
+    [Fact]
+    public void ADuplicateFieldOnTheFlatPathIsRefusedNamingTheFieldAndLine()
+    {
+        string text = Lines(
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  claim: The rule says: never drop it.",
+            "  claim: A second claim.");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("claim", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 8", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A folded block scalar joins the lines of a paragraph with spaces, and a blank line between paragraphs stays
+    /// a line break.
+    /// </summary>
+    [Fact]
+    public void AFoldedBlockClaimJoinsItsLinesAndKeepsItsParagraphs()
+    {
+        string text = Lines(
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  evidence: The rule says: never drop it.",
+            "  claim: >",
+            "    The claim is",
+            "    folded across lines.",
+            "",
+            "    Second paragraph.",
+            "  suggestion: Use <= or count + 1.");
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal("The claim is folded across lines.\nSecond paragraph.", Assert.Single(seat.Findings).Claim);
+    }
+
+    /// <summary>
+    /// A <c>---</c> line starts another document of findings and a <c>...</c> line ends one. Both documents' findings
+    /// are read; neither separator is read as a field.
+    /// </summary>
+    [Fact]
+    public void DocumentSeparatorsSplitTheFlatFindingsIntoTheirDocuments()
+    {
+        string text = Lines([
+            .. FlatFindingLines("correctness/first"),
+            "---",
+            .. FlatFindingLines("correctness/second"),
+            "..."
+        ]);
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(["correctness/first", "correctness/second"], seat.Findings.Select(finding => finding.Id));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Shapes that are not a list of findings, and values that are not text.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ANonListRootIsRefusedAsNotAListOfFindings()
+    {
+        string text = Lines("severity: minor", "claim: A mapping at the top of the file.");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("not a YAML list of findings", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMappingUnderAFieldIsRefusedNamingTheField()
+    {
+        string text = Lines(
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  claim:",
+            "    text: nested");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("'claim' that is not text", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>Discovery:</c> line that is not in the agreed shape reads as no discovery evidence, which the verdict
+    /// reports as KW-REVIEW-044. It does not make the seat unreadable.
+    /// </summary>
+    [Fact]
+    public void AMalformedDiscoveryLineReadsAsNoDiscoveryEvidence()
+    {
+        string text = Fenced(FindingLines()) + "Discovery: codegraph two, docs 0, direct reads 1\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(seat.Discovery);
+        Assert.Single(seat.Findings);
+    }
+
+    /// <summary>
+    /// The declared outcome is at the start of its line, so its column is always 1. The finding's column is the part
+    /// that varies: an indented finding starts at column 3, and the refusal must say so, along with both lines.
+    /// </summary>
+    [Fact]
+    public void ADeclaredOutcomeRefusalNamesTheDeclaredLineAndTheFindingsRealColumn()
+    {
+        string text = Lines(
+            "NO FINDINGS: I found nothing.",
+            "  - id: correctness/a",
+            "    lens: correctness",
+            "    severity: minor",
+            "    confidence: 7",
+            "    file: src/Foo.cs",
+            "    line: 3",
+            "    claim: x");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("line 1, column 1", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 2, column 3", error.Message, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Helpers: seat text built from the parts a seat writes.
     // -----------------------------------------------------------------------------------------
 
@@ -415,6 +649,17 @@ public sealed class SeatOutputParserTests
         lines.Add("  suggestion: Use <= or count + 1.");
         return lines;
     }
+
+    /// <summary>Unfenced seat text, one line per argument, so a line's number is its index plus one.</summary>
+    private static string Lines(params string[] lines) => string.Join('\n', lines) + "\n";
+
+    /// <summary>A finding's list items with a second value that strict YAML refuses, so the flat reader reads it.</summary>
+    private static IEnumerable<string> FlatForced(string claim) =>
+        FindingLines(claim: claim).Append("  guidance: Use it: carefully.");
+
+    /// <summary>One unfenced finding whose claim has a ": ", so the flat reader reads it.</summary>
+    private static List<string> FlatFindingLines(string id) =>
+        [.. FindingLines(id: id, claim: "The rule says: never drop it.")];
 
     private static string Fenced(IEnumerable<string> body, string fence = "```")
     {

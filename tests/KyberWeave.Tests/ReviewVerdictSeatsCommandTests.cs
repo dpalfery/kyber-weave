@@ -596,6 +596,115 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // An unverified citation: the message names the repository-relative path only, and the
+    // diagnostic is per file, not per finding.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AnUnverifiedMissingFileMessageNamesOnlyTheRepositoryRelativePath()
+    {
+        WriteSeat("correctness", FindingSeat(file: "src/Missing.cs", line: 12));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        List<string> messages = MessagesWithCode(run.Output, LineMoved);
+        string message = Assert.Single(messages);
+        Assert.Contains("src/Missing.cs", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(_temp.Path, message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two findings citing one file that cannot be checked get one KW-REVIEW-043 info, naming the file once, not one
+    /// per finding. The three kinds of citation each take the same path: a missing file, a path that leaves the
+    /// repository, and a rooted path.
+    /// </summary>
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("dotdot")]
+    [InlineData("rooted")]
+    public void AnUnverifiedFileIsReportedOncePerFileNotPerFinding(string kind)
+    {
+        string file = kind switch
+        {
+            "missing" => "src/Missing.cs",
+            "dotdot" => "../outside.cs",
+            _ => Path.Combine(_temp.Path, "outside.cs")
+        };
+        WriteSeat("correctness", TwoFindingsCiting(file));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Single(MessagesWithCode(run.Output, LineMoved));
+        AssertDiagnostic(run.Output, LineMoved, "Info");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // --not-seated and --drop operands that contain '=' but have no usable reason.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ANotSeatedNameThatIsNotALensIsRefused()
+    {
+        WriteSeat("correctness", FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--not-seated", "bogus=some reason", .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, LensUnaccounted, "Error", "does not name a catalogue lens");
+    }
+
+    [Fact]
+    public void ANotSeatedWithABlankReasonIsRefused()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--not-seated", "security=", .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, LensUnaccounted, "Error", "does not name a catalogue lens and a reason");
+    }
+
+    [Fact]
+    public void ADropWithABlankReasonIsRefused()
+    {
+        WriteSeat("correctness", FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=", .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, DropTarget, "Error", "does not name a finding id and a reason");
+    }
+
+    /// <summary>Two findings in one seat, both citing <paramref name="file"/> and both cited past the end of it.</summary>
+    private static string TwoFindingsCiting(string file)
+    {
+        List<string> lines = ["```yaml"];
+        foreach (string id in new[] { "correctness/a", "correctness/b" })
+        {
+            lines.Add($"- id: {id}");
+            lines.Add("  lens: correctness");
+            lines.Add("  severity: major");
+            lines.Add("  confidence: 9");
+            lines.Add($"  file: {file}");
+            lines.Add("  line: 12");
+            lines.Add("  excerpt: \"if (i < count)\"");
+            lines.Add("  claim: The loop bound excludes the final element.");
+            lines.Add("  evidence: src/Foo.cs");
+            lines.Add("  failure_scenario: The last element is never processed.");
+            lines.Add("  suggestion: Use <= or count + 1.");
+        }
+
+        lines.Add("```");
+        lines.Add("Discovery: codegraph 2, docs 0, direct reads 0");
+        lines.Add("REVIEW.md sections checked: [Ground rules]");
+        return string.Join('\n', lines) + "\n";
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Harness.
     // -----------------------------------------------------------------------------------------
 
