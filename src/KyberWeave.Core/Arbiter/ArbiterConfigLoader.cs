@@ -79,6 +79,10 @@ public static class ArbiterConfigLoader
                     throw new YamlException(
                         $"[{RuleValidator.MalformedSection}] arbiter.rules has an entry with no id. Every rule needs one.");
 
+                if (id.Contains(RuleValidator.ExpansionSeparator, StringComparison.Ordinal))
+                    throw new YamlException(
+                        $"[{RuleValidator.MalformedSection}] rule '{id}' contains '{RuleValidator.ExpansionSeparator}', which names a for-each question. Host rule ids may not contain it.");
+
                 if (entry.Shadow is not null && ModelTargetingRuleIds.Contains(id))
                     throw new YamlException(
                         $"[{RuleValidator.ShadowOwnedByMode}] rule '{id}' sets shadow, but arbiter.model-targeting.mode owns its shadow state. Set the mode instead.");

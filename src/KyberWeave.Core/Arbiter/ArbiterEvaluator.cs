@@ -419,7 +419,7 @@ public sealed class ArbiterEvaluator
             // One flag per returned finding; a finding past the budget was never judged, so it is kept (not dropped).
             bool[] dropped = Enumerable.Range(0, returned.Count)
                 .Select(index => index < judged.Count && string.Equals(
-                    CombineGating(primary.Family, judged[index].Effects, judged[index].Rules), RuleEffects.Drop, StringComparison.Ordinal))
+                    CombineGating(primary.Family, judged[index].Effects), RuleEffects.Drop, StringComparison.Ordinal))
                 .ToArray();
             await RecordReturnedFindingsAsync(ReviewStore(config), reviewRun, returned, dropped)
                 .ConfigureAwait(false);
@@ -556,7 +556,7 @@ public sealed class ArbiterEvaluator
             // provider keeps one answer per id, so equal items must not share one.
             ArbiterRule expanded = rule with
             {
-                Id = rule.Id + "@" + index,
+                Id = rule.Id + RuleValidator.ExpansionSeparator + index,
                 Ask = ask with { State = state, ForEach = null },
             };
             questions.Add(new Question(rule.Id, item, expanded));
@@ -695,16 +695,14 @@ public sealed class ArbiterEvaluator
     }
 
     /// <summary>
-    /// Combines the effects of the gating entries only. A shadow entry is log-only and never joins the
-    /// combination; when every entry is shadow, the family's neutral effect stands.
+    /// Combines the entries that take part: not shadow, and evaluated. A shadow or not-evaluated entry
+    /// records its neutral effect but stays out of the combination. When nothing takes part, the family's
+    /// neutral effect is the outcome, the same effect those entries record.
     /// </summary>
-    private static string CombineGating(ArbiterTriggerFamily family, List<string> gating, List<ArbiterDecisionRule> rules)
-    {
-        bool onlyShadow = rules.Count > 0 && rules.All(rule => rule.Shadow == true);
-        return gating.Count == 0 && onlyShadow
+    private static string CombineGating(ArbiterTriggerFamily family, List<string> gating) =>
+        gating.Count == 0
             ? ArbiterTriggerFamilies.NeutralEffect(family)
             : ArbiterTriggerFamilies.Combine(family, gating);
-    }
 
     private static string ProviderStatusFor(TriggerPlan plan, Step1Call call) =>
         plan.ShortCircuits
@@ -896,8 +894,9 @@ public sealed class ArbiterEvaluator
             effects.AddRange(finding.Effects);
         }
 
-        // Shadow entries are excluded from the combination here too; CombineGating gives the family's neutral when all are shadow.
-        string outcome = CombineGating(primary.Plan.Family, effects, rules);
+        // Only entries that take part are in effects: JudgeFinding leaves out shadow and not-evaluated entries, and
+        // records a no-candidates entry for each for-each rule it planned. CombineGating gives the neutral when none take part.
+        string outcome = CombineGating(primary.Plan.Family, effects);
         // Notes join the record after the combination: they are log-only and never gate the dispatch.
         rules.AddRange(notes);
         MarkSuppressedDrops(rules, outcome);
@@ -952,7 +951,10 @@ public sealed class ArbiterEvaluator
                 : null;
             if (string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
             {
-                rules.Add(Step1Rule(question, answer, neutral, score, null, null, null));
+                // Same shadow state the primary path records: a shadow question keeps shadow and its would-effect.
+                (string notEvaluatedEffect, bool? notEvaluatedShadow, string? notEvaluatedWould) = ShadowState(
+                    question.Rule, mapped, neutral);
+                rules.Add(Step1Rule(question, answer, notEvaluatedEffect, score, notEvaluatedShadow, notEvaluatedWould, null));
                 continue;
             }
 
@@ -983,7 +985,7 @@ public sealed class ArbiterEvaluator
         }
 
         RecordNoCandidates(plan, rules, effects);
-        string outcome = CombineGating(plan.Family, effects, rules);
+        string outcome = CombineGating(plan.Family, effects);
         ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
             ? ModelTargetResolver.Resolve(
                 rules, facts, config.Arbiter.ModelTargeting, table,
