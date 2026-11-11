@@ -15,9 +15,15 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// </remarks>
 public sealed class ArbiterSectionsCommand : Command<ArbiterSectionsSettings>
 {
-    /// <summary>Prints each section's id, its line range and title. Exits 1 when the document is missing.</summary>
+    /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
     public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
     {
+        // A missing or empty --path is a usage error, the same as a missing required option elsewhere in Arbiter.
+        if (string.IsNullOrWhiteSpace(settings.Path))
+        {
+            return UsageError("--path is required.");
+        }
+
         // The same containment and size cap as the served tool: a path outside the repository root, or a symbolic link
         // out of it, is refused the way the tool refuses it, and an oversized document is not read.
         string root = ArbiterRepoRoot.Find(System.IO.Path.GetFullPath("."));
@@ -52,6 +58,14 @@ public sealed class ArbiterSectionsCommand : Command<ArbiterSectionsSettings>
 
         AnsiConsole.MarkupLine($"[grey]{selection.Selected.Count} section(s) listed.[/]");
         return 0;
+    }
+
+    /// <summary>Prints a usage error on one line, as the other Arbiter commands do, and returns the usage exit code, 2.</summary>
+    private static int UsageError(string message)
+    {
+        CommandHelpers.WriteUnfolded(() =>
+            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
+        return 2;
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
