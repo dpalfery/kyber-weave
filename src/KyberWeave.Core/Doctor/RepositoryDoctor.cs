@@ -102,6 +102,26 @@ public static class RepositoryDoctor
         return result.Config?.StopsOnToolFailure ?? true;
     }
 
+    /// <summary>
+    ///     Runs the doctor for the git post-checkout hook: indexes a new worktree without restoring the tracked edits
+    ///     the index run would otherwise revert.
+    /// </summary>
+    /// <remarks>
+    ///     The hook fires on every checkout, including ones where a human has uncommitted work, so this path must not
+    ///     restore files beyond the ones <c>codegraph init</c> writes. It runs the ensure flow with
+    ///     <see cref="CodeGraphRestore.InitConfigFilesOnly"/> and never installs or removes the hook itself.
+    /// </remarks>
+    /// <param name="root">The worktree root the hook was fired in.</param>
+    /// <param name="options">The index budget and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    public static DoctorReport RunPostCheckout(
+        string root,
+        DoctorOptions options,
+        IProcessExecutor executor,
+        string? lockDirectory = null) =>
+        throw new NotImplementedException();
+
     /// <summary>The operating system this process runs on, in the terms the VS Code layout is keyed by.</summary>
     private static OSPlatform CurrentPlatform() =>
         OperatingSystem.IsWindows() ? OSPlatform.Windows

@@ -39,6 +39,10 @@ public sealed class DoctorSettings : CommandSettings
     [Description("The total budget of the live MCP session. Default 20.")]
     public int McpTimeoutSeconds { get; set; } = DefaultMcpTimeoutSeconds;
 
+    [CommandOption("--post-checkout")]
+    [Description("Used by the git post-checkout hook to index a new worktree without restoring edits.")]
+    public bool PostCheckout { get; set; }
+
     [CommandOption("--json")]
     [Description("Write the report as JSON instead of check lines.")]
     public bool Json { get; set; }

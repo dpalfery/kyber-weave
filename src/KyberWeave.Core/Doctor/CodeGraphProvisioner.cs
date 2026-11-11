@@ -69,6 +69,16 @@ public static class CodeGraphProvisioner
     /// <summary>How long a waiting run sleeps between attempts to take the lock.</summary>
     private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>
+    ///     The tracked files <c>codegraph init</c> writes, repository-relative with forward slashes, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    ///     Measured on a fresh clone: <c>codegraph init .</c> changed no tracked file and created no untracked file other
+    ///     than the git-ignored <c>.codegraph/</c>, so the list is empty. It is kept as a named list so that a future
+    ///     CodeGraph release which writes a tracked file is restored by name rather than by guess.
+    /// </remarks>
+    internal static readonly IReadOnlyList<string> InitConfigFiles = [];
+
     /// <summary>Returns the lock path for a root: a file in <paramref name="lockDirectory"/> named by a hash of the root.</summary>
     /// <param name="root">The repository root.</param>
     /// <param name="lockDirectory">The directory that holds lock files, normally the OS temp directory.</param>
@@ -85,12 +95,17 @@ public static class CodeGraphProvisioner
     /// <param name="options">The budgets and the CodeGraph executable name.</param>
     /// <param name="executor">Runs the CodeGraph child. Production passes an executor bounded by the index timeout.</param>
     /// <param name="lockDirectory">Where the lock file lives.</param>
+    /// <param name="restore">
+    ///     Which tracked files an index run restores after writing them. Accepted but not yet honoured: every caller
+    ///     passes the default, which is the current behaviour.
+    /// </param>
     public static CodeGraphOutcome Run(
         string root,
         DoctorMode mode,
         DoctorOptions options,
         IProcessExecutor executor,
-        string lockDirectory)
+        string lockDirectory,
+        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
     {
         List<DoctorCheck> checks = [];
 

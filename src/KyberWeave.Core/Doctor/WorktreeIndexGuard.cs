@@ -44,11 +44,16 @@ public static class WorktreeIndexGuard
     /// <param name="options">The index budget and the CodeGraph executable name.</param>
     /// <param name="executor">Runs the CodeGraph child. Production passes an executor bounded by the index timeout.</param>
     /// <param name="lockDirectory">Where the index lock file lives.</param>
+    /// <param name="restore">
+    ///     Which tracked files the index run restores. The default restores every written file; the post-checkout hook
+    ///     will pass <see cref="CodeGraphRestore.InitConfigFilesOnly"/>. Passed through to the provisioner.
+    /// </param>
     public static WorktreeIndexOutcome Ensure(
         string root,
         DoctorOptions options,
         IProcessExecutor executor,
-        string lockDirectory)
+        string lockDirectory,
+        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(options);
@@ -59,7 +64,7 @@ public static class WorktreeIndexGuard
             return new WorktreeIndexOutcome(WorktreeIndexStatus.NotGoverned, Created: false, StopsRun: false, []);
 
         bool existed = Directory.Exists(Path.Combine(root, CodeGraphProvisioner.IndexDirectoryName));
-        CodeGraphOutcome outcome = CodeGraphProvisioner.Run(root, DoctorMode.Ensure, options, executor, lockDirectory);
+        CodeGraphOutcome outcome = CodeGraphProvisioner.Run(root, DoctorMode.Ensure, options, executor, lockDirectory, restore);
 
         WorktreeIndexStatus status = outcome.BinaryMissing
             ? WorktreeIndexStatus.BinaryMissing
