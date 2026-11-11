@@ -347,6 +347,84 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         Assert.False(facts.IsPresent(FindingChangedLines), "a clean change has no hunks, so no finding line is changed.");
     }
 
+    /// <summary>
+    /// A one-line shebang change is code: <c>#!/bin/bash</c> picks the interpreter that runs the
+    /// script. Measured as a comment it put the script on the comment-only and no-code-change lists,
+    /// and KW-ARB-LENS-002 would then skip every lens for it.
+    /// </summary>
+    [Fact]
+    public void AShebangOnlyChangeIsNeitherCommentOnlyNorNoCodeChange()
+    {
+        CommitFile("scripts/build.sh", "#!/bin/sh\necho build\n");
+        CommitFile("docs/guide.md", "# Guide\n\nFirst.\n");
+        SetOriginHead(Head());
+        Write("scripts/build.sh", "#!/bin/bash\necho build\n");
+        Write("docs/guide.md", "# Guide\n\nSecond.\n");
+
+        ArbiterFactSet facts = Enrich(Declare(ChangedHunks, CommentOnly, NoCodeChange));
+
+        Assert.DoesNotContain("scripts/build.sh", ValueOf<IEnumerable<string>>(facts, CommentOnly));
+        Assert.DoesNotContain("scripts/build.sh", ValueOf<IEnumerable<string>>(facts, NoCodeChange));
+    }
+
+    /// <summary>
+    /// An untracked file over one mebibyte is not read whole: a generated or vendored blob would be
+    /// loaded into memory just to count its lines. A partial read would also hand a lens a partial
+    /// change, so the whole fact is absent and no path is classed comment-only or no-code.
+    /// </summary>
+    [Fact]
+    public void AnUntrackedFileOverOneMebibyteLeavesTheHunksAbsent()
+    {
+        CommitFile("src/Service.cs", NumberedLines(3));
+        string baseRef = Head();
+        Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
+        Write("data/large.txt", string.Concat(Enumerable.Range(1, 100_000).Select(i => $"line {i}\n")));
+        Assert.True(
+            new FileInfo(Path.Combine(_probe.Root, "data", "large.txt")).Length > 1024 * 1024,
+            "the fixture must exceed the one-mebibyte untracked-file cap.");
+
+        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+
+        Assert.Null(hunks);
+    }
+
+    /// <summary>
+    /// A binary untracked file (one with NUL bytes) has no meaningful lines to measure. Reading it as
+    /// text would invent hunks that no reviewer can judge, so the whole fact is absent instead.
+    /// </summary>
+    [Fact]
+    public void ABinaryUntrackedFileLeavesTheHunksAbsent()
+    {
+        CommitFile("src/Service.cs", NumberedLines(3));
+        string baseRef = Head();
+        Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
+        WriteBytes("assets/logo.dat", [0x89, 0x50, 0x00, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+
+        Assert.Null(hunks);
+    }
+
+    /// <summary>
+    /// An untracked entry that cannot be read (a dangling symbolic link here) leaves the fact absent
+    /// rather than throwing or dropping the file silently. This is a guard: the reader already maps
+    /// the failure to absence, and the test keeps it that way.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableUntrackedFileLeavesTheHunksAbsent()
+    {
+        CommitFile("src/Service.cs", NumberedLines(3));
+        string baseRef = Head();
+        Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
+        File.CreateSymbolicLink(
+            Path.Combine(_probe.Root, "src", "Dangling.cs"),
+            Path.Combine(_probe.Root, "src", "missing-target.cs"));
+
+        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+
+        Assert.Null(hunks);
+    }
+
     private ArbiterFactSet Enrich(ArbiterFactSet facts, string? cwd = null)
     {
         string root = cwd ?? _probe.Root;
@@ -420,5 +498,12 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         string path = Path.Combine(_probe.Root, relative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, text, Encoding.UTF8);
+    }
+
+    private void WriteBytes(string relative, byte[] bytes)
+    {
+        string path = Path.Combine(_probe.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
     }
 }

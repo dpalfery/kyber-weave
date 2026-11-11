@@ -170,4 +170,83 @@ public sealed class CommentSyntaxTests
     {
         Assert.False(CommentSyntax.IsCommentOnly(path, ["// a note"]), $"{path} has no known comment syntax.");
     }
+
+    /// <summary>
+    /// A shebang is an instruction to the operating system, not a comment: changing
+    /// <c>#!/bin/sh</c> to <c>#!/bin/bash</c> changes which interpreter runs the file. Read as a
+    /// comment, that change let a review lens skip a file whose behaviour had changed.
+    /// </summary>
+    [Theory]
+    [InlineData("build.sh", "#!/bin/sh")]
+    [InlineData("build.sh", "#!/bin/bash")]
+    [InlineData("settings.py", "#!/usr/bin/env python3")]
+    [InlineData("tool.rb", "#!/usr/bin/env ruby")]
+    public void AShebangLineIsCodeNotAComment(string path, string line)
+    {
+        Assert.False(CommentSyntax.IsCommentOnly(path, [line]), $"the shebang '{line}' in {path} selects the interpreter, so it is code.");
+    }
+
+    /// <summary>
+    /// Go reads <c>//go:</c> directives and the legacy <c>// +build</c> constraint as instructions to
+    /// the compiler, so flipping <c>//go:build linux</c> to <c>//go:build !linux</c> changes which files
+    /// compile. Those lines are code, never a comment-only change.
+    /// </summary>
+    [Theory]
+    [InlineData("//go:build linux")]
+    [InlineData("//go:build !linux")]
+    [InlineData("// +build linux")]
+    [InlineData("//go:generate stringer -type=Kind")]
+    [InlineData("//go:embed assets/*")]
+    public void AGoDirectiveLineIsCodeNotAComment(string line)
+    {
+        Assert.False(CommentSyntax.IsCommentOnly("Program.go", [line]), $"'{line}' is a Go directive the compiler reads, so it is code.");
+    }
+
+    /// <summary>
+    /// A plain Go comment is still a comment: only the directive forms above are code, so the
+    /// directive rule does not pull ordinary <c>//</c> notes out of the comment-only set.
+    /// </summary>
+    [Fact]
+    public void APlainGoCommentStaysCommentOnly()
+    {
+        Assert.True(CommentSyntax.IsCommentOnly("Program.go", ["// Package main prints a note."]), "an ordinary Go // note is still a comment.");
+    }
+
+    /// <summary>
+    /// The Python coding cookie tells the interpreter how to decode the source, so it is code even
+    /// though it is written as a <c>#</c> comment.
+    /// </summary>
+    [Theory]
+    [InlineData("# -*- coding: utf-8 -*-")]
+    [InlineData("# coding: utf-8")]
+    [InlineData("# coding=utf-8")]
+    public void APythonCodingCookieIsCodeNotAComment(string line)
+    {
+        Assert.False(CommentSyntax.IsCommentOnly("settings.py", [line]), $"'{line}' sets the source encoding the interpreter reads, so it is code.");
+    }
+
+    /// <summary>
+    /// C# preprocessor lines are directives the compiler acts on, so they are code. This is a guard:
+    /// the table already reads them as code, and the test keeps it that way.
+    /// </summary>
+    [Theory]
+    [InlineData("#nullable enable")]
+    // reason: a pragma is a compiler directive; this fixture checks the table keeps it as code, and suppresses nothing.
+    [InlineData("#pragma warning disable CS1591")]
+    [InlineData("#if DEBUG")]
+    [InlineData("#region Helpers")]
+    public void ACSharpPreprocessorLineIsCodeNotAComment(string line)
+    {
+        Assert.False(CommentSyntax.IsCommentOnly("Program.cs", [line]), $"'{line}' is a C# preprocessor directive, so it is code.");
+    }
+
+    /// <summary>
+    /// An XML doc comment is still a comment: the directive rule must not reclassify <c>///</c> lines,
+    /// which carry documentation the compiler discards.
+    /// </summary>
+    [Fact]
+    public void ACSharpDocCommentStaysCommentOnly()
+    {
+        Assert.True(CommentSyntax.IsCommentOnly("Program.cs", ["/// <summary>Reads the root.</summary>"]), "a /// doc comment is still a comment.");
+    }
 }
