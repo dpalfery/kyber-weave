@@ -755,7 +755,8 @@ public sealed class ArbiterEvaluator
         List<string> effects = new(Step0EffectsOf(judgement.Plan));
         List<(string RuleId, string? Candidate, bool Decisive, ArbiterDecisionRule Entry)> rows = [];
         HashSet<string> decisiveRules = new(StringComparer.Ordinal);
-        foreach (Question question in judgement.Plan.Questions)
+        // Unanswerable questions (a missing or wrong-shape list) are not sent: they record undecidable and count in the combination.
+        foreach (Question question in judgement.Plan.Questions.Concat(judgement.Plan.Unanswerable))
         {
             string answer = AnswerFor(question, judgement.Call);
             string mapped = MapOrNotEvaluated(question.Rule, answer, family);
