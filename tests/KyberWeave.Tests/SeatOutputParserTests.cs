@@ -747,6 +747,27 @@ public sealed class SeatOutputParserTests
     }
 
     /// <summary>
+    /// The key rule has three more ways in: a key after a table's pipe (<c>| claim: x |</c>), a key written in any case
+    /// (<c>ID:</c>, <c>Claim:</c>), and a key after a flow collection's comma. Each is refused, naming a seat field.
+    /// </summary>
+    [Theory]
+    [InlineData("NO FINDINGS: nothing wrong.", "| claim: x |")]
+    [InlineData("NO FINDINGS: nothing wrong.", "| Site | claim: x |")]
+    [InlineData("SKIPPED: the lens did not run.", "| Site | severity : minor |")]
+    [InlineData("NO FINDINGS: nothing wrong.", "ID: correctness/a")]
+    [InlineData("NO FINDINGS: nothing wrong.", "Claim: The loop bound excludes the final element.")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- SEVERITY: minor")]
+    [InlineData("SKIPPED: the lens did not run.", "- Failure_Scenario: x")]
+    [InlineData("SKIPPED: the lens did not run.", "see {x: 1, ID: a}")]
+    public void AKeyAfterAPipeOrInAnyCaseUnderADeclaredOutcomeIsRefused(string declared, string item)
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Lines(declared, item)));
+
+        Assert.Contains("seat field (line 2, column", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The cycle-8 bypasses: a schema key still refuses the seat after one prose line, after a bullet, after an unparsable
     /// line, before or after a fence, or inside one.
     /// </summary>
@@ -870,6 +891,21 @@ public sealed class SeatOutputParserTests
 
         Assert.NotNull(seat.Attestation);
         Assert.Contains(seat.Attestation, Attestations);
+    }
+
+    /// <summary>
+    /// Two different Index fallback lines keep the first as the seat's reason: the later line does not overwrite it.
+    /// </summary>
+    [Fact]
+    public void TheFirstOfTwoDifferentIndexFallbackLinesIsKept()
+    {
+        string text = Fenced(FindingLines())
+            + "Index fallback: projectPath: not-indexed\n"
+            + "Index fallback: projectPath: error\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal("projectPath: not-indexed", seat.IndexFallback);
     }
 
     /// <summary>Two different outcome lines are refused, and the message names both.</summary>

@@ -835,48 +835,54 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     // Seat folder entries that are not a lens: named, never a crash, never read as a seat.
     // -----------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// A file in the seat folder that cannot be a seat (its stem is empty, dotted or not a lowercase lens id) is warned
+    /// about under KW-REVIEW-041, saying it was ignored, and is never parsed. The body is a contradictory seat that
+    /// would be refused under KW-REVIEW-040 if anything read it, so a stray 040 proves the entry was parsed.
+    /// </summary>
     [Theory]
     [InlineData(".md")]
     [InlineData(".hidden.md")]
     [InlineData("Bad Name.md")]
-    public void ASeatFolderFileThatIsNotALensIsNamedAndNeverCrashesTheVerdict(string entry)
+    public void ASeatFolderFileThatIsNotALensIsIgnoredWithAWarningAndNeverParsed(string entry)
     {
-        File.WriteAllText(Path.Combine(_seats, entry), NoFindingsSeat("correctness"));
+        File.WriteAllText(Path.Combine(_seats, entry), "NO FINDINGS: I found nothing.\n" + FindingSeat());
 
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
 
-        Assert.True(run.Result is 0 or 1, $"The verdict did not exit normally (exit {run.Result}). Output:{Environment.NewLine}{run.Output}");
-        Assert.True(NamesEntry(run.Output, entry), $"No KW-REVIEW-041 or 040 names '{entry}'. Output:{Environment.NewLine}{run.Output}");
+        AssertEntryIgnoredAndNeverParsed(run, entry, "is not named <lens>.md with a lowercase lens id");
     }
 
-    /// <summary>A directory named like a seat file is an entry too: it is named, and the verdict does not crash on it.</summary>
+    /// <summary>
+    /// A directory named like a seat file is ignored too, with a warning saying so. A readable seat inside it is not
+    /// reached: the folder is not searched below its own level.
+    /// </summary>
     [Fact]
-    public void ADirectoryNamedAsASeatFileIsNamedAndNeverCrashesTheVerdict()
+    public void ADirectoryNamedAsASeatFileIsIgnoredWithAWarningAndNeverParsed()
     {
-        Directory.CreateDirectory(Path.Combine(_seats, "correctness.md"));
+        string directory = Path.Combine(_seats, "correctness.md");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "correctness.md"), "NO FINDINGS: I found nothing.\n" + FindingSeat());
 
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
 
-        Assert.True(run.Result is 0 or 1, $"The verdict did not exit normally (exit {run.Result}). Output:{Environment.NewLine}{run.Output}");
-        Assert.True(NamesEntry(run.Output, "correctness.md"), $"No KW-REVIEW-041 or 040 names the directory. Output:{Environment.NewLine}{run.Output}");
+        AssertEntryIgnoredAndNeverParsed(run, "correctness.md", "is a directory, not a seat file");
     }
 
-    /// <summary>A null coverage entry in the prior cycle's findings document refuses the document naming the file.</summary>
-    [Fact]
-    public void ANullCoverageEntryInThePriorFindingsDocumentIsRefusedNamingTheFile()
+    /// <summary>
+    /// The verdict exits 0 (the entry is a warning, not a refusal), names the entry in exactly one KW-REVIEW-041
+    /// warning that says why and that it was ignored, and raises no KW-REVIEW-040: nothing parsed the entry.
+    /// </summary>
+    private static void AssertEntryIgnoredAndNeverParsed(CapturedConsoleExecution<int> run, string entry, string reason)
     {
-        string prior = Path.Combine(_temp.Path, "prior");
-        Directory.CreateDirectory(prior);
-        File.WriteAllText(
-            Path.Combine(prior, "findings.json"),
-            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"coverage\":[null]}");
-        WriteSeat("correctness", NoFindingsSeat("correctness"));
-
-        CapturedConsoleExecution<int> run = Verdict(
-            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness", "security")]);
-
-        Assert.Equal(1, run.Result);
-        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.True(run.Result == 0, $"Expected exit 0, got {run.Result}. Output:{Environment.NewLine}{run.Output}");
+        List<string> named = [.. MessagesWithCode(run.Output, LensUnaccounted)
+            .Where(message => message.Contains(entry, StringComparison.Ordinal))];
+        string message = Assert.Single(named);
+        Assert.Contains(reason, message, StringComparison.Ordinal);
+        Assert.Contains("it was ignored", message, StringComparison.Ordinal);
+        AssertDiagnostic(run.Output, LensUnaccounted, "Warning", "it was ignored");
+        Assert.Empty(MessagesWithCode(run.Output, SeatUnparseable));
     }
 
     // -----------------------------------------------------------------------------------------
@@ -967,13 +973,29 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
 
         Assert.Equal(0, run.Result);
-        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning", "Index fallback");
+        string message = Assert.Single(MessagesWithCode(run.Output, DiscoveryMissing), text => text.Contains("different 'Index fallback:' lines", StringComparison.Ordinal));
+        Assert.Contains("'projectPath: not-indexed'", message, StringComparison.Ordinal);
+        Assert.Contains("'projectPath: error'", message, StringComparison.Ordinal);
+        Assert.Contains("the first is kept", message, StringComparison.Ordinal);
     }
 
-    /// <summary>True when a KW-REVIEW-041 or KW-REVIEW-040 diagnostic's message names the entry.</summary>
-    private static bool NamesEntry(string output, string entry) =>
-        MessagesWithCode(output, LensUnaccounted).Concat(MessagesWithCode(output, SeatUnparseable))
-            .Any(message => message.Contains(entry, StringComparison.Ordinal));
+    /// <summary>The same Index fallback line written twice is one reason, not a contradiction, so it draws no repeat warning.</summary>
+    [Fact]
+    public void ARepeatedIdenticalIndexFallbackLineDrawsNoRepeatWarning()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: projectPath: not-indexed",
+            "Index fallback: projectPath: not-indexed",
+            "Discovery: codegraph 0, docs 0, direct reads 6",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.DoesNotContain(MessagesWithCode(run.Output, DiscoveryMissing), text => text.Contains("different 'Index fallback:' lines", StringComparison.Ordinal));
+    }
 
     // -----------------------------------------------------------------------------------------
     // Harness.

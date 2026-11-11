@@ -38,9 +38,6 @@ public sealed class ReviewVerdictInputTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
-    // A finding whose required identity is null: dropped as incomplete, or the file refused. Never a crash, and never
-    // counted as accepted.
-    // -----------------------------------------------------------------------------------------
     // A finding whose required identity is null: the findings document is refused, naming the field. The verdict never
     // drops it as incomplete or counts it as accepted, because the identity is missing from the document, not the seat.
     // -----------------------------------------------------------------------------------------
@@ -142,6 +139,26 @@ public sealed class ReviewVerdictInputTests : IDisposable
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
     }
 
+    /// <summary>
+    /// The null-element check walks the whole parsed tree, not only the lists the report model names: a null inside a
+    /// list nested in an object, or in a list inside a list item, refuses the document and names the null's path.
+    /// </summary>
+    [Theory]
+    [InlineData("\"coverage\":[{\"files\":[null]}]", "$.coverage[0].files[0]")]
+    [InlineData("\"extra\":{\"inner\":{\"names\":[\"a\",null]}}", "$.extra.inner.names[1]")]
+    [InlineData("\"extra\":[[\"a\"],[null]]", "$.extra[1][0]")]
+    public void ANullElementNestedDeepInAFindingsDocumentIsRefusedNamingItsPath(string member, string path)
+    {
+        string findings = Write(
+            "findings.json",
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0," + member + "}");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", path);
+    }
+
     [Fact]
     public void ANullElementInAGateReportsNestedListIsRefusedNamingTheFile()
     {
@@ -152,6 +169,19 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
         Assert.Equal(Refused, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "gates.json");
+    }
+
+    /// <summary>A null in a list nested inside a gate report's object is refused, naming the gate report and the null's path.</summary>
+    [Fact]
+    public void ANullElementNestedDeepInAGateReportIsRefusedNamingItsPath()
+    {
+        string findings = WriteFindingDocument("id", "correctness/off-by-one");
+        string gates = Write("gates.json", "{\"schema\":\"kyber-weave.review-gates/v1\",\"gates\":[],\"coverageReports\":[{\"files\":[null]}]}");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "$.coverageReports[0].files[0]");
     }
 
     // -----------------------------------------------------------------------------------------
