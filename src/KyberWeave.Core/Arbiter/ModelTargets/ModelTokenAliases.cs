@@ -31,8 +31,9 @@ public static class ModelTokenAliases
             return alias;
         }
 
+        // The prefix is matched ignoring case, as the family and version are, so CLAUDE-sonnet-1 is a full model id too.
         string prefix = Claude + "-";
-        if (!trimmed.StartsWith(prefix, StringComparison.Ordinal))
+        if (!trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
