@@ -157,6 +157,8 @@ public static class ArbiterTriggerCatalog
                 "finding.severity",
                 "finding.gate-corroborated",
             },
+            // A refuter's return reads no facts: its outcome is parsed from the return text, not a rule.
+            ["refute.returned"] = new HashSet<string>(StringComparer.Ordinal),
             ["refute.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "finding.id",

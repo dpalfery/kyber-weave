@@ -370,6 +370,17 @@ public sealed class ArbiterEvaluator
                 .ConfigureAwait(false);
         }
 
+        // A refuter's return records its verdict against the finding its REFUTE header names, keyed by the slug.
+        // A return that states no recognised verdict records unknown; it never drops the finding it refutes.
+        if (!effective.DryRun && reviewRun is not null
+            && string.Equals(trigger, "refute.returned", StringComparison.Ordinal)
+            && HeaderBlock.Parse(prompt).Headers.TryGetValue("REFUTE", out string? refuteHeader))
+        {
+            await ReviewStore(config)
+                .AppendRefutationOutcomeAsync(reviewRun, FindingSlug(refuteHeader), RefutationOutcome.Parse(ev.ToolOutput), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         List<ArbiterSecondaryEvaluation> secondaryResults = new(secondaries.Count);
         foreach (TriggerPlan plan in secondaries)
         {

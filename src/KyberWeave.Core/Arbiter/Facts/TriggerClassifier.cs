@@ -333,6 +333,7 @@ public static partial class TriggerClassifier
         "delegate.planner" => "delegate.planner.returned",
         "investigate" => "investigate.returned",
         "lens.spawn" => "lens.returned",
+        "refute.spawn" => "refute.returned",
         _ => trigger,
     };
 

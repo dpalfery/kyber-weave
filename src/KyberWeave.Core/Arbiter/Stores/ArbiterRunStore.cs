@@ -76,6 +76,28 @@ public sealed class ArbiterRunStore
     }
 
     /// <summary>
+    /// Appends one refuter's verdict on a finding to the store of <paramref name="reviewRun"/>, keyed by the
+    /// finding's slug. It is written beside the findings as a line that is not itself a finding.
+    /// </summary>
+    /// <param name="reviewRun">The <c>REVIEW_RUN</c> id the finding belongs to.</param>
+    /// <param name="findingSlug">The bare slug of the refuted finding (the part after <c>&lt;lens&gt;/</c>).</param>
+    /// <param name="verdict">What the refuter's return said.</param>
+    /// <param name="ct">Cancels the append.</param>
+    /// <returns>Whether the item was stored, refused for size, or the store was unavailable.</returns>
+    public Task<ArbiterStoreStatus> AppendRefutationOutcomeAsync(
+        string reviewRun,
+        string findingSlug,
+        RefutationVerdict verdict,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(reviewRun);
+        ArgumentNullException.ThrowIfNull(findingSlug);
+        string text = "refutation-of: " + findingSlug + "\nverdict: " + RefutationOutcome.Word(verdict);
+        string directory = Path.Combine(_storesDirectory, "review-" + Digest(reviewRun));
+        return AppendAsync(directory, FindingsFileName, text, ct);
+    }
+
+    /// <summary>
     /// Appends one worker failure's text to the store of its plan, or of its session when no plan is known.
     /// </summary>
     /// <param name="planFile">The plan file the failure belongs to, or null.</param>

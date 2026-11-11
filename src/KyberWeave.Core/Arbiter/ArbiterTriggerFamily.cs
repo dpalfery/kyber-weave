@@ -58,6 +58,7 @@ public static class ArbiterTriggerFamilies
             ["lens.spawn"] = ArbiterTriggerFamily.LensSpawn,
             ["refute.spawn"] = ArbiterTriggerFamily.RefuteSpawn,
             ["lens.returned"] = ArbiterTriggerFamily.LensReturned,
+            ["refute.returned"] = ArbiterTriggerFamily.LensReturned,
             ["gate.select"] = ArbiterTriggerFamily.Gate,
             ["model.target"] = ArbiterTriggerFamily.ModelTarget,
             ["delegate.model"] = ArbiterTriggerFamily.ModelTarget,
