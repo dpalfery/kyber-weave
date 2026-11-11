@@ -774,6 +774,64 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // Empty option values and empty prior documents: refused, naming the option or the file.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("--seats")]
+    [InlineData("--prior")]
+    [InlineData("--out")]
+    [InlineData("--gates")]
+    public void AnEmptyOptionValueIsRefusedNamingTheOption(string option)
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+        List<string> arguments = option == "--seats"
+            ? ["--seats", ""]
+            : ["--seats", _seats, .. NotSeatedExcept("correctness"), option, ""];
+
+        CapturedConsoleExecution<int> run = Verdict([.. arguments]);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(option, run.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n")]
+    public void AnEmptyPriorFindingsDocumentIsRefusedNamingTheFile(string content)
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        File.WriteAllText(Path.Combine(prior, "findings.json"), content);
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    /// <summary>
+    /// A count too large for an int is not a count: the line reads as no discovery evidence and KW-REVIEW-044 says so,
+    /// rather than the seat being unreadable.
+    /// </summary>
+    [Fact]
+    public void ADiscoveryCountThatOverflowsReadsAsNoEvidenceAndWarnsUnderKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Discovery: codegraph 99999999999, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Harness.
     // -----------------------------------------------------------------------------------------
 

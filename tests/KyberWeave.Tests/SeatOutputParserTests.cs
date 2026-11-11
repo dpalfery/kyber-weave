@@ -622,9 +622,8 @@ public sealed class SeatOutputParserTests
     }
 
     // -----------------------------------------------------------------------------------------
-    // The Input sites closing line: the correctness seat's count of the input sites it traced.
-    // The count is read through the SeatOutput member named InputSites, by name, so this file
-    // does not depend on a member the parser has not yet written.
+    // The Input sites closing line: the correctness seat's count of the input sites it traced,
+    // read from SeatOutput.InputSites.
     // -----------------------------------------------------------------------------------------
 
     [Fact]
@@ -720,17 +719,180 @@ public sealed class SeatOutputParserTests
         Assert.Equal("| a |", Assert.Single(seat.Findings).Excerpt);
     }
 
-    /// <summary>Reads the InputSites member by name: null when the member is absent or holds no value, else (Traced, FilesWithNone).</summary>
-    private static (int Traced, int FilesWithNone)? InputSitesOf(SeatOutput seat)
+    /// <summary>
+    /// A seat that declares an outcome contradicts itself if its body holds any YAML list item, whatever its shape. The
+    /// seat contract is one sentence after the outcome line and closing lines, so a flow item, a flow list, an item that
+    /// does not open with a schema field, a quoted key and a prose bullet are all refused, not only block findings.
+    /// </summary>
+    [Theory]
+    [InlineData("NO FINDINGS: nothing wrong.", "- {id: correctness/a, lens: correctness, severity: minor, confidence: 7, file: src/Foo.cs, line: 3, claim: x}")]
+    [InlineData("NO FINDINGS: nothing wrong.", "[ {id: correctness/a, claim: x} ]")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- note: the loop bound looks wrong.")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- \"id\": correctness/a")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- Note the following about the loop bound.")]
+    [InlineData("SKIPPED: the lens did not run.", "- {id: correctness/a, lens: correctness, severity: minor, confidence: 7, file: src/Foo.cs, line: 3, claim: x}")]
+    [InlineData("SKIPPED: the lens did not run.", "[ {id: correctness/a, claim: x} ]")]
+    [InlineData("SKIPPED: the lens did not run.", "- note: the loop bound looks wrong.")]
+    [InlineData("SKIPPED: the lens did not run.", "- \"id\": correctness/a")]
+    [InlineData("SKIPPED: the lens did not run.", "- Note the following about the loop bound.")]
+    public void AnyListItemUnderADeclaredOutcomeIsRefused(string declared, string item)
     {
-        object? sites = typeof(SeatOutput).GetProperty("InputSites")?.GetValue(seat);
-        if (sites is null)
-            return null;
+        string text = Lines(declared, item);
 
-        int traced = (int)sites.GetType().GetProperty("Traced")!.GetValue(sites)!;
-        int filesWithNone = (int)sites.GetType().GetProperty("FilesWithNone")!.GetValue(sites)!;
-        return (traced, filesWithNone);
+        Assert.Throws<SeatOutputException>(() => SeatOutputParser.Parse("correctness", text));
     }
+
+    /// <summary>A severity written as a list is not one severity: it is refused and the field is named.</summary>
+    [Theory]
+    [InlineData("major, minor")]
+    [InlineData("minor, critical")]
+    public void ASeverityWrittenAsACommaListIsRefusedNamingTheField(string severity)
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(severity: severity))));
+
+        Assert.Contains("severity", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two Input sites lines are one seat's count split across two spawns, so they add up. Reading only the last would
+    /// report a fraction of the sites traced.
+    /// </summary>
+    [Fact]
+    public void RepeatedInputSitesLinesAreSummed()
+    {
+        string text = Fenced(FindingLines())
+            + "Input sites: 31 traced, 1 files with none\n"
+            + "Input sites: 8 traced, 4 files with none\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal((39, 5), InputSitesOf(seat));
+    }
+
+    /// <summary>Two Discovery lines add up counter by counter, the same as two Input sites lines.</summary>
+    [Fact]
+    public void RepeatedDiscoveryLinesAreSummedPerCounter()
+    {
+        string text = Fenced(FindingLines())
+            + "Discovery: codegraph 1, docs 0, direct reads 2\n"
+            + "Discovery: codegraph 3, docs 1, direct reads 4\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(new SeatDiscovery(CodeGraph: 4, Docs: 1, DirectReads: 6), seat.Discovery);
+    }
+
+    /// <summary>
+    /// Two attestation lines are kept as one reading or the other; this fact pins that the seat's attestation is one of the
+    /// two lines as written, not a blend of them.
+    /// </summary>
+    [Fact]
+    public void RepeatedAttestationLinesReadAsOneOfTheLinesWritten()
+    {
+        string text = Fenced(FindingLines())
+            + "REVIEW.md sections checked: [Ground rules]\n"
+            + "REVIEW.md sections checked: [Ground rules, §3]\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.NotNull(seat.Attestation);
+        Assert.Contains(seat.Attestation, Attestations);
+    }
+
+    /// <summary>Two different outcome lines are refused, and the message names both.</summary>
+    [Fact]
+    public void TwoDifferentOutcomeLinesAreRefusedNamingBoth()
+    {
+        string text = Lines("NO FINDINGS: nothing wrong.", "SKIPPED: the lens did not run.");
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Contains("NO FINDINGS:", error.Message, StringComparison.Ordinal);
+        Assert.Contains("SKIPPED:", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Outside a block scalar a line that starts with <c>#</c> is a YAML comment and is skipped on the flat path. A
+    /// block scalar's <c>#</c> line is the field's text and is kept.
+    /// </summary>
+    [Fact]
+    public void AHashCommentLineOnTheFlatPathIsSkipped()
+    {
+        List<string> body = FlatFindingLines("correctness/a");
+        body.Insert(3, "# a reviewer's note, not a field");
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Lines([.. body]));
+
+        Assert.Equal(["correctness/a"], seat.Findings.Select(finding => finding.Id));
+    }
+
+    [Fact]
+    public void AHashLineInsideABlockScalarIsKeptAsText()
+    {
+        List<string> body =
+        [
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  excerpt: |",
+            "    # not a comment",
+            "  claim: The rule says: never drop it."
+        ];
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal("# not a comment", Assert.Single(seat.Findings).Excerpt);
+    }
+
+    /// <summary>
+    /// A value over 200 characters is cut for the message, and the cut never leaves half of a surrogate pair. The value here
+    /// has a pair straddling the 200th character.
+    /// </summary>
+    [Fact]
+    public void AnOverLongValueInAMessageIsClippedWithoutSplittingASurrogatePair()
+    {
+        string value = new string('a', 199) + "😀" + "bbb";
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(confidence: value))));
+
+        Assert.Contains("…", error.Message, StringComparison.Ordinal);
+        Assert.False(HasUnpairedSurrogate(error.Message), "The clipped message splits a surrogate pair.");
+    }
+
+    private static readonly string[] Attestations =
+    [
+        "REVIEW.md sections checked: [Ground rules]",
+        "REVIEW.md sections checked: [Ground rules, §3]"
+    ];
+
+    private static bool HasUnpairedSurrogate(string text)
+    {
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (char.IsHighSurrogate(text[index]))
+            {
+                if (index + 1 >= text.Length || !char.IsLowSurrogate(text[index + 1]))
+                    return true;
+                index++;
+            }
+            else if (char.IsLowSurrogate(text[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The seat's Input sites counts, or null when the seat wrote no readable line.</summary>
+    private static (int Traced, int FilesWithNone)? InputSitesOf(SeatOutput seat) =>
+        seat.InputSites is { } sites ? (sites.Traced, sites.FilesWithNone) : null;
 
     // -----------------------------------------------------------------------------------------
     // Helpers: seat text built from the parts a seat writes.

@@ -97,6 +97,47 @@ public sealed class CitedLineCheckTests : IDisposable
         Assert.Equal(99, result.OriginalLine);
     }
 
+    /// <summary>
+    /// Line 0 can no more exist than a line past the end, so it is repaired the same way: the excerpt finds the line it
+    /// means. Without the repair a line-0 finding is left as written and nothing is ever checked.
+    /// </summary>
+    [Fact]
+    public void ALineZeroIsRepairedByItsExcerptLikeALineBeyondTheEnd()
+    {
+        WriteRepositoryFile("src/Foo.cs", "int a;\nint b;\n");
+
+        CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/Foo.cs", line: 0, excerpt: "int b;"));
+
+        Assert.Equal(CitedLineKind.Relocated, result.Kind);
+        Assert.Equal(2, result.Finding.Line);
+    }
+
+    /// <summary>A negative line with no excerpt cannot be repaired, the same as one beyond the end with none.</summary>
+    [Fact]
+    public void ANegativeLineWithNoExcerptIsUnresolved()
+    {
+        WriteRepositoryFile("src/Foo.cs", "a\nb\n");
+
+        CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/Foo.cs", line: -3, excerpt: null));
+
+        Assert.Equal(CitedLineKind.Unresolved, result.Kind);
+    }
+
+    /// <summary>
+    /// A path holding a NUL is a path no file system accepts. It is reported as unverified, with no exception and no crash
+    /// through the verdict, and the message does not carry the path's absolute form.
+    /// </summary>
+    [Fact]
+    public void ACitedPathWithANulCharacterIsUnverifiedAndDoesNotThrow()
+    {
+        WriteRepositoryFile("src/Foo.cs", "int a;\n");
+
+        CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/\0Foo.cs", line: 99, excerpt: "int a;"));
+
+        Assert.Equal(CitedLineKind.Unverified, result.Kind);
+        Assert.NotNull(result.Reason);
+    }
+
     private static ReviewFinding Finding(string file, int line, string? excerpt) =>
         new(
             "correctness/off-by-one",
