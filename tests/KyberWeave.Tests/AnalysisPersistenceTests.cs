@@ -735,8 +735,12 @@ public sealed class AnalysisPersistenceTests
                     // The fixture owes the child a ROLLBACK, and it can issue that write only while
                     // the child's standard input is open. Closed input leaves the rollback unissued
                     // and the immediate transaction in an unknown state, so that is a cleanup failure
-                    // the caller must see. A child that exited with its input still open took the
-                    // transaction with it: nothing to roll back, nothing to report.
+                    // the caller must see.
+                    //
+                    // Carve-out: a child that exited with its input still open (or whose broken pipe
+                    // was undetected because Flush on an empty buffer sends no bytes) took the
+                    // transaction with it: process termination releases all SQLite file locks, so
+                    // there is nothing to roll back, no lock leak, and nothing to report.
                     if (!IsStandardInputOpen(process))
                     {
                         cleanupFailures.Add(new IOException(
@@ -804,6 +808,12 @@ public sealed class AnalysisPersistenceTests
     ///     writer is open and throws <see cref="ObjectDisposedException"/> once a caller has disposed
     ///     it. The buffer is empty here because the acquire path flushed every write, so the probe
     ///     sends the child nothing.
+    ///     <para>
+    ///         Because the buffer is empty, this probe does not detect a broken pipe when the child
+    ///         exits without explicit input disposal. That exited-child carve-out is handled by the
+    ///         subsequent <see cref="Process.HasExited"/> check (the exited child took its locks with it,
+    ///         leaving nothing to roll back).
+    ///     </para>
     /// </remarks>
     private static bool IsStandardInputOpen(Process process)
     {
