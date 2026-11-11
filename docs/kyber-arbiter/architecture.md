@@ -773,7 +773,7 @@ flowchart TD
   runs the project-scope hook. Read-guard and hand-back matchers do not count.
 - **One evaluation per dispatch.** Only the dispatch events claim: the tool `Agent` or `Task`, on `PreToolUse`
   or `PostToolUse`. The claim is `artifacts/arbiter/claims/<id>.pre` (or `.post`), where `<id>` is the
-  `tool_use_id` (or its SHA-256 when that id is not a plain token). The project hook writes `project` and
+  `tool_use_id` (or its SHA-256 when that id is not a plain token; an id over 256 characters is not claimed, so that dispatch is evaluated without a claim). The project hook writes `project` and
   yields only to an existing `global` claim, logging `Arbiter: dispatch already claimed by the global hook;
   not evaluated twice.` The user-level hook, when candidates exist, waits up to 1.5 s for a `project` claim and
   logs `deferred-to-project (claimed by <owner>; ...)` if one appears; otherwise it claims `global` and evaluates,
