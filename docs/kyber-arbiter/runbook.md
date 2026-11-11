@@ -42,10 +42,12 @@ hook's behaviour depends on the harness:
     to the project's `artifacts/arbiter/`.
   - `Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).` The project set
     `arbiter.enabled: false` explicitly. Nothing is written.
-  - `Arbiter global scope: deferred-to-project (claimed by <source>).` A project hook claimed the dispatch;
-    `<source>` names the project hook file or the first candidate.
-  - `Arbiter global scope: deferred-to-project (project hooks may cover it: <sources>).` The dispatch has no
-    `tool_use_id`, so no claim could be made; the named candidates decide alone.
+  - `Arbiter global scope: deferred-to-project (claimed by <owner>; project hooks that can fire: <sources>).`
+    A project hook claimed the dispatch; `<owner>` is the claim's owner line and `<sources>` the project hook
+    files that could have fired.
+  - `Arbiter global scope: no tool use id to coordinate on; evaluating although project hooks may cover it: <sources>.`
+    The dispatch carries no `tool_use_id`, so no claim can be made; the hook evaluates rather than leave the
+    dispatch to a project hook that may never fire, and a project hook may evaluate it too.
   - `Arbiter: dispatch already claimed by the global hook; not evaluated twice.` This is the project-scope hook
     yielding to a `global` claim, so the dispatch is evaluated once.
 - **Every other harness** logs

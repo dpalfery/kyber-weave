@@ -13,9 +13,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <remarks>
 /// A claim is <c>&lt;project&gt;/artifacts/arbiter/claims/&lt;id&gt;.&lt;pre|post&gt;</c>, where the id is the
 /// harness's <c>tool_use_id</c> when it is a safe file name, and its SHA-256 otherwise. The file is created
-/// with <see cref="FileMode.CreateNew"/>, so exactly one creator wins a race, and it holds one line naming
-/// the owner: <c>project</c> or <c>global</c>. Claims older than a day are pruned on each new claim, so the
-/// folder does not grow with every dispatch ever made.
+/// written to a temporary file and moved into place without overwriting, so exactly one creator wins a race
+/// and a reader never sees a claim before its owner line is in it. The line names the owner: <c>project</c>
+/// or <c>global</c>. Claims older than a day are pruned, at most once an hour, so the folder does not grow
+/// with every dispatch ever made and no dispatch pays for a scan of it.
 /// </remarks>
 internal static class DispatchClaim
 {
@@ -30,6 +31,12 @@ internal static class DispatchClaim
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
+    private static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
+
+    // A tool use id is a short opaque string. Only this many characters of a longer one are hashed, so an
+    // oversized value in a hook payload cannot cost more than a bounded hash.
+    private const int MaxHashedIdLength = 4096;
+    private const string PruneMarker = ".last-prune";
 
     private static readonly Regex SafeIdPattern = new(
         "^[A-Za-z0-9_-]{1,128}$",
@@ -47,26 +54,45 @@ internal static class DispatchClaim
         Directory.CreateDirectory(directory);
         PruneStale(directory);
 
+        string temp = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            using StreamWriter writer = new(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            writer.Write(owner);
-            writer.Write('\n');
+            File.WriteAllText(temp, owner + "\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(temp, path, overwrite: false);
             return true;
         }
-        catch (IOException) when (File.Exists(path))
+        catch (IOException) when (ReadOwner(projectRoot, key) is not null)
         {
-            // Another hook created the claim first. Its owner decides what this hook does.
+            // Another hook's claim is in place with its owner written, so that owner decides what this
+            // hook does. Any other failure (a full disk, a path too long) propagates, and the caller
+            // evaluates the dispatch without a claim instead of treating it as covered.
             return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A leftover temporary file is pruned with the stale claims.
+            }
         }
     }
 
     /// <summary>The owner line of the existing claim for <paramref name="key"/>, or null when there is none.</summary>
     internal static string? ReadOwner(string projectRoot, DispatchClaimKey key)
     {
-        string path = ClaimPath(projectRoot, key);
-        return File.Exists(path) ? File.ReadLines(path).FirstOrDefault()?.Trim() : null;
+        try
+        {
+            string? owner = File.ReadLines(ClaimPath(projectRoot, key)).FirstOrDefault()?.Trim();
+            return string.IsNullOrEmpty(owner) ? null : owner;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -94,14 +120,31 @@ internal static class DispatchClaim
     {
         string id = SafeIdPattern.IsMatch(key.ToolUseId)
             ? key.ToolUseId
-            : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key.ToolUseId)));
+            : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Bounded(key.ToolUseId))));
         return Path.Combine(projectRoot, "artifacts", "arbiter", "claims", $"{id}.{key.Phase}");
     }
+
+    private static string Bounded(string id) => id.Length > MaxHashedIdLength ? id[..MaxHashedIdLength] : id;
 
     // Pruning is housekeeping: a file that cannot be deleted now is retried on the next claim, and it
     // must not stop the dispatch that is being claimed.
     private static void PruneStale(string directory)
     {
+        string marker = Path.Combine(directory, PruneMarker);
+        try
+        {
+            if (File.Exists(marker) && DateTime.UtcNow - File.GetLastWriteTimeUtc(marker) < PruneInterval)
+            {
+                return;
+            }
+
+            File.WriteAllText(marker, string.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
         DateTime cutoff = DateTime.UtcNow - StaleAge;
         foreach (string file in Directory.EnumerateFiles(directory))
         {

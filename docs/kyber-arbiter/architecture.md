@@ -776,9 +776,11 @@ flowchart TD
   `tool_use_id` (or its SHA-256 when that id is not a plain token). The project hook writes `project` and
   yields only to an existing `global` claim, logging `Arbiter: dispatch already claimed by the global hook;
   not evaluated twice.` The user-level hook, when candidates exist, waits up to 1.5 s for a `project` claim and
-  logs `deferred-to-project (claimed by <source>)` if one appears; otherwise it claims `global` and evaluates,
-  naming the candidates that did not fire. With no candidates it claims and evaluates at once. Claim files older
-  than 24 hours are removed on each write.
+  logs `deferred-to-project (claimed by <owner>; ...)` if one appears; otherwise it claims `global` and evaluates,
+  naming the candidates that did not fire. With no candidates it claims and evaluates at once. A claim is
+  written to a temporary file and moved into place, so a reader never sees one without its owner. A payload
+  with no `tool_use_id` cannot be claimed, so the user-level hook evaluates it. Claim files older than 24 hours
+  are removed, at most once an hour.
 - **Failure to claim.** If the claims folder cannot be written, the hook logs a line and evaluates without a
   claim, so the dispatch can be evaluated twice in that case. The rule favours gating over skipping.
 - **Main thread.** A main-thread payload carries no `agent_type`, so agent-file hooks never apply. A project

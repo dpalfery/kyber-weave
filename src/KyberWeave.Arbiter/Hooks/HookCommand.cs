@@ -268,18 +268,21 @@ public sealed class HookCommand
             return true;
         }
 
-        // Without a tool use id there is no claim to wait for, so the candidates decide alone.
+        // Without a tool use id there is no claim to wait for or to take. A candidate may be a skill that
+        // was never invoked, and deferring to it would leave the dispatch with no gate at all, so this hook
+        // evaluates: at worst a project hook decides it too.
         if (claim is null)
         {
             log.WriteLine(
-                $"Arbiter global scope: deferred-to-project (project hooks may cover it: {string.Join(", ", candidates)}).");
-            return false;
+                $"Arbiter global scope: no tool use id to coordinate on; evaluating although project hooks may cover it: {string.Join(", ", candidates)}.");
+            return true;
         }
 
         // A project hook that can fire will claim within the window; a claim means it did.
         if (DispatchClaim.WaitForClaim(repoRoot, claim))
         {
-            log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {candidates[0]}).");
+            log.WriteLine(
+                $"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}; project hooks that can fire: {string.Join(", ", candidates)}).");
             return false;
         }
 

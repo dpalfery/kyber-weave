@@ -85,7 +85,7 @@ internal static class ArbiterHarnessGating
         {
             string token = SquadTargetCatalog.GetToken(target);
             string? hookPath = ArbiterHookRefresher.ResolveGlobalHookPath(target, home, roots);
-            bool listed = globalTargets.Contains(token, StringComparer.Ordinal);
+            bool listed = globalTargets.Contains(token, StringComparer.OrdinalIgnoreCase);
             bool owned = OwnsGlobalHook(receipt, target, token, hookPath, roots);
             bool deployed = HasProjectDeployment(root, target, store, roots);
             if (!listed && !owned && !deployed)
@@ -204,40 +204,12 @@ internal static class ArbiterHarnessGating
     private static IReadOnlyList<string> ClaudeProjectSources(string root, string home)
     {
         List<string> sources = [];
-        foreach (string? agentType in AgentTypes(root))
+        foreach (string eventName in new[] { "PreToolUse", "PostToolUse" })
         {
-            foreach (string eventName in new[] { "PreToolUse", "PostToolUse" })
-            {
-                sources.AddRange(ClaudeHookCoverage.CandidateSources(root, home, agentType, eventName, AgentToolName));
-            }
+            sources.AddRange(ClaudeHookCoverage.ProjectCandidateSources(root, home, eventName, AgentToolName));
         }
 
         return sources.Distinct(StringComparer.Ordinal).ToList();
-    }
-
-    // Null stands for a main-thread dispatch. Each project agent file adds its own agent type.
-    private static List<string?> AgentTypes(string root)
-    {
-        List<string?> agentTypes = [null];
-        string agents = Path.Combine(root, ".claude", "agents");
-        if (!Directory.Exists(agents))
-        {
-            return agentTypes;
-        }
-
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(agents, "*.md"))
-            {
-                agentTypes.Add(Path.GetFileNameWithoutExtension(file));
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // An agents folder that cannot be listed contributes no agent-file hooks.
-        }
-
-        return agentTypes;
     }
 
     private static bool IsFallbackOnly(SquadTarget target) =>

@@ -30,6 +30,10 @@ public static class ClaudeHookCoverage
     // A matcher is a .NET regex in this check. A pattern that stalls must not stall the dispatch.
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
+    // A hook source is a settings file or a short agent or skill file. One larger than this is not read.
+    private const long MaxSourceBytes = 1024 * 1024;
+    private const int MaxAgentTypeLength = 128;
+
     // An agent type names a file under .claude/agents. Anything else (a traversal, a plugin-qualified
     // name) names no file at all, so it cannot reach a decoy outside the agents folder.
     private static readonly Regex AgentTypePattern = new(
@@ -85,6 +89,54 @@ public static class ClaudeHookCoverage
             .ToList();
     }
 
+    /// <summary>
+    /// The project's own sources that would fire for one tool call under any agent type: the settings
+    /// files, the effective skills, and each project agent file. The settings files and skills are read
+    /// once, however many agent files there are.
+    /// </summary>
+    /// <param name="projectRoot">The repository root that holds <c>.claude/</c>.</param>
+    /// <param name="homeDirectory">The user's home directory, whose <c>.claude/</c> holds the personal skills.</param>
+    /// <param name="eventName"><c>PreToolUse</c> or <c>PostToolUse</c>.</param>
+    /// <param name="toolName">The tool the event is for, matched against each entry's matcher.</param>
+    /// <returns>The display path of each source that would fire, in a stable order.</returns>
+    public static IReadOnlyList<string> ProjectCandidateSources(
+        string projectRoot,
+        string homeDirectory,
+        string eventName,
+        string toolName)
+    {
+        ArgumentNullException.ThrowIfNull(projectRoot);
+        ArgumentNullException.ThrowIfNull(homeDirectory);
+        ArgumentNullException.ThrowIfNull(eventName);
+        ArgumentNullException.ThrowIfNull(toolName);
+
+        List<Source> sources = Collect(projectRoot, homeDirectory, null);
+        string agents = Path.Combine(projectRoot, ".claude", "agents");
+        try
+        {
+            if (Directory.Exists(agents))
+            {
+                foreach (string file in Directory.EnumerateFiles(agents, "*.md").Order(StringComparer.Ordinal))
+                {
+                    if (EffectiveAgent(projectRoot, homeDirectory, Path.GetFileNameWithoutExtension(file)) is { } agent)
+                    {
+                        sources.Add(agent);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An agents folder that cannot be listed contributes no agent-file hooks.
+        }
+
+        return sources
+            .Where(source => Fires(source.FullPath, eventName, toolName))
+            .Select(source => source.Display)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
     private static List<Source> Collect(string projectRoot, string homeDirectory, string? agentType)
     {
         List<Source> sources = [];
@@ -110,7 +162,7 @@ public static class ClaudeHookCoverage
     // The project's agent file wins over the personal one of the same name, as Claude Code resolves it.
     private static Source? EffectiveAgent(string projectRoot, string homeDirectory, string? agentType)
     {
-        if (agentType is null || !AgentTypePattern.IsMatch(agentType))
+        if (agentType is null || !IsAgentType(agentType))
         {
             return null;
         }
@@ -183,11 +235,34 @@ public static class ClaudeHookCoverage
         }
     }
 
+    // A name this long is not an agent type, and a pattern that times out names no file either.
+    private static bool IsAgentType(string agentType)
+    {
+        if (agentType.Length > MaxAgentTypeLength)
+        {
+            return false;
+        }
+
+        try
+        {
+            return AgentTypePattern.IsMatch(agentType);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
     private static bool Fires(string path, string eventName, string toolName)
     {
         try
         {
-            IReadOnlyList<HookGroup> groups = Path.GetExtension(path) == ".md"
+            if (new FileInfo(path).Length > MaxSourceBytes)
+            {
+                return false;
+            }
+
+            IReadOnlyList<HookGroup> groups = string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase)
                 ? FrontmatterGroups(path, eventName)
                 : JsonGroups(path, eventName);
             return groups.Any(group => Matches(group.Matcher, toolName) && group.Commands.Any(IsArbiterClaudeHook));
