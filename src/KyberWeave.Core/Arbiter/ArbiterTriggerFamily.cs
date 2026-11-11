@@ -24,6 +24,18 @@ public enum ArbiterTriggerFamily
 
     /// <summary><c>gate.select</c>: undecidable runs the gate.</summary>
     Gate,
+
+    /// <summary><c>model.target</c>: any retarget wins, undecidable keeps the current model.</summary>
+    ModelTarget,
+
+    /// <summary><c>shortcut</c>: answer only when every rule agrees, undecidable spawns.</summary>
+    Shortcut,
+
+    /// <summary><c>failure.cluster</c>: any same-failure wins, undecidable allows.</summary>
+    FailureCluster,
+
+    /// <summary><c>advice</c>: advise only when every rule agrees, undecidable keeps.</summary>
+    Advice,
 }
 
 /// <summary>Family metadata: trigger mapping, effect sets, undecidable mapping and combination.</summary>
@@ -47,6 +59,10 @@ public static class ArbiterTriggerFamilies
             ["refute.spawn"] = ArbiterTriggerFamily.RefuteSpawn,
             ["lens.returned"] = ArbiterTriggerFamily.LensReturned,
             ["gate.select"] = ArbiterTriggerFamily.Gate,
+            ["model.target"] = ArbiterTriggerFamily.ModelTarget,
+            ["shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["failure.cluster"] = ArbiterTriggerFamily.FailureCluster,
+            ["advice"] = ArbiterTriggerFamily.Advice,
         };
 
     /// <summary>Every trigger name the Arbiter knows.</summary>
@@ -84,15 +100,31 @@ public static class ArbiterTriggerFamilies
         },
         ArbiterTriggerFamily.RefuteSpawn => new HashSet<string>(StringComparer.Ordinal)
         {
-            Rules.RuleEffects.Allow, Rules.RuleEffects.Verify,
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Verify, Rules.RuleEffects.Drop, Rules.RuleEffects.Duplicate,
         },
         ArbiterTriggerFamily.LensReturned => new HashSet<string>(StringComparer.Ordinal)
         {
-            Rules.RuleEffects.Allow, Rules.RuleEffects.Annotate,
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Annotate, Rules.RuleEffects.Drop,
         },
         ArbiterTriggerFamily.Gate => new HashSet<string>(StringComparer.Ordinal)
         {
             Rules.RuleEffects.Applies, Rules.RuleEffects.NotApplicable,
+        },
+        ArbiterTriggerFamily.ModelTarget => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Keep, Rules.RuleEffects.Retarget,
+        },
+        ArbiterTriggerFamily.Shortcut => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Spawn, Rules.RuleEffects.Answer,
+        },
+        ArbiterTriggerFamily.FailureCluster => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.SameFailure,
+        },
+        ArbiterTriggerFamily.Advice => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Keep, Rules.RuleEffects.Advise,
         },
         _ => new HashSet<string>(StringComparer.Ordinal),
     };
@@ -106,6 +138,10 @@ public static class ArbiterTriggerFamilies
         ArbiterTriggerFamily.RefuteSpawn => Rules.RuleEffects.Allow,
         ArbiterTriggerFamily.LensReturned => Rules.RuleEffects.Allow,
         ArbiterTriggerFamily.Gate => Rules.RuleEffects.Applies,
+        ArbiterTriggerFamily.ModelTarget => Rules.RuleEffects.Keep,
+        ArbiterTriggerFamily.Shortcut => Rules.RuleEffects.Spawn,
+        ArbiterTriggerFamily.FailureCluster => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.Advice => Rules.RuleEffects.Keep,
         _ => Rules.RuleEffects.Allow,
     };
 
@@ -125,11 +161,24 @@ public static class ArbiterTriggerFamilies
             ArbiterTriggerFamily.LensSpawn =>
                 seen.Contains(Rules.RuleEffects.Skip) ? Rules.RuleEffects.Skip : Rules.RuleEffects.Allow,
             ArbiterTriggerFamily.RefuteSpawn =>
-                seen.Contains(Rules.RuleEffects.Verify) ? Rules.RuleEffects.Verify : Rules.RuleEffects.Allow,
+                seen.Contains(Rules.RuleEffects.Verify) ? Rules.RuleEffects.Verify
+                : seen.Contains(Rules.RuleEffects.Drop) ? Rules.RuleEffects.Drop
+                : seen.Contains(Rules.RuleEffects.Duplicate) ? Rules.RuleEffects.Duplicate
+                : Rules.RuleEffects.Allow,
             ArbiterTriggerFamily.LensReturned =>
-                seen.Contains(Rules.RuleEffects.Annotate) ? Rules.RuleEffects.Annotate : Rules.RuleEffects.Allow,
+                seen.Contains(Rules.RuleEffects.Annotate) ? Rules.RuleEffects.Annotate
+                : seen.Contains(Rules.RuleEffects.Drop) ? Rules.RuleEffects.Drop
+                : Rules.RuleEffects.Allow,
             ArbiterTriggerFamily.Gate =>
                 seen.Contains(Rules.RuleEffects.Applies) ? Rules.RuleEffects.Applies : Rules.RuleEffects.NotApplicable,
+            ArbiterTriggerFamily.ModelTarget =>
+                seen.Contains(Rules.RuleEffects.Retarget) ? Rules.RuleEffects.Retarget : Rules.RuleEffects.Keep,
+            ArbiterTriggerFamily.Shortcut =>
+                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Answer) ? Rules.RuleEffects.Answer : Rules.RuleEffects.Spawn,
+            ArbiterTriggerFamily.FailureCluster =>
+                seen.Contains(Rules.RuleEffects.SameFailure) ? Rules.RuleEffects.SameFailure : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.Advice =>
+                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Advise) ? Rules.RuleEffects.Advise : Rules.RuleEffects.Keep,
             _ => Rules.RuleEffects.Allow,
         };
     }
