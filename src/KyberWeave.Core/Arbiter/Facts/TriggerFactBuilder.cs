@@ -72,13 +72,16 @@ public static class TriggerFactBuilder
     /// the harness offers no override: the value of <c>harness.model-override</c>.</param>
     /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null when it
     /// names none: the value of <c>delegation.model</c>.</param>
+    /// <param name="secondaryTriggers">The secondary triggers the primary dispatch carries. Their declared facts
+    /// join the bag, because the secondary rules read from the same bag as the primary.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
         KyberWeaveConfig config,
         bool observesReturns = true,
         string? modelOverrideField = null,
-        string? delegationModel = null)
+        string? delegationModel = null,
+        IReadOnlyList<string>? secondaryTriggers = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -96,7 +99,8 @@ public static class TriggerFactBuilder
             config,
             observesReturns,
             modelOverrideField,
-            delegationModel);
+            delegationModel,
+            secondaryTriggers);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -109,6 +113,7 @@ public static class TriggerFactBuilder
     /// <param name="observesReturns">Whether the harness observes sub-agent returns: the value of <c>harness.observes-returns</c>.</param>
     /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when the harness offers no override.</param>
     /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null.</param>
+    /// <param name="secondaryTriggers">Secondary triggers whose declared facts are added to the bag.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -119,18 +124,21 @@ public static class TriggerFactBuilder
         KyberWeaveConfig config,
         bool observesReturns = true,
         string? modelOverrideField = null,
-        string? delegationModel = null)
+        string? delegationModel = null,
+        IReadOnlyList<string>? secondaryTriggers = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
 
-        if (!ArbiterTriggerCatalog.TryGetFacts(trigger, out IReadOnlySet<string>? declared))
+        if (!ArbiterTriggerCatalog.TryGetFacts(trigger, out IReadOnlySet<string>? primaryDeclared))
         {
             throw new ArgumentException(
                 $"Unknown Arbiter trigger '{trigger}'. Known triggers: {string.Join(", ", ArbiterTriggerFamilies.KnownTriggers)}.",
                 nameof(trigger));
         }
+
+        IReadOnlySet<string> declared = DeclaredFacts(primaryDeclared, secondaryTriggers);
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
         string stripped = HeaderBlock.Strip(prompt);
@@ -206,6 +214,22 @@ public static class TriggerFactBuilder
         }
 
         return facts;
+    }
+
+    /// <summary>The primary trigger's facts plus every secondary trigger's, so one bag serves them all.</summary>
+    private static IReadOnlySet<string> DeclaredFacts(IReadOnlySet<string> primary, IReadOnlyList<string>? secondaryTriggers)
+    {
+        if (secondaryTriggers is null || secondaryTriggers.Count == 0)
+            return primary;
+
+        HashSet<string> union = new(primary, StringComparer.Ordinal);
+        foreach (string secondary in secondaryTriggers)
+        {
+            if (ArbiterTriggerCatalog.TryGetFacts(secondary, out IReadOnlySet<string>? secondaryDeclared))
+                union.UnionWith(secondaryDeclared);
+        }
+
+        return union;
     }
 
     private static IReadOnlyList<string> PlanningDirs(KyberWeaveConfig config)

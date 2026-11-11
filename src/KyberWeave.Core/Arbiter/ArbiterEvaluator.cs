@@ -220,8 +220,10 @@ public sealed class ArbiterEvaluator
             return new ArbiterDispatchEvaluation(null, RuleEffects.Allow);
         }
 
+        // Derived once: the bag declares the facts of every secondary, and the loop below plans them.
+        IReadOnlyList<string> secondaryNames = _secondaryTriggers(trigger, ev);
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model);
+            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
@@ -246,7 +248,7 @@ public sealed class ArbiterEvaluator
         List<TriggerPlan> secondaries = [];
         if (!primary.ShortCircuits)
         {
-            foreach (string secondary in _secondaryTriggers(trigger, ev))
+            foreach (string secondary in secondaryNames)
             {
                 if (rules.Any(rule => rule.Enabled
                     && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
