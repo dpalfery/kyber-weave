@@ -53,13 +53,13 @@ passes `--prior <prior cycle folder>`.
 5. Recompute the verdict with the `code-review` skill's verdict command, writing this
    cycle's folder and passing `--prior` with the prior cycle folder.
 
-**When verifier mode is not enough.** Escalate to `full` — or re-run every applicable
-lens over the changed scope — when the fix changes behaviour outside the original
-finding. That includes a new file, a new dependency, or a changed public contract, and
-it also includes changed logic in a file the prior review already covered: a targeted
-re-check of the named finding will not look at the new risk next to it. A strictly
-isolated fix — the defect at that file and line, and nothing else — stays in
-`verifier`.
+**When verifier mode is not enough.** Widen the cycle: re-seat every applicable lens
+over the fix delta when the fix changes behaviour outside the original finding. That
+includes a new file, a new dependency, or a changed public contract, and it also includes
+changed logic in a file the prior review already covered: a targeted re-check of the named
+finding will not look at the new risk next to it. A strictly isolated fix — the defect at
+that file and line, and nothing else — stays a targeted re-check. Either way it is still a
+verifier cycle in the loop; `full` is a mode a person selects, not one the loop switches to.
 
 ### full
 
