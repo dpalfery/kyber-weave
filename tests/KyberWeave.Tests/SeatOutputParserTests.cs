@@ -140,18 +140,287 @@ public sealed class SeatOutputParserTests
     }
 
     /// <summary>
-    /// Unparseable YAML is refused with a typed error that names the reason, so the verdict command can report
-    /// KW-REVIEW-040 with the file. The typed exception is not in the skeleton yet; the assertion rejects the
-    /// placeholder NotImplementedException so the fact fails until the parser is written.
+    /// Unparseable YAML is refused with the typed <see cref="SeatOutputException"/> that names the reason, so the
+    /// verdict command can report KW-REVIEW-040 with the file.
     /// </summary>
     [Fact]
     public void UnparseableYamlThrowsATypedErrorCarryingTheReason()
     {
         const string broken = "- id: [unclosed\n  lens: correctness\n";
 
-        Exception error = Assert.ThrowsAny<Exception>(() => SeatOutputParser.Parse("correctness", broken));
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", broken));
 
-        Assert.IsNotType<NotImplementedException>(error);
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The seats as they were written, before the parser was made tolerant of the flat schema.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void TheCorrectnessSeatAsItWroteItParsesWithItsFourSeverities()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fixture("correctness-flat.md"));
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Equal(
+            [ReviewSeverity.Major, ReviewSeverity.Major, ReviewSeverity.Minor, ReviewSeverity.Minor],
+            seat.Findings.Select(finding => finding.Severity));
+        Assert.Equal(new SeatDiscovery(CodeGraph: 1, Docs: 0, DirectReads: 9), seat.Discovery);
+    }
+
+    [Fact]
+    public void TheSupportabilitySeatAsItWroteItParsesWithItsFourSeverities()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("supportability", Fixture("supportability-flat.md"));
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Equal(
+            [ReviewSeverity.Minor, ReviewSeverity.Minor, ReviewSeverity.Major, ReviewSeverity.Minor],
+            seat.Findings.Select(finding => finding.Severity));
+        Assert.Equal(new SeatDiscovery(CodeGraph: 0, Docs: 0, DirectReads: 8), seat.Discovery);
+    }
+
+    [Fact]
+    public void TheTestAdequacySeatAsItWroteItParsesWithItsSevenFindingsAndUnknownFallbackMode()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("test-adequacy", Fixture("test-adequacy-flat.md"));
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Equal(
+            [
+                ReviewSeverity.Major, ReviewSeverity.Major, ReviewSeverity.Minor, ReviewSeverity.Major,
+                ReviewSeverity.Major, ReviewSeverity.Minor, ReviewSeverity.Minor
+            ],
+            seat.Findings.Select(finding => finding.Severity));
+        Assert.NotNull(seat.IndexFallback);
+        Assert.StartsWith("not-used", seat.IndexFallback, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Flat-schema tolerance: a plain scalar a seat really writes must read as the text it wrote.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void APlainScalarStartingWithABacktickIsReadAsWritten()
+    {
+        const string claim = "`Foo.Bar` returns null for empty input.";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(claim: claim)));
+
+        Assert.Equal(claim, Assert.Single(seat.Findings).Claim);
+    }
+
+    [Fact]
+    public void APlainScalarContainingColonSpaceIsReadAsWritten()
+    {
+        const string claim = "The rule says: never drop it.";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(claim: claim)));
+
+        Assert.Equal(claim, Assert.Single(seat.Findings).Claim);
+    }
+
+    /// <summary>
+    /// A refusal names where the YAML went wrong. The reviewer fixing a seat file needs a line and a column, not
+    /// just "could not be read".
+    /// </summary>
+    [Fact]
+    public void AnUnreadableSeatNamesTheLineAndColumnOfTheFault()
+    {
+        // The second list item is a bare scalar, not a finding mapping, so the fault is on the third line of the YAML.
+        string text = Fenced(["- id: correctness/a", "  lens: correctness", "- just a string"]);
+
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", text));
+
+        Assert.Matches(@"line \d+", error.Message);
+        Assert.Matches(@"column \d+", error.Message);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // A file that declares an outcome and also holds findings is contradictory, so it is refused.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("NO FINDINGS: I checked the lens and found nothing.")]
+    [InlineData("SKIPPED: the lens could not run in this session.")]
+    public void ADeclaredOutcomeWithFindingsInTheSameFileIsRefused(string declared)
+    {
+        string text = declared + "\n" + Fenced(FindingLines());
+
+        Assert.Throws<SeatOutputException>(() => SeatOutputParser.Parse("correctness", text));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Fences: only a column-0 fence delimits the YAML; a fence quoted inside an excerpt is content.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AnIndentedFenceInsideAnExcerptDoesNotDropTheLaterFindings()
+    {
+        List<string> first =
+        [
+            "- id: correctness/first",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  excerpt: |",
+            "    ```csharp",
+            "    int x = 1;",
+            "  claim: The first finding quotes a fence inside its excerpt."
+        ];
+        List<string> body = [.. first, .. FindingLines(id: "correctness/second")];
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal(["correctness/first", "correctness/second"], seat.Findings.Select(finding => finding.Id));
+    }
+
+    [Fact]
+    public void AFourBacktickFenceAroundTheYamlParsesItsFindings()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(), fence: "````"));
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Equal(["correctness/off-by-one"], seat.Findings.Select(finding => finding.Id));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Malformed input is refused with the field named, never read as a finding with a nonsense value.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ANumericSeverityIsRefusedNamingTheField()
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(severity: "2"))));
+
+        Assert.Contains("severity", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnknownSeverityWordIsRefusedNamingTheField()
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(severity: "blocker"))));
+
+        Assert.Contains("severity", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AConfidenceAboveTenIsRefusedNamingTheField()
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(confidence: "11"))));
+
+        Assert.Contains("confidence", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANonNumericConfidenceIsRefusedNamingTheField()
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(confidence: "high"))));
+
+        Assert.Contains("confidence", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFindingWithNoIdIsRefusedNamingTheField()
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(id: null))));
+
+        Assert.Contains("id", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n\t\n")]
+    public void AnEmptySeatIsRefusedAsHavingNoOutcome(string text)
+    {
+        Assert.Throws<SeatOutputException>(() => SeatOutputParser.Parse("correctness", text));
+    }
+
+    /// <summary>
+    /// A seat on Windows writes CRLF line endings. The same findings must read the same whichever way the file ends its lines.
+    /// </summary>
+    [Fact]
+    public void ACrlfSeatReadsTheSameFindingsAsItsLfForm()
+    {
+        string lf = Fenced(FindingLines());
+
+        SeatOutput fromLf = SeatOutputParser.Parse("correctness", lf);
+        SeatOutput fromCrlf = SeatOutputParser.Parse("correctness", lf.Replace("\n", "\r\n", StringComparison.Ordinal));
+
+        Assert.Equal(
+            fromLf.Findings.Select(finding => (finding.Id, finding.Severity, finding.Confidence, finding.Claim)),
+            fromCrlf.Findings.Select(finding => (finding.Id, finding.Severity, finding.Confidence, finding.Claim)));
+    }
+
+    /// <summary>
+    /// A seat may write more than one YAML document. The parser must read every document or refuse the file;
+    /// silently reading the first and dropping the rest is the defect this fact guards against.
+    /// </summary>
+    [Fact]
+    public void AMultiDocumentSeatIsReadInFullOrRefused()
+    {
+        List<string> body =
+        [
+            .. FindingLines(id: "correctness/first"),
+            "---",
+            .. FindingLines(id: "correctness/second")
+        ];
+
+        try
+        {
+            SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+            Assert.Equal(2, seat.Findings.Count);
+        }
+        catch (SeatOutputException)
+        {
+            // Refusing the file is the other allowed outcome.
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Helpers: seat text built from the parts a seat writes.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>One finding's YAML list item. A null id or severity or confidence omits that line.</summary>
+    private static List<string> FindingLines(
+        string? id = "correctness/off-by-one",
+        string? severity = "minor",
+        string? confidence = "7",
+        string claim = "The loop bound excludes the final element.")
+    {
+        List<string> lines = [];
+        lines.Add(id is null ? "- lens: correctness" : $"- id: {id}");
+        if (id is not null)
+            lines.Add("  lens: correctness");
+        if (severity is not null)
+            lines.Add($"  severity: {severity}");
+        if (confidence is not null)
+            lines.Add($"  confidence: {confidence}");
+        lines.Add("  file: src/Foo.cs");
+        lines.Add("  line: 12");
+        lines.Add("  excerpt: \"if (i < count)\"");
+        lines.Add($"  claim: {claim}");
+        lines.Add("  evidence: src/Foo.cs:12");
+        lines.Add("  failure_scenario: The last element is never processed.");
+        lines.Add("  suggestion: Use <= or count + 1.");
+        return lines;
+    }
+
+    private static string Fenced(IEnumerable<string> body, string fence = "```")
+    {
+        List<string> lines = [fence + "yaml"];
+        lines.AddRange(body);
+        lines.Add(fence);
+        return string.Join('\n', lines) + "\n";
     }
 }

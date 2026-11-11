@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
 using Xunit;
+using static KyberWeave.Tests.ReviewDiagnosticAssert;
 
 namespace KyberWeave.Tests;
 
@@ -329,8 +330,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
 
-        Assert.Contains(LineMoved, run.Output, StringComparison.Ordinal);
-        Assert.Contains("warning", run.Output, StringComparison.OrdinalIgnoreCase);
+        AssertDiagnostic(run.Output, LineMoved, "Warning");
         Assert.Empty(ReadFindingIds(report));
     }
 
@@ -366,8 +366,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
 
         Assert.Equal(0, run.Result);
-        Assert.Contains(DiscoveryMissing, run.Output, StringComparison.Ordinal);
-        Assert.Contains("warning", run.Output, StringComparison.OrdinalIgnoreCase);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
     }
 
     [Fact]
@@ -451,6 +450,152 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // Refusals of the input options themselves: each names the argument at fault.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void SeatsAndFindingsTogetherAreRefusedAsTwoSources()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+        string findings = WriteFile("findings.json", "{}");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--findings", findings]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "two sources");
+    }
+
+    [Fact]
+    public void AMissingSeatFolderIsRefusedNamingTheFolder()
+    {
+        string missing = Path.Combine(_temp.Path, "no-such-folder");
+
+        CapturedConsoleExecution<int> run = Verdict("--seats", missing);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "Seat folder not found");
+    }
+
+    [Fact]
+    public void AMalformedNotSeatedValueIsRefusedNamingTheArgument()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--not-seated", "security", .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, LensUnaccounted, "Error", "does not name a catalogue lens");
+    }
+
+    [Fact]
+    public void AMalformedDropValueIsRefusedNamingTheArgument()
+    {
+        WriteSeat("correctness", FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one", .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, DropTarget, "Error", "does not name a finding id and a reason");
+    }
+
+    [Fact]
+    public void APriorFolderWithoutAFindingsDocumentIsRefused()
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "Input document not found");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // A seat that declares an outcome and also holds findings is refused, never counted clean.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ASeatThatDeclaresAnOutcomeAndAlsoHoldsFindingsIsRefusedNamingTheFile()
+    {
+        WriteSeat("correctness", "NO FINDINGS: I found nothing.\n" + FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, SeatUnparseable, "Error", "correctness.md");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Closing lines the verdict checks: an unverifiable cited line, and an unknown fallback mode.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A finding cites a file the repository does not have, so its line cannot be verified. The verdict says so
+    /// under KW-REVIEW-043 rather than leaving the citation silently unchecked.
+    /// </summary>
+    [Fact]
+    public void ACitedLineInAFileThatIsNotThereGetsAKw043Diagnostic()
+    {
+        WriteSeat("correctness", FindingSeat(line: 12));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnosticCode(run.Output, LineMoved);
+    }
+
+    [Fact]
+    public void ACitedLineOutsideTheRepositoryGetsAKw043Diagnostic()
+    {
+        WriteSeat("correctness", FindingSeat(file: "../outside.cs", line: 12));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnosticCode(run.Output, LineMoved);
+    }
+
+    /// <summary>
+    /// The seat named an index fallback mode the seat contract does not define. The verdict does not change, but the
+    /// reader is told the closing line is one the reviewer cannot rely on.
+    /// </summary>
+    [Fact]
+    public void AnIndexFallbackModeThatIsNotKnownWarnsUnderKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: not-used",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning", "not-used");
+    }
+
+    [Fact]
+    public void AKnownIndexFallbackModeIsNotWarnedAbout()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: projectPath: not-indexed",
+            "Discovery: codegraph 0, docs 0, direct reads 6",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.DoesNotContain(DiscoveryMissing, run.Output, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Harness.
     // -----------------------------------------------------------------------------------------
 
@@ -476,7 +621,8 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         string severity = "major",
         int line = 12,
         string excerpt = "if (i < count)",
-        string[]? trailers = null)
+        string[]? trailers = null,
+        string file = "src/Foo.cs")
     {
         List<string> lines =
         [
@@ -485,7 +631,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
             $"  lens: {lens}",
             $"  severity: {severity}",
             "  confidence: 9",
-            "  file: src/Foo.cs",
+            $"  file: {file}",
             $"  line: {line}",
             $"  excerpt: \"{excerpt}\"",
             "  claim: The loop bound excludes the final element.",
