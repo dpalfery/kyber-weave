@@ -12,6 +12,7 @@
 // successful by absence of evidence.
 
 import { notMeasurable } from './types.js'
+import { releaseRecordParts } from './store-rows.js'
 import type {
   CanonicalRecord,
   Measurability,
@@ -237,38 +238,28 @@ function parseTestCounts(text: string): TestSuiteCounts | undefined {
  *   from observable telemetry only.
  */
 export function deriveOutcome(
-  records: readonly CanonicalRecord[],
+  records: Iterable<CanonicalRecord>,
   _session?: unknown,
 ): OutcomeBlock {
-  if (records.length === 0) {
-    return {
-      status: 'not_measurable',
-      statusReason: 'No records provided to observe run outcome.',
-      termination: {
-        availability: notMeasurable('No records available to measure termination.'),
-      },
-      errors: {
-        count: 0,
-        signals: [],
-        availability: notMeasurable('No records available to observe error channels.'),
-      },
-      userCorrections: {
-        count: 0,
-        turns: [],
-        availability: notMeasurable('No conversation history available to detect user corrections.'),
-      },
-      testDeltas: {
-        availability: notMeasurable('No test execution results observed.'),
-      },
-      availability: notMeasurable('Outcome was not observable for empty record set.'),
-    }
-  }
-
-  // 1. Extract termination reason and exit code
   let observedExitCode: number | undefined
   let observedTerminationReason: string | undefined
+  const errorSignals: ErrorSignal[] = []
+  const correctionTurns: CorrectionTurn[] = []
+  let hasConversationHistory = false
+  const testOutputs: TestSuiteCounts[] = []
+  let recordCount = 0
+  let lastStatus: CanonicalRecord['status'] | undefined
 
+  // One pass, so a stream of records is read once and each record's parts and
+  // content are released after it is read: a run's records never sit in memory
+  // with their payloads at the same time. Each list keeps the record order.
   for (const record of records) {
+    const idx = recordCount
+    recordCount += 1
+    lastStatus = record.status
+    const ts = typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString()
+
+    // Termination reason and exit code
     const rawExit = rawField(record, ['exitCode', 'exit_code', 'status_code'])
     if (typeof rawExit === 'number' && Number.isFinite(rawExit)) {
       observedExitCode = rawExit
@@ -286,13 +277,8 @@ export function deriveOutcome(
         observedExitCode = 0
       }
     }
-  }
 
-  // 2. Extract error signals
-  const errorSignals: ErrorSignal[] = []
-  for (const record of records) {
-    const ts = typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString()
-
+    // Error signals
     if (record.status === 'error' || record.status === 'fatal' || record.status === 'failure') {
       errorSignals.push({
         source: record.source,
@@ -331,17 +317,8 @@ export function deriveOutcome(
         })
       }
     }
-  }
 
-  // 3. Extract user correction turns
-  const correctionTurns: CorrectionTurn[] = []
-  let hasConversationHistory = false
-
-  for (let idx = 0; idx < records.length; idx++) {
-    const record = records[idx]!
-    const ts = typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString()
-
-    // Explicit telemetry flag from reader
+    // User correction turns
     const isCorr = rawField(record, ['isCorrection'])
     const corrRule = rawField(record, ['correctionRule'])
     if (isCorr === true) {
@@ -351,57 +328,52 @@ export function deriveOutcome(
         timestamp: ts,
         rule: typeof corrRule === 'string' ? corrRule : 'explicit_telemetry_indicator',
       })
-      continue
-    }
-
-    // User message in raw call
-    const userMessage = rawField(record, ['userMessage'])
-    if (typeof userMessage === 'string' && userMessage.trim() !== '') {
-      hasConversationHistory = true
-      const check = detectUserCorrection(userMessage)
-      if (check.matched) {
-        correctionTurns.push({
-          turnIndex: idx,
-          timestamp: ts,
-          rule: check.rule ?? 'prefix_negation',
-          excerpt: check.excerpt,
-        })
-      }
-    }
-
-    // Conversation history parts
-    if (record.parts && record.parts.length > 0) {
-      for (const part of record.parts) {
-        if (part.part === 'conversation_history') {
-          hasConversationHistory = true
-          const check = detectUserCorrection(part.text)
-          if (check.matched) {
-            correctionTurns.push({
-              turnIndex: idx,
-              timestamp: ts,
-              rule: check.rule ?? 'prefix_negation',
-              excerpt: check.excerpt,
-            })
-          }
+    } else {
+      const userMessage = rawField(record, ['userMessage'])
+      if (typeof userMessage === 'string' && userMessage.trim() !== '') {
+        hasConversationHistory = true
+        const check = detectUserCorrection(userMessage)
+        if (check.matched) {
+          correctionTurns.push({
+            turnIndex: idx,
+            timestamp: ts,
+            rule: check.rule ?? 'prefix_negation',
+            excerpt: check.excerpt,
+          })
         }
       }
-    } else if (typeof record.content.conversation_history === 'string' && record.content.conversation_history !== '') {
-      hasConversationHistory = true
-      const check = detectUserCorrection(record.content.conversation_history)
-      if (check.matched) {
-        correctionTurns.push({
-          turnIndex: idx,
-          timestamp: ts,
-          rule: check.rule ?? 'prefix_negation',
-          excerpt: check.excerpt,
-        })
+
+      // Conversation history parts
+      if (record.parts && record.parts.length > 0) {
+        for (const part of record.parts) {
+          if (part.part === 'conversation_history') {
+            hasConversationHistory = true
+            const check = detectUserCorrection(part.text)
+            if (check.matched) {
+              correctionTurns.push({
+                turnIndex: idx,
+                timestamp: ts,
+                rule: check.rule ?? 'prefix_negation',
+                excerpt: check.excerpt,
+              })
+            }
+          }
+        }
+      } else if (typeof record.content.conversation_history === 'string' && record.content.conversation_history !== '') {
+        hasConversationHistory = true
+        const check = detectUserCorrection(record.content.conversation_history)
+        if (check.matched) {
+          correctionTurns.push({
+            turnIndex: idx,
+            timestamp: ts,
+            rule: check.rule ?? 'prefix_negation',
+            excerpt: check.excerpt,
+          })
+        }
       }
     }
-  }
 
-  // 4. Extract test suite results and deltas
-  const testOutputs: TestSuiteCounts[] = []
-  for (const record of records) {
+    // Test suite results
     if (record.parts) {
       for (const part of record.parts) {
         if (part.part === 'tool_result_content') {
@@ -412,6 +384,32 @@ export function deriveOutcome(
     } else if (typeof record.content.tool_result_content === 'string') {
       const parsed = parseTestCounts(record.content.tool_result_content)
       if (parsed) testOutputs.push(parsed)
+    }
+
+    releaseRecordParts(record)
+  }
+
+  if (recordCount === 0) {
+    return {
+      status: 'not_measurable',
+      statusReason: 'No records provided to observe run outcome.',
+      termination: {
+        availability: notMeasurable('No records available to measure termination.'),
+      },
+      errors: {
+        count: 0,
+        signals: [],
+        availability: notMeasurable('No records available to observe error channels.'),
+      },
+      userCorrections: {
+        count: 0,
+        turns: [],
+        availability: notMeasurable('No conversation history available to detect user corrections.'),
+      },
+      testDeltas: {
+        availability: notMeasurable('No test execution results observed.'),
+      },
+      availability: notMeasurable('Outcome was not observable for empty record set.'),
     }
   }
 
@@ -501,7 +499,7 @@ export function deriveOutcome(
     outcomeAvail = 'measured'
   } else if (
     errorSignals.length > 0 &&
-    (records[records.length - 1]?.status === 'error' ||
+    (lastStatus === 'error' ||
       observedTerminationReason === 'task_failed' ||
       observedTerminationReason === 'error' ||
       observedTerminationReason === 'fatal')

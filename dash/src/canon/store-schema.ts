@@ -13,7 +13,7 @@ type Database = import('node:sqlite').DatabaseSync
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 23
+export const SCHEMA_VERSION = 24
 
 /**
  * The refusal a store written by a newer KyberDash earns.

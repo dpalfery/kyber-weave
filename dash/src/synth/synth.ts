@@ -127,6 +127,9 @@ export function nativeRecordIdentity(
   if (call.turnId !== undefined && call.turnId !== '' && cursorPairingId === undefined) {
     return { nativeRecordId: call.turnId }
   }
+  if (call.recordIdentity !== undefined && call.recordIdentity !== '') {
+    return { nativeRecordId: call.recordIdentity }
+  }
   const prefix = `${call.provider}:${call.sessionId}:`
   if (call.deduplicationKey.startsWith(prefix) && call.deduplicationKey.length > prefix.length) {
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
@@ -136,6 +139,29 @@ export function nativeRecordIdentity(
       .digest('hex')
       .slice(0, 16)
   return { nativeRecordId: digest, recordDigest: digest }
+}
+
+/**
+ * Per-item ordinal for the identity hash: the occurrence count among earlier
+ * kept items with the same harness, native session and timestamp. Unlike the
+ * array index it does not shift when the batch window moves, so a re-parse
+ * mints the same id. A call of an excluded harness is never persisted, so it
+ * takes no ordinal; `seen` carries the counts across the chunks of one batch.
+ */
+function windowIndependentOrdinals(
+  calls: readonly ParsedProviderCall[],
+  envelopes?: readonly SourceRecordEnvelope[],
+  seen: Map<string, number> = new Map(),
+): number[] {
+  return calls.map((call, index) => {
+    const envelope = envelopes?.[index]
+    const harnessId = harnessIdFor(call, envelope)
+    if (isExcludedHarness(harnessId) || isExcludedHarness(call.provider)) return 0
+    const key = `${harnessId}\0${nativeSessionIdFor(call, envelope)}\0${call.timestamp}`
+    const ordinal = seen.get(key) ?? 0
+    seen.set(key, ordinal + 1)
+    return ordinal
+  })
 }
 
 export function provenanceFor(
@@ -1144,6 +1170,15 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
+    return this.synthesizeCounting(parsedCalls, readerTurns, new Map())
+  }
+
+  /** {@link synthesize} with the ordinal counts supplied, so chunks of one batch share them. */
+  private synthesizeCounting(
+    parsedCalls: readonly ParsedProviderCall[],
+    readerTurns: readonly (ReaderTurn | undefined)[] | undefined,
+    seen: Map<string, number>,
+  ): CanonicalRecord[] {
     const rawItems: CallAndTurn[] = parsedCalls.map((call, index) => ({
       call,
       readerTurn: readerTurns?.[index],
@@ -1161,9 +1196,10 @@ export class Synthesizer {
       }
     }
 
+    const ordinals = windowIndependentOrdinals(collapsed.map((item) => item.call), undefined, seen)
     return collapsed.flatMap((item, index) => {
       if (isExcludedHarness(item.call.provider)) return []
-      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, index)
+      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, ordinals[index]!)
       const toolRecords = synthesizeToolCalls(parent, item.call, item.readerTurn, sessionToolResults)
       return [parent, ...toolRecords]
     })
@@ -1187,9 +1223,10 @@ export class Synthesizer {
       }
     }
 
+    const ordinals = windowIndependentOrdinals(collapsed.map((envelope) => envelope.call), collapsed)
     return collapsed.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
-      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
+      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, ordinals[index]!)
       const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)
       return [parent, ...toolRecords]
     })
@@ -1209,14 +1246,22 @@ export class Synthesizer {
    * arbitrary, exactly as worker threads finish files out of order), and the
    * results are assembled in submission order — the same contract
    * `parseFilesInOrder` gives upstream's install loop. Deep-equal to
-   * `synthesizeSerial` on the same input by construction, because
-   * `synthesizeCall` reads one call and no shared state; this method exists
-   * so that property stays tested rather than assumed (R1.5).
+   * `synthesizeSerial` on the same input when no twin-turn pair straddles a
+   * chunk boundary: `synthesizeCall` reads one call and the ordinal count is
+   * shared and advanced in submission order, but the twin-turn collapse runs
+   * per chunk, so a pair split across two chunks stays two records here and
+   * one on the serial path. This method exists so that property stays tested
+   * rather than assumed (R1.5).
    */
   async synthesizeParallel(parsedCalls: readonly ParsedProviderCall[]): Promise<CanonicalRecord[]> {
     const chunks = chunk(parsedCalls, this.chunkSize)
+    // The hash ordinal counts earlier calls of the same session and instant
+    // across the whole batch, so the chunks share one set of counts. The
+    // chunks are queued in submission order and each runs to completion, so
+    // the counts advance exactly as they do on the serial path.
+    const seen = new Map<string, number>()
     const synthesized = await Promise.all(
-      chunks.map((batch) => Promise.resolve().then(() => this.synthesizeSerial(batch))),
+      chunks.map((batch) => Promise.resolve().then(() => this.synthesizeCounting(batch, undefined, seen))),
     )
     return synthesized.flat()
   }
