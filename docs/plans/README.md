@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-11-cleanupcode-exit-hang.md](2026-11-11-cleanupcode-exit-hang.md) | Draft | 2026-11-11 | Let the `cleanupcode` fix pass finish on a machine where the tool never exits: `scripts/report-gate.sh` gains a "file contains this text" finish mode and its own time limit (exit 124), and this repository's fix pass runs `cleanupcode --no-build` through it, keyed on its log line. |
 
 ## Archived Plans
 
