@@ -1013,10 +1013,11 @@ public sealed class ArbiterEvaluator
             return (null, null, null);
         }
 
-        string source = ev.Model is not null
+        bool callerNamed = !string.IsNullOrWhiteSpace(ev.Model);
+        string source = callerNamed
             ? "caller"
             : ev.RenderedModelToken is not null ? "rendered" : "unknown";
-        if (ev.Model is not null)
+        if (callerNamed)
         {
             return (null, ev.Model, source);
         }
