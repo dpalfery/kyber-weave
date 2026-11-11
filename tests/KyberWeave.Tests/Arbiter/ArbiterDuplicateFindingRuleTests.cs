@@ -25,8 +25,9 @@ namespace KyberWeave.Tests.Arbiter;
 /// <para>
 /// Assumed names (GREEN must match): <c>ArbiterFindingNotices.DuplicateLine(string findingId, string earlierId,
 /// string decisionId)</c> returns <c>ARBITER_DUPLICATE: &lt;finding id&gt; of &lt;earlier id&gt; decision=&lt;id&gt;</c>.
-/// Each expanded question's rule id is <c>KW-ARB-DUP-001@&lt;stored text of the candidate&gt;</c>, so the provider
-/// can read which candidate a question is about from the batch it is handed. The prior findings are read from
+/// Each expanded question's rule id is <c>KW-ARB-DUP-001@&lt;list index&gt;</c>, and its <c>prior</c> state field names
+/// the scoped candidate fact that holds the stored text, so the provider reads which candidate a question is about
+/// from the batch facts it is handed. The prior findings are read from
 /// <c>ArbiterRunStore</c> (task 3.1), one stored item per finding.
 /// </para>
 /// </remarks>
@@ -85,17 +86,25 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             List<ArbiterRule> questions = rules.Where(rule => rule.Ask is not null).ToList();
-            _batches.Add(questions.Select(CandidateOf).ToList());
+            _batches.Add(questions.Select(rule => CandidateOf(rule, facts)).ToList());
             Dictionary<string, string> answers = questions
-                .ToDictionary(rule => rule.Id, rule => answerFor(CandidateOf(rule)), StringComparer.Ordinal);
+                .ToDictionary(rule => rule.Id, rule => answerFor(CandidateOf(rule, facts)), StringComparer.Ordinal);
             return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true));
         }
 
-        /// <summary>The candidate a per-item question is about: the stored text after the expansion's '@'.</summary>
-        private static string CandidateOf(ArbiterRule rule)
+        /// <summary>
+        /// The candidate a per-item question is about: the text of the scoped fact its <c>prior</c> state field
+        /// names, read from the batch facts the provider is handed. The expansion keys the rule id by list index,
+        /// so the id no longer carries the text.
+        /// </summary>
+        private static string CandidateOf(ArbiterRule rule, ArbiterFactSet facts)
         {
-            int at = rule.Id.IndexOf('@', StringComparison.Ordinal);
-            return at < 0 ? string.Empty : rule.Id[(at + 1)..];
+            if (rule.Ask is null || !rule.Ask.State.TryGetValue("prior", out string? factName))
+            {
+                return string.Empty;
+            }
+
+            return facts.TryGet(factName, out ArbiterFact? fact) && fact.Value is string text ? text : string.Empty;
         }
     }
 
