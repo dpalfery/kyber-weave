@@ -569,8 +569,9 @@ configuration error rather than a user-level setting. A `--global` `squad instal
 project config, so the `arbiter.global` block it holds is accepted. This holds whatever root a
 legacy single-root global receipt anchors at. A home without that file falls back to the
 project loader, which reads a legacy root-level `kyber-weave.yml` there. At runtime, a global hook that finds a
-project config with `arbiter.enabled: true` logs `deferred-to-project`, leaves the ledger
-untouched, and lets the project-level decision win. Global state and the per-root ledger live
+project config with `arbiter.enabled: true` evaluates a Claude dispatch under the project's configuration
+unless the project sets `arbiter.enabled: false` or a project hook covers the dispatch; every other harness
+logs `deferred-to-project` and lets the project-level decision win. Global state and the per-root ledger live
 under `~/.kyber-weave/arbiter/projects/<root-key>/`, while the target registry remains in the
 user config at `arbiter.global.targets`.
 

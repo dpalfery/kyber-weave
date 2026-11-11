@@ -2,7 +2,7 @@
 id: plans/arbiter-claude-ungated
 title: The global Arbiter hook gates Claude Code when no project hook does
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 created: 2026-11-11
@@ -15,7 +15,7 @@ impact-components: [KyberArbiter, KyberSquad]
 
 # The global Arbiter hook gates Claude Code when no project hook does
 
-**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/arbiter-claude-ungated.tasks.json`.
+**Status: Archived — complete 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). The task file was removed at archival; the decisions, tasks and test contract above are the record.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by `csharp-dev`, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `KyberArbiter` (the hook host, its doctor and status) and `KyberSquad` (the Claude hook block in the shared settings file).
@@ -294,3 +294,52 @@ T1, T2 and T3 start together (disjoint test files). T4 follows T1. T6 follows T3
 ## Verification gates and review
 
 Each developer task ends with its own `task-gate` run. The end-of-run review council reviews the whole change under the `code-review` skill. `docs-dev` closes out under T7.
+
+## Completion summary
+
+**Outcome.** The user-level Claude Arbiter hook evaluates a dispatch under the project's configuration unless the project sets `arbiter.enabled: false` or a project hook covers the dispatch; each dispatch is evaluated once; `arbiter doctor` and `arbiter status` report gating per harness; and Claude's settings block is written only under `PreToolUse` and `PostToolUse`.
+
+**Implementation evidence (from the developer task digests).**
+- T4 (commit c019b3ed): `ClaudeHookCoverage`, `DispatchClaim`, the two default members on `IHarnessHookAdapter` implemented by `ClaudeHookAdapter`, and `HookCommand.Run`. 20 new tests; 159 regression tests passed; task gate PASS. A claim-store failure evaluates without a claim, so both hooks may evaluate one dispatch in that case; it fails towards gating.
+- T5 (commit 9540e75f): `ArbiterHarnessGating`, and the per-harness lines in `arbiter doctor` and `arbiter status`. Task gate PASS. The T5 digest reports that two of its tests were being repaired by the test author (a fixture wrote a receipt to the wrong temporary folder), with no behaviour change expected. This closeout did not re-run them; see the gaps below.
+- T6 (commit 6828a65c): `SquadHookJsonBlock` writes the Claude format under `PreToolUse` / `PostToolUse` only, migrates clean Squad entries from both spellings, and re-anchors drift across them. Cursor unchanged. 9 new tests; 122 regression tests passed; task gate PASS.
+- T7 (this closeout): documentation harvest H1 to H6, the archive and the task-file removal.
+
+**Known gaps at archival.**
+- T5's two repaired tests were not re-run at closeout; the final review council and CI run the suite on the integrated head.
+- Other harnesses still defer, by design (D7). Their per-dispatch probes are a follow-up.
+- Existing installs keep the lower-case Claude block until the owner runs the command in the closeout mapping.
+
+## Closeout mapping
+
+Every durable decision and design-harvest item, its canonical destination, and its documentation impact. Impact components are `KyberArbiter` and `KyberSquad`; last reviewed 2026-11-11.
+
+| ID | Destination | ADR or waiver |
+|---|---|---|
+| O1 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md); [kyber-arbiter/architecture.md, the user-level Claude hook](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 1) |
+| O2 | Documentation waiver: transient one-change delivery shape with no surviving architectural invariant | no ADR — ADR waiver: delivery process for this change only |
+| D3 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 2); [kyber-arbiter/architecture.md, the user-level Claude hook](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (coverage bullet) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D4 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 3); [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (claim bullets); [kyber-arbiter/runbook.md, Hooks](../../kyber-arbiter/runbook.md#hooks) (log lines) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D5 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 4); [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (main-thread bullet) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D6 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 1, alternatives); [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (evaluation bullet) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D7 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 5); [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (other-harness bullet); [kyber-arbiter/runbook.md, Hooks](../../kyber-arbiter/runbook.md#hooks) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D8 | [kyber-arbiter/runbook.md, Setup, doctor, audit](../../kyber-arbiter/runbook.md#setup-doctor-audit) (per-harness line table) | no ADR — ADR waiver: operator-visible output of the existing doctor and status commands; no new boundary |
+| D9 | [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md#configuration-key-log-binary-guard-parse--arbiter-validate-setup-status-doctor-plan) (`KW-ARB-PROJECT-001` and `KW-ARB-GLOBAL-001` rows) | no ADR — ADR waiver: rule-id entries governed by the rule reference's id policy |
+| D10 | [kyber-squad/architecture.md, owned blocks, `claude` row](../../kyber-squad/architecture.md#owned-blocks-in-shared-hook-files); [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (decision 6) | no ADR — ADR waiver: refines the owned-block pattern of [ADR 0054](../../adr/0054-squad-owned-blocks-in-shared-hook-files.md) without a new boundary |
+| D11 | [kyber-arbiter/runbook.md, Hooks](../../kyber-arbiter/runbook.md#hooks): `kyber-weave arbiter install --target claude --provider none --yes`, the step the owner runs after updating | no ADR — ADR waiver: an operational step |
+| D12 | [kyber-arbiter/architecture.md, the user-level Claude hook](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (unmarked-dispatch bullet) | no ADR — ADR waiver: keeps existing behaviour; the decision does not change |
+| D13 | [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) (closing paragraph); [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (consequences) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D14 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md), Alternatives Considered | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) |
+| D15 | Documentation waiver: test-fixture scoped, no architectural, operational or behavioural invariant beyond the test pattern | no ADR — ADR waiver: test fixture isolation |
+| D16 | Documentation waiver: transient to this change, no surviving invariant | no ADR — ADR waiver: test authoring sequence |
+| AP1 | Documentation waiver: approval record only, kept in the Decisions table | no ADR — ADR waiver: approval provenance |
+| H1 | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md); [adr/README.md](../../adr/README.md) | [ADR 0069](../../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) (the ADR itself, documentation impact extends-component) |
+| H2 | [kyber-arbiter/architecture.md](../../kyber-arbiter/architecture.md) (install surface, notes on the table, the user-level Claude hook) | no ADR — ADR waiver: refines [ADR 0053](../../adr/0053-kyber-arbiter-three-step-decision-gates.md) and the architecture page; documentation impact extends-component |
+| H3 | [kyber-arbiter/runbook.md](../../kyber-arbiter/runbook.md) (Hooks; Setup, doctor, audit) | no ADR — ADR waiver: operator runbook; documentation impact extends-component |
+| H4 | [configuration.md](../../configuration.md) (Arbiter section, global hook runtime sentence) | no ADR — ADR waiver: configuration reference sentence; documentation impact extends-component |
+| H5 | [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) (Arbiter configuration section) | no ADR — ADR waiver: rule-id entries; documentation impact extends-component |
+| H6 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#owned-blocks-in-shared-hook-files) (owned-block table, `claude` row) | no ADR — ADR waiver: refines the owned-block pattern of [ADR 0054](../../adr/0054-squad-owned-blocks-in-shared-hook-files.md); documentation impact extends-component |
+
+Every harvested row was last reviewed 2026-11-11; impact components are `KyberArbiter` and `KyberSquad`. Also updated, beyond the design harvest, because it carried the same superseded deferral sentence: [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (the runtime `--scope global` sentence in the install section).
+
+**Archival.** Archived 2026-11-11 under the plan inventory. The task file `docs/plans/arbiter-claude-ungated.tasks.json` was removed in the same commit (`KW-DOC-LIFECYCLE-005`).

@@ -33,10 +33,44 @@ still refreshes the global hooks. A failed refresh does not fail the update: it 
 not refreshed: <cause>. The binaries are already updated; run kyber-weave update <version> to retry.` and exits 0,
 where the cause is `the project registry could not be read: <message>` when the registry could not be read, `a program
 component could not be loaded (<assembly>): <message>` for a failed assembly load, or otherwise the exception message.
-A global hook resolves the project config first:
-when that project enables Arbiter it logs `deferred-to-project`, writes no ledger entry, and
-lets the project configuration decide. Otherwise the user-level config is used and the
-per-root ledger lives under `~/.kyber-weave/arbiter/projects/<root-key>/`.
+A global hook resolves the project config first. When that project enables Arbiter, the user-level
+hook's behaviour depends on the harness:
+
+- **Claude** evaluates the dispatch under the project configuration unless a project hook covers it.
+  The log lines, one per dispatch, are:
+  - `Arbiter global scope: evaluating under the project configuration.` The decision and ledger are written
+    to the project's `artifacts/arbiter/`.
+  - `Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).` The project set
+    `arbiter.enabled: false` explicitly. Nothing is written.
+  - `Arbiter global scope: deferred-to-project (claimed by <source>).` A project hook claimed the dispatch;
+    `<source>` names the project hook file or the first candidate.
+  - `Arbiter global scope: deferred-to-project (project hooks may cover it: <sources>).` The dispatch has no
+    `tool_use_id`, so no claim could be made; the named candidates decide alone.
+  - `Arbiter: dispatch already claimed by the global hook; not evaluated twice.` This is the project-scope hook
+    yielding to a `global` claim, so the dispatch is evaluated once.
+- **Every other harness** logs
+  `Arbiter global scope: deferred-to-project (<harness>: no per-dispatch probe; the project's own <harness> hooks decide).`
+  Those harnesses have no per-dispatch probe yet, so a project with no hook for that harness is not gated there.
+  `arbiter doctor` reports it as `ungated`.
+
+With no project config, the user-level config is used and the per-root ledger lives under
+`~/.kyber-weave/arbiter/projects/<root-key>/`.
+
+**Claude's user-level block after updating.** A release with the Claude fix does not change the block on
+its own: `kyber-weave update` refreshes only the harnesses listed in `arbiter.global.targets`, and a machine
+that installed Claude before may not list it there. After updating, run the install once with the provider
+kind you have configured (`none` below; a user on another provider passes that kind, so the provider is
+left unchanged):
+
+```bash
+kyber-weave arbiter install --target claude --provider none --yes
+```
+
+This adds `claude` to `arbiter.global.targets`, rewrites the Claude hook block with `PreToolUse` and
+`PostToolUse` names, migrates any lower-case legacy entry, and rewrites the global receipt. Later
+`kyber-weave update` runs then refresh it too. Do not use `kyber-weave squad update --global` alone, which
+re-renders the block but leaves the target list wrong, or `kyber-weave update` alone, which skips a
+harness missing from the list.
 
 Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
 `.agent.md` hooks), Copilot CLI (`.github/hooks/kyber-arbiter.json`), and OpenCode (the
@@ -225,6 +259,25 @@ visible in argv and shell history (a one-line warning says so); `--key-stdin` an
 `TYPESAFE_API_KEY` stay the safer paths. A keyed provider with no resolving key surfaces
 `KW-ARB-KEY-001`. Exit `2` for client-input errors, `1` for operational failures, `0` for
 success or no-op.
+
+`arbiter doctor` and `arbiter status` print one line per installed harness that says what gates its dispatches
+in this project. A harness is installed when it is in `arbiter.global.targets`, owns an Arbiter hook in the
+global Squad receipt, or has a project deployment. The lines are:
+
+| Line | Meaning | Fix shown |
+|---|---|---|
+| `gated by project hooks` (Claude: with the project sources named) | A project hook file gates the harness's dispatches | none |
+| `gated by the global hook under this project's configuration` | Claude: the user-level hook is installed and evaluates the project's dispatches; when project hook sources exist they are listed as gating when they fire | none |
+| `gated by the global hook under your user configuration` | The project has no Arbiter config, so the user-level config applies | none |
+| `opted out (arbiter.enabled: false)` | The project sets `arbiter.enabled: false` | none |
+| `fallback-only: no hook; the Arbiter MCP server is its only gate` | Warp and ZCode have no hook to install | none |
+| `ungated` | Nothing gates the harness here | `kyber-weave arbiter install --project --target <token>`; Claude: `kyber-weave arbiter install --target claude` |
+
+Two diagnostics accompany them. `KW-ARB-PROJECT-001` (warning) is raised once per ungated harness while the
+project enables Arbiter. `KW-ARB-GLOBAL-001` (warning) is raised when the global Squad receipt owns a hook block,
+or a harness's own shim hook file, for a harness missing from `arbiter.global.targets`: `kyber-weave update` would
+never refresh it. Its hint is `kyber-weave arbiter install --target <token>`. Doctor no longer prints
+`Project hooks: installed.`, and status no longer prints `project overrides global`.
 
 Read-only inspection:
 

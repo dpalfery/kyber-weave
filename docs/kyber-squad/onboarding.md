@@ -1168,8 +1168,9 @@ install pipeline. Use `--project` to opt into repository scope and `--path <PATH
 that flag. `squad install` and `squad update` render the same hooks when the project's
 `arbiter.enabled` is true. `--provider ""` means `none`; a second install is an idempotent
 no-op. The runtime `--scope global` hook resolves the project config first; when the project
-has `arbiter.enabled: true` it logs `deferred-to-project`, writes no ledger entry, and lets the
-project decision win.
+has `arbiter.enabled: true`, a Claude dispatch is evaluated under the project's configuration unless the
+project opts out or a project hook covers it, and other harnesses log `deferred-to-project` and let the project
+decision win. The runbook lists the log lines and the `doctor` and `status` lines.
 
 Ten targets are hooked in user/global scope: `claude`, `copilot`, `opencode`, `pi`, `codex`,
 `cursor`, `kilo`, `antigravity`, `factory`, and `devin`. `commandcode` operates under degraded

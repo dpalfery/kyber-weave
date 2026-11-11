@@ -625,10 +625,12 @@ in [configuration](../configuration.md).
 The install surface defaults to global scope. `kyber-weave arbiter install --target <t>`
 stores the target list in `~/.kyber-weave/kyber-weave.yml` under `arbiter.global.targets`,
 while `--project` opts into repository scope and `--path` is valid only with that flag. The
-project config still wins when it has `arbiter.enabled: true`: a global runtime hook emits
-`deferred-to-project`, leaves the ledger untouched, and the project decision remains the one
-that actually gates the dispatch. The user-level check remains the fallback when no project
-config is present, and the per-root ledger stays under `~/.kyber-weave/arbiter/projects/<root-key>/`.
+When the project config has `arbiter.enabled: true`, the global runtime hook decides by harness. For
+Claude it evaluates the dispatch under the project's configuration unless the project opts out or a
+project hook covers it ([the user-level Claude hook](#the-user-level-claude-hook)). For every other
+harness it emits `deferred-to-project`, leaves the ledger untouched, and the project's own hooks decide.
+Without a project config the user-level check is used, and the per-root ledger stays under
+`~/.kyber-weave/arbiter/projects/<root-key>/`.
 Declaring `arbiter.global` inside a repository configuration file is rejected as `KW-ARB-CONFIG-011`.
 Passing mutually exclusive scope flags (`--global` and `--project`) or `--path` without
 `--project` fails with client-input exit code `2` and `KW-ARB-INSTALL-001`.
@@ -732,15 +734,70 @@ On Claude and Copilot in VS Code the caller is trusted, so gating does not depen
 marker — though Squad agents still write `KYBER-ARBITER: true` on every hooked dispatch,
 and `audit` reports a missing one. Hooks render at user scope by default (recording installed
 targets in `arbiter.global.targets`), or at project scope when `--project` is passed and
-`arbiter.enabled: true`. Project scope overrides global scope at runtime: when a project's
-`.kyber-weave/kyber-weave.yml` has `arbiter.enabled: true`, the global hook logs
-`deferred-to-project` and skips evaluation. Trust gates (Claude's workspace dialog, VS Code's
-trusted workspace plus `chat.useHooks`) are surfaced at install time — see the
-[runbook](runbook.md) and [Squad onboarding](../kyber-squad/onboarding.md).
+`arbiter.enabled: true`. At runtime the global hook's behaviour depends on the harness and the project's
+configuration, as set out in [the user-level Claude hook](#the-user-level-claude-hook) below. Trust gates
+(Claude's workspace dialog, VS Code's trusted workspace plus `chat.useHooks`) are surfaced at install
+time — see the [runbook](runbook.md) and [Squad onboarding](../kyber-squad/onboarding.md).
 
 On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
+
+### The user-level Claude hook
+
+The user-level hook (`--scope global`) and a project hook can both receive one Claude dispatch. For a
+project that enables Arbiter, the user-level hook decides in this order:
+
+```mermaid
+flowchart TD
+    A[Claude dispatch reaches the user-level hook] --> B{Project sets arbiter.enabled: false?}
+    B -- yes --> D1[Defer: project opts out]
+    B -- no --> C{Candidate project hook sources for this dispatch?}
+    C -- none --> E[Claim global, evaluate under the project configuration]
+    C -- some --> F{Project claim appears within 1.5 s?}
+    F -- yes --> D2[Defer: claimed by the project hook]
+    F -- no --> G[Claim global, evaluate under the project configuration]
+```
+
+- **Opt-out.** `arbiter.enabled: false` in the project config logs
+  `deferred-to-project (project opts out: arbiter.enabled: false)`.
+- **Evaluation.** Otherwise the decision runs under the project's configuration, logging
+  `evaluating under the project configuration`. The ledger and the decision log go to
+  `<project>/artifacts/arbiter/`, the same folder a project hook writes, so `arbiter audit` and `arbiter tune`
+  see one run in one place. Provider resolution is the project's, then the user override.
+- **Coverage is probed per dispatch.** `ClaudeHookCoverage` lists the candidate sources, the hook definitions
+  that would fire for this event and tool: the project's `.claude/settings.json` and `settings.local.json`;
+  the effective agent file for `agent_type`, the project agent when it exists, else the user agent; and each
+  effective skill, where a personal skill shadows a project skill of the same name. A source counts only under
+  the exact `PreToolUse` or `PostToolUse` key, with a matcher that matches `Agent` or `Task`, and a command that
+  runs the project-scope hook. Read-guard and hand-back matchers do not count.
+- **One evaluation per dispatch.** Only the dispatch events claim: the tool `Agent` or `Task`, on `PreToolUse`
+  or `PostToolUse`. The claim is `artifacts/arbiter/claims/<id>.pre` (or `.post`), where `<id>` is the
+  `tool_use_id` (or its SHA-256 when that id is not a plain token). The project hook writes `project` and
+  yields only to an existing `global` claim, logging `Arbiter: dispatch already claimed by the global hook;
+  not evaluated twice.` The user-level hook, when candidates exist, waits up to 1.5 s for a `project` claim and
+  logs `deferred-to-project (claimed by <source>)` if one appears; otherwise it claims `global` and evaluates,
+  naming the candidates that did not fire. With no candidates it claims and evaluates at once. Claim files older
+  than 24 hours are removed on each write.
+- **Failure to claim.** If the claims folder cannot be written, the hook logs a line and evaluates without a
+  claim, so the dispatch can be evaluated twice in that case. The rule favours gating over skipping.
+- **Main thread.** A main-thread payload carries no `agent_type`, so agent-file hooks never apply. A project
+  skill hook gates only when that skill is the effective one and was invoked this session; otherwise the
+  user-level hook evaluates.
+- **Unmarked dispatches** keep their existing behaviour: an `Explore` dispatch passes through, and an
+  unmarked `architect` dispatch is refused by `KW-ARB-PLANNER-001`. The user-level hook runs the same adapter
+  and engine as a project hook, so the answer is the same.
+- **Other harnesses** keep deferring when the project enables Arbiter, logging
+  `deferred-to-project (<harness>: no per-dispatch probe; the project's own <harness> hooks decide)`.
+
+The probe reads Claude Code's documented precedence (project sub-agents outrank user sub-agents; personal
+skills outrank project skills). Two points are not documented and are the design's assumptions: that
+`agent_type` is present for a sub-agent and under `--agent`, and that a skill's hooks are active only once it is
+invoked. The claim keeps one evaluation whichever way those points fall. The rationale and rejected
+alternatives are in [ADR 0069](../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
+
+Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
+[Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.
 
 ### Per-dispatch model sources
 
