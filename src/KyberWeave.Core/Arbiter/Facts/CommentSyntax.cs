@@ -19,7 +19,12 @@ public static class CommentSyntax
     // A directive line reads as a comment to the table but is an instruction to a tool, so it is code.
     private static readonly Regex ShebangDirective = new(@"^#!", RegexOptions.CultureInvariant);
     private static readonly Regex PythonDirective = new(@"^(#!|#\s*(-\*-\s*)?coding[:=])", RegexOptions.CultureInvariant);
-    private static readonly Regex GoDirective = new(@"^(//go:|// \+build)", RegexOptions.CultureInvariant);
+    // go/build trims the space after "//", so "//+build" and "//  +build" are constraints too; the
+    // compiler reads "//line ", "/*line " and "//export " as instructions. The match is loose on purpose:
+    // a plain comment that happens to match is judged as code, which only means a lens runs.
+    private static readonly Regex GoDirective = new(
+        @"^(//go:|//\s*\+build|//line\s|/\*line\s|//export\s)",
+        RegexOptions.CultureInvariant);
 
     private static readonly CommentStyle CStyle = new(["//"], "/*", "*/");
     private static readonly CommentStyle GoStyle = new(["//"], "/*", "*/", GoDirective);
