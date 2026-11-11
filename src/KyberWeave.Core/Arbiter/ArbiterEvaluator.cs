@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -56,6 +57,8 @@ public sealed class ArbiterEvaluator
 {
     /// <summary>The hook error code every evaluator failure carries.</summary>
     public const string HookErrorCode = "KW-ARB-HOOK-001";
+
+    private const string ModelTargetTrigger = "delegate.model";
 
     private readonly IArbiterProvider _provider;
     private readonly Func<Uri, string?> _keyResolver;
@@ -113,6 +116,8 @@ public sealed class ArbiterEvaluator
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
         Stopwatch elapsed = Stopwatch.StartNew();
+        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, config.Arbiter.ModelTargeting.Mode);
+        ArbiterModelTargets? table = ArbiterModelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that
         // was already appended. A fault after the append leaves exactly one record that
@@ -130,7 +135,7 @@ public sealed class ArbiterEvaluator
                     null, null, ArbiterCallerSources.None, ev.Target, "not-squad",
                     new Dictionary<string, string>(StringComparer.Ordinal), null, true);
             ArbiterLedgerEvent ledgerEvent = BuildLedgerEvent(
-                ledgerId, now, effective.Source, ev, first, TaskFilesFor(ev, first));
+                ledgerId, now, effective.Source, ev, first, TaskFilesFor(ev, first), table);
             if (effective.DryRun)
             {
                 // Dry run reads and writes nothing: the reads below prove the
@@ -153,7 +158,7 @@ public sealed class ArbiterEvaluator
                 TriggerClassification classification = classifications[index];
                 string prompt = prompts[index];
                 ArbiterDispatchEvaluation evaluated = await EvaluateDispatchAsync(
-                    classification, prompt, ev, config, effective, ledgerId, elapsed, cancellationToken)
+                    classification, prompt, ev, config, rules, table, effective, ledgerId, elapsed, cancellationToken)
                     .ConfigureAwait(false);
                 dispatches.Add(evaluated);
             }
@@ -202,6 +207,8 @@ public sealed class ArbiterEvaluator
         string prompt,
         ArbiterEvent ev,
         KyberWeaveConfig config,
+        IReadOnlyList<ArbiterRule> rules,
+        ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         Stopwatch elapsed,
@@ -214,10 +221,11 @@ public sealed class ArbiterEvaluator
         }
 
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField);
+            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
+        facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent and the rule escalates; an unexpected failure here
         // reaches the catch in EvaluateAsync, which escalates with the reason.
@@ -232,7 +240,7 @@ public sealed class ArbiterEvaluator
         // Primary and secondary read one fact set and one candidate map, so their questions
         // can share a single provider call.
         Dictionary<string, ArbiterFact> candidateFacts = new(StringComparer.Ordinal);
-        TriggerPlan primary = PlanTrigger(trigger, facts, config, candidateFacts);
+        TriggerPlan primary = PlanTrigger(trigger, facts, rules, candidateFacts);
 
         // Step 0 of the primary short-circuits: no provider call, and no secondary work.
         List<TriggerPlan> secondaries = [];
@@ -240,10 +248,10 @@ public sealed class ArbiterEvaluator
         {
             foreach (string secondary in _secondaryTriggers(trigger, ev))
             {
-                if (config.Arbiter.Rules.Any(rule => rule.Enabled
+                if (rules.Any(rule => rule.Enabled
                     && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
                 {
-                    secondaries.Add(PlanTrigger(secondary, facts, config, candidateFacts));
+                    secondaries.Add(PlanTrigger(secondary, facts, rules, candidateFacts));
                 }
             }
         }
@@ -286,7 +294,7 @@ public sealed class ArbiterEvaluator
         }
 
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
-            classification, ev, primary, primaryCall, config, effective, ledgerId, planDigest, elapsed,
+            classification, ev, primary, primaryCall, config, rules, effective, ledgerId, planDigest, elapsed,
             cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
 
@@ -294,8 +302,8 @@ public sealed class ArbiterEvaluator
         foreach (TriggerPlan plan in secondaries)
         {
             ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
-                classification, ev, plan, secondaryCall, primaryOutcome, config, effective, ledgerId, planDigest,
-                elapsed, cancellationToken).ConfigureAwait(false);
+                classification, ev, plan, secondaryCall, primaryOutcome, config, rules, facts, table, effective,
+                ledgerId, planDigest, elapsed, cancellationToken).ConfigureAwait(false);
             secondaryResults.Add(evaluated);
         }
 
@@ -306,11 +314,11 @@ public sealed class ArbiterEvaluator
     private static TriggerPlan PlanTrigger(
         string trigger,
         ArbiterFactSet facts,
-        KyberWeaveConfig config,
+        IReadOnlyList<ArbiterRule> rules,
         Dictionary<string, ArbiterFact> candidateFacts)
     {
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
-        List<ArbiterRule> step0Rules = config.Arbiter.Rules
+        List<ArbiterRule> step0Rules = rules
             .Where(rule => rule.Enabled
                 && string.Equals(rule.Trigger, trigger, StringComparison.Ordinal)
                 && rule.Decide is { Count: > 0 })
@@ -323,7 +331,7 @@ public sealed class ArbiterEvaluator
         List<Question> questions = [];
         if (!shortCircuits)
         {
-            foreach (ArbiterRule rule in config.Arbiter.Rules)
+            foreach (ArbiterRule rule in rules)
             {
                 if (!rule.Enabled || !string.Equals(rule.Trigger, trigger, StringComparison.Ordinal) || rule.Ask is null)
                 {
@@ -374,7 +382,7 @@ public sealed class ArbiterEvaluator
             {
                 if (field.Value.StartsWith("candidate.", StringComparison.Ordinal))
                 {
-                    string scoped = $"candidate[{index}]{field.Value["candidate".Length..]}";
+                    string scoped = $"candidate[{rule.Id}][{index}]{field.Value["candidate".Length..]}";
                     candidateFacts[scoped] = new ArbiterFact(item, ArbiterFactLabel.Derived);
                     state[field.Key] = scoped;
                 }
@@ -438,7 +446,37 @@ public sealed class ArbiterEvaluator
             : batch.RequestSent
                 ? ArbiterProviderStatuses.Answered
                 : ArbiterProviderStatuses.OverBudget;
-        return new Step1Call(batch.AnswersByRule, batch.ScoresByRule, batch.Model, batch.Usage, status);
+        return new Step1Call(
+            FloorAnswers(batch.AnswersByRule, batch.ScoresByRule), batch.ScoresByRule, batch.Model, batch.Usage, status);
+    }
+
+    /// <summary>
+    /// An answer whose confidence is below its own floor is undecidable. The provider client applies the
+    /// floor itself; the evaluator applies it again so no provider can gate a dispatch on a score under its floor.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> FloorAnswers(
+        IReadOnlyDictionary<string, string> answers,
+        IReadOnlyDictionary<string, ArbiterStep1Score>? scores)
+    {
+        if (scores is null)
+        {
+            return answers;
+        }
+
+        Dictionary<string, string> floored = new(answers, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, ArbiterStep1Score> pair in scores)
+        {
+            if (pair.Value.Threshold is double floor
+                && pair.Value.Confidence is double confidence
+                && confidence < floor
+                && floored.TryGetValue(pair.Key, out string? answer)
+                && !string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
+            {
+                floored[pair.Key] = RuleEngine.Undecidable;
+            }
+        }
+
+        return floored;
     }
 
     private static bool IsProviderFailure(Exception ex, bool guardAll, CancellationToken cancellationToken) =>
@@ -479,6 +517,7 @@ public sealed class ArbiterEvaluator
         TriggerPlan plan,
         Step1Call call,
         KyberWeaveConfig config,
+        IReadOnlyList<ArbiterRule> effectiveRules,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
@@ -506,8 +545,8 @@ public sealed class ArbiterEvaluator
         string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
-            classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: null,
-            effective, ledgerId, planDigest, config, elapsed, cancellationToken).ConfigureAwait(false);
+            classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: null,
+            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken).ConfigureAwait(false);
         return new ArbiterDispatchEvaluation(plan.Trigger, outcome);
     }
 
@@ -523,6 +562,9 @@ public sealed class ArbiterEvaluator
         Step1Call call,
         string primaryOutcome,
         KyberWeaveConfig config,
+        IReadOnlyList<ArbiterRule> effectiveRules,
+        ArbiterFactSet facts,
+        ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
@@ -568,12 +610,16 @@ public sealed class ArbiterEvaluator
         }
 
         string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
+            ? ModelTargetResolver.Resolve(rules, facts, config.Arbiter.ModelTargeting, table, ev, config.Arbiter.ModelTargeting.Mode)
+            : null;
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
-            classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: ledgerId,
-            effective, ledgerId, planDigest, config, elapsed, cancellationToken).ConfigureAwait(false);
+            classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: ledgerId,
+            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken, model: model)
+            .ConfigureAwait(false);
         string? answered = payload.Count == 0 ? null : string.Join(",", payload);
-        return new ArbiterSecondaryEvaluation(plan.Trigger, outcome, answered);
+        return new ArbiterSecondaryEvaluation(plan.Trigger, outcome, model?.Token ?? answered);
     }
 
     private static List<ArbiterDecisionRule> Step0Rules(ArbiterOutcome step0)
@@ -648,14 +694,15 @@ public sealed class ArbiterEvaluator
         List<ArbiterDecisionRule> rules,
         string outcome,
         ArbiterProviderRecord provider,
-        string? model,
         string? primaryLedgerId,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
         KyberWeaveConfig config,
+        IReadOnlyList<ArbiterRule> effectiveRules,
         Stopwatch elapsed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ArbiterModelBlock? model = null)
     {
         DateTimeOffset now = _clock.GetUtcNow();
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
@@ -676,7 +723,7 @@ public sealed class ArbiterEvaluator
             planFile,
             planDigest,
             task,
-            RuleSetDigest(config.Arbiter.Rules),
+            RuleSetDigest(effectiveRules),
             rules,
             provider,
             outcome,
@@ -774,9 +821,11 @@ public sealed class ArbiterEvaluator
         string source,
         ArbiterEvent ev,
         TriggerClassification first,
-        IReadOnlyList<string>? taskFiles)
+        IReadOnlyList<string>? taskFiles,
+        ArbiterModelTargets? table)
     {
         string phase = MapPhase(ev);
+        (string? modelProfile, string? modelToken, string? modelSource) = PreModelOf(ev, first, phase, table);
         ArbiterLedgerEvent ledgerEvent = new(ledgerId, now, source, ev.Harness, ev.Session, phase)
         {
             CallId = ev.ToolCallId,
@@ -787,6 +836,9 @@ public sealed class ArbiterEvaluator
             Headers = BuildHeaders(first),
             PairDigest = PairDigestOf(ev),
             TaskFiles = taskFiles,
+            ModelProfile = modelProfile,
+            ModelToken = modelToken,
+            ModelSource = modelSource,
             Returns = phase == ArbiterLedgerPhases.Post
                 ? ReturnMarkerParser.Parse(
                     ev.ToolOutput,
@@ -821,6 +873,38 @@ public sealed class ArbiterEvaluator
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The model fields of a delegate pre event. A caller-named model is the model that runs, so it is the token
+    /// and carries no profile. Otherwise the target's table entry gives the profile and token, and the source says
+    /// whether the model was the caller's, the rendered agent's, or neither.
+    /// </summary>
+    private static (string? Profile, string? Token, string? Source) PreModelOf(
+        ArbiterEvent ev,
+        TriggerClassification first,
+        string phase,
+        ArbiterModelTargets? table)
+    {
+        if (phase != ArbiterLedgerPhases.Pre || !string.Equals(first.Trigger, "delegate", StringComparison.Ordinal))
+        {
+            return (null, null, null);
+        }
+
+        string source = ev.Model is not null
+            ? "caller"
+            : ev.RenderedModelToken is not null ? "rendered" : "unknown";
+        if (ev.Model is not null)
+        {
+            return (null, ev.Model, source);
+        }
+
+        ArbiterModelTargetsAgent? agent = table is not null
+            && first.Target is not null
+            && table.Agents.TryGetValue(first.Target, out ArbiterModelTargetsAgent? found)
+                ? found
+                : null;
+        return (agent?.Profile, agent?.Token, source);
     }
 
     /// <summary>

@@ -31,6 +31,8 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
     private const string NoScoredAnswers = "no scored answers.";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    private const string DelegateModelTrigger = "delegate.model";
     private const string CommandName = "arbiter tune";
 
     /// <summary>Reports the scored answers per rule. Exits 1 only when the logs cannot be read whole.</summary>
@@ -91,7 +93,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         {
             if (settings.Json)
             {
-                WriteJson(tallies, thresholds);
+                WriteJson(tallies, thresholds, results);
             }
             else
             {
@@ -166,7 +168,10 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                     tallies[rule.Id] = tally;
                 }
 
-                tally.Add(record.Id, record.LedgerId, confidence, rule.Threshold, rule.Shadow == true);
+                ArbiterModelBlock? model = string.Equals(record.Trigger, DelegateModelTrigger, StringComparison.Ordinal)
+                    ? record.Model
+                    : null;
+                tally.Add(record.Id, record.LedgerId, confidence, rule.Threshold, rule.Shadow == true, model);
             }
         }
 
@@ -221,24 +226,48 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                     continue;
                 }
 
+                string modelText = sample.Model is null
+                    ? string.Empty
+                    : $" profile {Markup.Escape(sample.Model.Profile)} token {Markup.Escape(sample.Model.Token ?? "none")} delivered {(sample.Model.Delivered ? "true" : "false")}";
                 AnsiConsole.MarkupLine(
-                    $"  decision {Markup.Escape(sample.DecisionId)} score {sample.Confidence.ToString("0.00", CultureInfo.InvariantCulture)} RESULT: {Markup.Escape(result)}");
+                    $"  decision {Markup.Escape(sample.DecisionId)} score {sample.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}{modelText} RESULT: {Markup.Escape(result)}");
             }
         }
     }
 
-    private static void WriteJson(IReadOnlyDictionary<string, RuleTally> tallies, double[] thresholds)
+    private static void WriteJson(
+        IReadOnlyDictionary<string, RuleTally> tallies,
+        double[] thresholds,
+        IReadOnlyDictionary<string, string> results)
     {
         List<JsonRuleReport> rules = [];
         foreach (RuleTally tally in tallies.Values.OrderBy(t => t.Id, StringComparer.Ordinal))
         {
+            List<JsonModelRow> model = [];
+            foreach (RuleSample sample in tally.Samples)
+            {
+                if (sample.Model is null)
+                {
+                    continue;
+                }
+
+                model.Add(new JsonModelRow(
+                    sample.DecisionId,
+                    sample.Shadow,
+                    sample.Model.Profile,
+                    sample.Model.Token,
+                    sample.Model.Delivered,
+                    results.TryGetValue(sample.LedgerId, out string? result) ? result : null));
+            }
+
             rules.Add(new JsonRuleReport(
                 tally.Id,
                 tally.Scored,
                 tally.Shadow,
                 tally.Enforced,
                 tally.Histogram,
-                [.. tally.FlipsAt(thresholds).Select(f => new JsonThresholdReport(f.Threshold, f.Changed))]));
+                [.. tally.FlipsAt(thresholds).Select(f => new JsonThresholdReport(f.Threshold, f.Changed))],
+                model));
         }
 
         string json = JsonSerializer.Serialize(new JsonTuneReport(rules), JsonOptions);
@@ -262,7 +291,13 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
         public IReadOnlyList<RuleSample> Samples => _samples;
 
-        public void Add(string decisionId, string ledgerId, double confidence, double? threshold, bool shadow)
+        public void Add(
+            string decisionId,
+            string ledgerId,
+            double confidence,
+            double? threshold,
+            bool shadow,
+            ArbiterModelBlock? model)
         {
             int bin = Math.Clamp((int)Math.Floor(confidence * HistogramBins), 0, HistogramBins - 1);
             Histogram[bin]++;
@@ -271,7 +306,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                 Shadow++;
             }
 
-            _samples.Add(new RuleSample(decisionId, ledgerId, confidence, threshold, shadow));
+            _samples.Add(new RuleSample(decisionId, ledgerId, confidence, threshold, shadow, model));
         }
 
         /// <summary>
@@ -288,7 +323,22 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
     }
 
     /// <summary>One scored answer, kept with the threshold it was judged by and the ledger event it pairs with.</summary>
-    private sealed record RuleSample(string DecisionId, string LedgerId, double Confidence, double? Threshold, bool Shadow);
+    private sealed record RuleSample(
+        string DecisionId,
+        string LedgerId,
+        double Confidence,
+        double? Threshold,
+        bool Shadow,
+        ArbiterModelBlock? Model);
+
+    /// <summary>One <c>delegate.model</c> answer's model row in the JSON report: what it targeted and whether it was delivered.</summary>
+    private sealed record JsonModelRow(
+        [property: JsonPropertyName("decision")] string Decision,
+        [property: JsonPropertyName("shadow")] bool Shadow,
+        [property: JsonPropertyName("profile")] string Profile,
+        [property: JsonPropertyName("token")] string? Token,
+        [property: JsonPropertyName("delivered")] bool Delivered,
+        [property: JsonPropertyName("result")] string? Result);
 
     private sealed record ThresholdFlips(double Threshold, int Changed);
 
@@ -300,7 +350,8 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         [property: JsonPropertyName("shadow")] int Shadow,
         [property: JsonPropertyName("enforced")] int Enforced,
         [property: JsonPropertyName("histogram")] IReadOnlyList<int> Histogram,
-        [property: JsonPropertyName("thresholds")] IReadOnlyList<JsonThresholdReport> Thresholds);
+        [property: JsonPropertyName("thresholds")] IReadOnlyList<JsonThresholdReport> Thresholds,
+        [property: JsonPropertyName("model")] IReadOnlyList<JsonModelRow> Model);
 
     private sealed record JsonThresholdReport(
         [property: JsonPropertyName("threshold")] double Threshold,

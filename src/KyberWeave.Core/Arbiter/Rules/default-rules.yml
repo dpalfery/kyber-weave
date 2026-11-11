@@ -1,4 +1,4 @@
-# The 21 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 23 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -334,6 +334,51 @@ rules:
             - { fact: review.changed-paths, subset-of: review.no-code-change-paths }
         answer: no-code-change
     effects: { no-code-change: skip }
+
+  # Model targeting on a delegate.model dispatch. The difficulty question asks how hard the
+  # task is; an answer retargets to that difficulty's profile only when the classifier is at
+  # least 0.8 sure, and below the floor the answer is undecidable and the dispatch keeps its model.
+  # Mode off disables the rule, shadow records it without effect, and enforce lets it gate.
+  - id: KW-ARB-DIFFICULTY-001
+    trigger: delegate.model
+    question: How hard is this task: easy, standard or hard?
+    answers: [easy, standard, hard]
+    ask:
+      type: choice
+      state: { task: plan.task.text, files: plan.task.files, file-kinds: plan.task.file-kinds }
+      criteria:
+        easy: A small, local change with one obvious path.
+        standard: A change with several files or a non-obvious path, but no cross-cutting risk.
+        hard: A change that spans layers, alters contracts, or needs careful design.
+      confidence-at-least: 0.8
+    effects: { easy: retarget, standard: retarget, hard: retarget }
+
+  # Model targeting on a retry. Step 0 decides from the ledger alone, in order: a harness that
+  # does not observe returns cannot prove the attempt failed; a first attempt, or one that passed,
+  # has nothing to climb from; a failed attempt whose profile was never recorded cannot be
+  # climbed from; a failed attempt already on the top rung has nowhere higher to go. Only a
+  # failed attempt below the top steps up. Every answer except step-up keeps the model.
+  - id: KW-ARB-LADDER-001
+    trigger: delegate.model
+    question: Did the previous attempt at this task fail on a profile below the top of the ladder?
+    answers: [returns-unobservable, first-attempt, profile-unrecorded, top-of-ladder, step-up]
+    decide:
+      - when: { fact: harness.observes-returns, equals: false }
+        answer: returns-unobservable
+      - when: { not: { fact: model-targeting.prior-result, equals: fail } }
+        answer: first-attempt
+      - when: { fact: model-targeting.prior-profile, exists: false }
+        answer: profile-unrecorded
+      - when: { fact: model-targeting.ladder.next, exists: false }
+        answer: top-of-ladder
+      - when: { fact: model-targeting.ladder.next, exists: true }
+        answer: step-up
+    effects:
+      returns-unobservable: keep
+      first-attempt: keep
+      profile-unrecorded: keep
+      top-of-ladder: keep
+      step-up: retarget
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

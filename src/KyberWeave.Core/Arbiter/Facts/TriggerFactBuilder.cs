@@ -70,12 +70,15 @@ public static class TriggerFactBuilder
     /// enforced rule.</param>
     /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when
     /// the harness offers no override: the value of <c>harness.model-override</c>.</param>
+    /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null when it
+    /// names none: the value of <c>delegation.model</c>.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
         KyberWeaveConfig config,
         bool observesReturns = true,
-        string? modelOverrideField = null)
+        string? modelOverrideField = null,
+        string? delegationModel = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -92,10 +95,20 @@ public static class TriggerFactBuilder
             classification.CallerSource,
             config,
             observesReturns,
-            modelOverrideField);
+            modelOverrideField,
+            delegationModel);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
+    /// <param name="trigger">The trigger the dispatch classified as.</param>
+    /// <param name="target">The dispatch target, when there is one.</param>
+    /// <param name="prompt">The dispatch prompt, header block included.</param>
+    /// <param name="caller">The calling agent, when classified.</param>
+    /// <param name="callerSource">How the caller was classified.</param>
+    /// <param name="config">The host configuration.</param>
+    /// <param name="observesReturns">Whether the harness observes sub-agent returns: the value of <c>harness.observes-returns</c>.</param>
+    /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when the harness offers no override.</param>
+    /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -105,7 +118,8 @@ public static class TriggerFactBuilder
         string? callerSource,
         KyberWeaveConfig config,
         bool observesReturns = true,
-        string? modelOverrideField = null)
+        string? modelOverrideField = null,
+        string? delegationModel = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -184,6 +198,7 @@ public static class TriggerFactBuilder
                 "roster.descriptions" => descriptions,
                 "harness.observes-returns" => observesReturns,
                 "harness.model-override" => modelOverrideField,
+                "delegation.model" => delegationModel,
                 _ => null
             };
 

@@ -88,6 +88,8 @@ public static class ArbiterTriggerCatalog
                 "plan.task.files",
                 "plan.task.file-kinds",
                 "ledger.task.prior-attempt",
+                "model-targeting.prior-result",
+                "model-targeting.prior-profile",
                 "model-targeting.ladder.next",
                 "delegation.model",
                 "harness.model-override",

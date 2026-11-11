@@ -178,9 +178,9 @@ public sealed record ArbiterDecisionRecord(
     [JsonPropertyName("primary-ledger-id")]
     public string? PrimaryLedgerId { get; init; }
 
-    /// <summary>The model the decision was made on, when one answered; omitted otherwise.</summary>
+    /// <summary>The structured model block of the dispatch's model target, when one was resolved; omitted otherwise.</summary>
     [JsonPropertyName("model")]
-    public string? Model { get; init; }
+    public ArbiterModelBlock? Model { get; init; }
 
     /// <summary>Whether the model was substituted for the one requested; omitted when unknown.</summary>
     [JsonPropertyName("substitute")]
@@ -216,7 +216,7 @@ public sealed record ArbiterDecisionRecord(
         int repeat,
         int durationMs,
         string? primaryLedgerId = null,
-        string? model = null,
+        ArbiterModelBlock? model = null,
         bool? substitute = null,
         string? duplicateOf = null)
         : this(
