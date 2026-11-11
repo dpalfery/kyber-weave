@@ -115,6 +115,11 @@ public interface IHookDecisionEngine
     HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config);
 }
 
+/// <summary>Names the claim that one evaluation of a sub-agent dispatch event takes.</summary>
+/// <param name="ToolUseId">The harness's id for the tool call. The claim store turns it into a safe file name.</param>
+/// <param name="Phase"><c>pre</c> for the dispatch event, <c>post</c> for its return.</param>
+public sealed record DispatchClaimKey(string ToolUseId, string Phase);
+
 /// <summary>One harness's hook dialect: fast-path detection without configuration,
 /// decision rendering for classified events, and the fail-closed block.</summary>
 public interface IHarnessHookAdapter
@@ -163,6 +168,22 @@ public interface IHarnessHookAdapter
     /// from an allowed one in that harness's own protocol.
     /// </summary>
     string? DisabledAllowDocument => null;
+
+    /// <summary>
+    /// The hook sources that would also fire for this payload, or null when the payload is not a sub-agent
+    /// dispatch or the harness has no per-dispatch probe. The user-level hook uses it to decide whether a
+    /// project hook already covers the dispatch. Must not touch configuration.
+    /// </summary>
+    /// <param name="payload">The harness event.</param>
+    /// <param name="repoRoot">The project root whose hook sources are read.</param>
+    /// <param name="homeDirectory">The user's home directory, whose personal agents and skills are also read.</param>
+    IReadOnlyList<string>? CandidateSources(JsonElement payload, string repoRoot, string homeDirectory) => null;
+
+    /// <summary>
+    /// The claim that one evaluation of this payload takes, or null when the payload is not a sub-agent
+    /// dispatch event or carries no tool use id. Must not touch configuration.
+    /// </summary>
+    DispatchClaimKey? ClaimKey(JsonElement payload) => null;
 
     /// <summary>Handles a classified event. Returns the exact stdout text:
     /// empty means proceed.</summary>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -20,6 +21,9 @@ public sealed class HookCommand
 {
     /// <summary>The hook error code every host failure carries.</summary>
     public const string FailClosedCode = "KW-ARB-HOOK-001";
+
+    private const string EvaluatingUnderProjectLine =
+        "Arbiter global scope: evaluating under the project configuration.";
 
     private readonly HarnessAdapterRegistry _registry;
     private readonly Func<string, KyberWeaveConfig> _configLoader;
@@ -45,6 +49,12 @@ public sealed class HookCommand
     /// Runs one hook event. Returns 0 always: blocks ride stdout, and unknown-harness
     /// usage errors (which have no harness block shape) return 2 with stderr diagnostics.
     /// </summary>
+    /// <remarks>
+    /// The user-level hook (<see cref="HookScope.Global"/>) evaluates a project's dispatch under that
+    /// project's configuration when the project enables the Arbiter, so both hooks decide the same way
+    /// and write to the same project ledger. Each event is evaluated once: whichever hook claims the
+    /// dispatch first (<see cref="DispatchClaim"/>) decides it, and the other defers or allows.
+    /// </remarks>
     public int Run(
         string harness,
         string? caller,
@@ -84,40 +94,59 @@ public sealed class HookCommand
             }
 
             string repoRoot = RepoRootOf(adapter, payload);
-            string? effectiveHome = Composition.ResolveHomeDirectory(homeDirectory);
+            string home = Composition.ResolveHomeDirectory(homeDirectory);
+            KyberWeaveConfig config;
+            HookScope evaluationScope = scope;
             if (scope == HookScope.Global)
             {
-                bool deferToProject = IsGlobalScopeProjectDefer(repoRoot);
-                if (deferToProject)
+                KyberWeaveConfig? projectConfig = LoadProjectConfig(repoRoot);
+                if (projectConfig?.Arbiter.ExplicitlyEnabled == false)
                 {
-                    log.WriteLine("Arbiter global scope: deferred-to-project.");
-                    string? disabledAllow = adapter.DisabledAllowDocument;
-                    if (disabledAllow is not null)
-                    {
-                        stdout.Write(disabledAllow);
-                    }
-
-                    return 0;
+                    log.WriteLine("Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).");
+                    return WriteDisabledAllow(adapter, stdout);
                 }
 
-                log.WriteLine("Arbiter global scope: evaluating with the user config.");
+                if (projectConfig is not null && projectConfig.Arbiter.Enabled)
+                {
+                    if (!string.Equals(adapter.HarnessToken, ClaudeHookAdapter.Token, StringComparison.Ordinal))
+                    {
+                        log.WriteLine(
+                            $"Arbiter global scope: deferred-to-project ({adapter.HarnessToken}: no per-dispatch probe; " +
+                            $"the project's own {adapter.HarnessToken} hooks decide).");
+                        return WriteDisabledAllow(adapter, stdout);
+                    }
+
+                    if (!TakeUserLevelDispatch(adapter, payload, repoRoot, home, log))
+                    {
+                        return WriteDisabledAllow(adapter, stdout);
+                    }
+
+                    log.WriteLine(EvaluatingUnderProjectLine);
+                    config = projectConfig;
+                    evaluationScope = HookScope.Project;
+                }
+                else
+                {
+                    log.WriteLine("Arbiter global scope: evaluating with the user config.");
+                    config = Composition.LoadHostConfig(repoRoot, scope, home);
+                }
+            }
+            else
+            {
+                config = _configLoader(repoRoot);
             }
 
-            KyberWeaveConfig config = scope == HookScope.Global
-                ? Composition.LoadHostConfig(repoRoot, scope, effectiveHome)
-                : _configLoader(repoRoot);
             if (!config.Arbiter.Enabled)
             {
                 log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
                 // A harness whose protocol has no silent answer (Antigravity writes {}
                 // for every event) still receives its allow document here.
-                string? disabledAllow = adapter.DisabledAllowDocument;
-                if (disabledAllow is not null)
-                {
-                    stdout.Write(disabledAllow);
-                }
+                return WriteDisabledAllow(adapter, stdout);
+            }
 
-                return 0;
+            if (scope == HookScope.Project && TryYieldToGlobalClaim(adapter, payload, repoRoot, log))
+            {
+                return WriteDisabledAllow(adapter, stdout);
             }
 
             HookContext context = new(
@@ -125,8 +154,8 @@ public sealed class HookCommand
                 _newDecisionId,
                 log,
                 adapter.ObservesReturns,
-                effectiveHome,
-                scope,
+                home,
+                evaluationScope,
                 adapter.ModelOverride);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
@@ -192,7 +221,9 @@ public sealed class HookCommand
                 ? cwd.GetString()!
                 : Directory.GetCurrentDirectory());
 
-    private static bool IsGlobalScopeProjectDefer(string repoRoot)
+    // Null when the project has no config file. Throws when the file exists but does not load, so the
+    // user-level hook fails closed rather than guessing which configuration applies.
+    private static KyberWeaveConfig? LoadProjectConfig(string repoRoot)
     {
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
         if (!loaded.Success)
@@ -201,8 +232,140 @@ public sealed class HookCommand
                 $"{FailClosedCode}: failed to load project config '{loaded.ConfigPath}': {OneLine(loaded.Error ?? "unknown error")}");
         }
 
-        return loaded.Config is not null
-            && (loaded.Config.Arbiter.Enabled || loaded.Config.Arbiter.ExplicitlyEnabled == false);
+        return loaded.Config;
+    }
+
+    /// <summary>
+    /// Decides whether the user-level hook evaluates a Claude dispatch for a project that enables the
+    /// Arbiter. Returns false when the dispatch is covered: a project hook has claimed it, or one may
+    /// still claim it and the claim window closed on it. Logs the reason either way.
+    /// </summary>
+    private static bool TakeUserLevelDispatch(
+        IHarnessHookAdapter adapter,
+        JsonElement payload,
+        string repoRoot,
+        string home,
+        TextWriter log)
+    {
+        IReadOnlyList<string>? candidates = adapter.CandidateSources(payload, repoRoot, home);
+        DispatchClaimKey? claim = adapter.ClaimKey(payload);
+
+        // No project hook can fire on this event: the user-level hook is the only gate.
+        if (candidates is null || candidates.Count == 0)
+        {
+            if (claim is null)
+            {
+                return true;
+            }
+
+            ClaimResult taken = TryClaimOrReport(repoRoot, claim, DispatchClaim.GlobalOwner, log);
+            if (taken == ClaimResult.Held)
+            {
+                log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).");
+                return false;
+            }
+
+            return true;
+        }
+
+        // Without a tool use id there is no claim to wait for, so the candidates decide alone.
+        if (claim is null)
+        {
+            log.WriteLine(
+                $"Arbiter global scope: deferred-to-project (project hooks may cover it: {string.Join(", ", candidates)}).");
+            return false;
+        }
+
+        // A project hook that can fire will claim within the window; a claim means it did.
+        if (DispatchClaim.WaitForClaim(repoRoot, claim))
+        {
+            log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {candidates[0]}).");
+            return false;
+        }
+
+        if (TryClaimOrReport(repoRoot, claim, DispatchClaim.GlobalOwner, log) == ClaimResult.Held)
+        {
+            // A project hook claimed it after the window closed: the same deferral.
+            log.WriteLine($"Arbiter global scope: deferred-to-project (claimed by {OwnerOf(repoRoot, claim, log)}).");
+            return false;
+        }
+
+        log.WriteLine($"Arbiter global scope: candidate hooks did not fire: {string.Join(", ", candidates)}.");
+        return true;
+    }
+
+    /// <summary>
+    /// The project-scope half of the one-evaluation rule: when the user-level hook already claimed this
+    /// dispatch, the project hook allows it without evaluating. Otherwise it takes the project claim (a
+    /// re-run of a project hook still evaluates, as it always did) and returns false.
+    /// </summary>
+    private static bool TryYieldToGlobalClaim(IHarnessHookAdapter adapter, JsonElement payload, string repoRoot, TextWriter log)
+    {
+        DispatchClaimKey? claim = adapter.ClaimKey(payload);
+        if (claim is null || TryClaimOrReport(repoRoot, claim, DispatchClaim.ProjectOwner, log) != ClaimResult.Held)
+        {
+            return false;
+        }
+
+        if (!string.Equals(OwnerOf(repoRoot, claim, log), DispatchClaim.GlobalOwner, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        log.WriteLine("Arbiter: dispatch already claimed by the global hook; not evaluated twice.");
+        return true;
+    }
+
+    // A claim store that cannot be written must not stop the gate. The dispatch is still evaluated, so
+    // at worst both hooks decide it; the log says the claim was not recorded.
+    private static ClaimResult TryClaimOrReport(string repoRoot, DispatchClaimKey claim, string owner, TextWriter log)
+    {
+        try
+        {
+            return DispatchClaim.TryClaim(repoRoot, claim, owner) ? ClaimResult.Created : ClaimResult.Held;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.WriteLine($"Arbiter: could not record the dispatch claim ({OneLine(ex.Message)}); evaluating without it.");
+            return ClaimResult.Unavailable;
+        }
+    }
+
+    private static string OwnerOf(string repoRoot, DispatchClaimKey claim, TextWriter log)
+    {
+        try
+        {
+            string? owner = DispatchClaim.ReadOwner(repoRoot, claim);
+            return string.IsNullOrWhiteSpace(owner) ? "another hook" : owner;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.WriteLine($"Arbiter: could not read the dispatch claim ({OneLine(ex.Message)}).");
+            return "another hook";
+        }
+    }
+
+    private enum ClaimResult
+    {
+        /// <summary>This hook created the claim and owns the dispatch.</summary>
+        Created,
+
+        /// <summary>Another hook holds the claim.</summary>
+        Held,
+
+        /// <summary>The claim store could not be written, so the dispatch is evaluated without a claim.</summary>
+        Unavailable,
+    }
+
+    private static int WriteDisabledAllow(IHarnessHookAdapter adapter, TextWriter stdout)
+    {
+        string? disabledAllow = adapter.DisabledAllowDocument;
+        if (disabledAllow is not null)
+        {
+            stdout.Write(disabledAllow);
+        }
+
+        return 0;
     }
 
     private static string OneLine(string message) =>

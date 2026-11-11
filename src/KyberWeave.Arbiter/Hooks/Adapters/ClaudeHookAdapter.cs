@@ -119,6 +119,37 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
+    public IReadOnlyList<string>? CandidateSources(JsonElement payload, string repoRoot, string homeDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+        ArgumentNullException.ThrowIfNull(homeDirectory);
+
+        string? eventName = GetString(payload, "hook_event_name");
+        string? tool = GetString(payload, "tool_name");
+        if (eventName is null || tool is null || DispatchPhase(eventName, tool) is null)
+        {
+            return null;
+        }
+
+        return ClaudeHookCoverage.CandidateSources(
+            repoRoot,
+            homeDirectory,
+            GetString(payload, "agent_type"),
+            eventName,
+            tool);
+    }
+
+    /// <inheritdoc/>
+    public DispatchClaimKey? ClaimKey(JsonElement payload)
+    {
+        string? phase = DispatchPhase(GetString(payload, "hook_event_name"), GetString(payload, "tool_name"));
+        string? toolUseId = GetString(payload, "tool_use_id");
+        return phase is null || string.IsNullOrWhiteSpace(toolUseId)
+            ? null
+            : new DispatchClaimKey(toolUseId, phase);
+    }
+
+    /// <inheritdoc/>
     public string Handle(
         JsonElement payload,
         string rawJson,
@@ -530,6 +561,22 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     private static bool IsDispatchTool(string? tool) =>
         string.Equals(tool, "Agent", StringComparison.Ordinal)
         || string.Equals(tool, "Task", StringComparison.Ordinal);
+
+    // The claim phase of a sub-agent dispatch event, or null for every other event and tool.
+    private static string? DispatchPhase(string? eventName, string? tool)
+    {
+        if (!IsDispatchTool(tool))
+        {
+            return null;
+        }
+
+        return eventName switch
+        {
+            "PreToolUse" => "pre",
+            "PostToolUse" => "post",
+            _ => null,
+        };
+    }
 
     private static bool IsReadTool(string? tool) =>
         string.Equals(tool, "Read", StringComparison.Ordinal)
