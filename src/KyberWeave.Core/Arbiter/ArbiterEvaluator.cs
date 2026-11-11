@@ -191,7 +191,8 @@ public sealed class ArbiterEvaluator
         IReadOnlyDictionary<string, string> Step0Answers,
         bool ShortCircuits,
         List<Question> Questions,
-        List<Question> Unanswerable);
+        List<Question> Unanswerable,
+        List<Question> NoCandidates);
 
     /// <summary>What one batched provider call returned for a set of questions.</summary>
     private sealed record Step1Call(
@@ -326,6 +327,7 @@ public sealed class ArbiterEvaluator
 
         List<Question> questions = [];
         List<Question> unanswerable = [];
+        List<Question> noCandidates = [];
         if (!shortCircuits)
         {
             foreach (ArbiterRule rule in config.Arbiter.Rules)
@@ -341,26 +343,29 @@ public sealed class ArbiterEvaluator
                 bool shouldAsk = rule.Decide is null || rule.ShouldAsk(decideAnswer);
                 if (shouldAsk && SystemOneContracts.WhenMatches(rule.Ask, step0Answers))
                 {
-                    AddQuestions(rule, facts, candidateFacts, questions, unanswerable);
+                    AddQuestions(rule, facts, candidateFacts, questions, unanswerable, noCandidates);
                 }
             }
         }
 
-        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable);
+        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable, noCandidates);
     }
 
     /// <summary>
     /// Adds a rule's question. A <c>ForEach</c> rule asks once per item of its list fact, each
     /// keyed by rule id plus candidate, with the item bound to a per-item <c>candidate[i].*</c> fact.
-    /// A list that is missing, has the wrong shape, or is empty gives no question to ask; the rule
-    /// goes to <paramref name="unanswerable"/> so it still records, as undecidable.
+    /// A list that is missing or has the wrong shape gives no question to ask; the rule goes to
+    /// <paramref name="unanswerable"/> so it still records, as undecidable. A present, empty list is a
+    /// definite "no candidates": the rule goes to <paramref name="noCandidates"/>, records with the
+    /// family's neutral effect, and is not sent.
     /// </summary>
     private static void AddQuestions(
         ArbiterRule rule,
         ArbiterFactSet facts,
         Dictionary<string, ArbiterFact> candidateFacts,
         List<Question> questions,
-        List<Question> unanswerable)
+        List<Question> unanswerable,
+        List<Question> noCandidates)
     {
         RuleAsk ask = rule.Ask!;
         if (ask.ForEach is null)
@@ -407,8 +412,8 @@ public sealed class ArbiterEvaluator
 
         if (index == 0)
         {
-            // An empty list leaves nothing to ask, so the rule records as undecidable too.
-            unanswerable.Add(new Question(rule.Id, null, rule));
+            // Present and empty: nothing to ask, and nothing is uncertain. The rule records once as no candidates.
+            noCandidates.Add(new Question(rule.Id, null, rule));
         }
     }
 
@@ -481,6 +486,31 @@ public sealed class ArbiterEvaluator
         return combined with { Answers = answers };
     }
 
+    /// <summary>The answer a present-but-empty <c>ForEach</c> records. It is not <c>undecidable</c>, so the record never counts it as uncertainty.</summary>
+    private const string NoCandidatesAnswer = "no-candidates";
+
+    /// <summary>The evidence a present-but-empty <c>ForEach</c> rule records.</summary>
+    private const string NoCandidatesEvidence = "no candidates";
+
+    /// <summary>
+    /// Records each rule whose <c>ForEach</c> list is present and empty: one entry, the family's neutral
+    /// effect, never sent. It joins the combination as that neutral effect, unless the rule is shadow.
+    /// </summary>
+    private static void RecordNoCandidates(TriggerPlan plan, List<ArbiterDecisionRule> rules, List<string> effects)
+    {
+        string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
+        foreach (Question question in plan.NoCandidates)
+        {
+            bool shadow = question.Rule.Shadow;
+            rules.Add(Step1Rule(
+                question, NoCandidatesAnswer, neutral, null, shadow ? true : null, shadow ? neutral : null, NoCandidatesEvidence));
+            if (!shadow)
+            {
+                effects.Add(neutral);
+            }
+        }
+    }
+
     /// <summary>
     /// Combines the effects of the gating entries only. A shadow entry is log-only and never joins the
     /// combination; when every entry is shadow, the family's neutral effect stands.
@@ -534,6 +564,7 @@ public sealed class ArbiterEvaluator
             }
         }
 
+        RecordNoCandidates(plan, rules, effects);
         string outcome = CombineGating(plan.Family, effects, rules);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
@@ -605,6 +636,7 @@ public sealed class ArbiterEvaluator
             }
         }
 
+        RecordNoCandidates(plan, rules, effects);
         string outcome = CombineGating(plan.Family, effects, rules);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(

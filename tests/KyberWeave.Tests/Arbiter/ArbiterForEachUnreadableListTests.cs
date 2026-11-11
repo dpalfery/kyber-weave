@@ -8,8 +8,9 @@ using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Review finding 589-4: a <c>ForEach</c> rule whose list is missing, has the wrong shape, or is empty
-/// must answer undecidable and stay in the record. It used to vanish: no question, no record entry, and
+/// Review finding 589-4: a <c>ForEach</c> rule whose list is missing or has the wrong shape must answer
+/// undecidable and stay in the record. (A present, empty list is "no candidates"; see
+/// <see cref="ArbiterForEachEmptyListTests"/>.) It used to vanish: no question, no record entry, and
 /// no effect in the combination, so a conductor rule quietly allowed. Undecidable is the fail-safe
 /// answer, so the family's undecidable effect (escalate for a conductor) is what the record shows.
 /// </summary>
@@ -30,7 +31,7 @@ public sealed class ArbiterForEachUnreadableListTests : IDisposable
         }
     }
 
-    public static TheoryData<string> UnreadableLists => ["missing", "wrong-shape", "empty"];
+    public static TheoryData<string> UnreadableLists => ["missing", "wrong-shape"];
 
     [Theory]
     [MemberData(nameof(UnreadableLists))]
@@ -44,7 +45,6 @@ public sealed class ArbiterForEachUnreadableListTests : IDisposable
         {
             "missing" => facts,
             "wrong-shape" => facts.With(ListFact, "src/a.cs", ArbiterFactLabel.Derived),
-            "empty" => facts.With(ListFact, Array.Empty<string>(), ArbiterFactLabel.Derived),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown list shape."),
         });
 
