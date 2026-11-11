@@ -39,10 +39,12 @@ public sealed class ModelTargetResolverTests : IDisposable
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
 
-    /// <summary>Answers DIFFICULTY with a confident hard score, or with nothing when <see cref="Hard"/> is false.</summary>
+    /// <summary>Answers DIFFICULTY with a confident score for <see cref="Difficulty"/>, or with nothing when <see cref="Hard"/> is false.</summary>
     private sealed class HardProvider : IArbiterProvider
     {
         public bool Hard { get; init; } = true;
+
+        public string Difficulty { get; init; } = "hard";
 
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
@@ -58,7 +60,7 @@ public sealed class ModelTargetResolverTests : IDisposable
             Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
             if (Hard)
             {
-                answers[DifficultyRule] = "hard";
+                answers[DifficultyRule] = Difficulty;
                 scores[DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8);
             }
 
@@ -186,7 +188,10 @@ public sealed class ModelTargetResolverTests : IDisposable
             JsonSerializer.Serialize(table));
     }
 
-    private async Task SeedPriorFailAsync(string profile)
+    private Task SeedPriorFailAsync(string profile) => SeedPriorAttemptAsync(profile, "FAIL");
+
+    /// <summary>Seeds one earlier attempt at T2: the profile it ran on (null when unrecorded) and its task review.</summary>
+    private async Task SeedPriorAttemptAsync(string? profile, string taskReview)
     {
         InFlightLedger ledger = new(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", Harness, null, ArbiterLedgerPhases.Pre)
@@ -195,12 +200,12 @@ public sealed class ModelTargetResolverTests : IDisposable
             Target = "csharp-dev",
             Headers = new ArbiterLedgerHeaders(PlanFile: Plan, Task: "T2"),
             ModelProfile = profile,
-            ModelSource = "model-targets",
+            ModelSource = profile is null ? null : "model-targets",
         });
         await ledger.AppendAsync(new ArbiterLedgerEvent("post-1", At, "hook", Harness, null, ArbiterLedgerPhases.Post)
         {
             PreId = "pre-1",
-            Returns = new ArbiterReturnMarkers(TaskReview: "FAIL"),
+            Returns = new ArbiterReturnMarkers(TaskReview: taskReview),
         });
     }
 
@@ -245,6 +250,56 @@ public sealed class ModelTargetResolverTests : IDisposable
         ArbiterModelBlock block = BlockOf(record);
         Assert.Equal("general", block.Profile);
         Assert.Equal("ladder", block.Source);
+    }
+
+    // 2b. A failed retry is never sent to a cheaper profile: the ladder's keep holds over the difficulty answer.
+    // Regression guard: a fail on the top rung with an easy task used to climb down to fast through difficulty.
+
+    [Fact]
+    public async Task PriorFailOnTheTopRung_EasyDifficultyDoesNotCutTheModel()
+    {
+        WriteTable();
+        await SeedPriorFailAsync("deep-planning");
+
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
+
+        Assert.Null(record.Model?.Profile);
+    }
+
+    [Fact]
+    public async Task PriorFailWithProfileUnrecorded_EasyDifficultyDoesNotCutTheModel()
+    {
+        WriteTable();
+        await SeedPriorAttemptAsync(profile: null, taskReview: "FAIL");
+
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
+
+        Assert.Null(record.Model?.Profile);
+    }
+
+    [Fact]
+    public async Task FirstAttempt_EasyDifficultyStillRetargetsPerDifficultyProfile()
+    {
+        WriteTable();
+
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
+
+        ArbiterModelBlock block = BlockOf(record);
+        Assert.Equal("fast", block.Profile);
+        Assert.Equal("difficulty", block.Source);
+    }
+
+    [Fact]
+    public async Task PriorPass_EasyDifficultyStillRetargetsPerDifficultyProfile()
+    {
+        WriteTable();
+        await SeedPriorAttemptAsync("deep-planning", "PASS");
+
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
+
+        ArbiterModelBlock block = BlockOf(record);
+        Assert.Equal("fast", block.Profile);
+        Assert.Equal("difficulty", block.Source);
     }
 
     // 3. delegation.model present -> no change, reason caller-named-model.
@@ -298,6 +353,21 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: "t-deep"));
 
+        ArbiterModelBlock block = BlockOf(record);
+        Assert.False(block.Delivered);
+        Assert.Equal("same-as-rendered", block.Reason);
+    }
+
+    [Fact]
+    public async Task RenderedToken_ComesFromTheTargetAgentsTableEntry_AndEqualTokenSaysSameAsRendered()
+    {
+        // The table gives csharp-dev the t-deep token, and the hard retarget also lands on t-deep. Nothing
+        // in the caller supplies the rendered token, so the pre event and the resolver must read it from the table.
+        WriteTable(generalToken: "t-deep");
+
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
+
+        Assert.Equal("rendered", PreEventOf(new InFlightLedger(ArbiterDirectory)).ModelSource);
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("same-as-rendered", block.Reason);

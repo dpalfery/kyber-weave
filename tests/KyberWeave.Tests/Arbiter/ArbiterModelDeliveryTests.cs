@@ -1,4 +1,7 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
@@ -103,7 +106,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         TextWriter.Null,
         ModelOverride: ClaudeOverride);
 
-    private void WriteTable()
+    private void WriteTable(string deepToken = "t-deep")
     {
         Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
@@ -115,7 +118,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             {
                 ["fast"] = "t-fast",
                 ["general"] = "t-general",
-                ["deep-planning"] = "t-deep",
+                ["deep-planning"] = deepToken,
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
@@ -178,5 +181,65 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
         Assert.False(block.Delivered);
         Assert.Equal("shadow", block.Reason);
+    }
+
+    // Delivered truthfulness: the decision says delivered only for a token the adapter writes.
+
+    [Fact]
+    public void ATokenTheHarnessDoesNotAccept_IsNotRecordedDelivered()
+    {
+        // t-deep is not an alias the Agent tool accepts, so no adapter writes it. The decision must not claim it was delivered.
+        WriteTable("t-deep");
+
+        HookOutcome outcome = Decide(new HardProvider(), "enforce");
+
+        Assert.Null(outcome.ModelToken);
+        ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
+        Assert.False(block.Delivered);
+        Assert.Equal("token-not-accepted", block.Reason);
+    }
+
+    [Fact]
+    public void AnAcceptedAlias_UnderEnforce_IsRecordedDelivered()
+    {
+        WriteTable("haiku");
+
+        HookOutcome outcome = Decide(new HardProvider(), "enforce");
+
+        Assert.Equal("haiku", outcome.ModelToken);
+        ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
+        Assert.True(block.Delivered);
+        Assert.Null(block.Reason);
+    }
+
+    [Fact]
+    public void AWriteThatFails_ThroughTheClaudeAdapter_IsNotRecordedDelivered()
+    {
+        // The engine decides before the adapter writes. When the adapter's write fails the dispatch runs without
+        // the model, so the decision must not say the model was delivered.
+        WriteTable("haiku");
+        ClaudeHookAdapter adapter = new(Engine(new HardProvider())) { ModelWriteFault = new IOException("write refused") };
+        string raw = AgentDispatchPayload();
+        using JsonDocument doc = JsonDocument.Parse(raw);
+
+        _ = adapter.Handle(doc.RootElement, raw, "conductor", Config("enforce"), Context());
+
+        ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
+        Assert.False(block.Delivered);
+    }
+
+    private static string AgentDispatchPayload()
+    {
+        JsonNode root = JsonNode.Parse(File.ReadAllText(Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
+            "Fixtures", "arbiter-hooks", "claude", "pre-agent-dispatch.json")))
+            ?? throw new InvalidOperationException("The shipped Claude fixture is not a JSON document.");
+        root["tool_input"] = new JsonObject
+        {
+            ["subagent_type"] = "csharp-dev",
+            ["prompt"] = Prompt,
+            ["description"] = "Implement T2",
+        };
+        return root.ToJsonString();
     }
 }

@@ -272,6 +272,10 @@ public sealed class ClaudeHookAdapterTests
     }
 
     /// <summary>An Agent PreToolUse payload from the shipped fixture, with its tool input replaced by the given fields.</summary>
+    /// <remarks>
+    /// The tool input also carries fields the adapter never reads (<c>run_in_background</c>, <c>isolation</c>, a nested
+    /// object and an array). Every rewrite must hand them back unchanged: <see cref="AssertExtraFieldsSurvive"/>.
+    /// </remarks>
     private static string DispatchPayload(string prompt, string? model = null, string subagent = "csharp-dev")
     {
         JsonObject input = new()
@@ -279,6 +283,10 @@ public sealed class ClaudeHookAdapterTests
             ["subagent_type"] = subagent,
             ["prompt"] = prompt,
             ["description"] = "Implement T2",
+            ["run_in_background"] = true,
+            ["isolation"] = "worktree",
+            ["options"] = new JsonObject { ["nested"] = new JsonObject { ["depth"] = 2 } },
+            ["files"] = new JsonArray(JsonValue.Create("src/A.cs"), JsonValue.Create("src/B.cs")),
         };
         if (model is not null)
         {
@@ -373,6 +381,66 @@ public sealed class ClaudeHookAdapterTests
         Assert.Contains("token-not-accepted", log, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("claude-unknown-9")]
+    [InlineData("claude")]
+    [InlineData("")]
+    public void ModelRewrite_TokenWithNoAcceptedFamily_IsNotWritten(string token)
+    {
+        ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: token) };
+
+        (_, string stdout, string log) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+
+        Assert.False(UpdatedInput(stdout).TryGetProperty("model", out _));
+        Assert.Contains("token-not-accepted", log, StringComparison.Ordinal);
+    }
+
+    private static readonly string[] ExpectedFiles = ["src/A.cs", "src/B.cs"];
+
+    /// <summary>The tool-input fields <see cref="DispatchPayload"/> adds beyond the three the adapter reads.</summary>
+    private static void AssertExtraFieldsSurvive(JsonElement updated)
+    {
+        Assert.True(updated.GetProperty("run_in_background").GetBoolean());
+        Assert.Equal("worktree", updated.GetProperty("isolation").GetString());
+        Assert.Equal(2, updated.GetProperty("options").GetProperty("nested").GetProperty("depth").GetInt32());
+        Assert.Equal(JsonValueKind.Array, updated.GetProperty("files").ValueKind);
+        Assert.Equal(ExpectedFiles, updated.GetProperty("files").EnumerateArray().Select(file => file.GetString()).ToArray());
+    }
+
+    [Fact]
+    public void ModelRewrite_WrittenModel_KeepsEveryOtherToolInputField()
+    {
+        ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
+
+        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+
+        AssertExtraFieldsSurvive(UpdatedInput(stdout));
+    }
+
+    [Fact]
+    public void ModelRewrite_FailedWrite_KeepsEveryOtherToolInputField()
+    {
+        ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
+        ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
+        using JsonDocument doc = JsonDocument.Parse(DispatchPayload(HeaderedPrompt));
+        using StringWriter log = new();
+        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+
+        string stdout = adapter.Handle(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
+
+        AssertExtraFieldsSurvive(UpdatedInput(stdout));
+    }
+
+    [Fact]
+    public void ModelRewrite_StripOnly_KeepsEveryOtherToolInputField()
+    {
+        ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow) };
+
+        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+
+        AssertExtraFieldsSurvive(UpdatedInput(stdout));
+    }
+
     [Fact]
     public void ModelRewrite_ACallerSuppliedModelField_IsPassedAsDispatchModelAndLeftUnchanged()
     {
@@ -402,8 +470,12 @@ public sealed class ClaudeHookAdapterTests
         Assert.Contains("delivered: false", log.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A scripted allow with no token renders the strip-only document. The scripted engine never runs shadow
+    /// mode: the real shadow path is <c>ArbiterModelDeliveryTests.ModeShadow_HookOutcomeCarriesNoToken_ButTheDecisionStillHoldsTheModelBlock</c>.
+    /// </summary>
     [Fact]
-    public void ModelRewrite_ModeShadow_HookOutputIsTheStripOnlyDocumentToday()
+    public void ModelRewrite_ScriptedAllowWithNoToken_IsTheStripOnlyDocument()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow) };
 

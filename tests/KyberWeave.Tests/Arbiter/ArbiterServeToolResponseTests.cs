@@ -1,8 +1,10 @@
+using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -235,6 +237,8 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     public void Evaluate_ReportsTheRetargetItWouldMake_AsAdvisory_AndChangesNothing()
     {
         using TempDirectory baseline = new();
+        WriteServeTable(_repo.Path);
+        WriteServeTable(baseline.Path);
 
         ArbiterTools tools = CreateRetargetTools(_repo.Path, "enforce");
         string response = tools.Evaluate("delegate", RetargetFacts());
@@ -249,6 +253,9 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("advisory", response, StringComparison.Ordinal);
         Assert.Contains("source: serve", response, StringComparison.Ordinal);
         Assert.Contains("retarget", response, StringComparison.Ordinal);
+        // The advisory names the profile it would move to and the token that profile resolves to.
+        Assert.Contains("deep-planning", response, StringComparison.Ordinal);
+        Assert.Contains("t-deep", response, StringComparison.Ordinal);
 
         // The same serve call with model-targeting off writes the same ledger events.
         CreateRetargetTools(baseline.Path, "off").Evaluate("delegate", RetargetFacts());
@@ -259,6 +266,26 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.All(
             new InFlightLedger(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
             record => Assert.NotEqual("retarget", record.ModelSource));
+    }
+
+    /// <summary>Writes the serve harness's model targets table, so the advisory has a profile and a token to name.</summary>
+    private static void WriteServeTable(string repoRoot)
+    {
+        string directory = ArbiterDirectoryOf(repoRoot);
+        Directory.CreateDirectory(directory);
+        ArbiterModelTargets table = new(
+            ArbiterModelTargets.SchemaName,
+            "serve",
+            new ArbiterModelTargetsPreset("work", "d"),
+            "b",
+            new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["fast"] = "t-fast",
+                ["general"] = "t-general",
+                ["deep-planning"] = "t-deep",
+            },
+            new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
+        File.WriteAllText(Path.Combine(directory, "model-targets.serve.json"), JsonSerializer.Serialize(table));
     }
 
     private static ArbiterFacts RetargetFacts() => new()
