@@ -182,13 +182,22 @@ evidence like any other.
 
 Run the verdict command in step 5 once the seats are saved: it lists the accepted `major`
 and `critical` findings as refutation candidates. Refute in one batched review-lens spawn, and only the findings the verdict command lists as refutation candidates (KW-REVIEW-046).
-That spawn tries to **refute** each one. Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), open the invocation
-with the routing header block — `KYBER-ARBITER: true`, then `REFUTE: <lens>/<slug>` with the
-finding's id — and give the finding's YAML after the header block unchanged. Say so explicitly in
-the invocation: the confirming instance argues the finding is wrong and defaults to refuted when it
-cannot establish otherwise. Pass it the same review-guidance sections, and have it test the
-finding's `guidance:` rule id against them: a finding that misapplies the rule it names is refuted.
-Each refuted finding is dropped on the next verdict run with `--drop <id>=refuted: <reason>`.
+All candidates go in that one spawn, and it tries to **refute** each one:
+
+- Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), open the
+  invocation with the routing header block — `KYBER-ARBITER: true`, then `REFUTE: <lens>/<slug>`
+  naming the **first** candidate's id only. Write one `REFUTE:` header, never one per candidate:
+  a repeated header leaves the Arbiter without the fact it reads.
+- After the header block, give every candidate's YAML unchanged, one after another.
+- Say so explicitly in the invocation: the confirming instance argues each finding is wrong and
+  defaults to refuted when it cannot establish otherwise, and answers once per finding id. Pass it
+  the review-guidance sections of every seat whose finding it tests, and have it test each
+  finding's `guidance:` rule id against them: a finding that misapplies the rule it names is
+  refuted.
+
+Drop each refuted finding with `--drop <id>=refuted: <reason>` and run the verdict command again;
+that second run's verdict is the one reported. A verifier cycle sends only the candidates no
+earlier cycle refuted.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability
 candidates, generalized to every lens and for the same reason — a confident wrong finding

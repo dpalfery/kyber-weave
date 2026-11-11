@@ -122,11 +122,13 @@ That sentence matters. It is the difference between a lens that ran and a lens t
 
 # 6. Refutation runs
 
-When the header block at the start of your invocation carries `REFUTE: <lens>/<slug>` — the id of a finding another seat reported, as `REFUTE: security/key-in-argv` — the run is a refutation. The finding's YAML follows after the header block, exactly as it was reported. Read it, then read the code it points at, and argue the finding is wrong.
+When the header block at the start of your invocation carries `REFUTE: <lens>/<slug>` — the id of a finding another seat reported, as `REFUTE: security/key-in-argv` — the run is a refutation. The header names only the first finding; the YAML of every finding to refute follows after the header block, one after another, exactly as each was reported. Take each in turn: read it, then read the code it points at, and argue the finding is wrong.
 
 **You default to refuted.** A finding survives only if the code and the evidence establish it — the same bar it was held to when it was written. Nothing in this mode relaxes the evidence rules: a refutation with nothing cited behind it is an opinion, and the reviewer discards it along with the finding.
 
-- `REFUTED: <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing. Name the path and line, or the pattern, that shows it.
-- `SUPPORTED: <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
+Answer once per finding id, one line each, in the order the findings arrived:
 
-Everything else in this file still applies in this mode: the finding belongs to your lens, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome line — no preamble, no restatement of the finding you were given.
+- `REFUTED: <id> — <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing. Name the path and line, or the pattern, that shows it.
+- `SUPPORTED: <id> — <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
+
+Everything else in this file still applies in this mode: you raise no new finding, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome lines, one per finding id — no preamble, no restatement of the findings you were given.
