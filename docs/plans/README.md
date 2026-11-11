@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 ---
 
 # Kyber-Weave Plan Inventory
@@ -59,7 +59,8 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 | Plan | Status | Scale | Summary |
 |---|---|---|---|
-| [The review council runs until it passes, and computes its verdict from what its seats said](2026-11-11-council-assessment-fixes.md) | Ready | `extends-component` (ReviewCouncil, KyberSquad, CI Pipelines) | The council re-reviews after each fix round until `APPROVE` under a fixed hard stop; `review verdict` reads seat output directly so the reviewer can only keep or drop; a council deadline makes a timed-out gate NOT RUN instead of blocking; seats report discovery; unseated lenses need a reason; small PRs get a quick review |
+
+No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
 
 ## Archived Plans
 

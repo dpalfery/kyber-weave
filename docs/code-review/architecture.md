@@ -13,6 +13,7 @@ decided-by:
   - adr/0005-task-level-fast-review
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
+  - adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -952,6 +953,32 @@ Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` â
 folder, `gates.json`, the `findings.json` the verdict command writes, and `head` â€” until the run
 ends. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
 the same cycle and never counts as one.
+
+## Quick review, sibling sweep and seat confidence
+
+**Quick review.** A change of at most 300 changed lines (added plus removed, from
+`git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a
+larger change gets the full pre-push council. The quick review is one pass by the session that
+made the change: no seats, no gates beyond what the root `AGENTS.md` requires before a pull
+request, and no verdict engine. It walks a fixed checklist (intent against the description, the
+changed lines' correctness, the sibling sweep below, contract-assertion strength under `REVIEW.md`
+R14, and the pre-push defect-class checklist), fixes every major-or-worse finding first, and puts
+one line in the pull request description: `Quick review: <n> findings, <m> fixed, open: <ids or
+none>`. It fires where a session reads the root `AGENTS.md` or the `create-pull-request` skill.
+A pull request opened from a web interface, or by a session that never read either, is not
+covered; bot review is the backstop there.
+
+**Sibling sweep.** When a diff changes a rule's wording in one file, the `documentation-accuracy`
+seat lists every other file carrying the same rule text, checks each one, and reports each sibling
+the diff left stale. It finds them with Grep and `docs_find_duplicates_conflicts_ambiguous_terms`,
+and names the siblings it checked in its `NO FINDINGS` sentence. The quick review walks the same
+sweep.
+
+**Seat confidence.** Every seat reports at or above the effective `min-confidence` its invocation
+names (strict 5, balanced 7, lenient 8), and 7 when none is named; the rubric bands describe
+certainty, not a cut-off. The reviewer never drops a finding for confidence itself, because the
+verdict engine does. The security lens is the one exception: it keeps its own floor of 8, tuned in
+the `security-review` skill against false positives.
 
 ## Gate applicability and Arbiter review gates
 

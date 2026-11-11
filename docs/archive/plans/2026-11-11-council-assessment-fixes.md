@@ -2,7 +2,7 @@
 id: plans/2026-11-11-council-assessment-fixes
 title: The review council runs until it passes, and computes its verdict from what its seats said
 doc-type: plan
-status: current
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 created: 2026-11-11
@@ -15,7 +15,7 @@ impact-components: [ReviewCouncil, KyberSquad, CI Pipelines]
 
 # The review council runs until it passes, and computes its verdict from what its seats said
 
-**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/2026-11-11-council-assessment-fixes.tasks.json`.
+**Status: Archived, 2026-11-11.** Completed: the final council returned `APPROVE` at review cycle 3. Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). The task file was removed at archive; the tasks and test contract remain in this plan.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `ReviewCouncil` (verdict engine, gate runner, council prose), `KyberSquad` (conductor, bug-crusher and delivery contracts) and `CI Pipelines` (new rule ids).
@@ -468,3 +468,96 @@ The end-of-run council (`code-reviewer`, governed by the `code-review` skill) re
 ## docs-dev closeout
 
 T6. Harvest H1 to H5, archive the plan, and remove the task file in the same commit.
+
+## Completion summary
+
+**Delivered** on branch `claude/fix/review-council-assessment`. The final council returned `APPROVE` at review cycle 3 (head `fcc44ec6`).
+
+- Engine: `b0a7a9d8` (option surface), `ea3589f1` (seat verdict, coverage, cited lines, run deadline), `968f5404` and `fcc44ec6` (review fixes: tolerant seat reader, opt-in deadline). RED tests: `3ab9aa61`, `b814d029`, `9764c5df`.
+- Prose: `4a9e3ad7` (RED contract), then `339cba5d` to `9a82fc35` (the loop, seat verdict, batched refutation, quick review, seat discovery, once-per-review-cycle wording).
+- Canonical documentation: `8a64d1b1` and `9a82fc35`, plus the engine worker's rule-reference, configuration and CLI rows.
+
+**Acceptance.** Outcomes 1 to 9 are delivered:
+1. The loop runs until `APPROVE` under the D1 hard stop.
+2. The verdict is computed from seat output, and the reviewer can only keep or drop.
+3. A timed-out gate never holds the council.
+4. Seat discovery is reported and checked (`KW-REVIEW-044`).
+5. The documentation seat runs a sibling sweep.
+6. The seat floor follows the invocation's min-confidence.
+7. Refutation is one batched spawn.
+8. The quick review exists, with its 300-line trigger.
+9. Lens coverage (`KW-REVIEW-041`) and cited lines (`KW-REVIEW-043`) are enforced in code.
+
+The targeted contract and engine test classes passed on each task, and the council's `test` gate and CI ran the full suite.
+
+**Evidence from the run.**
+- Cycle 1, a full council: 13 seats plus 1 batched refutation, about 1.3M tokens, 17 minutes, 9 majors.
+- Cycle 2, a verifier cycle: 10 seats, about 1.0M tokens, 12 minutes, 1 major.
+- Cycle 3, a verifier cycle: 6 seats, about 0.44M tokens, 11 minutes, 0 majors, `APPROVE`.
+- No cycle used a hand-written verdict.
+
+**Shipped design that moved from the Decisions table during review.** The table is kept as decided. Where it differs, what shipped is:
+
+- **D6 and D7.** The run deadline is opt-in with `review gates --deadline`, and only the council passes it.
+  - Without `--deadline` there is no run deadline, and a timed-out blocking gate fails `review gates` as before (`KW-REVIEW-022`). CI, task gates and `--gate` re-checks are unchanged.
+  - With `--deadline`, a gate stopped by its own timeout or by the deadline is NOT RUN (`KW-REVIEW-039`) and does not fail the run. `--deadline` is refused with `--gate` and with `--agent`.
+  - `review verdict` always treats a timed-out or deadline-cut gate result as NOT RUN, never blocking.
+  - Reason: review cycle 1 found that exit 0 on a timed-out blocking gate would let CI pass with tests not run.
+- **D11.** The loop never switches to `full` on its own. A delta that adds a file, a dependency or a public contract widens the verifier cycle (more lenses re-seated) instead.
+- **D3.** The seat parser tries strict YAML, then reads the flat schema seats really write. A file that declares `NO FINDINGS:` or `SKIPPED:` and also holds findings is refused (`KW-REVIEW-040`). Each file is named for one lens.
+- **D14.** The security lens keeps its own floor of 8, now stated as a lens-specific exception beside the seat rule.
+- The hard stop (5 cycles, or 3 without progress), keep-or-drop only, the seat-computed verdict and the coverage check shipped as planned.
+
+**Follow-ups**, not done here:
+- The Arbiter's lens list knows 15 of the 17 lenses; `documentation-accuracy` and `test-infrastructure` are missing (F-1).
+- CI does not run `inspectcode`, so the council's analyzer gate is verified only when the council runs it (F-2).
+- Seat output should be captured by the Arbiter's lens-result hook rather than saved by the reviewer, which could still alter it (F-3).
+- There is no deterministic backstop, such as a CI check or a hook, for small pull requests nobody reviewed (F-4).
+- Seated runs share worktree artifacts (F-5).
+- Whether the security lens's floor of 8 should follow strictness is undecided (F-6).
+- The plan-read check misreads `review`, and other read verbs, inside a plan file name (F-7).
+- The reviewer's write permission comment in `products/kyber-squad/profiles/capabilities.yml` still describes a single findings file.
+- The flat seat reader duplicates the Arbiter's reader for refutation findings.
+- Three minor findings from cycle 3 stay open:
+  - the strict-to-flat re-read is decided per seat, not per field (`SeatOutputParser.cs:211`);
+  - the "could not be read" branch at `CitedLineCheck.cs:75` is untested;
+  - the flow-value trigger is tested only for a sequence in `excerpt`.
+- Review seats still mostly read files directly: `KW-REVIEW-044` warned on 4 to 7 seats per cycle. That cost is now visible, not yet reduced.
+
+## Closeout mapping
+
+Each row gives the destination of one decision or harvest item, its documentation impact, impact components, last-reviewed date and archive status.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md); [architecture, Modes](../../code-review/architecture.md#modes); [squad architecture, delivery](../../kyber-squad/architecture.md#delivery-draft-first-ready-on-ci) | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D2 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) (rejected: holding ready); [squad architecture, delivery](../../kyber-squad/architecture.md#delivery-draft-first-ready-on-ci); [autonomous gates](../../reference/autonomous-gates.md) | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D3 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md); [architecture, How a finding survives](../../code-review/architecture.md#how-a-finding-survives); [CLI surface](../../cli-command-surface.md) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D4 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md); [architecture, How a finding survives](../../code-review/architecture.md#how-a-finding-survives); [rule reference](../../ci-pipelines/rule-reference.md) (`KW-REVIEW-042`, `-045`) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D5 | [rule reference](../../ci-pipelines/rule-reference.md) (`KW-REVIEW-045`); no ADR — ADR waiver: a binding fix inside the existing findings reader | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D6 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md), as shipped (opt-in `--deadline`); [architecture, How the verdict is computed](../../code-review/architecture.md#how-the-verdict-is-computed) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D7 | [architecture, Reaching a verdict in one pass](../../code-review/architecture.md#reaching-a-verdict-in-one-pass); [configuration, Review](../../configuration.md#review); no ADR beyond 0068 — ADR waiver: a configuration value | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D8 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md); [worker rule map](../../kyber-squad/worker-rule-map.md); [architecture, How a finding survives](../../code-review/architecture.md#how-a-finding-survives) | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D9 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md); [architecture, How a finding survives](../../code-review/architecture.md#how-a-finding-survives); [rule reference](../../ci-pipelines/rule-reference.md) (`KW-REVIEW-041`) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D10 | [architecture, How a finding survives](../../code-review/architecture.md#how-a-finding-survives); no ADR — ADR waiver: an input-repair rule within the verdict engine | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D11 | [architecture, Modes](../../code-review/architecture.md#modes), as shipped (no automatic `full`); [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D12 | [architecture, Quick review, sibling sweep and seat confidence](../../code-review/architecture.md#quick-review-sibling-sweep-and-seat-confidence) (also the `code-review` skill, root `AGENTS.md` and `create-pull-request`); no ADR — ADR waiver: prose-only entry point, cheap to change | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D13 | [architecture, Quick review, sibling sweep and seat confidence](../../code-review/architecture.md#quick-review-sibling-sweep-and-seat-confidence) (also the `documentation-accuracy` lens file); no ADR — ADR waiver: lens procedure | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D14 | [architecture, Quick review, sibling sweep and seat confidence](../../code-review/architecture.md#quick-review-sibling-sweep-and-seat-confidence) (also `review-lens` and the security lens file); no ADR — ADR waiver: follows the existing strictness preset | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D15 | [architecture, Adversarial confirmation](../../code-review/architecture.md#adversarial-confirmation-and-refutation-guardrails); no ADR — ADR waiver: refines the confirmation step of ADR 0002 | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D16 | [rule reference](../../ci-pipelines/rule-reference.md) (`KW-REVIEW-039` to `-046`); no ADR — ADR waiver: rule ids follow the existing convention | extends-component | CI Pipelines | 2026-11-11 | archived |
+| D17 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| D18 | Documentation waiver: worker sequencing for this run only, with no surviving invariant; no ADR — ADR waiver: process decision | extends-component | KyberSquad | 2026-11-11 | archived |
+| AP1 | Documentation waiver: the approval record is kept in this archived plan's Decisions table; no ADR — ADR waiver: process decision | extends-component | ReviewCouncil | 2026-11-11 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0068](../../adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md), indexed in the [ADR index](../../adr/README.md) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| H2 | [review council architecture](../../code-review/architecture.md): The whole system, How a finding survives, Adversarial confirmation, How the verdict is computed, Reaching a verdict in one pass, Modes, Quick review, sibling sweep and seat confidence | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| H3 | [rule reference](../../ci-pipelines/rule-reference.md): `KW-REVIEW-039` to `KW-REVIEW-046` | extends-component | CI Pipelines | 2026-11-11 | archived |
+| H4 | [configuration, Review](../../configuration.md#review) (`council-deadline-seconds`); [CLI command surface](../../cli-command-surface.md) (`review verdict` options, `review gates --deadline`) | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| H5 | [squad architecture, delivery](../../kyber-squad/architecture.md#delivery-draft-first-ready-on-ci); [worker rule map](../../kyber-squad/worker-rule-map.md) (seat discovery) | extends-component | KyberSquad | 2026-11-11 | archived |
