@@ -16,9 +16,10 @@ import {
 } from '../providers/antigravity.js'
 import { createDroidProvider } from '../providers/droid.js'
 import { refreshHarnessSources } from './orchestrator.js'
-import { descriptorFor } from './registry.js'
-import type { SourceCheckpoint } from '../canon/source-state.js'
-import type { Provider, SessionSource } from '../providers/types.js'
+import { descriptorFor, sourceKeyFor } from './registry.js'
+import type { RecordProvenance, SourceCheckpoint } from '../canon/source-state.js'
+import type { CanonicalRecord, TokenUsage } from '../canon/types.js'
+import type { ParsedProviderCall, Provider, SessionSource } from '../providers/types.js'
 
 import {
   COMMAND_STARTED_AT,
@@ -680,6 +681,191 @@ describe('droid file source through refresh (T14)', () => {
       store.close()
       if (previousFactoryDir === undefined) delete process.env['FACTORY_DIR']
       else process.env['FACTORY_DIR'] = previousFactoryDir
+    }
+  })
+})
+
+describe('re-identified position-based calls supersede their old copies through refresh', () => {
+  const SESSION = 'pi-supersede-session'
+  const AT = '2026-09-08T10:00:00.000Z'
+  const OLD = `synth:pi:${SESSION}:0a1b2c3d4e5f6071`
+  const OLD_TOOL = `synth:pi:${SESSION}:0a1b2c3d4e5f6071:tool-0`
+  const STABLE = `synth:pi:${SESSION}:stable-turn-7`
+  const OTHER = 'synth:pi:pi-other-session:9f8e7d6c5b4a3921'
+  const OTHER_KEY = 'pi:0123456789abcdef'
+
+  function usage(): TokenUsage {
+    return { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 4, reportedInput: 10, reportedOutput: 4 }
+  }
+
+  function seededRecord(spanId: string, options: {
+    op: 'llm.invoke' | 'tool.invoke'
+    parentSpanId: string | null
+    sessionId: string
+    hashBacked: boolean
+  }): CanonicalRecord {
+    return {
+      spanId,
+      traceId: `synth:pi:${options.sessionId}`,
+      parentSpanId: options.parentSpanId,
+      source: 'pi-fixture',
+      harness: 'pi',
+      sessionId: options.sessionId,
+      name: options.op === 'llm.invoke' ? 'pi:pi-model' : 'Read',
+      op: options.op,
+      kind: 'internal',
+      timestamp: AT,
+      durationMs: 0,
+      status: 'ok',
+      tokens: usage(),
+      content: {},
+      cost: { basis: 'unknown', status: 'no_rate' },
+      raw: options.hashBacked ? { provenance: { recordDigest: `digest-${spanId}` } } : { provenance: {} },
+    }
+  }
+
+  function seededProvenance(spanId: string, sourceKey: string, sessionId: string, hashBacked: boolean): RecordProvenance {
+    return {
+      spanId,
+      harnessId: 'pi',
+      sourceKey,
+      nativeSessionId: sessionId,
+      nativeRecordId: hashBacked ? `digest-${spanId}` : 'stable-turn-7',
+      sourceRevision: 'seeded-revision',
+      parserVersion: '1',
+      importedAtUtc: '2026-09-09T00:00:00.000Z',
+      locationToken: 'pi-fixture',
+    }
+  }
+
+  /**
+   * A checkpoint the refresh cannot reuse: its revision token is not the file's. Its
+   * parser contract matches the pi descriptor, so the refresh does not treat every
+   * stored row as version-invalidated and re-commit them.
+   */
+  function seededCheckpoint(sourceKey: string): SourceCheckpoint {
+    const descriptor = descriptorFor('pi')
+    if (descriptor === undefined) throw new Error('missing descriptor pi')
+    return {
+      harnessId: 'pi',
+      sourceKey,
+      providerId: 'pi',
+      parserId: 'pi-fixture',
+      parserContractVersion: descriptor.parserContractVersion,
+      format: 'jsonl',
+      sourceRootLabel: 'temporary-root',
+      revisionToken: 'seeded-before-refresh',
+      coveredFromUtc: '2026-08-29T00:00:00.000Z',
+      coveredThroughUtc: '2026-09-01T00:00:00.000Z',
+      lastAttemptUtc: '2026-09-09T00:00:00.000Z',
+      lastSuccessUtc: '2026-09-09T00:00:00.000Z',
+      lastStatus: 'ok',
+      lastErrorCode: null,
+      unitCount: 1,
+      recordCount: 3,
+    }
+  }
+
+  /** The unit's one call, with no native id and an opaque dedup key: it takes the hash fallback. */
+  function opaqueCall(): ParsedProviderCall {
+    return {
+      ...parsedCall({ sessionId: SESSION, turnId: 'unused', timestamp: AT, model: 'pi-model' }, 'pi'),
+      turnId: undefined,
+      deduplicationKey: `opaque-${SESSION}`,
+    }
+  }
+
+  type Snapshot = Map<string, { record: CanonicalRecord; provenance: RecordProvenance | undefined }>
+
+  function snapshotOf(store: CanonStore): Snapshot {
+    return new Map(store.listAll().map((record) => [
+      record.spanId,
+      { record, provenance: store.getRecordProvenance(record.spanId) },
+    ]))
+  }
+
+  async function refreshOpaquePi(store: CanonStore, sourcePath: string) {
+    return refreshHarnessSources(store, {
+      getAllProviders: async () => [fixtureProvider('pi', [source(sourcePath, 'pi')], () => [opaqueCall()])],
+      descriptors: descriptorsFor(['pi']),
+      jobConcurrency: 1,
+      commandStartedAt: COMMAND_STARTED_AT,
+      parseAllSessions: async () => undefined,
+    })
+  }
+
+  it('replaces a re-identified call copy with its child and provenance, and leaves stable and other-key rows alone', async () => {
+    const root = tempRoot()
+    const sourcePath = join(root, 'pi', 'session.jsonl')
+    mkdirSync(join(root, 'pi'), { recursive: true })
+    writeFileSync(sourcePath, '{"type":"fixture"}\n')
+    // The unit's real key: the one the refresh derives for this source, with no sourceId.
+    const sourceKey = sourceKeyFor('pi', source(sourcePath, 'pi'))
+
+    const store = new CanonStore(join(root, 'canon.db'))
+    try {
+      // Seeded as an earlier refresh left them: the old copy and its child in one
+      // unit (so the seed does not supersede its own old copy), the stable row beside them.
+      store.commitSourceUnit({
+        records: [
+          seededRecord(OLD, { op: 'llm.invoke', parentSpanId: null, sessionId: SESSION, hashBacked: true }),
+          seededRecord(OLD_TOOL, { op: 'tool.invoke', parentSpanId: OLD, sessionId: SESSION, hashBacked: false }),
+          seededRecord(STABLE, { op: 'llm.invoke', parentSpanId: null, sessionId: SESSION, hashBacked: false }),
+        ],
+        provenance: [
+          seededProvenance(OLD, sourceKey, SESSION, true),
+          seededProvenance(OLD_TOOL, sourceKey, SESSION, false),
+          seededProvenance(STABLE, sourceKey, SESSION, false),
+        ],
+        checkpoint: seededCheckpoint(sourceKey),
+      })
+      // A hash-backed copy at the same instant under a different source key.
+      store.commitSourceUnit({
+        records: [seededRecord(OTHER, { op: 'llm.invoke', parentSpanId: null, sessionId: 'pi-other-session', hashBacked: true })],
+        provenance: [seededProvenance(OTHER, OTHER_KEY, 'pi-other-session', true)],
+        checkpoint: seededCheckpoint(OTHER_KEY),
+      })
+      const before = snapshotOf(store)
+
+      const report = await refreshOpaquePi(store, sourcePath)
+      const after = snapshotOf(store)
+
+      // Guards: the refresh ingested the call under the real key, on the hash path.
+      expect(row(report, 'pi')).toMatchObject({ status: 'ok', created: 1, updated: 0 })
+      const fresh = [...after.values()].filter(({ record, provenance }) =>
+        record.op === 'llm.invoke' && record.timestamp === AT && provenance?.sourceKey === sourceKey && record.spanId !== STABLE,
+      )
+      expect(fresh).toHaveLength(1)
+      const [freshEntry] = fresh
+      expect(freshEntry?.record.spanId).toMatch(/^synth:pi:pi-supersede-session:[0-9a-f]{16}$/)
+      expect((freshEntry?.record.raw as { provenance?: { recordDigest?: unknown } }).provenance?.recordDigest).toBeTypeOf('string')
+      expect(store.getSourceCheckpoint('pi', sourceKey)).toMatchObject({ sourceKey })
+
+      // The old copy, its child, and both provenance rows are gone.
+      expect(after.has(OLD)).toBe(false)
+      expect(after.has(OLD_TOOL)).toBe(false)
+      expect(store.getRecordProvenance(OLD)).toBeUndefined()
+      expect(store.getRecordProvenance(OLD_TOOL)).toBeUndefined()
+
+      // Exactly one llm.invoke from this source key at that instant, besides the stable row.
+      const atInstant = [...after.values()]
+        .filter(({ record, provenance }) => record.op === 'llm.invoke' && record.timestamp === AT && provenance?.sourceKey === sourceKey)
+        .map(({ record }) => record.spanId)
+        .sort()
+      expect(atInstant).toEqual([freshEntry?.record.spanId, STABLE].sort())
+
+      // The stable row and the other-key copy are untouched.
+      expect(after.get(STABLE)).toEqual(before.get(STABLE))
+      expect(after.get(OTHER)).toEqual(before.get(OTHER))
+
+      // A second refresh of the unchanged source changes no row.
+      const settled = snapshotOf(store)
+      const second = await refreshOpaquePi(store, sourcePath)
+      expect(row(second, 'pi')).toMatchObject({ created: 0, updated: 0 })
+      expect(['unchanged', 'ok']).toContain(row(second, 'pi').status)
+      expect(snapshotOf(store)).toEqual(settled)
+    } finally {
+      store.close()
     }
   })
 })
