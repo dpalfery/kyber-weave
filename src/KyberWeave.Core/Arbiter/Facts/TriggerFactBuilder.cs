@@ -19,6 +19,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static class TriggerFactBuilder
 {
+    /// <summary>How many lines either side of a refuted finding's line an earlier finding may sit and still be a candidate.</summary>
+    private const int PriorFindingWindowLines = 20;
+
+    /// <summary>The most earlier findings one refutation compares against.</summary>
+    private const int MaxPriorFindings = 3;
+
     /// <summary>
     /// Returns the provenance label for <paramref name="fact"/>: <c>caller</c> is
     /// asserted only when inferred from headers; <c>delegation.*</c> (except the
@@ -162,8 +168,10 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
+        // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
+        // or the bare slug, so the block is read by the full value first and the slug second.
         RefuteFinding? finding = refute is not null && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
-            ? RefuteFinding.Parse(stripped, refute)
+            ? RefuteFinding.Parse(stripped, refute) ?? RefuteFinding.Parse(stripped, refute[(refute.LastIndexOf('/') + 1)..])
             : null;
         string? applicability = lens is not null
                                 && catalog.Lenses.TryGetValue(lens, out ArbiterSquadLens? lensEntry)
@@ -258,6 +266,62 @@ public static class TriggerFactBuilder
         return status is null
             ? facts
             : facts.With("finding.dropped", string.Equals(status, ReturnedFinding.DroppedStatus, StringComparison.Ordinal), ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>
+    /// Adds <c>review.prior-findings</c>: the earlier findings of this review that name the refuted finding's
+    /// file and sit within 20 lines of its line, oldest first, at most three. Only findings stored before the
+    /// refuted finding's own item are candidates, so a finding is never compared against itself.
+    /// </summary>
+    /// <param name="facts">The fact bag to extend; it must already carry <c>finding.file</c> and <c>finding.line</c>.</param>
+    /// <param name="findingId">The refuted finding's bare id (the slug after the lens).</param>
+    /// <param name="storedItems">The review run's stored items, in append order.</param>
+    public static ArbiterFactSet WithPriorFindings(ArbiterFactSet facts, string findingId, IReadOnlyList<string> storedItems)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(findingId);
+        ArgumentNullException.ThrowIfNull(storedItems);
+
+        string? file = facts.TryGet("finding.file", out ArbiterFact? fileFact) ? fileFact.Value as string : null;
+        int? line = facts.TryGet("finding.line", out ArbiterFact? lineFact) ? lineFact.Value as int? : null;
+        List<string> prior = [];
+        if (file is null || line is null)
+            return facts.With("review.prior-findings", prior, ArbiterFactLabel.Derived);
+
+        foreach (string item in storedItems)
+        {
+            IReadOnlyList<ReturnedFinding> parsed = ReturnedFinding.ParseAll(item);
+            if (parsed.Count == 0)
+                continue;
+            if (string.Equals(parsed[0].Id, findingId, StringComparison.Ordinal))
+                break;
+            if (!string.Equals(FieldOf(item, "file"), file, StringComparison.Ordinal))
+                continue;
+            if (int.TryParse(FieldOf(item, "line"), System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int otherLine)
+                && Math.Abs(otherLine - line.Value) <= PriorFindingWindowLines)
+            {
+                prior.Add(item);
+                if (prior.Count == MaxPriorFindings)
+                    break;
+            }
+        }
+
+        return facts.With("review.prior-findings", prior, ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>The value of a <c>name:</c> line in a stored finding block, or null when it has none.</summary>
+    private static string? FieldOf(string item, string name)
+    {
+        string prefix = name + ":";
+        foreach (string raw in item.Split('\n'))
+        {
+            string line = raw.Trim().TrimStart('-').TrimStart();
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+                return line[prefix.Length..].Trim();
+        }
+
+        return null;
     }
 
     /// <summary>The status a stored item carries on its last <c>status:</c> line, or null when it has none.</summary>

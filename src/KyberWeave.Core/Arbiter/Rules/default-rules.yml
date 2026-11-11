@@ -1,4 +1,4 @@
-# The 23 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 26 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -418,6 +418,26 @@ rules:
       - when: { fact: finding.dropped, equals: true }
         answer: dropped
     effects: { dropped: verify }
+
+  # A refutation of a finding that repeats an earlier finding of the same review is not worth a refuter. The
+  # candidates are the review's earlier findings on the same file within 20 lines (at most three, oldest first).
+  # They travel in one batch, and the first candidate answered same-defect at or above the floor names the
+  # duplicate. Shipped in shadow: the duplicate is logged, and the refuter still runs, until calibration is read.
+  - id: KW-ARB-DUP-001
+    trigger: refute.spawn
+    question: Does an earlier finding of this review name the same defect as the refuted finding?
+    answers: [same-defect, different-defect]
+    shadow: true
+    ask:
+      type: choice
+      for-each: review.prior-findings
+      state: { claim: finding.excerpt, prior: candidate.text }
+      criteria:
+        same-defect: "The earlier finding describes the same defect at the same place as the refuted finding."
+        different-defect: "The earlier finding describes a different defect, or the same place for another reason."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { same-defect: duplicate, different-defect: allow }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

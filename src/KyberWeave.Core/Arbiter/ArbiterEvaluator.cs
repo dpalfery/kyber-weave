@@ -203,6 +203,12 @@ public sealed class ArbiterEvaluator
         bool ShortCircuits,
         List<Question> Questions);
 
+    /// <summary>One finding's judgement input: the plan its own fact bag produced and the call that answered it.</summary>
+    private sealed record FindingJudgement(string? FindingId, TriggerPlan Plan, Step1Call Call);
+
+    /// <summary>One finding's decision rules and the effects they contribute to the dispatch outcome.</summary>
+    private sealed record JudgedFinding(string? FindingId, List<ArbiterDecisionRule> Rules, List<string> Effects);
+
     /// <summary>What one batched provider call returned for a set of questions.</summary>
     private sealed record Step1Call(
         IReadOnlyDictionary<string, string> Answers,
@@ -248,19 +254,25 @@ public sealed class ArbiterEvaluator
         IReadOnlyList<ReturnedFinding> returned = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
             ? ReturnedFinding.ParseAll(ev.ToolOutput)
             : [];
+        // Each finding is judged on its own bag: the static facts plus that finding's own id, text and severity.
+        ArbiterFactSet baseFacts = facts;
+        bool gateCorroborated = GateReportFacts.FailedGateCorroborates(ev.Cwd);
         if (returned.Count > 0)
         {
-            facts = TriggerFactBuilder.WithReturnedFinding(
-                facts, returned[0], GateReportFacts.FailedGateCorroborates(ev.Cwd));
+            facts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[0], gateCorroborated);
         }
 
+        // A refutation names its finding as <lens>/<slug>; the store and the notices carry the bare slug.
+        string? refutedSlug = null;
         if (reviewRun is not null
             && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
             && facts.TryGet("finding.id", out ArbiterFact? refuted)
             && refuted.Value is string refutedId)
         {
-            facts = TriggerFactBuilder.WithDroppedStatus(
-                facts, refutedId, ReviewStore(config).ReadFindings(reviewRun));
+            refutedSlug = FindingSlug(refutedId);
+            IReadOnlyList<string> stored = ReviewStore(config).ReadFindings(reviewRun);
+            facts = TriggerFactBuilder.WithDroppedStatus(facts, refutedSlug, stored);
+            facts = TriggerFactBuilder.WithPriorFindings(facts, refutedSlug, stored);
         }
 
         // Read once here and reused for both REPEAT and the record, so the count and the
@@ -325,13 +337,36 @@ public sealed class ArbiterEvaluator
             primaryCall = Restrict(combined, primaryQuestions);
         }
 
+        // A lens return judges every finding it carries. The first rides the batch above; each later one is asked
+        // alone on its own fact bag, so its step-0 gates and its step-1 answer read its own id, text and severity.
+        FindingJudgement primaryJudgement = new(returned.Count > 0 ? returned[0].Id : null, primary, primaryCall);
+        List<FindingJudgement> judgements = [primaryJudgement];
+        for (int index = 1; index < returned.Count; index++)
+        {
+            ArbiterFactSet findingFacts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[index], gateCorroborated);
+            Dictionary<string, ArbiterFact> findingCandidates = new(StringComparer.Ordinal);
+            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, rules, findingCandidates);
+            ArbiterFactSet findingBatch = findingCandidates.Aggregate(
+                findingFacts, (set, pair) => set.With(pair.Key, pair.Value.Value, pair.Value.Label));
+            Step1Call findingCall = await AskAsync(
+                findingPlan.Questions, findingBatch, findingPlan.Step0Answers, false, cancellationToken).ConfigureAwait(false);
+            judgements.Add(new FindingJudgement(returned[index].Id, findingPlan, findingCall));
+        }
+
+        // One decision record per dispatch: every finding's rules sit on it, tagged with the finding they judged.
+        string recordId = ArbiterRecordId.New(_clock.GetUtcNow());
+        List<JudgedFinding> judged = judgements.Select(judgement => JudgeFinding(judgement, recordId, refutedSlug)).ToList();
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
-            classification, ev, primary, primaryCall, config, rules, effective, ledgerId, planDigest, elapsed,
-            cancellationToken).ConfigureAwait(false);
+            classification, ev, primaryJudgement, judged, recordId, config, rules, effective, ledgerId, planDigest,
+            elapsed, cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
         if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
         {
-            await RecordReturnedFindingsAsync(ReviewStore(config), reviewRun, returned, primaryOutcome)
+            bool[] dropped = judged
+                .Select(finding => string.Equals(
+                    ArbiterTriggerFamilies.Combine(primary.Family, finding.Effects), RuleEffects.Drop, StringComparison.Ordinal))
+                .ToArray();
+            await RecordReturnedFindingsAsync(ReviewStore(config), reviewRun, returned, dropped)
                 .ConfigureAwait(false);
         }
 
@@ -553,21 +588,107 @@ public sealed class ArbiterEvaluator
             () => _clock.GetUtcNow());
 
     /// <summary>
-    /// Appends a lens return's findings to the review store. The first finding, the one the filter read,
-    /// carries the drop status; the rest are stored kept, because no rule read them.
+    /// Appends a lens return's findings to the review store, in return order. Each carries its own drop status,
+    /// the one its own judgement reached.
     /// </summary>
     private static async Task RecordReturnedFindingsAsync(
         ArbiterRunStore store,
         string reviewRun,
         IReadOnlyList<ReturnedFinding> findings,
-        string outcome)
+        IReadOnlyList<bool> dropped)
     {
         for (int index = 0; index < findings.Count; index++)
         {
-            bool dropped = index == 0 && string.Equals(outcome, RuleEffects.Drop, StringComparison.Ordinal);
-            await store.AppendFindingAsync(reviewRun, ReturnedFinding.StoredText(findings[index].Text, dropped))
+            await store.AppendFindingAsync(reviewRun, ReturnedFinding.StoredText(findings[index].Text, dropped[index]))
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>A refutation's finding slug: the part after the lens in <c>&lt;lens&gt;/&lt;slug&gt;</c>.</summary>
+    private static string FindingSlug(string refute)
+    {
+        int slash = refute.LastIndexOf('/');
+        return slash < 0 ? refute : refute[(slash + 1)..];
+    }
+
+    /// <summary>The id of the earlier finding a stored candidate text names, or null when the text names none.</summary>
+    private static string? EarlierIdOf(string? candidate)
+    {
+        if (candidate is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<ReturnedFinding> parsed = ReturnedFinding.ParseAll(candidate);
+        return parsed.Count == 0 ? null : parsed[0].Id;
+    }
+
+    /// <summary>
+    /// Reads one finding's step-1 answers into decision rules and effects. An expanded for-each rule (one question per
+    /// candidate) keeps one entry per rule: the first candidate whose answer has an effect, else the first candidate.
+    /// A lens finding's entries are tagged with that finding's id, so the record says which finding each judged.
+    /// </summary>
+    private static JudgedFinding JudgeFinding(FindingJudgement judgement, string recordId, string? refutedSlug)
+    {
+        ArbiterTriggerFamily family = judgement.Plan.Family;
+        List<ArbiterDecisionRule> rules = Step0Rules(judgement.Plan.Step0);
+        List<string> effects = new(judgement.Plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<(string RuleId, string? Candidate, bool Decisive, ArbiterDecisionRule Entry)> rows = [];
+        HashSet<string> decisiveRules = new(StringComparer.Ordinal);
+        foreach (Question question in judgement.Plan.Questions)
+        {
+            string answer = AnswerFor(question, judgement.Call);
+            string mapped = MapOrNotEvaluated(question.Rule, answer, family);
+            ArbiterStep1Score? score = judgement.Call.Scores is not null
+                && judgement.Call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
+                ? found
+                : null;
+            (string effect, bool? shadow, string? wouldEffect) = ShadowState(
+                question.Rule, mapped, ArbiterTriggerFamilies.NeutralEffect(family));
+            string? evidence = string.Equals(mapped, RuleEffects.Duplicate, StringComparison.Ordinal)
+                && refutedSlug is not null
+                && EarlierIdOf(question.Candidate) is { } earlierId
+                ? ArbiterFindingNotices.DuplicateLine(refutedSlug, earlierId, recordId)
+                : null;
+            ArbiterDecisionRule entry = Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence);
+            bool decisive = !string.Equals(mapped, RuleEffects.Allow, StringComparison.Ordinal);
+            if (decisive && question.Candidate is not null)
+            {
+                decisiveRules.Add(question.RuleId);
+            }
+
+            rows.Add((question.RuleId, question.Candidate, decisive, entry));
+            if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
+            {
+                effects.Add(effect);
+            }
+        }
+
+        // Every candidate of a for-each rule is recorded, unless one decided: then the record keeps the decisive one.
+        HashSet<string> placed = new(StringComparer.Ordinal);
+        foreach ((string ruleId, string? candidate, bool decisive, ArbiterDecisionRule entry) in rows)
+        {
+            if (candidate is null || !decisiveRules.Contains(ruleId))
+            {
+                rules.Add(entry);
+            }
+            else if (decisive && placed.Add(ruleId))
+            {
+                rules.Add(entry);
+            }
+        }
+
+        if (judgement.FindingId is not null)
+        {
+            for (int index = 0; index < rules.Count; index++)
+            {
+                rules[index] = rules[index].Candidate is null
+                    ? rules[index] with { Candidate = judgement.FindingId }
+                    : rules[index];
+            }
+        }
+
+        return new JudgedFinding(judgement.FindingId, rules, effects);
     }
 
     /// <summary>
@@ -593,11 +714,16 @@ public sealed class ArbiterEvaluator
     private static string AnswerFor(Question question, Step1Call call) =>
         call.Answers.TryGetValue(question.Rule.Id, out string? answer) ? answer : RuleEngine.Undecidable;
 
+    /// <summary>
+    /// Records the dispatch's one primary decision: every judged finding's rules and effects, combined into the
+    /// outcome. The provider record is the primary call's; a later finding's call is judged but not itemised.
+    /// </summary>
     private async Task<ArbiterDispatchEvaluation> RecordPrimaryAsync(
         TriggerClassification classification,
         ArbiterEvent ev,
-        TriggerPlan plan,
-        Step1Call call,
+        FindingJudgement primary,
+        IReadOnlyList<JudgedFinding> judged,
+        string recordId,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
         ArbiterEvaluatorOptions effective,
@@ -606,31 +732,23 @@ public sealed class ArbiterEvaluator
         Stopwatch elapsed,
         CancellationToken cancellationToken)
     {
-        List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
-        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
-        foreach (Question question in plan.Questions)
+        List<ArbiterDecisionRule> rules = [];
+        List<string> effects = [];
+        foreach (JudgedFinding finding in judged)
         {
-            string answer = AnswerFor(question, call);
-            string mapped = MapOrNotEvaluated(question.Rule, answer, plan.Family);
-            ArbiterStep1Score? score = call.Scores is not null && call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
-                ? found
-                : null;
-            (string effect, bool? shadow, string? wouldEffect) = ShadowState(
-                question.Rule, mapped, ArbiterTriggerFamilies.NeutralEffect(plan.Family));
-            rules.Add(Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence: null));
-            if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
-            {
-                effects.Add(effect);
-            }
+            rules.AddRange(finding.Rules);
+            effects.AddRange(finding.Effects);
         }
 
-        string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        string outcome = ArbiterTriggerFamilies.Combine(primary.Plan.Family, effects);
         MarkSuppressedDrops(rules, outcome);
-        ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
+        ArbiterProviderRecord provider = ProviderRecord(
+            config, primary.Call, ProviderStatusFor(primary.Plan, primary.Call), elapsed);
         await AppendRecordAsync(
-            classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: null,
-            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken).ConfigureAwait(false);
-        return new ArbiterDispatchEvaluation(plan.Trigger, outcome);
+            classification, ev, primary.Plan.Trigger, rules, outcome, provider, primaryLedgerId: null,
+            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken,
+            recordId: recordId).ConfigureAwait(false);
+        return new ArbiterDispatchEvaluation(primary.Plan.Trigger, outcome);
     }
 
     /// <summary>
@@ -795,7 +913,8 @@ public sealed class ArbiterEvaluator
         IReadOnlyList<ArbiterRule> effectiveRules,
         Stopwatch elapsed,
         CancellationToken cancellationToken,
-        ArbiterModelBlock? model = null)
+        ArbiterModelBlock? model = null,
+        string? recordId = null)
     {
         DateTimeOffset now = _clock.GetUtcNow();
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
@@ -803,7 +922,7 @@ public sealed class ArbiterEvaluator
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
         int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task, ev.Session);
         ArbiterDecisionRecord record = new(
-            ArbiterRecordId.New(now),
+            recordId ?? ArbiterRecordId.New(now),
             now,
             effective.Source,
             ev.Harness,

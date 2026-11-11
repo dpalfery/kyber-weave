@@ -300,12 +300,27 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 return new HookOutcome(HookOutcomeKind.Allow);
             }
 
-            return new HookOutcome(
-                HookOutcomeKind.PostAnnotation,
-                ArbiterFindingNotices.DroppedLine(returned[0].Id, record.Id));
+            // One line per dropped finding: each drop entry is tagged with the finding it judged.
+            List<string> lines = record.Rules
+                .Where(rule => string.Equals(rule.Effect, RuleEffects.Drop, StringComparison.Ordinal)
+                    && rule.Suppressed != true
+                    && rule.Candidate is not null)
+                .Select(rule => ArbiterFindingNotices.DroppedLine(rule.Candidate!, record.Id))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                lines.Add(ArbiterFindingNotices.DroppedLine(returned[0].Id, record.Id));
+            }
+
+            return new HookOutcome(HookOutcomeKind.PostAnnotation, string.Join("\n", lines));
         }
 
-        string reason = RenderReason(record, prompt, harness, caller, config);
+        // A duplicate denies the refutation with the line the duplicate rule wrote on the record.
+        string? duplicate = string.Equals(record.Outcome, RuleEffects.Duplicate, StringComparison.Ordinal)
+            ? record.Rules.FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.Duplicate, StringComparison.Ordinal)
+                && rule.Evidence is not null)?.Evidence
+            : null;
+        string reason = duplicate ?? RenderReason(record, prompt, harness, caller, config);
         context.Log.WriteLine($"Arbiter {record.Trigger} {record.Outcome}: blocking dispatch to '{record.Target ?? "<none>"}'.");
         if (string.Equals(record.Outcome, RuleEffects.Annotate, StringComparison.Ordinal))
         {
