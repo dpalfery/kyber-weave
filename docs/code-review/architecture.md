@@ -724,9 +724,10 @@ zero gates, which a reader could take as a pass. `--gate` is exclusive with `--a
 thing and needs that one gate re-checked pays for one gate, not the suite.
 
 **The council deadline bounds the council's run, and only when asked for.** `--deadline` turns
-on the run-level deadline `review.council-deadline-seconds` (default `600`). The gate the deadline
-cuts, and every gate after it, is recorded as `DeadlinePassed`; a gate its own `timeout-seconds`
-stopped is `TimedOut`. Under `--deadline` either one is reported NOT RUN (`KW-REVIEW-039`, a
+on the run-level deadline `review.council-deadline-seconds` (default `600`). At the deadline, every
+gate still running is cut, a `concurrent` gate declared earlier included, and every gate not yet
+started is not started; all of them are recorded as `DeadlinePassed`. A gate its own
+`timeout-seconds` stopped is `TimedOut`. Under `--deadline` either one is reported NOT RUN (`KW-REVIEW-039`, a
 warning) and left out of the exit code, so the council goes on to a verdict on the evidence it
 has instead of waiting on a slow suite. Without `--deadline` nothing changes: CI, task gates,
 `--gate` re-checks and the pre-push self-review have no run deadline, and a blocking gate stopped

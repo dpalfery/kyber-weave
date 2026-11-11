@@ -31,7 +31,9 @@ requests 582 to 591 measured what that drift cost:
 - `kyber-weave review verdict` failed 7 of 8 calls on hand-built findings JSON (`KW-REVIEW-023`).
   Reviewers then wrote verdicts by hand, and at least six majors were downgraded to minor on the way.
 - Every seated run waited about 15 minutes for `inspectcode` to time out, and the timeout counted as
-  a blocking failure. A loop that runs until `APPROVE` could never end against that.
+  a blocking failure. A loop that runs until `APPROVE` could never end against that. (A separate
+  change has since stopped `inspectcode` timing out and lets it run alongside the other gates; the
+  deadline below still bounds any gate that runs long.)
 - Seats were exempt from reporting discovery, so 3 CodeGraph calls against 322 raw reads went
   unseen. One run left out 14 lenses, security included, with no reasons.
 

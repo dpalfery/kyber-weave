@@ -33,6 +33,10 @@ public static class GateRunner
     /// Gates start in declaration order and each waits for the one before it, except a gate declared
     /// <c>concurrent</c>: it starts at its place and runs alongside the gates declared after it. The report
     /// lists results in declaration order either way.
+    /// <para>
+    /// The deadline is opt-in rather than read from <paramref name="config"/>, because a single named gate, a task
+    /// gate, and a run outside the council are not spending the council's budget and must never be cut by it.
+    /// </para>
     /// </remarks>
     /// <param name="config">The host's review configuration.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
@@ -48,13 +52,9 @@ public static class GateRunner
     /// <param name="baseRef">The commit the change was measured against, recorded on the report.</param>
     /// <param name="deadline">
     /// The wall-clock budget for the whole run, or null for none. Each gate runs for the shorter of its own
-    /// timeout and the time left; the gate the deadline cuts, and every gate not yet started, is reported as
+    /// timeout and the time left; every gate still running at the deadline, and every gate not yet started, is reported as
     /// <see cref="GateOutcome.DeadlinePassed"/>. Only <c>review gates --deadline</c> passes one.
     /// </param>
-    /// <remarks>
-    /// The deadline is opt-in rather than read from <paramref name="config"/>, because a single named gate, a task
-    /// gate, and a run outside the council are not spending the council's budget and must never be cut by it.
-    /// </remarks>
     public static GateReport Run(
         ReviewConfig config,
         string workingDirectory,
