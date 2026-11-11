@@ -157,7 +157,7 @@ A task counts as complete on its worker's own report: no separate reviewer confi
 
 ## The rules
 
-Twenty-three rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Thirty-two rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
 same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
@@ -186,6 +186,15 @@ same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped
 | `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one that has nothing to judge in a change with no code in it? See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002). |
 | `KW-ARB-DIFFICULTY-001` | `delegate.model` | 1 (`choice`, ≥ 0.8) | How hard is this task: `easy`, `standard` or `hard`? Governed by `model-targeting.mode`; see [model targeting](#model-targeting-phase-2). |
 | `KW-ARB-LADDER-001` | `delegate.model` | 0 | Did the previous attempt fail below the top of the ladder? Governed by `model-targeting.mode`; see [model targeting](#model-targeting-phase-2). |
+| `KW-ARB-NITPICK-001` | `lens.returned` | 0, then 1 | Is a lens finding a nitpick or a substantive defect? Shadow. See [phase 3 facts](#phase-3-facts-review-shortcuts-stores-and-comments). |
+| `KW-ARB-NITPICK-002` | `refute.spawn` | 0 | Did the nitpick filter drop this finding? Shadow. |
+| `KW-ARB-DUP-001` | `refute.spawn` | 1 | Does an earlier finding of this review name the same defect at the same place? Shadow. |
+| `KW-ARB-TRIAGE-001` | `triage.shortcut` | 1 | Is this defect a trivial single-site fix that needs no architect? Shadow. |
+| `KW-ARB-INTAKE-001` | `intake.shortcut` | 1 | Does this request call for a written plan or a written specification? Shadow. |
+| `KW-ARB-DOCIMPACT-001` | `docs-impact.shortcut` | 0, then 1 | Does this change need no documentation change? Shadow. |
+| `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
+| `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
+| `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
@@ -265,9 +274,12 @@ The catalogue also accepts the family names `model.target`, `shortcut`, `failure
 
 Phase 1 catalogued the seven new triggers and their facts. Since phase 2, `SecondaryTriggers.For`
 derives `delegate.model` from every `delegate` event whose target is an implementation-class agent.
-Nothing derives the phase 3 secondary triggers yet: `intake.shortcut`, `triage.shortcut`,
-`docs-impact.shortcut`, `delegate.failure`, `sections.select` or `comment.triage`. Their rules can be
-dry-run offline with `arbiter eval --trigger <t>`, and no live hook reaches them.
+Phase 3 adds four more derivations from the same event: `delegate.failure` for an implementation
+dispatch carrying a `FAILURE-CLUSTER:` marker, `triage.shortcut` for a `bug-crusher` investigate of
+`bug-crusher-investigator`, `intake.shortcut` for a planner dispatch carrying the `INTAKE:` marker,
+and `docs-impact.shortcut` for a `docs-dev` dispatch carrying the `DOCS-IMPACT: true` line. The two
+remaining phase 3 triggers have no dispatch: `sections.select` comes from the section tool and
+`comment.triage` from the comment tool. Every trigger can be dry-run offline with `arbiter eval --trigger <t>`.
 
 A non-allow outcome on a red-flag family is what ends the step-1 call early. The
 short-circuit signal is unchanged: `escalate`, `skip` and `verify` only. The new effects never
@@ -314,9 +326,9 @@ These facts are filled on the hook path. Each is `derived` unless noted.
 Phase 2 fills the `delegate.model` facts: `delegation.model`, `plan.task.file-kinds`,
 `ledger.task.prior-attempt`, `model-targeting.ladder.next`, `model-targeting.prior-result` and
 `model-targeting.prior-profile` (see [model targeting](#model-targeting-phase-2)). Still catalogued but
-not filled, so a rule that reads them answers `undecidable`: `finding.severity`,
-`finding.gate-corroborated`, `review.prior-findings`, `file.text-at-line` and `gates.report`. Their
-fillers arrive with phase 3.
+not filled, so a rule that reads them answers `undecidable`: `gates.report`. Phase 3 fills
+`finding.severity`, `finding.gate-corroborated`, `review.prior-findings`, `file.text-at-line` (comment
+triage), the failure, comment, section and docs facts. See [phase 3 facts](#phase-3-facts-review-shortcuts-stores-and-comments).
 
 ### Hunk comment syntax
 
@@ -334,13 +346,85 @@ comment-only.
 | `--` | none | `.sql` `.lua` |
 | none | `<!-- … -->` | `.html` `.htm` `.xml` `.xaml` `.csproj` `.props` `.targets` |
 
+## Phase 3 facts: review, shortcuts, stores, and comments
+
+Phase 3 adds nine rules. All nine ship with `shadow: true`: each is evaluated and logged with the
+effect it would have had (`would-effect`), and the host sees no effect until the rule is enforced
+by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-001`,
+`KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`, `KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`,
+`KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`, `KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`.
+
+- **Nitpick filter (`KW-ARB-NITPICK-001`, `-002`).** A `Critical` lens finding, or one a failed gate
+  corroborates, is substantive without a question. Any other finding is asked once, and only a
+  confident `nitpick` (≥ 0.85) drops it. A drop never blocks: after the lens returns, the hook adds
+  `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`. A refutation of a dropped finding is
+  skipped (`-002`, effect `verify`).
+- **Duplicate findings (`KW-ARB-DUP-001`).** The candidates are the earlier findings of the same review
+  in the same file within 20 lines, at most three, oldest first. The first candidate answered
+  `same-defect` at ≥ 0.9 makes the refutation a duplicate: it is denied with
+  `ARBITER_DUPLICATE: <id> of <earlier id> decision=<id>`. Lens and refute dispatches identify their
+  review with a `REVIEW_RUN: <id>` header, so the findings of one review share a store.
+- **Run stores (`<arbiter-dir>/stores/`).** Finding text and worker failure text are held in stores
+  under `<arbiter-dir>/stores/`, outside the decision log and the ledger. A review store is keyed by a
+  digest of its `REVIEW_RUN` id. A failure store is keyed by the plan file and its content digest, or by the
+  session when there is no plan. Each item is one JSON line. An item over
+  `arbiter.stores.max-item-bytes` is refused as `TooLarge` and never shortened. Defaults are 16384 bytes
+  and 14 days (`ArbiterStoreOptions`). Retention is best-effort: each append removes sibling store
+  directories whose newest file was last written more than `retain-days` ago (a directory with no
+  file falls back to its own write time), so an active run appended to in place is not swept.
+  `retain-days` is clamped to 1 through 3650 when swept. A write failure is reported as
+  `Unavailable`, never thrown.
+- **Triage, intake and docs-impact shortcuts (`KW-ARB-TRIAGE-001`, `-INTAKE-001`, `-DOCIMPACT-001`).**
+  An answered shortcut withholds its worker: the dispatch is denied with a substitute digest, and the
+  caller takes that digest as the result. The triage digest carries `VERDICT: TRIVIAL` and
+  `ARBITER_DECISION: <id>`. The intake digest is `STATUS: INTAKE_RECOMMENDATION` with `RECOMMENDATION`
+  set to `PLAN` or `SPEC`. The docs-impact digest is `DOCS_REVIEW: no doc change with justification`
+  with `RECOMMENDATIONS: none`. A docs change that touches a governed path always keeps the dispatch,
+  and the provider is not asked. Each shortcut is derived only from its marker, as described under
+  secondary triggers.
+- **Same-failure advisory (`KW-ARB-FAILURE-001`).** A rework dispatch carries `FAILURE-CLUSTER: <key>`
+  as its first body line and a `FAILURE:` section. The first failure of a cluster is only recorded.
+  A later failure the rule judges `same` returns `ARBITER_SAME_FAILURE: yes prior=<id> decision=<id>`
+  as an advisory with the dispatch allowed. It never denies, and it is the signal to escalate sooner.
+- **Section trimming (`KW-ARB-TRIM-001`, `arbiter_select_relevant_document_sections`).** The section
+  selector lists the sections of one repository markdown document (at most 1 MiB) and asks about each
+  candidate. Only a confident (≥ 0.9) `not-relevant` answer trims a section, and any unsure answer keeps
+  it. With no provider every section is listed. When the provider is unsure or fails, every section is
+  listed and the result is marked `failedSafe`. The same selector runs as `kyber-weave arbiter sections --path <FILE> --task <TEXT>`.
+- **Bot review comments (`KW-ARB-COMMENT-001`, `arbiter_classify_bot_review_comment`).** One comment is
+  classified as `real`, `nitpick` or `already-fixed` against the code at the cited line as it is now
+  (≥ 0.85). Anything unsure, below the floor, or not obtained stays `real`, so the comment is fixed.
+  Each call records a decision and returns its id. While the rule is in shadow the class handed back is
+  always `real`; the result carries `shadow` and `wouldClass`, the class the model gave (null when it gave none). The CLI form is
+  `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]`.
+- **Bot summary tables (summary mode).** A bot's PR-level summary comment has no inline thread. With
+  `summary: true` (CLI `--summary`), `body` is that summary and each row of its first findings table
+  (`Severity | File | Line | Issue`, matched by header name) is classified through the same rule. The
+  `author` parameter (CLI `--author`) decides whether any row is classified: only a login listed in
+  `arbiter.comment-triage.bot-logins`, or one ending `[bot]`, is classified. Callers always pass
+  `author`. Every other row is `real` with no provider call. At most 50 rows (`MaxSummaryRows`) are
+  classified per call; rows past that are `real` and unasked. A table that cannot be read in full
+  (no table, or any malformed data row) yields no items, and the caller keeps the rows `real`. Each
+  classified row records its own decision, and while the rule is in shadow every row is `real` with `shadow` and `wouldClass` beside it. An absent `author` is never treated as a bot, so every row
+  is `real`. As built, the per-row fixing-commit check of Requirement 20.5 is not delivered: summary
+  rows reach the rule with no commit, so an `already-fixed` answer for a summary row rests on the model
+  alone.
+  `comment-triage.bot-logins` is read by the triage service on both the served tool and the CLI
+  ([configuration](../configuration.md#savings-keys)). With no logins configured, no summary row is
+  classified.
+- **Evidence lines (log-only, never a drop).** A decision record's notes carry `review-run-missing:` when
+  a lens dispatch has no `REVIEW_RUN` header, and `findings-over-cap:` with the count when a return
+  carries more findings than the 64-question budget. The findings past the budget are kept, not dropped.
+- **Not filled.** `gates.report` is catalogued but no filler sets it, so any rule that reads it
+  answers `undecidable`.
+
 ## Shadow and the model-targeting switch
 
 **Per-rule shadow.** A host sets `shadow: true` or `shadow: false` on a shipped rule under
 `arbiter.rules`. A shadowed step-1 rule is evaluated and logged in full. Its entry records
 `shadow: true` and the effect it would have had as `would-effect`. The combined outcome uses the
 family's neutral effect (`keep`, `spawn`, `allow`), so no adapter ever sees a shadowed effect.
-Phase 1 ships no rule in shadow; `KW-ARB-LENS-002` enforces.
+Phase 1 shipped no rule in shadow. Phase 3 ships nine rules in shadow, listed under [phase 3 facts](#phase-3-facts-review-shortcuts-stores-and-comments); `KW-ARB-LENS-002` enforces.
 
 **Model-targeting switch.** `arbiter.model-targeting.mode` is `off`, `shadow` (the default) or
 `enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`. A `shadow`
@@ -359,7 +443,7 @@ dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 | Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the hook fails closed for the whole hook with `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
 | Model targets table missing or unreadable | The dispatch is kept on its model | `model.reason: model-targets-unreadable`; `KW-ARB-MODEL-001` at doctor time |
 | Claude model write throws | The dispatch runs with its routing header stripped and no model field | `delivered: false`, `model.reason: model-write-failed`; hook log line `model-write-failed` |
-| Store unwritable | The rule that needs the store answers `undecidable` | Run stores ship in phase 3 |
+| Run store write fails | The store reports `unavailable` and never throws; the append is best-effort | The store status; see [phase 3 facts](#phase-3-facts-review-shortcuts-stores-and-comments) |
 
 ## Model targets
 
@@ -815,7 +899,7 @@ Research verified against vendor documentation governs the user-level global hoo
 `kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
 for harnesses without hooks or with degraded dispatch (such as Warp, CommandCode, or ZCode). Its server key is **`kw-arbiter`**
 (`McpServerNames.Arbiter`), which is the name a client configuration declares and the name a
-grant is built from; the executable and its argv are unchanged. Three tools:
+grant is built from; the executable and its argv are unchanged. Five tools:
 
 - **`arbiter_evaluate_agent_dispatch_or_return(trigger, facts)`** — evaluates one event exactly as
   the hook would: the same facts, rules, ledger append and decision record, and the same allow,
@@ -829,6 +913,10 @@ grant is built from; the executable and its argv are unchanged. Three tools:
   and closed-world.
 - **`arbiter_check_configuration_and_key_readiness()`** — reports the root, the rule-set hash,
   the rule count and the provider state, never the key; read-only and closed-world.
+- **`arbiter_select_relevant_document_sections`** — the section selector for one repository markdown
+  document (`KW-ARB-TRIM-001`); read-only.
+- **`arbiter_classify_bot_review_comment`** — the bot-comment triage (`KW-ARB-COMMENT-001`), per
+  comment or, with `summary: true`, per summary row. It writes a decision record for each call, and its JSON carries `shadow` and `wouldClass` beside `class`.
 
 Every response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The

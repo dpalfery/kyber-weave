@@ -123,6 +123,8 @@ RECOMMENDATIONS: <canonical documents to create or update, or none>
 
 Keep a run record of what was reviewed and the verdict reached. Route each recommendation by component and doc type, placing the update beside the component's existing docs rather than in a new location. Proceed at high confidence only; a human approves before anything is written. This review never adds ontology vocabulary: when no existing document fits, choose the best existing home and record the gap. File a todo only if the owner accepts it.
 
+**Impact-review marker.** A dispatch whose first body line is `DOCS-IMPACT: true` is a documentation-impact review, not a closeout. The Arbiter reads that line to decide the `docs-impact.shortcut`. When the change touches no governed path and the Arbiter answers, the dispatch returns a substitute digest in place of yours: `DOCS_REVIEW: no doc change with justification — Arbiter shortcut (decision <id>)`, `RECOMMENDATIONS: none`, and `ARBITER_DECISION: <id>`. Treat that digest as the review's verdict and do not re-run the review. A change that touches a governed path always keeps the dispatch, so you review it. The shortcut is shipped in shadow, so you run every review until the Arbiter enforces it.
+
 ## Discovery order
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.

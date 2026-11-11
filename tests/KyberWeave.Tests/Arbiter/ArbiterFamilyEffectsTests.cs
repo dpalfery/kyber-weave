@@ -56,10 +56,11 @@ public sealed class ArbiterFamilyEffectsTests
     }
 
     [Fact]
-    public void Shortcut_AllowedEffects_AreSpawnAndAnswer()
+    public void Shortcut_AllowedEffects_AreSpawnAnswerAndKeep()
     {
+        // Keep is legitimate: the triage and intake rules keep the dispatch when the Arbiter is unsure.
         Assert.Equal(
-            new[] { Spawn, Answer }.Order(),
+            new[] { Spawn, Answer, Keep }.Order(),
             ArbiterTriggerFamilies.AllowedEffects(ArbiterTriggerFamily.Shortcut).Order());
     }
 

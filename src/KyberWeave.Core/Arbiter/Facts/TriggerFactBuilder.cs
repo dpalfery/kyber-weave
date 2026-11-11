@@ -19,6 +19,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static class TriggerFactBuilder
 {
+    /// <summary>How many lines either side of a refuted finding's line an earlier finding may sit and still be a candidate.</summary>
+    private const int PriorFindingWindowLines = 20;
+
+    /// <summary>The most earlier findings one refutation compares against.</summary>
+    private const int MaxPriorFindings = 3;
+
     /// <summary>
     /// Returns the provenance label for <paramref name="fact"/>: <c>caller</c> is
     /// asserted only when inferred from headers; <c>delegation.*</c> (except the
@@ -162,8 +168,10 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
+        // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
+        // or the bare slug, so the block is read by the full value first and the slug second.
         RefuteFinding? finding = refute is not null && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
-            ? RefuteFinding.Parse(stripped, refute)
+            ? RefuteFinding.Parse(stripped, refute) ?? RefuteFinding.Parse(stripped, refute[(refute.LastIndexOf('/') + 1)..])
             : null;
         string? applicability = lens is not null
                                 && catalog.Lenses.TryGetValue(lens, out ArbiterSquadLens? lensEntry)
@@ -184,6 +192,10 @@ public static class TriggerFactBuilder
                 "delegation.target-class" => targetClass,
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
+                // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
+                // find, and the intake request the planner was asked to assess.
+                "defect.report" => stripped,
+                "intake.request" => stripped,
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
@@ -214,6 +226,125 @@ public static class TriggerFactBuilder
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Adds a lens return's finding facts: its id, its text, its stated severity, and whether a failed gate
+    /// corroborates it. Built from the return, not the dispatch, so it is added after the static build.
+    /// </summary>
+    public static ArbiterFactSet WithReturnedFinding(ArbiterFactSet facts, ReturnedFinding finding, bool gateCorroborated)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(finding);
+
+        ArbiterFactSet bag = facts
+            .With("finding.id", finding.Id, ArbiterFactLabel.Asserted)
+            .With("finding.excerpt", finding.Text, ArbiterFactLabel.Asserted)
+            .With("finding.gate-corroborated", gateCorroborated, ArbiterFactLabel.Derived);
+        return finding.Severity is null
+            ? bag
+            : bag.With("finding.severity", finding.Severity, ArbiterFactLabel.Asserted);
+    }
+
+    /// <summary>
+    /// Adds <c>finding.dropped</c> for a refuted finding, read from the review store's items for its run. A
+    /// finding with no stored item keeps the fact absent, so a refuter cannot be denied on no evidence.
+    /// </summary>
+    /// <param name="facts">The fact bag to extend.</param>
+    /// <param name="findingId">The refuted finding's id.</param>
+    /// <param name="storedItems">The review run's stored items, in append order; the latest for the id decides.</param>
+    public static ArbiterFactSet WithDroppedStatus(ArbiterFactSet facts, string findingId, IReadOnlyList<string> storedItems)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(findingId);
+        ArgumentNullException.ThrowIfNull(storedItems);
+
+        string? status = null;
+        string key = ReturnedFinding.IdKey(findingId);
+        foreach (string item in storedItems)
+        {
+            IReadOnlyList<ReturnedFinding> stored = ReturnedFinding.ParseAll(item);
+            if (stored.Count > 0 && string.Equals(ReturnedFinding.IdKey(stored[0].Id), key, StringComparison.Ordinal))
+                status = StatusOf(item) ?? status;
+        }
+
+        return status is null
+            ? facts
+            : facts.With("finding.dropped", string.Equals(status, ReturnedFinding.DroppedStatus, StringComparison.Ordinal), ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>
+    /// Adds <c>review.prior-findings</c>: the earlier findings of this review that name the refuted finding's
+    /// file and sit within 20 lines of its line, oldest first, at most three. Only findings stored before the
+    /// refuted finding's own item are candidates, so a finding is never compared against itself.
+    /// </summary>
+    /// <param name="facts">The fact bag to extend; it must already carry <c>finding.file</c> and <c>finding.line</c>.</param>
+    /// <param name="findingId">The refuted finding's id, bare or lens-qualified; both sides are compared by slug.</param>
+    /// <param name="storedItems">The review run's stored items, in append order.</param>
+    /// <remarks>
+    /// With no file or line for the finding the neighbours are undecidable, so the fact is left absent rather than
+    /// written as an empty list: an empty list would read as "no neighbours" and let a rule decide on nothing.
+    /// </remarks>
+    public static ArbiterFactSet WithPriorFindings(ArbiterFactSet facts, string findingId, IReadOnlyList<string> storedItems)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(findingId);
+        ArgumentNullException.ThrowIfNull(storedItems);
+
+        string? file = facts.TryGet("finding.file", out ArbiterFact? fileFact) ? fileFact.Value as string : null;
+        int? line = facts.TryGet("finding.line", out ArbiterFact? lineFact) ? lineFact.Value as int? : null;
+        if (file is null || line is null)
+            return facts;
+
+        string key = ReturnedFinding.IdKey(findingId);
+        List<string> prior = [];
+        foreach (string item in storedItems)
+        {
+            IReadOnlyList<ReturnedFinding> parsed = ReturnedFinding.ParseAll(item);
+            if (parsed.Count == 0)
+                continue;
+            if (string.Equals(ReturnedFinding.IdKey(parsed[0].Id), key, StringComparison.Ordinal))
+                break;
+            if (!string.Equals(FieldOf(item, "file"), file, StringComparison.Ordinal))
+                continue;
+            if (int.TryParse(FieldOf(item, "line"), System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int otherLine)
+                && Math.Abs(otherLine - line.Value) <= PriorFindingWindowLines)
+            {
+                prior.Add(item);
+                if (prior.Count == MaxPriorFindings)
+                    break;
+            }
+        }
+
+        return facts.With("review.prior-findings", prior, ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>The value of a <c>name:</c> line in a stored finding block, or null when it has none.</summary>
+    private static string? FieldOf(string item, string name)
+    {
+        string prefix = name + ":";
+        foreach (string raw in item.Split('\n'))
+        {
+            string line = raw.Trim().TrimStart('-').TrimStart();
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+                return line[prefix.Length..].Trim();
+        }
+
+        return null;
+    }
+
+    /// <summary>The status a stored item carries on its last <c>status:</c> line, or null when it has none.</summary>
+    private static string? StatusOf(string item)
+    {
+        string? status = null;
+        foreach (string line in item.Split('\n'))
+        {
+            if (line.StartsWith(ReturnedFinding.StatusPrefix, StringComparison.Ordinal))
+                status = line[ReturnedFinding.StatusPrefix.Length..].Trim();
+        }
+
+        return status;
     }
 
     /// <summary>The primary trigger's facts plus every secondary trigger's, so one bag serves them all.</summary>
