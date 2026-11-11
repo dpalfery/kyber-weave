@@ -42,6 +42,10 @@ internal static class SquadPresetFileRewriter
     /// <param name="agentProfiles">The canonical agent name to profile category map.</param>
     /// <param name="readContent">Reads a receipt file's current bytes, or null when the file is missing.</param>
     /// <param name="preset">The preset the table names, or null to keep the table's recorded preset.</param>
+    /// <param name="bundled">
+    /// The bundled profiles the effective profiles were built from, or null when <paramref name="profiles" />
+    /// is itself the bundle (clear). The table's bundle digest is taken from these, never carried forward.
+    /// </param>
     /// <returns>The rewritten files and the diff rows for files whose model changed.</returns>
     /// <remarks>
     /// The model targets table is a receipt file like any agent file, so it is rewritten in this same
@@ -53,7 +57,8 @@ internal static class SquadPresetFileRewriter
         SquadModelProfiles profiles,
         IReadOnlyDictionary<string, string> agentProfiles,
         Func<SquadOwnedFile, byte[]?> readContent,
-        ArbiterModelTargetsPreset? preset = null)
+        ArbiterModelTargetsPreset? preset = null,
+        SquadModelProfiles? bundled = null)
     {
         ArgumentNullException.ThrowIfNull(receiptFiles);
         ArgumentNullException.ThrowIfNull(targetTokens);
@@ -78,7 +83,7 @@ internal static class SquadPresetFileRewriter
             {
                 rewritten.Add(new SquadDeploymentFile(
                     file.RelativePath,
-                    RewriteModelTargetsTable(file.Target, rawBytes, profiles, agentProfiles, preset),
+                    RewriteModelTargetsTable(file.Target, rawBytes, profiles, agentProfiles, preset, bundled ?? profiles),
                     file.Target));
                 continue;
             }
@@ -143,15 +148,18 @@ internal static class SquadPresetFileRewriter
 
     /// <summary>
     ///     Rebuilds a model targets table from the effective profiles and the canonical roster. The
-    ///     preset name, preset digest and bundle digest are kept from the table unless the caller names a
-    ///     preset. A table that does not parse keeps its bytes, so a damaged file is never guessed at.
+    ///     preset name and preset digest are kept from the table unless the caller names a preset. The
+    ///     bundle digest is always recomputed from <paramref name="bundled" />, the bundle the profiles were
+    ///     built from, so it describes the same data as the tokens beside it. A table that does not parse
+    ///     keeps its bytes, so a damaged file is never guessed at.
     /// </summary>
     private static byte[] RewriteModelTargetsTable(
         string harness,
         byte[] rawBytes,
         SquadModelProfiles profiles,
         IReadOnlyDictionary<string, string> agentProfiles,
-        ArbiterModelTargetsPreset? preset)
+        ArbiterModelTargetsPreset? preset,
+        SquadModelProfiles bundled)
     {
         try
         {
@@ -160,12 +168,13 @@ internal static class SquadPresetFileRewriter
             JsonElement recorded = root.GetProperty("preset");
             string recordedName = recorded.GetProperty("name").GetString() ?? ArbiterModelTargetsFile.BundledPresetName;
             string recordedDigest = recorded.GetProperty("digest").GetString() ?? string.Empty;
-            string bundleDigest = root.GetProperty("bundle-digest").GetString() ?? string.Empty;
+            // Shape check only: a table without its recorded bundle digest is damaged and keeps its bytes.
+            _ = root.GetProperty("bundle-digest");
             return ArbiterModelTargetsFile.Serialize(
                 harness,
                 preset?.Name ?? recordedName,
                 preset?.Digest ?? recordedDigest,
-                bundleDigest,
+                ArbiterModelTargetsFile.BundleDigest(bundled, harness),
                 profiles,
                 agentProfiles);
         }

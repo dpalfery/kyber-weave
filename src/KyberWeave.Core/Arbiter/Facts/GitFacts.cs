@@ -640,14 +640,23 @@ public static class GitFacts
     /// binary (contains a NUL byte), or unreadable. Never throws.
     /// </summary>
     /// <remarks>
-    /// The size is checked before any read so a huge file is never loaded. The read itself is bounded
-    /// too, because a file can grow between the size check and the read.
+    /// A symbolic link is never followed: its target's content is not the change's content, so a link
+    /// reads as unmeasurable, which keeps a lens from skipping it as comment-only. The link check runs
+    /// before the size check and the open, because both of those follow a link. The size is checked
+    /// before any read so a huge file is never loaded. The read itself is bounded too, because a file
+    /// can grow between the size check and the read.
     /// </remarks>
     private static List<string>? ReadUntrackedLines(string fullPath)
     {
         try
         {
-            if (new FileInfo(fullPath).Length > UntrackedFileByteLimit)
+            FileInfo info = new(fullPath);
+            if (info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                return null;
+            }
+
+            if (info.Length > UntrackedFileByteLimit)
             {
                 return null;
             }

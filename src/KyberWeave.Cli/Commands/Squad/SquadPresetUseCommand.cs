@@ -285,7 +285,8 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
             },
-            new ArbiterModelTargetsPreset(preset.Name, preset.Digest));
+            new ArbiterModelTargetsPreset(preset.Name, preset.Digest),
+            bundled: canonical.Profiles);
 
         if (settings.DryRun)
         {
