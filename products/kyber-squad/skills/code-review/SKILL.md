@@ -119,7 +119,7 @@ returns the same attestation line.
 
 Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
-Every finding cites a file and a `line`, and `line` is the line number in the file as you read it, never a line offset in the patch file. The verdict command checks each cited line against the file (`KW-REVIEW-043`) and drops a finding whose line does not exist.
+Every finding cites a file and a `line`, and `line` is the line number in the file as you read it, never a line offset in the patch file. The verdict command checks each cited line against the file (`KW-REVIEW-043`): a line outside the file is moved to the one line that holds the excerpt, and the finding is dropped when no single line does.
 
 The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
 takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
