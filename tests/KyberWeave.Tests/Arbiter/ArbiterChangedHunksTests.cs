@@ -26,6 +26,11 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     private const string NoCodeChange = "review.no-code-change-paths";
     private const string FindingChangedLines = "finding.changed-lines";
 
+    private static readonly string[] ExpectedRenameOnly = new[] { "src/New.cs" };
+    private static readonly string[] ExpectedCommentOnly = new[] { "src/Notes.cs" };
+    private static readonly string[] ExpectedNoCodeChange = new[] { "docs/guide.md", "src/New.cs", "src/Notes.cs" };
+    private static readonly int[] ExpectedFindingChangedLines = new[] { 3, 7, 8 };
+
     private readonly RunStartProbe _probe = RunStartProbe.Create();
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _arbiter = new();
@@ -227,7 +232,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
 
         ArbiterFactSet facts = Enrich(Declare(RenameOnly));
 
-        Assert.Equal(new[] { "src/New.cs" }, ValueOf<IEnumerable<string>>(facts, RenameOnly));
+        Assert.Equal(ExpectedRenameOnly, ValueOf<IEnumerable<string>>(facts, RenameOnly));
     }
 
     /// <summary>
@@ -262,7 +267,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
 
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks, CommentOnly));
 
-        Assert.Equal(new[] { "src/Notes.cs" }, ValueOf<IEnumerable<string>>(facts, CommentOnly));
+        Assert.Equal(ExpectedCommentOnly, ValueOf<IEnumerable<string>>(facts, CommentOnly));
     }
 
     /// <summary>
@@ -285,7 +290,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         ArbiterFactSet facts = Enrich(Declare(ChangedHunks, RenameOnly, CommentOnly, NoCodeChange));
 
         Assert.Equal(
-            new[] { "docs/guide.md", "src/New.cs", "src/Notes.cs" },
+            ExpectedNoCodeChange,
             ValueOf<IEnumerable<string>>(facts, NoCodeChange).Order(StringComparer.Ordinal));
     }
 
@@ -305,7 +310,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             "src/Service.cs",
             ArbiterFactLabel.Asserted));
 
-        Assert.Equal(new[] { 3, 7, 8 }, ValueOf<IEnumerable<int>>(facts, FindingChangedLines));
+        Assert.Equal(ExpectedFindingChangedLines, ValueOf<IEnumerable<int>>(facts, FindingChangedLines));
     }
 
     /// <summary>

@@ -23,6 +23,9 @@ public sealed class ModelOverrideCapabilityTests
 {
     private const string SubAgentsDocs = "https://code.claude.com/docs/en/sub-agents";
 
+    private static readonly string[] ExpectedClaudeAliases = new[] { "fable", "haiku", "opus", "sonnet" };
+    private static readonly string[] ExpectedAllowDocumentKeys = new[] { "hookEventName", "permissionDecision", "updatedInput" };
+
     /// <summary>A hook adapter whose declared capability is set by the test, to observe what the host copies.</summary>
     private sealed class RecordingAdapter : IHarnessHookAdapter
     {
@@ -85,7 +88,7 @@ public sealed class ModelOverrideCapabilityTests
         IReadOnlySet<string> aliases = capability.AcceptedAliases
             ?? throw new Xunit.Sdk.XunitException("Claude must declare its accepted aliases.");
         Assert.Equal(
-            new[] { "fable", "haiku", "opus", "sonnet" },
+            ExpectedClaudeAliases,
             aliases.Order(StringComparer.Ordinal));
         Assert.Contains(SubAgentsDocs, capability.Source, StringComparison.Ordinal);
     }
@@ -186,7 +189,7 @@ public sealed class ModelOverrideCapabilityTests
         using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
         JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
         Assert.Equal(
-            new[] { "hookEventName", "permissionDecision", "updatedInput" },
+            ExpectedAllowDocumentKeys,
             output.EnumerateObject().Select(property => property.Name));
     }
 
