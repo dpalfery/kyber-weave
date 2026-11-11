@@ -25,6 +25,11 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// <summary>Prints the class and the decision id. Exits 2 on a usage error, and 1 when the document or the configured provider cannot be used.</summary>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
+        if (settings.Body is null)
+        {
+            return UsageError("--body is required.");
+        }
+
         // The same size limit the MCP tool applies, checked before any read, provider call or ledger append.
         if (settings.Body.Length > ArbiterTextLimits.MaxTextChars)
         {

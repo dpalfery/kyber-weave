@@ -31,4 +31,24 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
         Assert.Equal(2, execution.Result);
         Assert.Contains("kyber-weave arbiter: error: --path is required.", execution.Output, StringComparison.Ordinal);
     }
+
+    /// <summary>A comment with no body is a usage error on one line, as the MCP tool answers it with an error.</summary>
+    [Fact]
+    public void ACommentWithoutABodyIsAUsageErrorNotAnException()
+    {
+        ArbiterCommentCommand command = new();
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new ArbiterCommentSettings
+            {
+                Root = _temp.Path,
+                Path = "docs/guide.md",
+                Line = 2,
+                Body = null!,
+            }));
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("kyber-weave arbiter: error: --body is required.", execution.Output, StringComparison.Ordinal);
+    }
 }
