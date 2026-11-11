@@ -166,6 +166,41 @@ public sealed class ModelTargetResolverInputTests : IDisposable
         Assert.Equal("unknown-mode", block.Reason);
     }
 
+    // A blank caller model names nothing, so the Arbiter may still choose the model.
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public async Task BlankCallerModel_CountsAsNoCallerModel_AndDelivers(string model)
+    {
+        WriteTable();
+
+        ArbiterDecisionRecord record = await RunAsync(Dispatch(model: model), Config("enforce"));
+
+        ArbiterModelBlock block = BlockOf(record);
+        Assert.True(block.Delivered);
+        Assert.Null(block.Reason);
+        Assert.Equal("opus", block.Token);
+    }
+
+    // A blank table token is no token at all.
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public async Task BlankTableToken_SaysNoToken(string token)
+    {
+        WriteTable(deepToken: token);
+
+        ArbiterDecisionRecord record = await RunAsync(Dispatch(), Config("enforce"));
+
+        ArbiterModelBlock block = BlockOf(record);
+        Assert.False(block.Delivered);
+        Assert.Equal("no-token", block.Reason);
+    }
+
     [Fact]
     public async Task ModeShadow_StillSaysShadowNotUnknownMode()
     {

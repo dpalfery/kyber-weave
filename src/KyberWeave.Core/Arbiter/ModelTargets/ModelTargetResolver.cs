@@ -124,7 +124,7 @@ internal static class ModelTargetResolver
     /// <summary>The first step that holds, in the contract's order; null when the dispatch is delivered.</summary>
     private static string? ReasonFor(ArbiterEvent ev, ArbiterModelTargets? table, string? token, string mode)
     {
-        if (ev.Model is not null)
+        if (!string.IsNullOrWhiteSpace(ev.Model))
         {
             return CallerNamedModel;
         }
@@ -134,7 +134,7 @@ internal static class ModelTargetResolver
             return ModelTargetsUnreadable;
         }
 
-        if (string.IsNullOrEmpty(token))
+        if (string.IsNullOrWhiteSpace(token))
         {
             return NoToken;
         }
