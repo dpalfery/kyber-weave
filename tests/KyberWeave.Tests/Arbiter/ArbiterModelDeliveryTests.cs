@@ -106,7 +106,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         TextWriter.Null,
         ModelOverride: ClaudeOverride);
 
-    private void WriteTable(string deepToken = "t-deep")
+    private void WriteTable(string deepToken = "opus")
     {
         Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
@@ -116,13 +116,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             "b",
             new Dictionary<string, string?>(StringComparer.Ordinal)
             {
-                ["fast"] = "t-fast",
-                ["general"] = "t-general",
+                ["fast"] = "haiku",
+                ["general"] = "sonnet",
                 ["deep-planning"] = deepToken,
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
-                ["csharp-dev"] = new("general", "t-general"),
+                ["csharp-dev"] = new("general", "sonnet"),
             });
         File.WriteAllText(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
@@ -152,7 +152,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         HookOutcome outcome = Decide(new HardProvider(), "enforce");
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
-        Assert.Equal("t-deep", outcome.ModelToken);
+        Assert.Equal("opus", outcome.ModelToken);
     }
 
     [Fact]

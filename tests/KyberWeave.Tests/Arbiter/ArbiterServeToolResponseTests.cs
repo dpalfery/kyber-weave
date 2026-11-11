@@ -255,7 +255,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("retarget", response, StringComparison.Ordinal);
         // The advisory names the profile it would move to and the token that profile resolves to.
         Assert.Contains("deep-planning", response, StringComparison.Ordinal);
-        Assert.Contains("t-deep", response, StringComparison.Ordinal);
+        Assert.Contains("opus", response, StringComparison.Ordinal);
 
         // The same serve call with model-targeting off writes the same ledger events.
         CreateRetargetTools(baseline.Path, "off").Evaluate("delegate", RetargetFacts());
@@ -280,9 +280,9 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             "b",
             new Dictionary<string, string?>(StringComparer.Ordinal)
             {
-                ["fast"] = "t-fast",
-                ["general"] = "t-general",
-                ["deep-planning"] = "t-deep",
+                ["fast"] = "haiku",
+                ["general"] = "sonnet",
+                ["deep-planning"] = "opus",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
         File.WriteAllText(Path.Combine(directory, "model-targets.serve.json"), JsonSerializer.Serialize(table));

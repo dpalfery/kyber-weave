@@ -160,10 +160,10 @@ public sealed class ModelTargetResolverTests : IDisposable
         Assert.IsType<ArbiterModelBlock>(record.Model);
 
     private void WriteTable(
-        string? generalToken = "t-general",
+        string? generalToken = "sonnet",
         bool includeAgent = true,
         string harness = Harness,
-        string? deepToken = "t-deep")
+        string? deepToken = "opus")
     {
         Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
@@ -173,7 +173,7 @@ public sealed class ModelTargetResolverTests : IDisposable
             "b",
             new Dictionary<string, string?>(StringComparer.Ordinal)
             {
-                ["fast"] = "t-fast",
+                ["fast"] = "haiku",
                 ["general"] = generalToken,
                 ["deep-planning"] = deepToken,
             },
@@ -349,9 +349,9 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task TokenAlreadyRendered_SaysSameAsRendered()
     {
-        WriteTable(generalToken: "t-deep");
+        WriteTable(generalToken: "opus");
 
-        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: "t-deep"));
+        (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: "opus"));
 
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
@@ -361,9 +361,9 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task RenderedToken_ComesFromTheTargetAgentsTableEntry_AndEqualTokenSaysSameAsRendered()
     {
-        // The table gives csharp-dev the t-deep token, and the hard retarget also lands on t-deep. Nothing
+        // The table gives csharp-dev the opus token, and the hard retarget also lands on opus. Nothing
         // in the caller supplies the rendered token, so the pre event and the resolver must read it from the table.
-        WriteTable(generalToken: "t-deep");
+        WriteTable(generalToken: "opus");
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
 
@@ -386,7 +386,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         Assert.False(block.Delivered);
         Assert.Equal("unsupported-harness", block.Reason);
         Assert.Equal("deep-planning", block.Profile);
-        Assert.Equal("t-deep", block.Token);
+        Assert.Equal("opus", block.Token);
     }
 
     // 8. Mode shadow -> shadow; otherwise the result carries the token to deliver.
@@ -413,7 +413,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         ArbiterModelBlock block = BlockOf(record);
         Assert.True(block.Delivered);
         Assert.Null(block.Reason);
-        Assert.Equal("t-deep", block.Token);
+        Assert.Equal("opus", block.Token);
         Assert.Equal(Model, block.RenderedToken);
     }
 
@@ -428,7 +428,7 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         ArbiterModelBlock block = BlockOf(record);
         Assert.Equal("deep-planning", block.Profile);
-        Assert.Equal("t-deep", block.Token);
+        Assert.Equal("opus", block.Token);
         Assert.Equal(Model, block.RenderedToken);
         Assert.Equal("difficulty", block.Source);
         Assert.True(block.Delivered);
@@ -479,6 +479,6 @@ public sealed class ModelTargetResolverTests : IDisposable
 
         ArbiterSecondaryEvaluation secondary = Assert.Single(result.Secondary, s => s.Trigger == "delegate.model");
         Assert.NotNull(secondary.Payload);
-        Assert.Contains("t-deep", secondary.Payload, StringComparison.Ordinal);
+        Assert.Contains("opus", secondary.Payload, StringComparison.Ordinal);
     }
 }
