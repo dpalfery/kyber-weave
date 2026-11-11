@@ -1,5 +1,4 @@
 using KyberWeave.Core.Arbiter.Facts;
-using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -24,10 +23,4 @@ internal static class SecondaryTriggers
         ArgumentNullException.ThrowIfNull(ev);
         return [];
     }
-
-    /// <summary>
-    /// The effect a secondary rule contributes while it cannot gate: a shadow rule, or a rule whose
-    /// primary did not allow. Every secondary family shares the neutral <c>keep</c>.
-    /// </summary>
-    public static string NeutralEffect() => RuleEffects.Keep;
 }

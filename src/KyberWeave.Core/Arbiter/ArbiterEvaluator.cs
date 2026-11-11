@@ -529,7 +529,7 @@ public sealed class ArbiterEvaluator
         Stopwatch elapsed,
         CancellationToken cancellationToken)
     {
-        string neutral = SecondaryTriggers.NeutralEffect();
+        string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
         bool primaryAllows = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal);
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
         List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
