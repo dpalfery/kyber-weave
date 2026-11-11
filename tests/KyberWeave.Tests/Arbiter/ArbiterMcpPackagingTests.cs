@@ -16,7 +16,7 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 17.1: <c>kyber-weave-arbiter serve</c> is a stdio MCP server for the
-/// D4 fallback. It declares three tools with routing descriptions, leads every response
+/// D4 fallback. It declares five tools with routing descriptions, leads every response
 /// with the provenance line, resolves its root as flag, then environment, then working
 /// directory, answers <c>arbiter_evaluate_agent_dispatch_or_return</c> with the hook's own outcome for the same
 /// event, and never reports the key. Stdout belongs to the transport.
@@ -153,7 +153,7 @@ public sealed class ArbiterMcpPackagingTests
     }
 
     [Fact]
-    public void TheServeSurfaceDeclaresExactlyTheThreeArbiterTools()
+    public void TheServeSurfaceDeclaresExactlyTheFiveArbiterTools()
     {
         string[] names = typeof(ArbiterTools)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
@@ -163,7 +163,15 @@ public sealed class ArbiterMcpPackagingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(["arbiter_check_configuration_and_key_readiness", "arbiter_evaluate_agent_dispatch_or_return", "arbiter_list_effective_rules_by_trigger"], names);
+        Assert.Equal(
+            [
+                "arbiter_check_configuration_and_key_readiness",
+                "arbiter_classify_bot_review_comment",
+                "arbiter_evaluate_agent_dispatch_or_return",
+                "arbiter_list_effective_rules_by_trigger",
+                "arbiter_select_relevant_document_sections",
+            ],
+            names);
     }
 
     [Theory]

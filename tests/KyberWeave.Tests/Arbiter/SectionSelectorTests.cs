@@ -21,7 +21,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class SectionSelectorTests : IDisposable
 {
-    private const string TrimRule = "KW-ARB-TRIM-001";
     private const string Relevant = "relevant";
     private const string NotRelevant = "not-relevant";
 

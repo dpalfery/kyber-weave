@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
@@ -57,7 +58,9 @@ public sealed class FileTextFactsTests : IDisposable
 
         FileExcerpt excerpt = Assert.IsType<FileExcerpt>(FileTextFacts.ReadExcerpt(Root, path, 2));
 
-        Assert.True(excerpt.Text.Length <= FileTextFacts.MaxExcerptCharacters, excerpt.Text.Length.ToString());
+        Assert.True(
+            excerpt.Text.Length <= FileTextFacts.MaxExcerptCharacters,
+            excerpt.Text.Length.ToString(CultureInfo.InvariantCulture));
         Assert.True(excerpt.Truncated);
     }
 

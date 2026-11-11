@@ -60,7 +60,7 @@ public sealed class ArbiterConfigTests
         Assert.Equal("https://api.typesafe.ai/v1", config.Provider.Endpoint);
         Assert.Equal("jev-1.14.0", config.Provider.Model);
         Assert.Equal(3000, config.Provider.TimeoutMs);
-        // 30 shipped rule ids; ROSTER-001 runs on two triggers, so it appears twice.
+        // 32 shipped rule ids; ROSTER-001 runs on two triggers, so it appears twice.
         Assert.Equal(ExpectedRuleIds, config.Rules.Select(rule => rule.Id).Distinct());
         Assert.Equal(ExpectedRuleIds.Length + 1, config.Rules.Count);
         Assert.All(config.Rules, rule => Assert.True(rule.Enabled));
