@@ -456,3 +456,115 @@ describe('Population Rate Monitoring (Plan §6)', () => {
     expect(report.populationRate).toBe(0)
   })
 })
+
+describe('deriveOutcome memory bound', () => {
+  const RECORD_COUNT = 200
+
+  /** Counts parts values inflated and not yet released. */
+  type LiveCounter = { live: number; peak: number }
+
+  /**
+   * Gives a record a lazy field with the `defineLazy` contract: the first read
+   * inflates and caches, and assigning `undefined` releases. Each inflation
+   * counts toward `counter` when one is given.
+   */
+  function lazyField(
+    record: CanonicalRecord,
+    key: 'parts' | 'content',
+    counter: LiveCounter | undefined,
+  ): void {
+    const source: unknown = record[key]
+    let value: unknown
+    let inflated = false
+    const adjust = (delta: number): void => {
+      if (counter === undefined) return
+      counter.live += delta
+      counter.peak = Math.max(counter.peak, counter.live)
+    }
+    Object.defineProperty(record, key, {
+      enumerable: true,
+      configurable: true,
+      get(): unknown {
+        if (!inflated) {
+          value = source
+          inflated = true
+          adjust(1)
+        }
+        return value
+      },
+      set(next: unknown): void {
+        if (inflated) adjust(-1)
+        value = next
+        inflated = next !== undefined
+        if (inflated) adjust(1)
+      },
+    })
+  }
+
+  function instrumented(plain: CanonicalRecord, counter: LiveCounter | undefined): CanonicalRecord {
+    const record: CanonicalRecord = { ...plain }
+    lazyField(record, 'parts', counter)
+    lazyField(record, 'content', undefined)
+    return record
+  }
+
+  /** Plain records covering each outcome channel, at a count that would overflow a live cache. */
+  function corpus(): CanonicalRecord[] {
+    return Array.from({ length: RECORD_COUNT }, (_, index) => {
+      const over: Partial<CanonicalRecord> = {
+        sessionId: 'sess-mem',
+        timestamp: new Date(Date.UTC(2026, 8, 5, 10, 0, index)).toISOString(),
+      }
+      if (index === 3) over.status = 'error'
+      if (index === 40) {
+        over.parts = [{ part: 'conversation_history', text: 'No, that is not right.' }]
+      }
+      if (index === 120) {
+        over.parts = [{ part: 'tool_result_content', text: 'Tests: 9 passed, 1 failed, 10 total' }]
+      }
+      if (index === RECORD_COUNT - 1) {
+        over.parts = [{ part: 'tool_result_content', text: 'Tests: 10 passed, 10 total' }]
+        over.raw = { exitCode: 0 }
+      }
+      return makeRecord(`span-mem-${index}`, over)
+    })
+  }
+
+  /**
+   * The records as a generator, each instrumented. The cast is the parameter
+   * type deriveOutcome has today; it comes off once deriveOutcome takes an
+   * iterable.
+   */
+  function* streamOf(records: readonly CanonicalRecord[], counter: LiveCounter): Generator<CanonicalRecord> {
+    for (const record of records) yield instrumented(record, counter)
+  }
+
+  it('holds at most one inflated parts value live at a time', () => {
+    const counter: LiveCounter = { live: 0, peak: 0 }
+
+    deriveOutcome(corpus().map((record) => instrumented(record, counter)))
+
+    expect(counter.peak, 'peak live inflated parts').toBeLessThanOrEqual(1)
+  })
+
+  it('releases every inflated parts value before deriveOutcome returns', () => {
+    const counter: LiveCounter = { live: 0, peak: 0 }
+
+    deriveOutcome(corpus().map((record) => instrumented(record, counter)))
+
+    expect(counter.live, 'parts still live after deriveOutcome returned').toBe(0)
+  })
+
+  it('accepts a generator and returns the block the eager records produce', () => {
+    const counter: LiveCounter = { live: 0, peak: 0 }
+
+    const streamed = deriveOutcome(streamOf(corpus(), counter) as unknown as readonly CanonicalRecord[])
+    const eager = deriveOutcome(corpus())
+
+    expect(streamed).toEqual(eager)
+    expect(eager.errors.count, 'the fixture carries an error channel').toBeGreaterThan(0)
+    expect(eager.userCorrections.count, 'the fixture carries a correction').toBeGreaterThan(0)
+    expect(eager.testDeltas.availability, 'the fixture carries test results').toBe('measured')
+    expect(eager.termination.exitCode).toBe(0)
+  })
+})

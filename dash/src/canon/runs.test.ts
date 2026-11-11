@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { deriveOutcome } from './outcome.js'
 import { buildRuns, deriveRunIdentity, linkExecutions, type ExecutionCandidate } from './runs.js'
 import { CanonStore, SCHEMA_VERSION } from './store.js'
 import type { CanonicalRecord, TokenUsage } from './types.js'
@@ -776,6 +777,129 @@ describe('buildRuns turn evidence — malformed counters and content', () => {
     const report = await buildRuns(store)
 
     expect(report.runsBuilt).toBe(0)
+    store.close()
+  })
+})
+
+describe('buildRuns streams outcome records', () => {
+  const SESSION = 'sess-stream-1'
+  const RECORD_COUNT = 200
+
+  /** Counts parts values inflated and not yet released. */
+  type LiveCounter = { live: number; peak: number }
+
+  /** Plain records for one session, with an error, a correction, test results and an exit code. */
+  function sessionRecords(): CanonicalRecord[] {
+    return Array.from({ length: RECORD_COUNT }, (_, index) => {
+      const over: Partial<CanonicalRecord> = {
+        sessionId: SESSION,
+        harness: 'antigravity',
+        timestamp: new Date(Date.UTC(2026, 8, 3, 10, 0, index)).toISOString(),
+      }
+      if (index === 3) over.status = 'error'
+      if (index === 40) {
+        over.parts = [{ part: 'conversation_history', text: 'No, that is not right.' }]
+      }
+      if (index === 120) {
+        over.parts = [{ part: 'tool_result_content', text: 'Tests: 9 passed, 1 failed, 10 total' }]
+      }
+      if (index === RECORD_COUNT - 1) {
+        over.parts = [{ part: 'tool_result_content', text: 'Tests: 10 passed, 10 total' }]
+        over.raw = { exitCode: 0 }
+      }
+      return makeRecord(`span-stream-${index}`, over)
+    })
+  }
+
+  /** Gives a record a lazy `parts` with the `defineLazy` contract, counted in `counter`. */
+  function instrumented(plain: CanonicalRecord, counter: LiveCounter): CanonicalRecord {
+    const record: CanonicalRecord = { ...plain }
+    const source = plain.parts
+    let value: CanonicalRecord['parts']
+    let inflated = false
+    const adjust = (delta: number): void => {
+      counter.live += delta
+      counter.peak = Math.max(counter.peak, counter.live)
+    }
+    Object.defineProperty(record, 'parts', {
+      enumerable: true,
+      configurable: true,
+      get(): CanonicalRecord['parts'] {
+        if (!inflated) {
+          value = source
+          inflated = true
+          adjust(1)
+        }
+        return value
+      },
+      set(next: CanonicalRecord['parts']): void {
+        if (inflated) adjust(-1)
+        value = next
+        inflated = next !== undefined
+        if (inflated) adjust(1)
+      },
+    })
+    return record
+  }
+
+  /**
+   * An in-memory store whose record streams yield instrumented copies of the
+   * seeded session. The seeded rows also sit in the store, so the session keys
+   * and the run tables come from the real store.
+   */
+  class StreamingStore extends CanonStore {
+    constructor(
+      private readonly seeded: readonly CanonicalRecord[],
+      private readonly counter: LiveCounter,
+    ) {
+      super(':memory:')
+    }
+
+    *iterateRecordsForSession(key: string): Generator<CanonicalRecord> {
+      for (const record of this.seeded) {
+        if (record.sessionId === key) yield instrumented(record, this.counter)
+      }
+    }
+
+    *iterateRecordsForShare(key: string, harness: string): Generator<CanonicalRecord> {
+      for (const record of this.iterateRecordsForSession(key)) {
+        if (record.harness === harness) yield record
+      }
+    }
+
+    override recordsForSession(key: string): CanonicalRecord[] {
+      return [...this.iterateRecordsForSession(key)]
+    }
+  }
+
+  it('exposes streaming accessors for sessions and shares on CanonStore', () => {
+    const prototype = CanonStore.prototype as unknown as Record<string, unknown>
+
+    expect(typeof prototype['iterateRecordsForSession']).toBe('function')
+    expect(typeof prototype['iterateRecordsForShare']).toBe('function')
+  })
+
+  it('holds at most one inflated parts value live during the run phase', async () => {
+    const counter: LiveCounter = { live: 0, peak: 0 }
+    const store = new StreamingStore(sessionRecords(), counter)
+    store.upsertMany(sessionRecords())
+
+    await buildRuns(store)
+
+    expect(counter.peak, 'peak live inflated parts during buildRuns').toBeLessThanOrEqual(1)
+    store.close()
+  })
+
+  it('stores the run outcome deriveOutcome gives for the same records as an array', async () => {
+    const counter: LiveCounter = { live: 0, peak: 0 }
+    const store = new StreamingStore(sessionRecords(), counter)
+    store.upsertMany(sessionRecords())
+
+    await buildRuns(store)
+
+    const runs = store.listRuns()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.outcome).toEqual(deriveOutcome(sessionRecords()))
     store.close()
   })
 })
