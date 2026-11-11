@@ -577,6 +577,10 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         await evaluator.EvaluateAsync(DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 
         ArbiterDecisionRecord docs = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == DocsImpactTrigger);
+        // The digest only means "shortcut" when the rule itself answered: not when the question was kept and escalated.
+        ArbiterDecisionRule answered = Assert.Single(docs.Rules, rule => rule.Id == DocsImpactRule);
+        Assert.Equal(NoDocChange, answered.Answer);
+        Assert.Equal(Answered, answered.Effect);
         string expected = string.Join(
             "\n",
             $"DOCS_REVIEW: no doc change with justification — Arbiter shortcut (decision {docs.Id})",

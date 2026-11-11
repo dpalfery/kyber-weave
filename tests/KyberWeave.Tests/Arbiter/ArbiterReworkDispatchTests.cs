@@ -98,9 +98,22 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
-    /// <summary>The rules every rework test enforces: the primary delegate rule, the model-targeting rule and the failure rule.</summary>
+    /// <summary>
+    /// The rules every rework test enforces: the primary delegate rule, the model-targeting rule and the failure rule.
+    /// Model targeting is set to <c>enforce</c> because the shipped mode is <c>shadow</c>, which forces
+    /// <c>KW-ARB-DIFFICULTY-001</c> to keep the worker's model rather than retarget it.
+    /// </summary>
     private static KyberWeaveConfig ReworkConfig() =>
-        ConfigWith([Enforced(PlanReadRule), Enforced(ModelRule), Enforced(FailureRule)]);
+        new()
+        {
+            Arbiter = new ArbiterConfig
+            {
+                Enabled = true,
+                Rules = [Enforced(PlanReadRule), Enforced(ModelRule), Enforced(FailureRule)],
+                ModelTargeting = ArbiterModelTargetingConfig.Defaults with { Mode = "enforce" },
+            },
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
