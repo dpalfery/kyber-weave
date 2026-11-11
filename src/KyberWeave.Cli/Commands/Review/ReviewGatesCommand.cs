@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -428,7 +429,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             Severity.Warning,
             $"The CodeGraph index for '{root}' could not be prepared ({IndexReason(index)}), so the gates run anyway.",
             "review.gates",
-            Hint: $"kyber-weave doctor --ensure {root}"));
+            Hint: $"kyber-weave doctor --ensure {ShellQuote.Quote(root)}"));
     }
 
     private static string IndexReason(WorktreeIndexOutcome index) =>

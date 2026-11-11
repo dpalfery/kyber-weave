@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -438,8 +439,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             $"the CodeGraph index for '{tree}' is not usable ({IndexReason(index)}), so the run stops here. " +
             $"The branch '{branch}' is in place.";
         string remedy =
-            $"run 'kyber-weave doctor --ensure {tree}' to repair the index. The branch needs no second " +
-            "run start: once that command passes, the run continues in that tree.";
+            $"repair the index with: kyber-weave doctor --ensure {ShellQuote.Quote(tree)} (the branch needs no " +
+            "second run start: once that command passes, the run continues in that tree).";
 
         if (json)
         {
@@ -457,7 +458,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     {
         string warning =
             $"the CodeGraph index for '{tree}' could not be prepared ({IndexReason(index)}), so the run continues " +
-            $"without it. Repair it with 'kyber-weave doctor --ensure {tree}'.";
+            $"without it. Repair it with: kyber-weave doctor --ensure {ShellQuote.Quote(tree)}";
 
         if (json)
         {

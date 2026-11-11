@@ -408,7 +408,7 @@ stale entry with `git worktree prune` first.
 | `location` | `in-place` or `worktree`. |
 | `revision` | The commit the base resolved to, or `null` when it did not resolve. |
 | `resumed` | Whether this run continued an existing branch. |
-| `index` | The CodeGraph index of the tree the branch landed in: `created`, `ready` (synced), `not-governed` (no governed docs, so not checked), or `warning` (it could not be prepared and `stop-on-tool-failure` is `false`). |
+| `index` | The CodeGraph index of the tree the branch landed in: `created`, `ready` (synced), `not-governed` (no governed docs, so not checked), or `warning` (it could not be prepared and `stop-on-tool-failure` is `false`). A missing `codegraph` binary never reaches this key: the run has already ended with exit `3`. |
 | `versions.failing` | `--failing-version` as given, or `null`. |
 | `versions.head` | The nearest tag at `HEAD`, else its abbreviated commit. |
 | `versions.base` | The nearest tag at the base ref, else its abbreviated commit. |
