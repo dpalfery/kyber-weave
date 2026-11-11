@@ -46,6 +46,18 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     /// </summary>
     public const string ModelTargetsMissing = "KW-ARB-MODEL-001";
 
+    /// <summary>
+    /// The project enables Arbiter, and an installed harness is ungated for it: no project hook gates its
+    /// dispatches and no live user-level hook does. The finding names the harness and carries its fix.
+    /// </summary>
+    public const string ProjectUngated = "KW-ARB-PROJECT-001";
+
+    /// <summary>
+    /// The global Squad receipt holds an Arbiter hook for a harness that <c>arbiter.global.targets</c> does
+    /// not list, so <c>kyber-weave update</c> never refreshes that hook.
+    /// </summary>
+    public const string GlobalUnlisted = "KW-ARB-GLOBAL-001";
+
     private const string ModelTargetingOff = "off";
     private const string EnforcedGlobal = "enforced-global";
     private const string SquadUpdateHint = "Run kyber-weave squad update to rewrite the model targets.";
@@ -70,12 +82,13 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
         string home = ArbiterCommandComposition.HomeDirectory();
         IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
-        bool projectEnabled = config.Arbiter.Enabled;
+        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        HarnessGatingReport gating = ArbiterHarnessGating.Build(root, home, config, globalTargets);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Arbiter Doctor[/]");
         AnsiConsole.WriteLine();
         WriteGlobalScope(globalTargets);
-        WriteProjectScope(projectEnabled, globalTargets.Count > 0);
+        WriteProjectScope(gating, config.Arbiter.Enabled);
 
         report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
         report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
@@ -83,7 +96,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckLogIgnored(settings, report);
         CheckBinary(report);
         CheckGuard(config, settings, report);
-        CheckProjectHooks(settings.Path, projectEnabled, report);
+        CheckProjectHooks(gating, report);
         CheckModelTargets(config, home, globalTargets, report);
         CheckAdvisoryPostDispatchTargets();
     }
@@ -185,23 +198,15 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         }
     }
 
-    private static void WriteProjectScope(bool enabled, bool projectOverridesGlobal)
+    private static void WriteProjectScope(HarnessGatingReport gating, bool enabled)
     {
         AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
         if (enabled)
         {
-            AnsiConsole.MarkupLine("  project overrides global");
             AnsiConsole.MarkupLine("  arbiter.enabled: true");
-            return;
         }
 
-        if (projectOverridesGlobal)
-        {
-            AnsiConsole.MarkupLine("  project does not override global");
-            return;
-        }
-
-        AnsiConsole.MarkupLine("  no project override");
+        ArbiterHarnessGating.WriteRows(gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)
@@ -243,64 +248,39 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         };
     }
 
-    private static void CheckProjectHooks(string? projectRoot, bool enabled, DiagnosticReport report)
+    /// <summary>
+    /// Raises one <see cref="ProjectUngated"/> warning per ungated harness, and one
+    /// <see cref="GlobalUnlisted"/> warning per harness the global receipt holds a hook for but the global
+    /// targets do not list. Each finding prints its line here and is recorded for the report.
+    /// </summary>
+    private static void CheckProjectHooks(HarnessGatingReport gating, DiagnosticReport report)
     {
-        if (!enabled)
+        foreach (HarnessGatingRow row in gating.Rows.Where(row => row.Ungated))
         {
-            return;
+            string label = TargetDisplayName(row.Token);
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] [bold]{ProjectUngated}[/]: {Markup.Escape(label)} is ungated; run {Markup.Escape(row.FixCommand ?? string.Empty)}.");
+            report.Add(new Diagnostic(
+                ProjectUngated,
+                Severity.Warning,
+                $"Project enables Arbiter, and {label} is ungated: no project hook and no live global hook gates its dispatches.",
+                "arbiter.enabled",
+                Hint: row.FixCommand));
         }
 
-        if (string.IsNullOrWhiteSpace(projectRoot))
+        foreach (string token in gating.UnlistedGlobalTokens)
         {
-            projectRoot = Directory.GetCurrentDirectory();
+            string label = TargetDisplayName(token);
+            string fix = $"kyber-weave arbiter install --target {token}";
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] [bold]{GlobalUnlisted}[/]: the global Squad receipt holds an Arbiter hook for {Markup.Escape(label)}, which arbiter.global.targets does not list; run {Markup.Escape(fix)}.");
+            report.Add(new Diagnostic(
+                GlobalUnlisted,
+                Severity.Warning,
+                $"The global Squad receipt holds an Arbiter hook for {label}, but {label} is not in arbiter.global.targets, so kyber-weave update never refreshes it.",
+                "arbiter.global.targets",
+                Hint: fix));
         }
-
-        if (HasProjectHooksInstalled(projectRoot))
-        {
-            AnsiConsole.MarkupLine("  [green]ok[/] Project hooks: installed.");
-            return;
-        }
-
-        AnsiConsole.MarkupLine("  [yellow]warn[/] Project [bold]arbiter.enabled: true[/]: no project hooks installed; ungated by design.");
-        report.Add(new Diagnostic(
-            "KW-ARB-PROJECT-001",
-            Severity.Warning,
-            "Project enables Arbiter but has no project hooks installed; it remains ungated by design.",
-            "arbiter.enabled",
-            Hint: "Install the project hooks for the target harnesses or set arbiter.enabled to false."));
-    }
-
-    private static bool HasProjectHooksInstalled(string projectRoot)
-    {
-        try
-        {
-            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
-                null,
-                ArbiterCommandComposition.GetEnvironmentVariable);
-            SquadReceipt? receipt = stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
-            if (receipt is not null)
-            {
-                if (receipt.Files.Any(f => f.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase))
-                    || receipt.Blocks.Any(b => b.RelativePath.Contains("arbiter", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(b.Target)))
-                {
-                    return true;
-                }
-            }
-
-            foreach (SquadTarget target in SquadTargetCatalog.All)
-            {
-                if (ArbiterUninstaller.HasDeployment(projectRoot, target, stateStore, SquadDeploymentScope.Project))
-                {
-                    return true;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
-        {
-            return false;
-        }
-
-        return false;
     }
 
     private static void CheckKey(KyberWeaveConfig config, DiagnosticReport report)
