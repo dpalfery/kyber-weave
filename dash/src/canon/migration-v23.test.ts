@@ -157,7 +157,7 @@ function metricOver(intervalStartNanos: string): OtlpMetric {
 
 describe('schema migration v22 -> v23 (the metric point interval start)', () => {
   it('pins SCHEMA_VERSION to 23 and defines migration 22 as its own step', () => {
-    expect(SCHEMA_VERSION).toBe(23)
+    expect(SCHEMA_VERSION).toBe(24)
     expect(MIGRATIONS[22]).toBeTypeOf('function')
   })
 
@@ -167,7 +167,7 @@ describe('schema migration v22 -> v23 (the metric point interval start)', () => 
     const path = join(dir, 'canon.db')
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
 
       const cols = tableInfo(path, 'metric_point')
       const colMap = new Map(cols.map((c) => [c.name, c]))
@@ -191,7 +191,7 @@ describe('schema migration v22 -> v23 (the metric point interval start)', () => 
 
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
       expect(
         tableInfo(path, 'metric_point').map((c) => c.name),
         'the migration must add the interval column to an existing store',
@@ -238,7 +238,7 @@ describe('schema migration v22 -> v23 (the metric point interval start)', () => 
 
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
       const cols = tableInfo(path, 'metric_point').map((c) => c.name)
       expect(cols.filter((name) => name === 'start_time_unix_nano')).toHaveLength(1)
     } finally {

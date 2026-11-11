@@ -6,8 +6,8 @@ import { SOURCE_STATE_SQL } from './source-state.js'
 import { REFRESH_RUN_SQL } from './refresh-run.js'
 import { compressColumn, type CompressedColumn } from './compressed-column.js'
 import { parseJsonObject, turnObjectOf } from './session-read.js'
-import { DETECTOR_VERSION, SESSION_TURN_TABLE_SQL, createSessionDenormIndex } from './store-schema.js'
-import { sessionSummaryOf } from './store-rows.js'
+import { DETECTOR_VERSION, RECORDS_WRITE_MARKER_KEY, SESSION_TURN_TABLE_SQL, createSessionDenormIndex } from './store-schema.js'
+import { decompressRaw, sessionSummaryOf } from './store-rows.js'
 type StatementSync = import('node:sqlite').StatementSync
 type Database = import('node:sqlite').DatabaseSync
 
@@ -510,6 +510,138 @@ export const MIGRATIONS: Record<
       db.exec('ALTER TABLE metric_point ADD COLUMN start_time_unix_nano TEXT')
     }
   },
+  // v23 -> v24: duplicate model-call records.
+  //
+  // A refresh re-minted a hash-backed model-call record under a new id whenever
+  // its window start moved, so one call sat in the store as one copy per
+  // import. Each copy's provenance row names the import that wrote it. The
+  // step keeps every row of the latest import of a call and deletes the
+  // hash-backed rows of older imports, with their tool children and
+  // provenance. It yields between groups when it is given a seam, and runs one
+  // pass otherwise; both do the same work, and a second run finds nothing.
+  23: (db: Database, options?: MigrationOptions): void | Promise<void> => {
+    if (options?.yield === undefined) {
+      const groups = duplicateCallGroups(db)
+      let deleted = 0
+      for (const group of groups) deleted += repairDuplicateGroup(db, group)
+      if (deleted > 0) bumpMarker(db)
+      return
+    }
+    return runYieldingDuplicateRepair(db, options.yield)
+  },
+}
+
+/** One call that sits in the store under several imports. */
+type DuplicateCallGroup = {
+  harness: string
+  sessionId: string | null
+  timestamp: string
+  name: string
+}
+
+/** The groups of model calls that more than one import wrote. */
+function duplicateCallGroups(db: Database): DuplicateCallGroup[] {
+  // A store this old has no provenance table yet, so it has no copies to repair.
+  const hasTables = db
+    .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('records', 'record_provenance')")
+    .get() as { n: number }
+  if (hasTables.n < 2) return []
+  const rows = db
+    .prepare(
+      `SELECT r.harness AS harness, r.session_id AS session_id, r.timestamp AS timestamp, r.name AS name
+         FROM records r JOIN record_provenance p ON p.span_id = r.span_id
+        WHERE r.source LIKE 'codeburn/%' AND r.op = 'llm.invoke'
+        GROUP BY r.harness, r.session_id, r.timestamp, r.name
+       HAVING COUNT(DISTINCT p.imported_at_utc) > 1`,
+    )
+    .all() as { harness: string; session_id: string | null; timestamp: string; name: string }[]
+  return rows.map((row) => ({
+    harness: row.harness,
+    sessionId: row.session_id,
+    timestamp: row.timestamp,
+    name: row.name,
+  }))
+}
+
+/** True when a records row's raw payload carries `provenance.recordDigest`. */
+export function hasRecordDigest(raw: unknown): boolean {
+  if (!(raw instanceof Uint8Array)) return false
+  const payload = decompressRaw(raw)
+  if (typeof payload !== 'object' || payload === null) return false
+  const provenance = (payload as { provenance?: unknown }).provenance
+  if (typeof provenance !== 'object' || provenance === null) return false
+  const digest = (provenance as { recordDigest?: unknown }).recordDigest
+  return typeof digest === 'string' && digest !== ''
+}
+
+/**
+ * Delete model-call spans, their tool children and the provenance of all of
+ * them. A child is a `tool.invoke` row whose parent is one of the spans, in
+ * the parent's trace (the trace index keeps the lookup off a table scan).
+ */
+export function deleteSupersededSpans(db: Database, spans: readonly { spanId: string; traceId: string }[]): void {
+  const findChildren = db.prepare(
+    "SELECT span_id FROM records WHERE trace_id = ? AND parent_span_id = ? AND op = 'tool.invoke'",
+  )
+  const deleteRecord = db.prepare('DELETE FROM records WHERE span_id = ?')
+  const deleteProvenance = db.prepare('DELETE FROM record_provenance WHERE span_id = ?')
+  for (const span of spans) {
+    for (const child of findChildren.all(span.traceId, span.spanId) as { span_id: string }[]) {
+      deleteRecord.run(child.span_id)
+      deleteProvenance.run(child.span_id)
+    }
+    deleteRecord.run(span.spanId)
+    deleteProvenance.run(span.spanId)
+  }
+}
+
+/** Delete the older hash-backed copies of one group; returns how many calls went. */
+function repairDuplicateGroup(db: Database, group: DuplicateCallGroup): number {
+  const rows = db
+    .prepare(
+      `SELECT r.span_id AS span_id, r.trace_id AS trace_id, r.raw AS raw, p.imported_at_utc AS imported
+         FROM records r JOIN record_provenance p ON p.span_id = r.span_id
+        WHERE r.harness = ? AND r.session_id IS ? AND r.timestamp = ? AND r.name = ?
+          AND r.source LIKE 'codeburn/%' AND r.op = 'llm.invoke'`,
+    )
+    .all(group.harness, group.sessionId, group.timestamp, group.name) as {
+    span_id: string
+    trace_id: string
+    raw: unknown
+    imported: string
+  }[]
+  let latest = ''
+  for (const row of rows) if (row.imported > latest) latest = row.imported
+  const doomed = rows
+    .filter((row) => row.imported < latest && hasRecordDigest(row.raw))
+    .map((row) => ({ spanId: row.span_id, traceId: row.trace_id }))
+  deleteSupersededSpans(db, doomed)
+  return doomed.length
+}
+
+/** Advance the records write marker, as `CanonStore.bumpRecordsWriteMarker` does. */
+function bumpMarker(db: Database): void {
+  const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get(RECORDS_WRITE_MARKER_KEY) as
+    | { value: string }
+    | undefined
+  const current = row === undefined ? 0 : Number(row.value)
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run(
+    RECORDS_WRITE_MARKER_KEY,
+    String((Number.isFinite(current) ? current : 0) + 1),
+  )
+}
+
+/**
+ * The v23 -> v24 repair as the yielding open path runs it: the same work,
+ * handing the event loop back between groups.
+ */
+export async function runYieldingDuplicateRepair(db: Database, yieldToLoop: MigrationYield): Promise<void> {
+  let deleted = 0
+  for (const group of duplicateCallGroups(db)) {
+    deleted += repairDuplicateGroup(db, group)
+    await yieldToLoop()
+  }
+  if (deleted > 0) bumpMarker(db)
 }
 
 /**
