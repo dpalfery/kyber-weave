@@ -315,7 +315,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             provider.Asked);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
-        Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-old", record.Id), DuplicateLineOf(record));
+        Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-old decision={record.Id}", DuplicateLineOf(record));
     }
 
     /// <summary>
@@ -337,7 +337,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         Assert.Equal(1, provider.CallCount);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
-        Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-b", record.Id), DuplicateLineOf(record));
+        Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-b decision={record.Id}", DuplicateLineOf(record));
     }
 
     /// <summary>A finding from another review run is never compared, even when it matches exactly.</summary>
@@ -424,7 +424,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
-        Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-1", record.Id), DuplicateLineOf(record));
+        Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-1 decision={record.Id}", DuplicateLineOf(record));
     }
 
     /// <summary>
