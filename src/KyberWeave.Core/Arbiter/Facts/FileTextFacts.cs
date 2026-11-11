@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -26,6 +27,13 @@ public static class FileTextFacts
 
     /// <summary>Lines read on each side of the cited line.</summary>
     private const int Radius = 10;
+
+    /// <summary>
+    /// The most characters one read consumes, skipped lines and the clipped tail of a long line included. A read
+    /// past it is refused rather than finished, so one huge line costs at most this much. It is the document cap
+    /// the section selector reads by.
+    /// </summary>
+    private const long MaxConsumedCharacters = SectionSelector.MaxDocumentBytes;
 
     /// <summary>
     /// Reads the window around <paramref name="line"/> of <paramref name="path"/>.
@@ -77,10 +85,11 @@ public static class FileTextFacts
         int lineNumber = 0;
         int lastRead = 0;
         bool reachedTarget = false;
+        long budget = MaxConsumedCharacters;
 
         using FileStream stream = File.OpenRead(full);
         using StreamReader reader = new(stream, Encoding.UTF8);
-        while (lineNumber < last && ReadBoundedLine(reader, current, out bool clipped))
+        while (lineNumber < last && ReadBoundedLine(reader, current, ref budget, out bool clipped))
         {
             lineNumber++;
             if (lineNumber < first)
@@ -123,7 +132,8 @@ public static class FileTextFacts
             text.Append(piece);
         }
 
-        if (!reachedTarget)
+        // Past the budget the read is refused, not finished: the file is absent evidence, as an unreadable one is.
+        if (budget < 0 || !reachedTarget)
         {
             return null;
         }
@@ -178,9 +188,11 @@ public static class FileTextFacts
 
     /// <summary>
     /// Reads one line into <paramref name="line"/>, keeping at most <see cref="MaxLineCharacters"/> characters and
-    /// discarding the rest. Returns false at the end of the stream.
+    /// discarding the rest. Every character consumed is taken from <paramref name="budget"/>; once it is spent the
+    /// line stops and returns false, and the caller sees the negative budget and refuses the file. Returns false at
+    /// the end of the stream.
     /// </summary>
-    private static bool ReadBoundedLine(TextReader reader, StringBuilder line, out bool clipped)
+    private static bool ReadBoundedLine(TextReader reader, StringBuilder line, ref long budget, out bool clipped)
     {
         line.Clear();
         clipped = false;
@@ -191,6 +203,11 @@ public static class FileTextFacts
             if (next < 0)
             {
                 return any;
+            }
+
+            if (--budget < 0)
+            {
+                return false;
             }
 
             any = true;
