@@ -143,7 +143,7 @@ function v20StoreAt(options?: { withV21Columns?: boolean }): string {
 
 describe('schema migration v20 -> v21 (session summary materialization)', () => {
   it('pins SCHEMA_VERSION to 21 and defines migration 20 as its own step', () => {
-    expect(SCHEMA_VERSION).toBe(23)
+    expect(SCHEMA_VERSION).toBe(24)
     expect(MIGRATIONS[20]).toBeTypeOf('function')
   })
 
@@ -153,7 +153,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const path = join(dir, 'canon.db')
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
 
       const cols = tableInfo(path, 'session')
       // The v21 columns are present. Pinned as containment, not an exact
@@ -204,7 +204,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
 
       const cols = tableInfo(path, 'session')
       expect(cols.map((c) => c.name)).toEqual(
@@ -285,7 +285,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('23')
+      expect(reopened.getMetadata('schema_version')).toBe('24')
     } finally {
       reopened.close()
     }
@@ -310,7 +310,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const path = v20StoreAt({ withV21Columns: true })
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
       expect(tableInfo(path, 'session').map((c) => c.name)).toEqual(
         expect.arrayContaining(['summary_json', 'problems_count']),
       )
@@ -346,7 +346,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const store = new CanonStore(path)
     try {
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(23)
+      expect(SCHEMA_VERSION).toBe(24)
     } finally {
       store.close()
     }
@@ -491,7 +491,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
     } finally {
       store.close()
     }
@@ -576,7 +576,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('23')
+      expect(store.getMetadata('schema_version')).toBe('24')
     } finally {
       store.close()
     }
@@ -596,7 +596,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('23')
+      expect(reopened.getMetadata('schema_version')).toBe('24')
     } finally {
       reopened.close()
     }
