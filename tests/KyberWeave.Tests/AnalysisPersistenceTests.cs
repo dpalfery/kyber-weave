@@ -653,6 +653,7 @@ public sealed class AnalysisPersistenceTests
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite lock fixture.");
 
+        bool acquired = false;
         try
         {
             process.StandardInput.WriteLine(
@@ -704,6 +705,8 @@ public sealed class AnalysisPersistenceTests
                     $"sqlite lock fixture did not acquire an immediate transaction. Output: '{line}', Error: '{stderr}'.");
             }
 
+            acquired = true;
+
             beforeProbe?.Invoke(process);
 
             DateTime deadline = DateTime.UtcNow.AddSeconds(probeTimeoutSeconds);
@@ -725,29 +728,39 @@ public sealed class AnalysisPersistenceTests
         catch (Exception primaryException)
         {
             List<Exception> cleanupFailures = [];
-            try
+            if (acquired)
             {
-                // The fixture owes the child a ROLLBACK, and it can issue that write only while
-                // the child's standard input is open. Closed input leaves the rollback unissued
-                // and the immediate transaction in an unknown state, so that is a cleanup failure
-                // the caller must see. A child that exited with its input still open took the
-                // transaction with it: nothing to roll back, nothing to report.
-                if (!IsStandardInputOpen(process))
+                try
                 {
-                    cleanupFailures.Add(new IOException(
-                        "sqlite lock fixture could not issue ROLLBACK; the child's standard input was already closed, "
-                        + "so whether the immediate transaction was released is unknown."));
+                    // The fixture owes the child a ROLLBACK, and it can issue that write only while
+                    // the child's standard input is open. Closed input leaves the rollback unissued
+                    // and the immediate transaction in an unknown state, so that is a cleanup failure
+                    // the caller must see.
+                    //
+                    // Carve-out: a child that exited with its input still open (or whose broken pipe
+                    // was undetected because Flush on an empty buffer sends no bytes) took the
+                    // transaction with it: process termination releases all SQLite file locks, so
+                    // there is nothing to roll back, no lock leak, and nothing to report.
+                    if (!IsStandardInputOpen(process))
+                    {
+                        cleanupFailures.Add(new IOException(
+                            "sqlite lock fixture could not issue ROLLBACK; the child's standard input was already closed, "
+                            + "so whether the immediate transaction was released is unknown."));
+                    }
+                    else if (!process.HasExited)
+                    {
+                        process.StandardInput.WriteLine("ROLLBACK;");
+                        process.StandardInput.Close();
+                        if (!process.HasExited)
+                        {
+                            process.WaitForExit(5_000);
+                        }
+                    }
                 }
-                else if (!process.HasExited)
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
                 {
-                    process.StandardInput.WriteLine("ROLLBACK;");
-                    process.StandardInput.Close();
-                    process.WaitForExit(5_000);
+                    cleanupFailures.Add(ex);
                 }
-            }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException)
-            {
-                cleanupFailures.Add(ex);
             }
 
             try
@@ -795,6 +808,12 @@ public sealed class AnalysisPersistenceTests
     ///     writer is open and throws <see cref="ObjectDisposedException"/> once a caller has disposed
     ///     it. The buffer is empty here because the acquire path flushed every write, so the probe
     ///     sends the child nothing.
+    ///     <para>
+    ///         Because the buffer is empty, this probe does not detect a broken pipe when the child
+    ///         exits without explicit input disposal. That exited-child carve-out is handled by the
+    ///         subsequent <see cref="Process.HasExited"/> check (the exited child took its locks with it,
+    ///         leaving nothing to roll back).
+    ///     </para>
     /// </remarks>
     private static bool IsStandardInputOpen(Process process)
     {
