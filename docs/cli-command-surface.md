@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 ---
 
 # CLI command surface
@@ -547,7 +547,7 @@ and is unrelated.
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision` and `--ensure` are mutually exclusive (exit `2`). |
+| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--post-checkout`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision`, `--ensure` and `--post-checkout` are mutually exclusive (exit `2`). `--ensure` also installs, refreshes or removes the git post-checkout hook block that indexes new worktrees; `--check` and `--provision` only report it ([runbook](docgraph/mcp-runbook.md#the-worktree-index-hook)). |
 
 Mode rule:
 
@@ -566,14 +566,19 @@ Mode rule:
 - A bare run provisions only when stdin is a terminal and `CI` is unset. Otherwise it behaves
   as `--check` and prints `provisioning skipped: non-interactive; rerun with --provision`. The
   hint is suppressed with `--json`, so stdout stays valid JSON.
+- `--post-checkout [path]` is the mode the git post-checkout hook runs in the background when a
+  new worktree is checked out. People do not run it by hand. It indexes the tree with the guard
+  `--ensure` uses, skips the MCP and Copilot probes, and restores only the tracked files
+  `codegraph init` writes. It reads `worktree-index-hook` and does nothing when it is `false`.
+  The hook's details are in the [MCP runbook](docgraph/mcp-runbook.md#the-worktree-index-hook).
 
 Exit codes for `doctor` (the `kyber-weave` binary):
 
 | Exit | Meaning |
 |---|---|
-| `0` | Every check passed, or `--ensure` ran with `stop-on-tool-failure: false` and only reported failures. |
-| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, the `--ensure` explore proof still failed after its one repair, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. |
-| `2` | A client-input error: two modes at once, a non-positive timeout, a path that is not usable or not inside a git repository, or a root that is the home directory. |
+| `0` | Every check passed, or `--ensure` ran with `stop-on-tool-failure: false` and only reported failures. `--post-checkout` exits `0` when the index is ready, when the repository has no governed docs, and when `worktree-index-hook: false` is set. A hook warning (`githook.post-checkout`) never changes the exit code. |
+| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, the `--ensure` explore proof still failed after its one repair, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. Under `--post-checkout`, the index failed. |
+| `2` | A client-input error: two modes at once (`--check`, `--provision`, `--ensure` and `--post-checkout` are exclusive), a non-positive timeout, a path that is not usable or not inside a git repository, or a root that is the home directory. |
 | `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed, in any mode. |
 
 The failure output contract, the check ids, and the provisioning rules are in the

@@ -5,9 +5,10 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-11
 status: current
 decided-by:
+  - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
   - adr/0067-copilot-system-prompt-override-is-machine-wide
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0017-copilot-deterministic-tool-order
@@ -1684,7 +1685,11 @@ execution throughput, conductor does not serialize all task execution or test ru
   new worktree indexes itself with `kyber-weave doctor --ensure`, which is how a worker in that tree gets
   answers about the code it is editing; the MCP servers stay bound to the canonical checkout, so a worker
   with a shell asks its own index through `codegraph explore` rather than through the MCP tool. A shared
-  index was measured answering for another branch.
+  index was measured answering for another branch. A plain `git worktree add` is indexed by the
+  post-checkout hook ([ADR 0068](../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md))
+  on that tree's first checkout, in the background. The hook and `run start` serialise on the same index
+  lock: whichever starts first builds the index, and the other waits and only syncs. `run start` does not
+  suppress the hook for the tree it creates.
 - **Serialized branch-head integration**: Only final integration and branch-head mutations are
   serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
   recording shared index and review gate state, and running `git push` execute sequentially at the
@@ -1884,7 +1889,10 @@ What follows is why it is shaped that way
   stops the run under `stop-on-tool-failure`. `kyber-weave review gates` applies the same guard before
   any repository gate starts (`KW-REVIEW-038`), so a worktree made with a plain `git worktree add` is
   indexed when a review reaches it, and a tree that cannot be indexed is reported, not stopped: a
-  review is a read-only run.
+  review is a read-only run. A plain `git worktree add` no longer waits for a run or a review: the
+  git post-checkout hook that `doctor --ensure` installs starts the same index in the background on the
+  new tree's first checkout ([ADR 0068](../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md)).
+  It never fails the checkout, and `worktree-index-hook: false` turns it off.
 - **Reported, not assumed.** The versions the operator is working between — the failing build,
   `HEAD`, and the base — and the divergence from the server are read *before* anything is switched,
   because that is the state the defect was observed in. The run record carries them, and every later

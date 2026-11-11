@@ -2,7 +2,7 @@
 id: plans/2026-11-11-worktree-index-git-hook
 title: A git post-checkout hook that indexes every new worktree
 doc-type: plan
-status: current
+status: archived
 component: DocGraph
 owner: dpalfery
 created: 2026-11-11
@@ -15,7 +15,7 @@ impact-components: [DocGraph, KyberSquad]
 
 # A git post-checkout hook that indexes every new worktree
 
-**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/2026-11-11-worktree-index-git-hook.tasks.json`.
+**Status: Archived, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). The task file was removed at closeout; see the Completion summary.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `DocGraph` (the doctor and its runbook) and `KyberSquad` (the worktree-index rule).
@@ -243,3 +243,65 @@ T0, then T1, then T2, then T3, then T4, then T5 (which also needs T3). A straigh
 ## Verification gates and review
 
 Each developer task ends with its own `task-gate` run. The end-of-run review council reviews the whole change under the `code-review` skill. `docs-dev` closes out under T5.
+
+## Live verification
+
+T0 (measured in a scratch clone): `codegraph init .` modified no tracked file and created only the git-ignored `.codegraph/`. So `CodeGraphProvisioner.InitConfigFiles` is empty, and the hook's index run restores nothing.
+
+T4 (scratch clone, all criteria passed):
+
+- L2: `kyber-weave doctor --ensure .` installed the block between the `>>> kyber-weave worktree index >>>` and `<<< kyber-weave worktree index <<<` markers.
+- L3: `git worktree add` returned in 0.50 s. The index finished about 20 s later, in the background. The log `kyber-weave-index.log` held three PASS lines (`codegraph.binary`, `codegraph.index`, `codegraph.explore`). An edit to `README.md` made right after the add survived the run.
+- L4: `git switch -c other` started no index run.
+- Not verified: Windows.
+
+## Completion summary
+
+**Completed 2026-11-11.** Every task is delivered and the plan is archived.
+
+- **Implementation.** T1 skeleton, T2 red contract tests, and T3 green implementation. The changed production files are `PostCheckoutHook.cs` and `CodeGraphRestore.cs` (new), with `CodeGraphProvisioner.cs`, `WorktreeIndexGuard.cs`, `RepositoryDoctor.cs`, `DoctorCommand.cs`, `DoctorSettings.cs`, `KyberWeaveConfigLoader.cs`, `KyberWeaveConfig.cs` and `KyberWeaveYamlDocument.cs` changed. Six test files were added under `tests/KyberWeave.Tests/`.
+- **Tests.** 45 new tests and 64 existing doctor and index tests pass (109 in total). The Release build is clean.
+- **Live check.** T4 passed, as recorded in Live verification above.
+- **Decisions.** Each decision in the table above maps to a destination in the Closeout mapping below.
+- **Documentation.** H1 to H5 are written: ADR 0068, the runbook, the CLI reference, the configuration reference and the Squad architecture.
+- **Known limits, not fixed.** Windows is not live-verified. A fresh `git clone` is not indexed; its hooks come from the template folder, and this is out of scope.
+
+**Acceptance criteria.** H1 to H5 are in canonical documentation. The plan is archived, and its task file is removed. Both documentation gates are run after the archive move, and their results are in the closeout report.
+
+## Closeout mapping
+
+Every decision and harvest item maps to its destination. Each row states its documentation impact, impact components, last-reviewed date and archive status.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| O1 | [ADR 0068, Decision 1 and Alternatives](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) | extends-component | DocGraph, KyberSquad | 2026-11-11 | archived |
+| O2 | [ADR 0068, Decision 2](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [runbook, Modes](../../docgraph/mcp-runbook.md#the-worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| O3 | [ADR 0068, Decision 3](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [runbook, Where it lives](../../docgraph/mcp-runbook.md#the-worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| O4 | [ADR 0068, Decision 4](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [runbook, What it does](../../docgraph/mcp-runbook.md#the-worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| O5 | [ADR 0068, Decision 8](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [configuration, Worktree index hook](../../configuration.md#worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| D6 | [CLI command surface, `doctor` row and exit codes](../../cli-command-surface.md#doctor--repository-documentation-tooling); [runbook, `--post-checkout`](../../docgraph/mcp-runbook.md#the-worktree-index-hook); no ADR — ADR waiver: a public flag and its exit codes, documented in the command reference | extends-component | DocGraph | 2026-11-11 | archived |
+| D7 | [ADR 0068, Decision 6 and Alternatives](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [runbook, `--post-checkout`](../../docgraph/mcp-runbook.md#the-worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| D8 | [ADR 0068, Decisions 3 and 5](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) (never fail, narrow edit, shell rules) | extends-component | DocGraph | 2026-11-11 | archived |
+| D9 | [runbook, The check: `githook.post-checkout`](../../docgraph/mcp-runbook.md#the-worktree-index-hook); no ADR — ADR waiver: the warn-only rule is ADR 0068 Decision 2 | extends-component | DocGraph | 2026-11-11 | archived |
+| D10 | [configuration, Worktree index hook](../../configuration.md#worktree-index-hook); [ADR 0068, Decision 8](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) | extends-component | DocGraph | 2026-11-11 | archived |
+| D11 | [runbook, Where it lives](../../docgraph/mcp-runbook.md#the-worktree-index-hook); no ADR — ADR waiver: `core.hooksPath` handling follows git's own documented behaviour | extends-component | DocGraph | 2026-11-11 | archived |
+| D12 | [runbook, The log](../../docgraph/mcp-runbook.md#the-worktree-index-hook); no ADR — ADR waiver: log location is an operational detail | extends-component | DocGraph | 2026-11-11 | archived |
+| D13 | [configuration, Worktree index hook](../../configuration.md#worktree-index-hook) (cites the existing `KW-CONFIG-001`); no ADR — ADR waiver: reuses an existing rule id, adds none | extends-component | DocGraph | 2026-11-11 | archived |
+| D14 | [ADR 0068](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) itself | extends-component | DocGraph | 2026-11-11 | archived |
+| D15 | [ADR 0068, Decision 7](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); [architecture, A worktree keeps its own index](../../kyber-squad/architecture.md#concurrency-and-scheduling-model-worktree-and-artifact-isolation) | extends-component | DocGraph, KyberSquad | 2026-11-11 | archived |
+| D16 | [runbook, Windows](../../docgraph/mcp-runbook.md#the-worktree-index-hook); [ADR 0068, Consequences](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md); no ADR — ADR waiver: a platform-verification status, not a separate decision | extends-component | DocGraph | 2026-11-11 | archived |
+| D17 | Documentation waiver: test-fixture isolation (temporary repositories and redirected git configuration). No operational invariant outside the test contract survives; the contract is in this archived plan | extends-component | DocGraph | 2026-11-11 | archived |
+| D18 | [ADR 0068, Consequences](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) (version skew, rewritten in place by the next `--ensure`) | extends-component | DocGraph | 2026-11-11 | archived |
+| AP1 | Documentation waiver: owner approval record for this plan, transient, with no surviving invariant. No ADR — ADR waiver: process decision | extends-component | DocGraph | 2026-11-11 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0068](../../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) and its row in the [ADR index](../../adr/README.md) | extends-component | DocGraph | 2026-11-11 | archived |
+| H2 | [runbook, The worktree index hook](../../docgraph/mcp-runbook.md#the-worktree-index-hook), beside "The worker's first command" | extends-component | DocGraph | 2026-11-11 | archived |
+| H3 | [CLI command surface, `doctor` row and exit codes](../../cli-command-surface.md#doctor--repository-documentation-tooling) | extends-component | DocGraph | 2026-11-11 | archived |
+| H4 | [configuration, Shape and Worktree index hook](../../configuration.md#worktree-index-hook) | extends-component | DocGraph | 2026-11-11 | archived |
+| H5 | [Kyber-Squad architecture, the worktree-index passage and A worktree keeps its own index](../../kyber-squad/architecture.md#concurrency-and-scheduling-model-worktree-and-artifact-isolation) | extends-component | KyberSquad | 2026-11-11 | archived |
