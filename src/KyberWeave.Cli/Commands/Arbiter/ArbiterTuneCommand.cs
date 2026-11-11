@@ -166,12 +166,25 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                     tallies[rule.Id] = tally;
                 }
 
+                if (!IsReadableConfidence(confidence))
+                {
+                    tally.CountUnreadable();
+                    continue;
+                }
+
                 tally.Add(record.Id, record.LedgerId, confidence, rule.Threshold, rule.Shadow == true);
             }
         }
 
         return tallies;
     }
+
+    /// <summary>
+    /// A confidence the tally can place: a finite number between 0 and 1. NaN and out-of-range values are
+    /// skipped and counted as unreadable, because clamping them would put them in a bin they never earned.
+    /// </summary>
+    private static bool IsReadableConfidence(double confidence) =>
+        double.IsFinite(confidence) && confidence is >= 0 and <= 1;
 
     /// <summary>The return's <c>RESULT</c> keyed by the decision's ledger id, from the post event that names the pre.</summary>
     private static Dictionary<string, string> PairedResults(IReadOnlyList<ArbiterLedgerEvent> events)
@@ -206,7 +219,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         foreach (RuleTally tally in tallies.Values.OrderBy(t => t.Id, StringComparer.Ordinal))
         {
             AnsiConsole.MarkupLine(
-                $"[bold]{Markup.Escape(tally.Id)}[/]  scored {tally.Scored}  shadow {tally.Shadow}  enforced {tally.Enforced}");
+                $"[bold]{Markup.Escape(tally.Id)}[/]  scored {tally.Scored}  shadow {tally.Shadow}  enforced {tally.Enforced}{UnreadableSuffix(tally)}");
             AnsiConsole.MarkupLine($"  confidence (tenths): {string.Join(' ', tally.Histogram)}");
             foreach (ThresholdFlips flips in tally.FlipsAt(thresholds))
             {
@@ -227,6 +240,9 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         }
     }
 
+    private static string UnreadableSuffix(RuleTally tally) =>
+        tally.Unreadable == 0 ? string.Empty : $"  unreadable {tally.Unreadable}";
+
     private static void WriteJson(IReadOnlyDictionary<string, RuleTally> tallies, double[] thresholds)
     {
         List<JsonRuleReport> rules = [];
@@ -237,6 +253,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                 tally.Scored,
                 tally.Shadow,
                 tally.Enforced,
+                tally.Unreadable,
                 tally.Histogram,
                 [.. tally.FlipsAt(thresholds).Select(f => new JsonThresholdReport(f.Threshold, f.Changed))]));
         }
@@ -258,9 +275,14 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
         public int Enforced => Scored - Shadow;
 
+        /// <summary>Step-1 answers whose confidence was not a finite number between 0 and 1, so were not tallied.</summary>
+        public int Unreadable { get; private set; }
+
         public int[] Histogram { get; } = new int[HistogramBins];
 
         public IReadOnlyList<RuleSample> Samples => _samples;
+
+        public void CountUnreadable() => Unreadable++;
 
         public void Add(string decisionId, string ledgerId, double confidence, double? threshold, bool shadow)
         {
@@ -299,6 +321,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         [property: JsonPropertyName("scored")] int Scored,
         [property: JsonPropertyName("shadow")] int Shadow,
         [property: JsonPropertyName("enforced")] int Enforced,
+        [property: JsonPropertyName("unreadable")] int Unreadable,
         [property: JsonPropertyName("histogram")] IReadOnlyList<int> Histogram,
         [property: JsonPropertyName("thresholds")] IReadOnlyList<JsonThresholdReport> Thresholds);
 
