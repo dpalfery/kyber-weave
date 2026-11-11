@@ -548,7 +548,11 @@ public sealed class ArbiterEvaluator
         CancellationToken cancellationToken)
     {
         string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
-        bool primaryAllows = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal);
+        // The primary allows when it reaches its family's allow-equivalent, the neutral effect. A gate's
+        // neutral is applies and a shortcut's is spawn, so comparing against allow alone suppressed them.
+        ArbiterTriggerFamily primaryFamily = ArbiterTriggerFamilies.ForTrigger(classification.Trigger!);
+        bool primaryAllows = string.Equals(
+            primaryOutcome, ArbiterTriggerFamilies.NeutralEffect(primaryFamily), StringComparison.Ordinal);
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
         List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
         List<string> payload = [];
