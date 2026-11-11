@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -198,6 +199,35 @@ public sealed class SquadPresetRewriterTests
         Assert.Empty(result.Diffs);
         Assert.Equal(initial, Encoding.UTF8.GetString(ReadResult(result, ".opencode/agents/architect.md")));
         Assert.Equal(markdownResource, Encoding.UTF8.GetString(ReadResult(result, ".claude/agents/notes.markdown")));
+    }
+
+    [Fact]
+    public void ArbiterModelTargetsTableIsRewrittenWithResolvedTokensInTheSameResult()
+    {
+        // The table names each profile's resolved token and each roster agent's profile and token.
+        // A preset rewrite must refresh it alongside the agent files, in the same result.
+        const string staleTable =
+            "{\"schema\":\"kyber-arbiter.model-targets/v1\",\"harness\":\"claude\"," +
+            "\"preset\":{\"name\":\"old\",\"digest\":\"0\"},\"bundle-digest\":\"0\"," +
+            "\"profiles\":{\"deep-planning\":\"stale\",\"fast\":\"stale\",\"general\":\"stale\"}," +
+            "\"agents\":{\"architect\":{\"profile\":\"deep-planning\",\"token\":\"stale\"}}}";
+        string agentContent = "---\nname: architect\nmodel: bundled-model\n---\nYou are architect.\n";
+        Dictionary<string, byte[]> contents = new(StringComparer.Ordinal)
+        {
+            [".claude/agents/architect.md"] = Encoding.UTF8.GetBytes(agentContent),
+            ["artifacts/arbiter/model-targets.claude.json"] = Encoding.UTF8.GetBytes(staleTable),
+        };
+
+        SquadPresetRewriteResult result = Rewrite(contents);
+
+        using JsonDocument table = JsonDocument.Parse(ReadResult(result, "artifacts/arbiter/model-targets.claude.json"));
+        JsonElement profiles = table.RootElement.GetProperty("profiles");
+        Assert.Equal("claude-plan-model", profiles.GetProperty("deep-planning").GetString());
+        Assert.Equal("general-claude-model", profiles.GetProperty("general").GetString());
+        Assert.Equal(JsonValueKind.Null, profiles.GetProperty("fast").ValueKind);
+        JsonElement architect = table.RootElement.GetProperty("agents").GetProperty("architect");
+        Assert.Equal("deep-planning", architect.GetProperty("profile").GetString());
+        Assert.Equal("claude-plan-model", architect.GetProperty("token").GetString());
     }
 
     private static SquadPresetRewriteResult Rewrite(Dictionary<string, byte[]> contents)

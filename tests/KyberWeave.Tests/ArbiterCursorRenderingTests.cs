@@ -137,13 +137,15 @@ public sealed class ArbiterCursorRenderingTests : IDisposable
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
             SquadDeploymentScope.Project);
 
+        // The Arbiter adds exactly one file: its model targets table. Every other owned file must match byte for byte.
+        const string table = "artifacts/arbiter/model-targets.cursor.json";
         Assert.Equal(
-            without.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList(),
+            without.Files.Select(f => (f.Target, f.RelativePath)).Append(("cursor", table)).Order().ToList(),
             with.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList());
         foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in without.Files
             .OrderBy(f => f.Target, StringComparer.Ordinal)
             .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
-            .Zip(with.Files
+            .Zip(with.Files.Where(f => f.RelativePath != table)
                 .OrderBy(f => f.Target, StringComparer.Ordinal)
                 .ThenBy(f => f.RelativePath, StringComparer.Ordinal)))
         {

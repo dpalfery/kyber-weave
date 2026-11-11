@@ -67,8 +67,16 @@ public sealed class ArbiterRealEngineTests : IDisposable
             throw new InvalidOperationException("git facts exploded");
     }
 
+    /// <summary>
+    /// Disables every catalogued rule except the lens-skip rule. That rule only answers
+    /// <c>lens.spawn</c>, which these tests never send, so leaving it enabled changes nothing here.
+    /// </summary>
     private static string DisabledShippedRules() =>
-        string.Join("\n", ArbiterConfigTests.ExpectedRuleIds.Select(id => $"                - id: {id}\n                  enabled: false"));
+        string.Join(
+            "\n",
+            ArbiterConfigTests.ExpectedRuleIds
+                .Where(id => !string.Equals(id, LensNoCodeChangeRule, StringComparison.Ordinal))
+                .Select(id => $"                - id: {id}\n                  enabled: false"));
 
     private void WriteConfig(string rulesYaml, string providerYaml = "    kind: none")
     {
@@ -101,7 +109,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             () => "decision-test-1");
     }
 
-    private string Payload(string hookEvent, string target, string prompt, string? status = null)
+    private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
     {
         string cwd = _repo.Path.Replace("\\", "\\\\", StringComparison.Ordinal);
         string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
@@ -114,7 +122,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "\"session_id\":\"sess-real-1\",\"transcript_path\":\"/tmp/t.jsonl\"," +
             "\"cwd\":\"" + cwd + "\"," +
             "\"permission_mode\":\"default\"," +
-            "\"agent_id\":\"agent-conductor-1\",\"agent_type\":\"conductor\"," +
+            "\"agent_id\":\"agent-" + agentType + "-1\",\"agent_type\":\"" + agentType + "\"," +
             "\"tool_name\":\"Agent\",\"tool_input\":" + toolInput + "," +
             "\"tool_use_id\":\"toolu-real-1\"";
         if (status is not null)
@@ -136,6 +144,37 @@ public sealed class ArbiterRealEngineTests : IDisposable
 
     private const string Prompt =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the plan parser.";
+
+    private const string LensNoCodeChangeRule = "KW-ARB-LENS-002";
+
+    private const string LensPrompt =
+        "KYBER-ARBITER: true\nLENS: correctness\n\nApply the lens to the change.";
+
+    /// <summary>Adds a Markdown-only review's git facts to the facts the builder produced.</summary>
+    private sealed class MarkdownOnlyGitFacts : IArbiterGitFacts
+    {
+        private static readonly string[] MarkdownPaths = ["docs/guide.md"];
+
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) =>
+            facts.With("review.changed-paths", MarkdownPaths, ArbiterFactLabel.Asserted)
+                .With("review.no-code-change-paths", MarkdownPaths, ArbiterFactLabel.Asserted)
+                .With("review.changed-hunks", "hunks", ArbiterFactLabel.Derived);
+    }
+
+    [Fact]
+    public void RealEngine_LensSpawnOnAMarkdownOnlyChange_SkipsWithAReviewNoteNamingRuleAndReason()
+    {
+        WriteConfig(DisabledShippedRules());
+        HookCommand command = CreateCommand(new FakeProvider(), new MarkdownOnlyGitFacts());
+
+        (int exit, string stdout, _) = Run(
+            command,
+            Payload("PreToolUse", "review-lens", LensPrompt, agentType: "code-reviewer"));
+
+        Assert.Equal(0, exit);
+        Assert.Contains("KW-ARB-LENS-002", stdout, StringComparison.Ordinal);
+        Assert.Contains("no-code-change", stdout, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void RealEngine_PreDispatch_Deny_WritesDenyShapeWithEscalationEnvelope()

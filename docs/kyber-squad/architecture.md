@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-11
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1068,17 +1068,19 @@ and validates.
 - **`decision.query` grants the Arbiter fallback.** The capability vocabulary carries
   `decision.query`: the `orchestrator` and `reviewer` profiles allow it, and the other
   ten profiles deny it. An `allow` lowers to the `kw-arbiter` server alone on
-  the fallback-only targets `warp` and `zcode` — the three tools
+  the fallback-only targets `warp` and `zcode` — the five tools
   `arbiter_evaluate_agent_dispatch_or_return`,
-  `arbiter_list_effective_rules_by_trigger`, and
-  `arbiter_check_configuration_and_key_readiness`, granted by qualified name where grants are
+  `arbiter_list_effective_rules_by_trigger`,
+  `arbiter_check_configuration_and_key_readiness`,
+  `arbiter_select_relevant_document_sections`, and
+  `arbiter_classify_bot_review_comment`, granted by qualified name where grants are
   enumerated — and to nothing on a hooked target, so no hooked target is widened. A
   separate server name is the only portable grant that excludes the docs tools, because
   MCP grants are whole-server wildcards. ZCode's and Devin's fully qualified generic
   grants exclude the `kw-arbiter` server; the Arbiter tools ride a separate,
   `decision.query`-keyed grant. On the canonical tree the server is declared in
   `products/kyber-squad/mcp.json` under the key `kw-arbiter`
-  (`kyber-weave-arbiter serve --repo-root .`) and `toolchain.yml` lists its three tools under
+  (`kyber-weave-arbiter serve --repo-root .`) and `toolchain.yml` lists its five tools under
   `required-mcp-tools.kw-arbiter`.
   **Three landed grants, each in the form its harness actually reads, and three exclusions by
   citation.** `PiRenderer` derives the overlay for every entitled **subagent**: `extensions:
@@ -2172,6 +2174,34 @@ when the prompt file is absent, and under `--ensure` it turns each failure into 
 checks, their ids, and the log line they read are in the [runbook](copilot-prompt-runbook.md).
 
 ---
+
+## Arbiter savings in the roles
+
+The Kyber Arbiter's savings rules change how the Squad roles dispatch work. The Arbiter reads a
+marker the role writes into the dispatch; a dispatch without its marker is never shortcut. The rules
+are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-arbiter/architecture.md#phase-3-facts-review-shortcuts-stores-and-comments)).
+
+- **Conductor and bug-crusher.** The planner dispatch that carries `INTAKE:` can be answered with
+  `STATUS: INTAKE_RECOMMENDATION` and `RECOMMENDATION: PLAN` or `SPEC` (`KW-ARB-INTAKE-001`). A
+  triage dispatch can be answered `VERDICT: TRIVIAL` (`KW-ARB-TRIAGE-001`). The impact-review dispatch
+  whose first body line is `DOCS-IMPACT: true` can be answered with a no-change digest
+  (`KW-ARB-DOCIMPACT-001`). The closeout dispatch never carries the marker.
+- **Rework dispatches.** A rework dispatch opens with `FAILURE-CLUSTER: <key>` and a `FAILURE:`
+  section. A repeat the rule judges the same failure gets an advisory to escalate sooner; it never
+  denies the dispatch (`KW-ARB-FAILURE-001`). The cluster key is set in the
+  [delivery-execution](../../products/kyber-squad/skills/delivery-execution/SKILL.md) contract.
+- **Code review.** Every lens and refutation dispatch of one review carries `REVIEW_RUN: <id>`, so the
+  findings of one review share a store and a repeated finding is refuted as a duplicate
+  (`KW-ARB-DUP-001`). A refutation of a finding dropped as a nitpick is skipped (`KW-ARB-NITPICK-002`).
+- **Review loops.** `kilo-review-loop` and `code-review-loop` read bot-authored issue comments and
+  review bodies as well as inline threads. A bot's PR-level summary is classified row by row
+  (`KW-ARB-COMMENT-001`, summary mode). After pushing, the loop posts one PR comment that links the
+  summary and lists **Fixed**, **Already fixed**, **Nitpick** and **Not changed** rows. While
+  `KW-ARB-COMMENT-001` is in shadow the Arbiter hands every summary row back as `real`, so the loop acts
+  on each row as it would without the Arbiter. A summary has
+  no thread, so nothing is resolved; inline threads keep reply-and-resolve.
+- **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
+  `already-fixed` answer for a summary row rests on the model alone.
 
 ## Related
 

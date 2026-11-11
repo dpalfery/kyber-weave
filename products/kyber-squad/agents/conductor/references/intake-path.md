@@ -60,6 +60,14 @@ Handle defensive routing responses without treating them as failures:
 - `STATUS: INTENT_STATED` with `CHOICE: PLAN | SPEC`: preserve the choice and go to Promotion without asking the user to choose again.
 - `STATUS: DEFECT` with `CHOICE: PLAN | SPEC | UNSTATED`: preserve the choice and artifact, then enter Defect diagnosis. No PLAN/SPEC recommendation is required in that digest.
 
+## Arbiter intake shortcut
+
+When the Arbiter answers the intake assessment dispatch (`intake.shortcut`), it does not spawn `architect`. The dispatch returns a digest in place of the architect's, ending `ARBITER_DECISION: <id>`, with `STATUS: INTAKE_RECOMMENDATION` and `RECOMMENDATION: PLAN | SPEC`.
+
+- Treat that digest as the architect's `INTAKE_RECOMMENDATION`, use its `RECOMMENDATION` as the recommendation, and do not re-dispatch the assessment.
+- The recommendation is still not the decision: the supervised-mode rule above applies unchanged, and autonomous mode records it and goes to Promotion.
+- The shortcut answers only the planner dispatch that carries the `INTAKE:` marker. It is shipped in shadow, so it has no effect until the Arbiter's intake rule is enforced; until then the `architect` assessment still runs.
+
 ## Promotion
 
 Before creating or revising a delivery artifact for a concrete failure, require that its diagnosis is attached. Otherwise return to Defect diagnosis. Preserve any existing artifact rather than creating a competing plan/spec for the same task.

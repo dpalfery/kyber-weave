@@ -59,6 +59,12 @@ public static partial class TriggerClassifier
     /// </summary>
     private const string RunStartMarker = "RUN-START";
 
+    /// <summary>
+    /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
+    /// reworking. Its <c>FAILURE:</c> section carries the failing output the same-failure rule compares.
+    /// </summary>
+    internal const string FailureClusterMarker = "FAILURE-CLUSTER";
+
     /// <summary>Whether <paramref name="harness"/> hooks project-wide rather than per agent.</summary>
     public static bool IsProjectWideHarness(string harness)
     {
@@ -114,6 +120,8 @@ public static partial class TriggerClassifier
                 return RunStartMarker;
             if (first.StartsWith("FINDINGS:", StringComparison.Ordinal))
                 return "FINDINGS";
+            if (first.StartsWith(FailureClusterMarker + ":", StringComparison.Ordinal))
+                return FailureClusterMarker;
             if (first.StartsWith("STATUS: ARBITER_ESCALATION", StringComparison.Ordinal))
                 return "STATUS: ARBITER_ESCALATION";
             if (string.Equals(first, "FINALIZE", StringComparison.Ordinal) && hasPlanFile)
@@ -273,6 +281,8 @@ public static partial class TriggerClassifier
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";
 
+        // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
+        // rides as a secondary trigger, derived by SecondaryTriggers.For.
         if (string.Equals(caller, "conductor", StringComparison.Ordinal))
         {
             if (string.Equals(targetClass, "implementation", StringComparison.Ordinal))
@@ -333,6 +343,7 @@ public static partial class TriggerClassifier
         "delegate.planner" => "delegate.planner.returned",
         "investigate" => "investigate.returned",
         "lens.spawn" => "lens.returned",
+        "refute.spawn" => "refute.returned",
         _ => trigger,
     };
 

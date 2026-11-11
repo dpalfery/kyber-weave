@@ -55,31 +55,46 @@ public sealed class McpToolNameContractTests
         (ArbiterServer, "arbiter_status", "arbiter_check_configuration_and_key_readiness"),
     ];
 
-    /// <summary>The docs server exposes exactly its eight renamed tools, and the arbiter server its three.</summary>
+    /// <summary>
+    /// Arbiter tools added after the rename. They are new names, not renames, so they live apart from
+    /// <see cref="Renames"/>, but the arbiter server must declare them too and the length limits apply to them.
+    /// </summary>
+    private static readonly (string Server, string Name)[] AddedTools =
+    [
+        (ArbiterServer, "arbiter_select_relevant_document_sections"),
+        (ArbiterServer, "arbiter_classify_bot_review_comment"),
+    ];
+
+    /// <summary>The docs server exposes exactly its eight renamed tools, and the arbiter server its three renamed and two added.</summary>
     [Fact]
     public void TheDocsAndArbiterToolsDeclareExactlyTheRenamedNames()
     {
         string[] declaredDocs = DeclaredNames(typeof(DocsTools));
         string[] declaredArbiter = DeclaredNames(typeof(ArbiterTools));
+        string[] expectedArbiter = Renames
+            .Where(rename => rename.Server == ArbiterServer)
+            .Select(rename => rename.Renamed)
+            .Concat(AddedTools.Select(added => added.Name))
+            .ToArray();
 
         List<string> missing = Renames
             .Where(rename => rename.Server == DocsServer)
             .Select(rename => rename.Renamed)
-            .Concat(Renames.Where(rename => rename.Server == ArbiterServer).Select(rename => rename.Renamed))
+            .Concat(expectedArbiter)
             .Where(name => !declaredDocs.Contains(name, StringComparer.Ordinal)
                 && !declaredArbiter.Contains(name, StringComparer.Ordinal))
             .ToList();
 
         Assert.True(
             missing.Count == 0,
-            $"{missing.Count} of {Renames.Length} renamed tools are not declared by DocsTools or ArbiterTools: "
+            $"{missing.Count} of {Renames.Length + AddedTools.Length} expected tools are not declared by DocsTools or ArbiterTools: "
             + string.Join(", ", missing));
 
         Assert.Equal(
             Renames.Where(rename => rename.Server == DocsServer).Select(rename => rename.Renamed).Order(StringComparer.Ordinal),
             declaredDocs.Order(StringComparer.Ordinal));
         Assert.Equal(
-            Renames.Where(rename => rename.Server == ArbiterServer).Select(rename => rename.Renamed).Order(StringComparer.Ordinal),
+            expectedArbiter.Order(StringComparer.Ordinal),
             declaredArbiter.Order(StringComparer.Ordinal));
     }
 
@@ -138,7 +153,8 @@ public sealed class McpToolNameContractTests
     }
 
     public static IEnumerable<object[]> RenamedTools() =>
-        Renames.Select(rename => new object[] { rename.Server, rename.Renamed });
+        Renames.Select(rename => new object[] { rename.Server, rename.Renamed })
+            .Concat(AddedTools.Select(added => new object[] { added.Server, added.Name }));
 
     /// <summary>The names the class serving <paramref name="server"/> declares: the docs class or the arbiter class.</summary>
     private static string[] DeclaredBy(string server) =>

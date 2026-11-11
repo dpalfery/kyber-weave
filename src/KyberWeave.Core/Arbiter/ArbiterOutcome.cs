@@ -4,8 +4,16 @@ namespace KyberWeave.Core.Arbiter;
 /// <param name="RuleId">The rule that answered.</param>
 /// <param name="Answer">The answer name, or <c>undecidable</c>.</param>
 /// <param name="Step">Always 0 for step-0 answers.</param>
-/// <param name="Effect">The answer mapped through the rule's effects (undecidable via the family).</param>
-public sealed record ArbiterRuleAnswer(string RuleId, string Answer, int Step, string Effect);
+/// <param name="Effect">The effect the answer contributes: its mapped effect, or the family's neutral effect when the rule is shadow.</param>
+/// <param name="Shadow">Whether the rule is shadow, so its effect is log-only.</param>
+/// <param name="WouldEffect">For a shadow rule, the mapped effect it would have contributed; otherwise null.</param>
+public sealed record ArbiterRuleAnswer(
+    string RuleId,
+    string Answer,
+    int Step,
+    string Effect,
+    bool Shadow = false,
+    string? WouldEffect = null);
 
 /// <summary>Step-0's combined verdict for one trigger firing.</summary>
 /// <param name="Trigger">The trigger that fired.</param>

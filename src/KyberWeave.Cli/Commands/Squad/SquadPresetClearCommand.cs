@@ -1,6 +1,8 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Squad;
@@ -224,7 +226,8 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
                     ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
-            });
+            },
+            new ArbiterModelTargetsPreset(ArbiterModelTargetsFile.BundledPresetName, string.Empty));
 
         if (settings.DryRun)
         {

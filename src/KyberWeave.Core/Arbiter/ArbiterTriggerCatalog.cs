@@ -37,6 +37,7 @@ public static class ArbiterTriggerCatalog
         "ledger.completed-tasks",
         "ledger.red-evidence",
         "harness.observes-returns",
+        "harness.model-override",
         "roster.caller.delegates-to",
         "roster.descriptions",
         "rules.<id>.answer",
@@ -81,6 +82,54 @@ public static class ArbiterTriggerCatalog
                 "git.changed-paths.since-dispatch",
                 "ledger.concurrent.paths",
             },
+            ["delegate.model"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "plan.task.text",
+                "plan.task.files",
+                "plan.task.file-kinds",
+                "ledger.task.prior-attempt",
+                "model-targeting.prior-result",
+                "model-targeting.prior-profile",
+                "model-targeting.ladder.next",
+                "delegation.model",
+                "harness.model-override",
+                "harness.observes-returns",
+            },
+            ["intake.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "intake.request",
+            },
+            ["triage.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "defect.report",
+            },
+            ["docs-impact.shortcut"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "docs.governed-paths-changed",
+                "review.changed-paths",
+                "review.diff-summary",
+            },
+            ["delegate.failure"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "failure.previous-text",
+                "failure.current-text",
+                "ledger.task.prior-attempt",
+            },
+            ["sections.select"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "task.text",
+                "section.candidates",
+                "section.candidate.*",
+            },
+            ["comment.triage"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "comment.body",
+                "comment.path",
+                "comment.line",
+                "comment.author",
+                "file.text-at-line",
+                "comment.fixing-commits",
+            },
             ["lens.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "lens.name",
@@ -88,6 +137,10 @@ public static class ArbiterTriggerCatalog
                 "review.changed-paths",
                 "review.base-ref",
                 "review.diff-summary",
+                "review.comment-only-paths",
+                "review.rename-only-paths",
+                "review.no-code-change-paths",
+                "review.changed-hunks",
             },
             ["lens.returned"] = new HashSet<string>(StringComparer.Ordinal)
             {
@@ -97,7 +150,15 @@ public static class ArbiterTriggerCatalog
                 "finding.excerpt",
                 "file.text-at-line",
                 "review.changed-hunks",
+                "review.comment-only-paths",
+                "review.rename-only-paths",
+                "review.no-code-change-paths",
+                "finding.changed-lines",
+                "finding.severity",
+                "finding.gate-corroborated",
             },
+            // A refuter's return reads no facts: its outcome is parsed from the return text, not a rule.
+            ["refute.returned"] = new HashSet<string>(StringComparer.Ordinal),
             ["refute.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "finding.id",
@@ -107,6 +168,12 @@ public static class ArbiterTriggerCatalog
                 "finding.line",
                 "file.surroundings",
                 "gates.report",
+                "finding.dropped",
+                "review.prior-findings",
+                "review.changed-hunks",
+                "review.comment-only-paths",
+                "review.rename-only-paths",
+                "review.no-code-change-paths",
             },
             ["gate.select"] = new HashSet<string>(StringComparer.Ordinal)
             {
