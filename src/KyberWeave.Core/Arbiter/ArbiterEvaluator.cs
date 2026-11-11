@@ -609,7 +609,10 @@ public sealed class ArbiterEvaluator
                 : null;
             if (string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
             {
-                rules.Add(Step1Rule(question, answer, neutral, score, null, null, null));
+                // Same shadow state the primary path records: a shadow question keeps shadow and its would-effect.
+                (string notEvaluatedEffect, bool? notEvaluatedShadow, string? notEvaluatedWould) = ShadowState(
+                    question.Rule, mapped, neutral);
+                rules.Add(Step1Rule(question, answer, notEvaluatedEffect, score, notEvaluatedShadow, notEvaluatedWould, null));
                 continue;
             }
 
