@@ -161,10 +161,13 @@ steps above, which restore the solution that `--no-build` needs. On this machine
 cleanupcode` never exits, so the command runs under a wrapper that stops it once the log shows its
 finish line, and fails with exit 124 after 300 seconds. Remove the wrapper when the tool exits on its
 own. Replace `<task>` with a scratch folder name and `<changed files>` with the files you changed.
+The tool logs its finish line after a failed cleanup too, so a log holding `Failed to run cleanup` fails the command.
+The profile rewrites the whole of each included file, not only the changed lines, so revert edits to members you did not touch.
 
 ```bash
 mkdir -p .agent_scratchpad/<task>
-scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE
+scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE \
+  && ! grep -q "Failed to run cleanup" "$PWD/.agent_scratchpad/<task>/cleanupcode.log"
 ```
 
 - **Build first, and let the later runs reuse it.** The build is where the analyzers run, so a
