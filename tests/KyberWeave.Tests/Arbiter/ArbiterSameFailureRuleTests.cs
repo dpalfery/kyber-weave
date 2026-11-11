@@ -169,6 +169,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(plain, "csharp-dev", plain.Prompt);
 
         Assert.Equal("delegate", classification.Trigger);
+        Assert.DoesNotContain(FailureTrigger, SecondaryTriggers.For("delegate", plain));
     }
 
     /// <summary>The marker counts only as the first body line: a later line with the same text does not derive the trigger.</summary>
@@ -181,6 +182,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "csharp-dev", prompt);
 
         Assert.Equal("delegate", classification.Trigger);
+        Assert.DoesNotContain(FailureTrigger, SecondaryTriggers.For("delegate", ev));
     }
 
     // ---- Shipped shape (acceptance: trigger, shadow, floor, answers and effects) ----
