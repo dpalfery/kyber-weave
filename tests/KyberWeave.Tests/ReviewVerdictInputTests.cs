@@ -41,21 +41,23 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // A finding whose required identity is null: dropped as incomplete, or the file refused. Never a crash, and never
     // counted as accepted.
     // -----------------------------------------------------------------------------------------
+    // A finding whose required identity is null: the findings document is refused, naming the field. The verdict never
+    // drops it as incomplete or counts it as accepted, because the identity is missing from the document, not the seat.
+    // -----------------------------------------------------------------------------------------
 
     [Theory]
     [InlineData("file")]
     [InlineData("id")]
     [InlineData("lens")]
-    public void AFindingWithANullRequiredFieldIsDroppedOrRefusedNeverAccepted(string field)
+    public void AFindingWithANullRequiredFieldRefusesTheDocumentNamingTheField(string field)
     {
         string findings = WriteFindingDocument(field, null);
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings);
 
-        bool refused = run.Result == Refused && MessagesWithCode(run.Output, UnreadableInput).Count > 0;
-        bool dropped = run.Result == 0 && MessagesWithCode(run.Output, IncompleteFinding).Count > 0;
-        Assert.True(refused || dropped, $"A null '{field}' was neither refused nor dropped. Output:{Environment.NewLine}{run.Output}");
-        Assert.DoesNotContain("1 finding(s) accepted", run.Output, StringComparison.Ordinal);
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"'{field}'");
+        Assert.Empty(MessagesWithCode(run.Output, IncompleteFinding));
     }
 
     /// <summary>
@@ -115,6 +117,36 @@ public sealed class ReviewVerdictInputTests : IDisposable
     {
         string findings = WriteFindingDocument("id", "correctness/off-by-one");
         string gates = Write("gates.json", document);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "gates.json");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // A null element in any list of a findings or gates document refuses the document, naming the file, however deeply
+    // the list is nested. Each of these crashed or was read as a clean report.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[null],\"changedLines\":0}")]
+    [InlineData("{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"coverage\":[null]}")]
+    public void ANullElementInAFindingsDocumentListIsRefusedNamingTheFile(string document)
+    {
+        string findings = Write("findings.json", document);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    [Fact]
+    public void ANullElementInAGateReportsNestedListIsRefusedNamingTheFile()
+    {
+        string findings = WriteFindingDocument("id", "correctness/off-by-one");
+        string gates = Write("gates.json", "{\"schema\":\"kyber-weave.review-gates/v1\",\"gates\":[],\"coverageReports\":[null]}");
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates);
 

@@ -832,6 +832,150 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // Seat folder entries that are not a lens: named, never a crash, never read as a seat.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(".md")]
+    [InlineData(".hidden.md")]
+    [InlineData("Bad Name.md")]
+    public void ASeatFolderFileThatIsNotALensIsNamedAndNeverCrashesTheVerdict(string entry)
+    {
+        File.WriteAllText(Path.Combine(_seats, entry), NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
+
+        Assert.True(run.Result is 0 or 1, $"The verdict did not exit normally (exit {run.Result}). Output:{Environment.NewLine}{run.Output}");
+        Assert.True(NamesEntry(run.Output, entry), $"No KW-REVIEW-041 or 040 names '{entry}'. Output:{Environment.NewLine}{run.Output}");
+    }
+
+    /// <summary>A directory named like a seat file is an entry too: it is named, and the verdict does not crash on it.</summary>
+    [Fact]
+    public void ADirectoryNamedAsASeatFileIsNamedAndNeverCrashesTheVerdict()
+    {
+        Directory.CreateDirectory(Path.Combine(_seats, "correctness.md"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
+
+        Assert.True(run.Result is 0 or 1, $"The verdict did not exit normally (exit {run.Result}). Output:{Environment.NewLine}{run.Output}");
+        Assert.True(NamesEntry(run.Output, "correctness.md"), $"No KW-REVIEW-041 or 040 names the directory. Output:{Environment.NewLine}{run.Output}");
+    }
+
+    /// <summary>A null coverage entry in the prior cycle's findings document refuses the document naming the file.</summary>
+    [Fact]
+    public void ANullCoverageEntryInThePriorFindingsDocumentIsRefusedNamingTheFile()
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        File.WriteAllText(
+            Path.Combine(prior, "findings.json"),
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"coverage\":[null]}");
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Repeated closing lines the sum cannot read, and a repeated Index fallback line.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AMalformedRepeatedInputSitesLineRaisesKw047()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Input sites: several",
+            "Input sites: 3 traced, 1 files with none",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
+    }
+
+    [Fact]
+    public void AnOverflowingInputSitesSumRaisesKw047()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Input sites: 2147483647 traced, 0 files with none",
+            "Input sites: 1 traced, 0 files with none",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
+    }
+
+    [Fact]
+    public void AMalformedRepeatedDiscoveryLineRaisesKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Discovery: several",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    [Fact]
+    public void AnOverflowingDiscoverySumRaisesKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Discovery: codegraph 2147483647, docs 0, direct reads 0",
+            "Discovery: codegraph 1, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    /// <summary>
+    /// Two different Index fallback lines are not silently overwritten: the verdict warns under KW-REVIEW-044 that the
+    /// closing line repeated, so the reader knows the seat gave two reasons and the verdict kept one of them.
+    /// </summary>
+    [Fact]
+    public void ARepeatedIndexFallbackLineIsNotSilentlyOverwritten()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: projectPath: not-indexed",
+            "Index fallback: projectPath: error",
+            "Discovery: codegraph 0, docs 0, direct reads 6",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning", "Index fallback");
+    }
+
+    /// <summary>True when a KW-REVIEW-041 or KW-REVIEW-040 diagnostic's message names the entry.</summary>
+    private static bool NamesEntry(string output, string entry) =>
+        MessagesWithCode(output, LensUnaccounted).Concat(MessagesWithCode(output, SeatUnparseable))
+            .Any(message => message.Contains(entry, StringComparison.Ordinal));
+
+    // -----------------------------------------------------------------------------------------
     // Harness.
     // -----------------------------------------------------------------------------------------
 
