@@ -384,9 +384,11 @@ public sealed class ArbiterEvaluator
                 }
             }
 
+            // The index, not the item text, keys the question: a list may repeat an item, and the
+            // provider keeps one answer per id, so equal items must not share one.
             ArbiterRule expanded = rule with
             {
-                Id = rule.Id + "@" + item,
+                Id = rule.Id + "@" + index,
                 Ask = ask with { State = state, ForEach = null },
             };
             questions.Add(new Question(rule.Id, item, expanded));
