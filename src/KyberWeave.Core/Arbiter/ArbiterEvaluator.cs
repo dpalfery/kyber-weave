@@ -761,6 +761,7 @@ public sealed class ArbiterEvaluator
         string? refutedSlug)
     {
         ArbiterTriggerFamily family = judgement.Plan.Family;
+        string neutral = ArbiterTriggerFamilies.NeutralEffect(family);
         List<ArbiterDecisionRule> rules = Step0Rules(judgement.Plan);
         List<string> effects = new(Step0EffectsOf(judgement.Plan));
         List<(string RuleId, string? Candidate, bool Decisive, ArbiterDecisionRule Entry)> rows = [];
@@ -774,15 +775,15 @@ public sealed class ArbiterEvaluator
                 && judgement.Call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
                 ? found
                 : null;
-            (string effect, bool? shadow, string? wouldEffect) = ShadowState(
-                question.Rule, mapped, ArbiterTriggerFamilies.NeutralEffect(family));
+            (string effect, bool? shadow, string? wouldEffect) = ShadowState(question.Rule, mapped, neutral);
             string? evidence = string.Equals(mapped, RuleEffects.Duplicate, StringComparison.Ordinal)
                 && refutedSlug is not null
                 && EarlierIdOf(question.Candidate) is { } earlierId
                 ? ArbiterFindingNotices.DuplicateLine(refutedSlug, earlierId, recordId)
                 : null;
             ArbiterDecisionRule entry = Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence);
-            bool decisive = !string.Equals(mapped, RuleEffects.Allow, StringComparison.Ordinal);
+            // Decisive means the answer changes the family's outcome, so a neutral answer (keep, spawn, applies) is not one.
+            bool decisive = !string.Equals(mapped, neutral, StringComparison.Ordinal);
             if (decisive && question.Candidate is not null)
             {
                 decisiveRules.Add(question.RuleId);
