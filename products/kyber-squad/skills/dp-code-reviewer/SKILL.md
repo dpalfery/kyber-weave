@@ -45,7 +45,7 @@ passes `--prior <prior cycle folder>`.
 2. For each surviving finding, re-check that finding and its class. Re-read the code at
    that file and line; do not trust the fix description. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. A fix that
    refuses the named input and lets another input of the class through is not FIXED: the
-   finding stays open, with the input that still gets through named in it.
+   finding stays open, with the input that still gets through named in it. Seats cannot run anything, so the reviewer does: when the code is reachable from a command, run the class inputs against the built CLI, and record each input and what the command did in a `reviewer.md` seat file: in a finding's `evidence` when an input still gets through, or in its `NO FINDINGS:` sentence when every input was refused. A finding the reviewer raises itself goes in `reviewer.md` too.
 3. Re-run the gates. Gates are cheap relative to the council and their result is the
    evidence, so they run every time — never carry a gate result forward from an earlier run.
 4. Re-seat **only** the lenses that own a finding still outstanding, plus any lens whose

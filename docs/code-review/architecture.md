@@ -218,7 +218,7 @@ The review council enforces explicit contract verification disciplines across it
 - **Contract assertion rigor (`test-adequacy`, `R14`):** Flags bare single-word `Assert.Contains` checks that match common boilerplate, unguarded boolean `||` assertions where one branch matches unrelated text, and non-contiguous `foreach` loops over multi-line schemas; requires contiguous block assertions.
 - **Operational lifecycle state-machine walks (`correctness`, `supportability`):** Walks the complete resource lifecycle from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and verifies error paths including `conflict` and `rollback` for concurrency primitives, worktrees, locks, and temp-paths.
 - **Literal prompt parsing (`correctness`, `R16`):** Prohibits charitable reading of agent prompt instructions; parses prompt directives literally as executed by language models, flagging any gate deadlock, self-contradiction, or missing recovery step.
-- **Input-site table (`correctness`):** For every changed code file the seat writes "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API, with what the code does today for each hostile input class (absent or null, a null element in a list, empty, wrong type, zero or negative, the largest value, characters the API rejects, repeated or contradictory markers). Every `THROWS` or `accepted wrong` cell is a finding. The seat closes with an `Input sites:` count, and its absence draws `KW-REVIEW-047`.
+- **Input-site table (`correctness`):** For every changed code file the seat writes "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API, with what the code does today for each hostile input class (absent or null, a null element in a list, empty, wrong type, zero or negative, the largest value, characters the API rejects, repeated or contradictory markers). Every `THROWS` or `accepted wrong` cell is a finding. The seat closes with an `Input sites:` count, and a correctness seat that reported findings or `NO FINDINGS` without it draws `KW-REVIEW-047`, and a `SKIPPED` correctness seat is exempt.
 - **Rule subjects and side-by-side statements (`documentation-accuracy`):** Who a rule applies to ("a seat", "every gate") is a claim checked at the call site that decides it, and each rule id or command the changed prose states is quoted side by side from every document that states it; a different subject, condition or flag list is a finding.
 - **Hand-off of malformed inputs (`test-adequacy` to `correctness`):** Test-adequacy says what the code does today for each malformed input it names, and hands one it cannot show is refused to correctness as a `test-adequacy/out-of-scope` finding, rather than reporting only the missing test.
 - **No reviewer hunt list:** The reviewer hands each seat its lens file and guidance sections, not a list of its own things to hunt for. A list of areas narrows a seat to those areas, and an area is not an input. Named focus files must each be accounted for by the seat.
@@ -326,10 +326,11 @@ the policy below:
 
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
-warning (`KW-REVIEW-044`); it is never a verdict input.
+warning (`KW-REVIEW-044`); a `SKIPPED` seat is exempt, and the warning is never a verdict input.
 The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
 `Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that
-ran and wrote no readable `Input sites:` line draws a warning (`KW-REVIEW-047`), never a verdict input.
+reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws a warning
+(`KW-REVIEW-047`), never a verdict input; a `SKIPPED` correctness seat is exempt.
 A seat file that repeats its `Discovery:` or `Input sites:` line, as a lens split across two spawns
 does, is read as the sum of the lines; a malformed or overflowing line makes the count unreadable.
 

@@ -54,14 +54,15 @@ number used as an index or a line. Write the table in Markdown, before your find
 | `path/File.cs:120` | seat file | refused | handled | refused | THROWS | handled | THROWS | handled | accepted wrong |
 
 Each cell says what the code does today for that input: `refused`, `handled`, `THROWS` or
-`accepted wrong`. Trace each one through the code; a cell you did not trace is not `handled`.
+`accepted wrong`. Trace each one through the code; a cell you did not trace is not `handled`. Fill the repeated or contradictory markers column by tracing at least two different marker
+pairs (for example two outcome lines that disagree, and an outcome line followed by a list), not
+one: a cell marked `refused` after one pair can hide every other pair the code lets through.
 Every THROWS or accepted wrong cell is a finding. A file with no such site gets one line,
 `path/File.cs: no input site`, so the table shows that every changed file was looked at.
 
 Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. N counts the table's rows and M the files you marked "no input site". Write the line
 even when nothing was traced, as `Input sites: 0 traced, M files with none`: the verdict command
-does not know which files changed, so it warns (`KW-REVIEW-047`) whenever a correctness seat that
-reported findings or `NO FINDINGS` wrote no readable `Input sites:` line.
+does not know which files changed, so a correctness seat that reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws `KW-REVIEW-047`; a `SKIPPED` correctness seat is exempt.
 
 **Non-finite numbers.** Where arithmetic or comparison touches a number that can arrive as
 `NaN`, `Infinity`, `-Infinity`, or a negative zero, check what each comparison, sum, and

@@ -105,7 +105,8 @@ lens needs a seat file or a recorded reason for not seating it.
   disagreed with a sibling document. In seven of the nine a rule covered the defect and the owning
   seat had read the code, but traced only the inputs it thought of; one fix was confirmed FIXED on
   the single input its finding named; one file was never opened. The answers are: a required
-  input-site table in the correctness seat, whose absence draws `KW-REVIEW-047`; a verifier rule
+  input-site table in the correctness seat, whose absence on a seat that reported findings or
+  `NO FINDINGS` draws `KW-REVIEW-047` (a `SKIPPED` seat is exempt); a verifier rule
   that a finding is FIXED only when the fix refuses its whole class; two documentation checks (a
   rule's subject is checked at the call site, and every statement of a rule id or command is
   compared side by side); and hand-offs, so test-adequacy routes an unproven malformed input to

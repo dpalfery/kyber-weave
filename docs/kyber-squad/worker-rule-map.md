@@ -151,11 +151,12 @@ order and the plan-read ban, and whose fourth is the batched-read line.
 
 The two review seats report discovery too. `review-lens` and `review-triage` put
 `Discovery: codegraph N, docs N, direct reads N` directly above their attestation line, below any
-`Index fallback:` line, and the verdict engine flags a findings or `NO FINDINGS` seat that wrote none, or that read files
-directly with no index lookup and no fallback line, as `KW-REVIEW-044`. A `SKIPPED` seat is exempt. The
+`Index fallback:` line, and the verdict engine flags a findings or `NO FINDINGS` seat that wrote
+none, that read files directly with no index lookup and no fallback line, or that wrote an
+`Index fallback:` value outside the three modes, as `KW-REVIEW-044`. A `SKIPPED` seat is exempt. The
 correctness seat adds one closing line, `Input sites: N traced, M files with none`, directly
 above its `Discovery:` line; a correctness seat that reported findings or `NO FINDINGS` without
-it draws `KW-REVIEW-047`. The closing-line order and the input-site table live in `review-lens`
+it draws `KW-REVIEW-047`, and a `SKIPPED` correctness seat is exempt. The closing-line order and the input-site table live in `review-lens`
 and the correctness lens file, not in the baseline.
 
 ## The task-end fix pass and build isolation
@@ -192,7 +193,7 @@ theory pins there.
 | G1 | Send a self-contained packet: inlined entry-file table, acceptance criteria, dependencies, mode, pre-computed test commands, and no plan or spec in the worker's context. | `agents/conductor.md` → `## Shared lifecycle invariants`; `skills/delivery-execution/SKILL.md` → `## Ready queue`, `## Task file and dispatch` | `delivery-execution` | `ConductorSurfacesSpecifyInlinedTaskPacketContents` — asserts both files. **Blocked** |
 | G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | `ConductorSurfacesSpecifyWorktreeAndArtifactsParallelization` — both files. **Blocked**, though `ConductorExecutionContractSpecifiesWorktreeCleanupAndConflictHandling` pins only the skill, so the MCP-setup and cleanup sentences are the removable part |
 | G3 | Keep RED authorship and GREEN implementation adversarial, bundle same-role micro-tasks, and keep the independent verification pass at task completion. | both files | `delivery-execution` → `## Ready queue` | `ConductorSurfacesPreserveAdversarialRedGreenBoundaryAndBundleSameRoleTasks` — both files. **Blocked** |
-| G4 | Report discovery before the digest; the two review seats report it above their attestation line instead, and the verdict engine flags gaps (`KW-REVIEW-044`). | both files | `delivery-execution` → `## Developer exit gate` | `ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest` — both files. **Blocked** |
+| G4 | Report discovery before the digest; the two review seats report it above their attestation line instead, and the verdict engine flags a findings or `NO FINDINGS` seat's gaps (`KW-REVIEW-044`; a `SKIPPED` seat is exempt). | both files | `delivery-execution` → `## Developer exit gate` | `ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest` — both files. **Blocked** |
 | G5 | Exempt a valid `STATUS: ESCALATION` from the six-field rejection, and route a tripped breaker to architect mediation. | both files, plus `docs/kyber-squad/requirements.md` | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | `ConductorAndRequirementsExemptCircuitBreakerEscalationFromSixFieldRejection` — three files. **Blocked** |
 | G6 | Keep the original worker session for rework and verification; a busy session is queued, not replaced. | `agents/conductor.md` → `## Shared lifecycle invariants`: **shortened in T52** to a pointer at the skill's `## Task session continuity`; `delivery-execution` keeps the section | `delivery-execution` → `## Task session continuity` | `SquadCanonicalContentTests.ConductorRetainsOnlyWorkerSessionsForTaskRework` asserts the skill only |
 | G7 | Bounded retries: the 2-rework-dispatch cap and the oscillation tripwire (row B6). | `agents/conductor.md` → `## Shared lifecycle invariants`: **removed in T52** | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | `SquadCanonicalContentTests.LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection` asserts the skill only |
