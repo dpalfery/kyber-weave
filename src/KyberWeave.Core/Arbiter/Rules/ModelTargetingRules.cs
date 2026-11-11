@@ -18,11 +18,12 @@ internal static class ModelTargetingRules
     public const string LadderRuleId = "KW-ARB-LADDER-001";
 
     private const string Off = "off";
-    private const string Shadow = "shadow";
+    private const string Enforce = "enforce";
 
     /// <summary>Returns <paramref name="rules"/> with the model-targeting rules set for <paramref name="mode"/>.</summary>
     /// <param name="rules">The effective rule set.</param>
-    /// <param name="mode"><c>off</c> disables both rules, <c>shadow</c> records them without effect, and <c>enforce</c> lets them gate.</param>
+    /// <param name="mode"><c>off</c> disables both rules, <c>shadow</c> records them without effect, and <c>enforce</c> lets them gate.
+    /// Any other mode is treated as shadow, so an unrecognised mode never gates a dispatch.</param>
     public static IReadOnlyList<ArbiterRule> Apply(IReadOnlyList<ArbiterRule> rules, string mode)
     {
         ArgumentNullException.ThrowIfNull(rules);
@@ -40,8 +41,8 @@ internal static class ModelTargetingRules
             applied.Add(mode switch
             {
                 Off => rule with { Enabled = false },
-                Shadow => rule with { Shadow = true },
-                _ => rule with { Shadow = false },
+                Enforce => rule with { Shadow = false },
+                _ => rule with { Shadow = true },
             });
         }
 

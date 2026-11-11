@@ -43,7 +43,11 @@ internal static class ModelTargetResolver
     /// <summary>The mode is shadow: the choice is recorded and not delivered.</summary>
     public const string Shadow = "shadow";
 
-    private const string ModelTargetMode = "shadow";
+    /// <summary>The mode is not exactly <c>enforce</c> or <c>shadow</c>: nothing is delivered and the mode is reported.</summary>
+    public const string UnknownMode = "unknown-mode";
+
+    private const string ModeEnforce = "enforce";
+    private const string ModeShadow = "shadow";
     private const string LadderNextFact = "model-targeting.ladder.next";
     private const string SourceLadder = "ladder";
     private const string SourceDifficulty = "difficulty";
@@ -150,6 +154,12 @@ internal static class ModelTargetResolver
             return TokenNotAccepted;
         }
 
-        return string.Equals(mode, ModelTargetMode, StringComparison.Ordinal) ? Shadow : null;
+        // Only the exact enforce mode delivers. Any other mode is shadow-like: nothing is written, and the reason says why.
+        return mode switch
+        {
+            ModeEnforce => null,
+            ModeShadow => Shadow,
+            _ => UnknownMode,
+        };
     }
 }
