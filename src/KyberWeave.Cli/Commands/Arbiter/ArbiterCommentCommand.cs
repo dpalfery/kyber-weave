@@ -22,7 +22,7 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// </summary>
     internal Func<string, DiagnosticReport, IArbiterProvider?> ProviderFactory { get; init; } = ProviderFor;
 
-    /// <summary>Prints the class and the decision id. Exits 1 when the configured provider cannot be built.</summary>
+    /// <summary>Prints the class and the decision id. Exits 2 on a usage error, and 1 when the document or the configured provider cannot be used.</summary>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
         // The same size limit the MCP tool applies, checked before any read, provider call or ledger append.
@@ -30,6 +30,12 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         {
             AnsiConsole.MarkupLine($"[red]The comment is larger than {ArbiterTextLimits.MaxTextChars} characters.[/]");
             return 1;
+        }
+
+        // A single comment needs the path it cites. The same usage error as a missing required option elsewhere in Arbiter.
+        if (!settings.Summary && string.IsNullOrWhiteSpace(settings.Path))
+        {
+            return UsageError("--path is required.");
         }
 
         string root = System.IO.Path.GetFullPath(settings.Root);
@@ -99,6 +105,14 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
 
         AnsiConsole.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
         return 0;
+    }
+
+    /// <summary>Prints a usage error on one line, as the other Arbiter commands do, and returns the usage exit code, 2.</summary>
+    private static int UsageError(string message)
+    {
+        CommandHelpers.WriteUnfolded(() =>
+            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
+        return 2;
     }
 
     /// <summary>
