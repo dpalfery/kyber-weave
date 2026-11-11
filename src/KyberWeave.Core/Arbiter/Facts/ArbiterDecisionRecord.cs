@@ -92,6 +92,10 @@ public sealed record ArbiterDecisionRule(
     [JsonPropertyName("candidate")]
     public string? Candidate { get; init; }
 
+    /// <summary>Whether this rule's drop was outranked by another rule's annotation; omitted otherwise.</summary>
+    [JsonPropertyName("suppressed")]
+    public bool? Suppressed { get; init; }
+
     /// <summary>
     /// The full shape with the three optional fields. Deserialisation binds through this
     /// constructor so every field a line carries is read back.

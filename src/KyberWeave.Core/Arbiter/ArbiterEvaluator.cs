@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter;
@@ -241,6 +242,27 @@ public sealed class ArbiterEvaluator
         // reaches the catch in EvaluateAsync, which escalates with the reason.
         facts = GateReportFacts.Enrich(facts, ev);
 
+        // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
+        // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
+        string? reviewRun = HeaderBlock.Parse(prompt).Headers.TryGetValue("REVIEW_RUN", out string? run) ? run : null;
+        IReadOnlyList<ReturnedFinding> returned = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
+            ? ReturnedFinding.ParseAll(ev.ToolOutput)
+            : [];
+        if (returned.Count > 0)
+        {
+            facts = TriggerFactBuilder.WithReturnedFinding(
+                facts, returned[0], GateReportFacts.FailedGateCorroborates(ev.Cwd));
+        }
+
+        if (reviewRun is not null
+            && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
+            && facts.TryGet("finding.id", out ArbiterFact? refuted)
+            && refuted.Value is string refutedId)
+        {
+            facts = TriggerFactBuilder.WithDroppedStatus(
+                facts, refutedId, ReviewStore(config).ReadFindings(reviewRun));
+        }
+
         // Read once here and reused for both REPEAT and the record, so the count and the
         // entry it is written beside are keyed on the same digest.
         string? planDigest = facts.TryGet("plan.digest", out ArbiterFact? digestFact)
@@ -307,6 +329,11 @@ public sealed class ArbiterEvaluator
             classification, ev, primary, primaryCall, config, rules, effective, ledgerId, planDigest, elapsed,
             cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
+        if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
+        {
+            await RecordReturnedFindingsAsync(ReviewStore(config), reviewRun, returned, primaryOutcome)
+                .ConfigureAwait(false);
+        }
 
         List<ArbiterSecondaryEvaluation> secondaryResults = new(secondaries.Count);
         foreach (TriggerPlan plan in secondaries)
@@ -518,6 +545,51 @@ public sealed class ArbiterEvaluator
                 ? ArbiterProviderStatuses.NotEvaluated
                 : call.Status;
 
+    /// <summary>The run store under this evaluator's Arbiter directory, sized by <c>arbiter.stores</c>.</summary>
+    private ArbiterRunStore ReviewStore(KyberWeaveConfig config) =>
+        new(
+            _ledger.DirectoryPath,
+            new ArbiterStoreOptions(config.Arbiter.Stores.MaxItemBytes, config.Arbiter.Stores.RetainDays),
+            () => _clock.GetUtcNow());
+
+    /// <summary>
+    /// Appends a lens return's findings to the review store. The first finding, the one the filter read,
+    /// carries the drop status; the rest are stored kept, because no rule read them.
+    /// </summary>
+    private static async Task RecordReturnedFindingsAsync(
+        ArbiterRunStore store,
+        string reviewRun,
+        IReadOnlyList<ReturnedFinding> findings,
+        string outcome)
+    {
+        for (int index = 0; index < findings.Count; index++)
+        {
+            bool dropped = index == 0 && string.Equals(outcome, RuleEffects.Drop, StringComparison.Ordinal);
+            await store.AppendFindingAsync(reviewRun, ReturnedFinding.StoredText(findings[index].Text, dropped))
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A drop that another rule's annotation outranks stays in the record, marked suppressed, so the decision
+    /// log still shows the filter's view of the finding.
+    /// </summary>
+    private static void MarkSuppressedDrops(List<ArbiterDecisionRule> rules, string outcome)
+    {
+        if (string.Equals(outcome, RuleEffects.Drop, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        for (int index = 0; index < rules.Count; index++)
+        {
+            if (string.Equals(rules[index].Effect, RuleEffects.Drop, StringComparison.Ordinal))
+            {
+                rules[index] = rules[index] with { Suppressed = true };
+            }
+        }
+    }
+
     private static string AnswerFor(Question question, Step1Call call) =>
         call.Answers.TryGetValue(question.Rule.Id, out string? answer) ? answer : RuleEngine.Undecidable;
 
@@ -553,6 +625,7 @@ public sealed class ArbiterEvaluator
         }
 
         string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        MarkSuppressedDrops(rules, outcome);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: null,

@@ -216,6 +216,63 @@ public static class TriggerFactBuilder
         return facts;
     }
 
+    /// <summary>
+    /// Adds a lens return's finding facts: its id, its text, its stated severity, and whether a failed gate
+    /// corroborates it. Built from the return, not the dispatch, so it is added after the static build.
+    /// </summary>
+    public static ArbiterFactSet WithReturnedFinding(ArbiterFactSet facts, ReturnedFinding finding, bool gateCorroborated)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(finding);
+
+        ArbiterFactSet bag = facts
+            .With("finding.id", finding.Id, ArbiterFactLabel.Asserted)
+            .With("finding.excerpt", finding.Text, ArbiterFactLabel.Asserted)
+            .With("finding.gate-corroborated", gateCorroborated, ArbiterFactLabel.Derived);
+        return finding.Severity is null
+            ? bag
+            : bag.With("finding.severity", finding.Severity, ArbiterFactLabel.Asserted);
+    }
+
+    /// <summary>
+    /// Adds <c>finding.dropped</c> for a refuted finding, read from the review store's items for its run. A
+    /// finding with no stored item keeps the fact absent, so a refuter cannot be denied on no evidence.
+    /// </summary>
+    /// <param name="facts">The fact bag to extend.</param>
+    /// <param name="findingId">The refuted finding's id.</param>
+    /// <param name="storedItems">The review run's stored items, in append order; the latest for the id decides.</param>
+    public static ArbiterFactSet WithDroppedStatus(ArbiterFactSet facts, string findingId, IReadOnlyList<string> storedItems)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(findingId);
+        ArgumentNullException.ThrowIfNull(storedItems);
+
+        string? status = null;
+        foreach (string item in storedItems)
+        {
+            IReadOnlyList<ReturnedFinding> stored = ReturnedFinding.ParseAll(item);
+            if (stored.Count > 0 && string.Equals(stored[0].Id, findingId, StringComparison.Ordinal))
+                status = StatusOf(item) ?? status;
+        }
+
+        return status is null
+            ? facts
+            : facts.With("finding.dropped", string.Equals(status, ReturnedFinding.DroppedStatus, StringComparison.Ordinal), ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>The status a stored item carries on its last <c>status:</c> line, or null when it has none.</summary>
+    private static string? StatusOf(string item)
+    {
+        string? status = null;
+        foreach (string line in item.Split('\n'))
+        {
+            if (line.StartsWith(ReturnedFinding.StatusPrefix, StringComparison.Ordinal))
+                status = line[ReturnedFinding.StatusPrefix.Length..].Trim();
+        }
+
+        return status;
+    }
+
     /// <summary>The primary trigger's facts plus every secondary trigger's, so one bag serves them all.</summary>
     private static IReadOnlySet<string> DeclaredFacts(IReadOnlySet<string> primary, IReadOnlyList<string>? secondaryTriggers)
     {

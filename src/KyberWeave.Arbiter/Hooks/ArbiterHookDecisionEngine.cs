@@ -220,7 +220,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 ev, effective,
                 new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook, ConfirmModelWrite: context.ConfirmModelWrite))
                 .GetAwaiter().GetResult();
-            return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, isPost);
+            return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, toolOutput, isPost);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -243,6 +243,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         KyberWeaveConfig config,
         string arbiterDirectory,
         HookContext context,
+        string? toolOutput,
         bool isPost)
     {
         if (result.IsError)
@@ -287,6 +288,21 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 "the escalation was judged by no model.",
                 context.NewDecisionId(),
                 context);
+        }
+
+        if (string.Equals(record.Outcome, RuleEffects.Drop, StringComparison.Ordinal))
+        {
+            // A drop sets a finding aside after the lens returns; it never blocks. The one line names the finding
+            // so the host can see what was set aside. A drop has no pre-dispatch form, so before a return it allows.
+            IReadOnlyList<ReturnedFinding> returned = ReturnedFinding.ParseAll(toolOutput);
+            if (!isPost || returned.Count == 0)
+            {
+                return new HookOutcome(HookOutcomeKind.Allow);
+            }
+
+            return new HookOutcome(
+                HookOutcomeKind.PostAnnotation,
+                ArbiterFindingNotices.DroppedLine(returned[0].Id, record.Id));
         }
 
         string reason = RenderReason(record, prompt, harness, caller, config);
