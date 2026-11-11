@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -25,6 +25,7 @@ code-refs:
   - ProjectRootDetector
   - ReviewBlockWriter
   - ReviewCatalogueCommand
+  - SeatOutputParser
 sections:
   "#":
     keywords:
@@ -69,7 +70,7 @@ flowchart TD
     Approval -->|"granted"| Worker
     Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
     Drain -->|"collection empty"| Join
-    Join -->|"end of run · the only automatic council run"| Scope
+    Join -->|"end of run · the council's first cycle"| Scope
     HumanAsk["human asks for a review"] --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
@@ -92,11 +93,11 @@ flowchart TD
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
-    Council -->|"findings"| Confirm["3. Adversarial confirm<br/>one refuter per major or critical finding"]
+    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one batched refuter over the KW-REVIEW-046 candidates"]
     Confirm --> Adjudicate
     Gates -->|"gates.json"| Adjudicate
 
-    Adjudicate["4. Adjudication<br/>quote verified · duplicates reconciled<br/>claims checked against gate output"] --> VE
+    Adjudicate["4. Adjudication<br/>quote verified · duplicates reconciled<br/>every removal through --drop id=reason"] --> VE
 
     subgraph VE["LAYER 3 — Verdict engine (unit-tested code)"]
         direction LR
@@ -106,10 +107,10 @@ flowchart TD
     VE --> Out["APPROVE · REQUEST_CHANGES<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
     Out -->|"APPROVE"| RunComplete["run complete"]
-    Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
+    Out -->|"REQUEST_CHANGES"| ObjRemed["review loop — owning workers fix critical, major<br/>and failed blocking gates, then verifier re-review until APPROVE"]
     ObjRemed --> Worker
-    ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Join --> ObjReview["objective-level code-reviewer<br/>once per objective"]
+    ObjRemed -->|"5-cycle cap · no-progress stop"| ObjFailed["hard stop — open findings listed in the PR<br/>as pending human review · delivery continues"]
+    Worker -->|"fix round done"| ObjReview["verifier cycle<br/>fix delta · --prior cycle folder"]
     ObjReview --> Scope
 
     Cfg -.-> Gates
@@ -297,6 +298,27 @@ refusing unverified claims is not permitted to make one.
 
 ## How a finding survives
 
+Findings reach the verdict from **seat files**, not from a findings file the reviewer writes.
+Each seat's output is saved unchanged as `<lens>.md` in the cycle's `seats` folder (a finding
+the reviewer raises itself goes in `reviewer.md`), and `kyber-weave review verdict . --seats
+<cycle>/seats --gates <cycle>/gates.json --out <cycle>/findings.json` parses them
+(`SeatOutputParser`). The reviewer's only action on a finding is `--drop <id>=<reason>`: it
+never edits a finding and never changes its severity, so every removal appears in the Dropped
+list with its reason, and a bad `--drop` is refused (`KW-REVIEW-042`). Two checks run before
+the policy below:
+
+- **Lens coverage (`KW-REVIEW-041`).** Every catalogue lens needs a seat file, a
+  `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
+  otherwise the command refuses to compute. A file whose name is not a catalogue lens keeps its
+  findings but covers no lens, and draws a warning. An unreadable seat file is refused
+  (`KW-REVIEW-040`).
+- **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
+  its file is moved to the one line that holds its excerpt, or dropped when no single line
+  does. A line inside the file is never moved.
+
+A seat that wrote no `Discovery:` line, or read files directly with no index lookup and no
+`Index fallback:` line, draws a warning (`KW-REVIEW-044`); it is never a verdict input.
+
 ```mermaid
 flowchart TD
     F["Finding reported by a lens"] --> E{"excerpt + evidence<br/>+ failure_scenario?"}
@@ -317,7 +339,13 @@ while the exemption stays. On the day after it lapses the finding returns on its
 
 ### Adversarial confirmation and refutation guardrails
 
-Step 3 spends one more `review-lens` invocation attempting to refute every surviving finding of severity `major` or `critical`. However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
+Step 3 sends every refutation candidate — the accepted `major` and `critical` findings the
+verdict command lists under `KW-REVIEW-046` — to **one batched** `review-lens` spawn. Its single
+`REFUTE:` header names the first candidate, because a repeated header would leave the Arbiter
+without the fact it reads; the body carries every candidate's YAML, and the refuter answers once
+per finding id. The reviewer drops each refuted finding with `--drop <id>=refuted: <reason>` and
+computes the verdict again. A verifier cycle sends only the candidates no earlier cycle refuted.
+However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
 - Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
 - Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.
 - Refuters are strictly forbidden from dropping:
@@ -345,6 +373,12 @@ The properties of that order are load-bearing:
 
 **Gate failures outrank findings.** A failing blocking gate forces `REQUEST_CHANGES` immediately;
 clean code cannot pass with failed build, test, or analyzer evidence.
+
+**A gate that time stopped is NOT RUN, not failed.** A gate whose outcome is `TimedOut` (its
+own limit) or `DeadlinePassed` (the council deadline) reached no result. The engine reports it as
+`KW-REVIEW-039`, a warning that what it checks is unverified; it never trips rule 1 and never
+grades risk `HIGH`. A gate whose program never started still blocks, because approving past it
+would read as a gate that ran and passed.
 
 **Exit codes are binary.** `0` for `APPROVE` and `1` for `REQUEST_CHANGES`. Former rules
 `KW-REVIEW-008`, `KW-REVIEW-009`, and `KW-REVIEW-011` are retired in place; review policy no longer
@@ -680,6 +714,12 @@ zero gates, which a reader could take as a pass. `--gate` is exclusive with `--a
 `--paths`, `--base` and `--council`. A reviewer that reads `artifacts/gates.json`, fixes one
 thing and needs that one gate re-checked pays for one gate, not the suite.
 
+**The council deadline bounds the full council run.** `review.council-deadline-seconds`
+(default `600`) applies only to a full `review gates --council` run: a `--gate` re-check and a run
+without `--council` have no deadline. The gate the deadline cuts, and every gate after it, is
+recorded as `DeadlinePassed` and reported NOT RUN (`KW-REVIEW-039`), so the council goes on to a
+verdict on the evidence it has instead of waiting on a slow suite.
+
 **A gate whose dependency is absent does not start.** `requires-paths` turns "the tool was
 never installed" into its own reported fact instead of a code failure the reviewer has to
 diagnose. The reviewer installs what the hint names and re-runs that gate with `--gate`.
@@ -855,8 +895,9 @@ key: written on a task gate it is an unknown key (`KW-CONFIG-002`), not a silent
 The two principles this area answers to are stated in the
 [review index](README.md#principles); this section is how they are implemented.
 
-**One reviewer, and a deterministic gate ahead of it.** `code-reviewer` reviews the whole run,
-once, at the end — and one task only when a human explicitly asks. There is no condition under
+**One reviewer, and a deterministic gate ahead of it.** `code-reviewer` reviews the whole run
+at the end, and again after each fix round of the review loop below — and one task only when a
+human explicitly asks. There is no condition under
 which a task summons the council: not a failed gate, not a reserved path, not a concern that
 looks serious. Each of those would be a per-task council bill, and avoiding that bill is the
 entire point of the split.
@@ -877,13 +918,28 @@ rather than performing it.
 |---|---|---|
 | `shadow` | Full review, verdict recorded, **gates nothing** | First rollout on a repository |
 | `enabled` | The verdict gates | Normal operation |
-| `verifier` | Re-checks only the prior findings | After a fix push |
-| `full` | Forces a complete council re-scan | Escalation, or a stale prior review |
+| `verifier` | Re-checks only the prior findings and the fix delta | Every review cycle after the first |
+| `full` | Forces a complete council re-scan | Selected by a person: a disputed verdict, or a stale prior review |
 
-`verifier` is the cost lever: gates re-run every cycle because their result *is* the evidence,
-but only lenses owning an outstanding finding re-run. The loop escalates after three cycles
-without the surviving-finding count falling — a loop that is not converging is not going to,
-and the usual cause needs a person.
+**The review loop.** After `REQUEST_CHANGES`, every critical and major finding, and every
+failed blocking gate, goes to the worker that owns its scope; the council then re-reviews, and
+it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle. Every cycle
+after the first is a `verifier` cycle: it reviews the fix delta `git diff <prior head>...<head>`,
+re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
+satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
+coverage. Gates re-run every cycle because their result *is* the evidence.
+
+The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
+surviving critical and major findings does not fall. The findings still open are then listed in
+the pull request as pending human review, and delivery continues — a loop that is not
+converging is not going to, and the usual cause needs a person. A finding whose rework tripped
+the circuit-breaker stays open and counts toward the stop. The loop runs on the open pull
+request: ready stays decided by required CI alone.
+
+Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
+folder, `gates.json`, the `findings.json` the verdict command writes, and `head` — until the run
+ends. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
+the same cycle and never counts as one.
 
 ## Gate applicability and Arbiter review gates
 

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 keywords:
   - worker rule map
   - rule home
@@ -149,8 +149,10 @@ order and the plan-read ban, and whose fourth is the batched-read line.
 | D3 | Plans are the conductor's: do not open a file under `<plan-index>` or `<specification-index>`, or any plan folder; return a blocker when the packet is insufficient. | `## Scope` in 13 developer agent bodies: `csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `sql-database-architect`, `tauri-dev`, `test-dev`, `typescript-dev` — the duplicate sentence removed, "Your packet is your whole scope." kept. `docs-dev` keeps only its closeout exception, which is the one part of the rule that is its own | the baseline block ("**Plans are the conductor's.**") | `SquadWorkerBaselineInjectionTests`, whose required phrase list includes `<plan-index>`; Arbiter rule `KW-ARB-PLANREAD-001` on the `delegate` trigger refuses a dispatch that sends a worker into a plan. No test pins the agent-body copy |
 | D4 | Batch independent reads into one round trip per question. | nowhere in the agent bodies — it is new text in the baseline | the baseline block | `SquadWorkerBaselineInjectionTests` ("one round trip"). Listed so nothing "restores" it into agent bodies |
 
-The two review seats keep their own exception: `review-lens` and `review-triage` stay exempt from
-*reporting* the discovery header, because their output schemas are machine-consumed and fixed.
+The two review seats report discovery too. `review-lens` and `review-triage` put
+`Discovery: codegraph N, docs N, direct reads N` directly above their attestation line, below any
+`Index fallback:` line, and the verdict engine flags a seat that wrote none, or that read files
+directly with no index lookup and no fallback line, as `KW-REVIEW-044`.
 
 ## The task-end fix pass and build isolation
 
@@ -186,7 +188,7 @@ theory pins there.
 | G1 | Send a self-contained packet: inlined entry-file table, acceptance criteria, dependencies, mode, pre-computed test commands, and no plan or spec in the worker's context. | `agents/conductor.md` → `## Shared lifecycle invariants`; `skills/delivery-execution/SKILL.md` → `## Ready queue`, `## Task file and dispatch` | `delivery-execution` | `ConductorSurfacesSpecifyInlinedTaskPacketContents` — asserts both files. **Blocked** |
 | G2 | Give each parallel worker a worktree or isolated context with per-task artifact paths, and serialize integration before push. | both files | `delivery-execution` → `## Ready queue` | `ConductorSurfacesSpecifyWorktreeAndArtifactsParallelization` — both files. **Blocked**, though `ConductorExecutionContractSpecifiesWorktreeCleanupAndConflictHandling` pins only the skill, so the MCP-setup and cleanup sentences are the removable part |
 | G3 | Keep RED authorship and GREEN implementation adversarial, bundle same-role micro-tasks, and keep the independent verification pass at task completion. | both files | `delivery-execution` → `## Ready queue` | `ConductorSurfacesPreserveAdversarialRedGreenBoundaryAndBundleSameRoleTasks` — both files. **Blocked** |
-| G4 | Report discovery before the digest, and exempt the two review seats from report-format rules. | both files | `delivery-execution` → `## Developer exit gate` | `ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest` — both files. **Blocked** |
+| G4 | Report discovery before the digest; the two review seats report it above their attestation line instead, and the verdict engine flags gaps (`KW-REVIEW-044`). | both files | `delivery-execution` → `## Developer exit gate` | `ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest` — both files. **Blocked** |
 | G5 | Exempt a valid `STATUS: ESCALATION` from the six-field rejection, and route a tripped breaker to architect mediation. | both files, plus `docs/kyber-squad/requirements.md` | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | `ConductorAndRequirementsExemptCircuitBreakerEscalationFromSixFieldRejection` — three files. **Blocked** |
 | G6 | Keep the original worker session for rework and verification; a busy session is queued, not replaced. | `agents/conductor.md` → `## Shared lifecycle invariants`: **shortened in T52** to a pointer at the skill's `## Task session continuity`; `delivery-execution` keeps the section | `delivery-execution` → `## Task session continuity` | `SquadCanonicalContentTests.ConductorRetainsOnlyWorkerSessionsForTaskRework` asserts the skill only |
 | G7 | Bounded retries: the 2-rework-dispatch cap and the oscillation tripwire (row B6). | `agents/conductor.md` → `## Shared lifecycle invariants`: **removed in T52** | `delivery-execution` → `## Iteration circuit-breaker and loop detection` | `SquadCanonicalContentTests.LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection` asserts the skill only |
@@ -209,7 +211,7 @@ alone.
 | The six-field block and the `TASK_GATE:` line in `skills/delivery-execution/SKILL.md` alongside its new home in `skills/task-gate/SKILL.md` | Two audiences: the conductor requires the digest, the worker emits it. Both are pinned (`ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema`, `SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt`, `TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema`). |
 | The closed `CIRCUIT_BREAKER_TRIGGER` token set in `skills/task-gate/SKILL.md` alongside its procedure in `references/rework.md` | The skill raises the escalation the reference explains; `SquadCanonicalContentTests.TaskGateSkillDefinesTheDeterministicReviewGateContract` asserts the closed set on the skill file itself. |
 | Each developer agent's own agent-specific completion, plus its `TASK_GATE:` line | The shared contract's phased rollout keeps those: only `csharp-dev` and `test-dev` must return the full six-field block, and the conductor rejects a missing or `FAIL` `TASK_GATE` line from every developer worker. `SquadCanonicalContentTests.NonDeveloperAgentBodiesNeverEmitTaskGateDigest` keeps it out of the non-developer bodies. |
-| `review-lens` and `review-triage`'s `## Discovery order`, with its "Discovery reporting is exempt" line | Their machine-consumed output schemas are fixed; `SquadCanonicalContentTests` asserts the exemption text specifically for them. |
+| `review-lens` and `review-triage`'s `## Discovery order`, with its seat-specific `Discovery:` placement | A seat's closing lines are read by the verdict engine, so they report discovery directly above the attestation line rather than before a digest; `SquadCanonicalContentTests` asserts the `Discovery: codegraph N, docs N, direct reads N` line for them, and `KW-REVIEW-044` flags a seat that omits it. |
 | The zero-stash and worktree-isolation text in `agents/test-dev.md`, `agents/conductor.md` and the two .NET agent bodies | Pinned by `TestDevSurfacesSpecifyZeroStashRedProofRule`, `ConductorSurfacesSpecifyZeroStashRedProofs`, `SpecialistSurfacesClarifyWorktreeOutputIsolationBypassesArtifactsPath` and `SpecialistPromptsClarifyArtifactAndBaselinePathsBelongInAccompanyingMessageBody`. |
 | The test-runner statement in the 9 standard templates that carry one | Same reason as the first row, and `TestStandardDefinesSharedTestInfrastructureAndGivesNoFullRunRoute` pins the test standard's version. |
 
