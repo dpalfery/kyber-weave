@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No active plans. A plan is registered here when execution starts and removed at closeout, when it moves to the archived plan inventory and its file moves to `docs/archive/plans/`.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [The global Arbiter hook gates Claude Code when no project hook does](arbiter-claude-ungated.md) | Ready | 2026-11-11 | The user-level Arbiter hook evaluates Claude dispatches under the project's configuration when no project hook covers them, never twice; doctor and status report gating per harness; the Claude hook block uses `PreToolUse` / `PostToolUse`. |
 
 ## Archived Plans
 
