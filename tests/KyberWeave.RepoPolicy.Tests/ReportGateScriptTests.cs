@@ -151,7 +151,7 @@ public sealed class ReportGateScriptTests : IDisposable
     {
         SkipIfBashUnavailable();
 
-        ProcessResult result = RunContainsScript($"echo '<Report><Issue /></Report>' > {Report}", grace: 1);
+        ProcessResult result = RunContainsScript($"echo '<Report><Issue />' > {Report}", grace: 1);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("no complete report", result.StandardError, StringComparison.Ordinal);
