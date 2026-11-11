@@ -102,7 +102,7 @@ Permanent state, preserved across the plan's whole lifecycle.
 
 ## Investigation findings
 
-Read at `claude/fix/review-council-assessment`, revision `5fc77a2b` (PR 592's head; `git diff origin/main...HEAD` read for its wording), through this worktree's own CodeGraph index (`codegraph explore` in `/Users/dave/git/claude-worktree/kyber-weave/sleepy-fermat-a979d2`).
+Read at `claude/fix/review-council-assessment`, revision `5fc77a2b` (PR 592's head; `git diff origin/main...HEAD` read for its wording), through this worktree's own CodeGraph index (`codegraph explore` in the run worktree).
 
 - **F1: `KW-REVIEW-023` reproduced from the transcripts.** It is `ReviewVerdictCommand.UnreadableInput`, raised whenever `TryRead` fails. The reviewer transcripts for 589, 590 and 591 show four separate causes, all from hand-built JSON:
   - (a) No envelope. `{"findings":[…]}` lacks the required `schema`, `changedPaths` and `changedLines`; `FindingsReport` uses `RespectRequiredConstructorParameters`. 589 parsed only after a `sed` added them.
@@ -134,7 +134,7 @@ Read at `claude/fix/review-council-assessment`, revision `5fc77a2b` (PR 592's he
 - **F8: Measured gate durations** (`artifacts/gates.json` in the 589 to 591 worktree): format 7 s and 10 s, `build` 21 s, `test` 228 s, `test-policy` 26 s, every skill and docs gate under 2 s, `duplicates` 2 s, `inspectcode` 900 s timed out. CI does not run `inspectcode`.
 
 Discovery: codegraph 4 (worktree CLI index, revision `5fc77a2b`), docs 2, direct reads 31:
-- Docs route: the kw-docs server is bound to `/Users/dave/git/personal/claude/kyber-weave` on branch `claude/fix/architect-plan-date-prefix` at `0ae061d2`, not `RUN_BRANCH`, so `docs_find_duplicates_conflicts_ambiguous_terms` answered for another tree. Its first page held no review-council duplicates. The sibling lists in this plan come from Grep over this worktree instead (`mcp: wrong-branch claude/fix/architect-plan-date-prefix vs claude/fix/review-council-assessment`).
+- Docs route: the kw-docs server is bound to the canonical checkout on branch `claude/fix/architect-plan-date-prefix` at `0ae061d2`, not `RUN_BRANCH`, so `docs_find_duplicates_conflicts_ambiguous_terms` answered for another tree. Its first page held no review-council duplicates. The sibling lists in this plan come from Grep over this worktree instead (`mcp: wrong-branch claude/fix/architect-plan-date-prefix vs claude/fix/review-council-assessment`).
 - Indexed code read directly:
   - `VerdictEngine.cs`, `ReviewModel.cs`, `ReviewJson.cs`, `ReviewVerdictCommand.cs` and `GateRunner.cs` excerpts: the explore output elided the method bodies (`cli: elided gap`).
   - `HeaderBlock.cs` lens list and the `SquadCanonicalContentTests` excerpts: confirming one detail each.
