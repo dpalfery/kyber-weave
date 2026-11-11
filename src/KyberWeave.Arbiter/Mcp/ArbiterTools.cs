@@ -447,7 +447,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
     /// <summary>
     /// Classifies one bot review comment as <c>real</c>, <c>nitpick</c> or <c>already-fixed</c> against the code at the
-    /// cited line, and records the decision. Returns JSON with <c>class</c>, <c>confidence</c> and <c>decisionId</c>.
+    /// cited line, and records the decision. Returns JSON with <c>class</c>, <c>confidence</c>, <c>decisionId</c>,
+    /// <c>shadow</c> and <c>wouldClass</c>. While the rule is in shadow <c>class</c> is always <c>real</c>.
     /// </summary>
     /// <param name="path">The repository-relative path the comment cites.</param>
     /// <param name="line">The 1-based line the comment cites.</param>
@@ -457,7 +458,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <param name="author">The login that posted the summary, when known. Only a configured bot's summary is classified.</param>
     [McpServerTool(Name = "arbiter_classify_bot_review_comment", ReadOnly = false, OpenWorld = false)]
     [Description("""
-        Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items. Returns JSON.
+        Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. While the rule is in shadow (log-only), class is always real and wouldClass gives the class the model would have returned; shadow true says so. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items, each with the same fields. Returns JSON.
         """)]
     public string ClassifyBotReviewComment(
         [Description("The repository-relative path the comment cites. Ignored when summary is true.")]
@@ -484,12 +485,16 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
-        string ruleSet = ArbiterProvenance.RuleSetHash(ArbiterConfig.ProductDefaults.Rules);
+        // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
+        // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
+        (KyberWeaveConfig? config, _) = Load();
+        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfig.ProductDefaults.Rules;
+        string ruleSet = ArbiterProvenance.RuleSetHash(rules);
         if (summary)
         {
-            IReadOnlyList<string> botLogins = BotLoginsForRoot();
+            IReadOnlyList<string> botLogins = config?.Arbiter.CommentTriage.BotLogins ?? [];
             CommentSummaryResult summaryResult = WithProvider(provider =>
-                new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, botLogins)
+                new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, botLogins, rules)
                     .ClassifySummaryAsync(new CommentSummaryRequest(body, author))
                     .GetAwaiter()
                     .GetResult());
@@ -503,6 +508,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                     @class = item.Class,
                     confidence = item.Confidence,
                     decisionId = item.DecisionId,
+                    shadow = item.Shadow,
+                    wouldClass = item.WouldClass,
                 }),
             });
         }
@@ -524,7 +531,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         CommentTriageResult result = WithProvider(provider =>
-            new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet)
+            new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, rules: rules)
                 .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha))
                 .GetAwaiter()
                 .GetResult());
@@ -533,17 +540,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             @class = result.Class,
             confidence = result.Confidence,
             decisionId = result.DecisionId,
+            shadow = result.Shadow,
+            wouldClass = result.WouldClass,
         });
-    }
-
-    /// <summary>
-    /// The bot logins from <c>arbiter.comment-triage.bot-logins</c>. A root whose configuration cannot be loaded has
-    /// none, so every summary stays real: the fail-safe answer.
-    /// </summary>
-    private IReadOnlyList<string> BotLoginsForRoot()
-    {
-        (KyberWeaveConfig? config, string? error) = Load();
-        return error is null && config is not null ? config.Arbiter.CommentTriage.BotLogins : [];
     }
 
     /// <summary>

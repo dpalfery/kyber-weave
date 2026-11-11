@@ -109,6 +109,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
         Assert.Equal(12, items[0].GetProperty("line").GetInt32());
         Assert.Equal("Rename this variable to something clearer.", items[0].GetProperty("issue").GetString());
         Assert.Equal("real", items[0].GetProperty("class").GetString());
+        Assert.Equal("nitpick", items[0].GetProperty("wouldClass").GetString());
         Assert.False(string.IsNullOrEmpty(items[0].GetProperty("decisionId").GetString()));
     }
 
