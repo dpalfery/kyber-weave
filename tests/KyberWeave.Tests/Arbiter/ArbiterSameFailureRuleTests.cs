@@ -10,8 +10,8 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 3.9 (same-failure): a rework dispatch to the same worker that carries the prior failing
-/// output. <c>KW-ARB-FAILURE-001</c> sits on the new primary trigger <c>delegate.failure</c>, which a
-/// <c>delegate</c> dispatch to an implementation worker reaches when its prompt body opens with
+/// output. <c>KW-ARB-FAILURE-001</c> sits on the new secondary trigger <c>delegate.failure</c>, which a
+/// <c>delegate</c> dispatch to an implementation worker carries (behind its primary) when its prompt body opens with
 /// <c>FAILURE-CLUSTER: &lt;key&gt;</c>. The rule asks the provider whether the current <c>FAILURE:</c> text is the
 /// same failure as the one stored from the previous attempt. When the answer is <c>same</c> at or above the
 /// 0.85 floor, the dispatch gets an advisory line and is never denied.
@@ -143,14 +143,21 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
     // ---- Classification (acceptance: the marker derives the new primary trigger) ----
 
-    /// <summary>A delegate whose first body line is <c>FAILURE-CLUSTER:</c> classifies as <c>delegate.failure</c>.</summary>
+    /// <summary>
+    /// A rework dispatch (first body line <c>FAILURE-CLUSTER:</c>) classifies as the normal <c>delegate</c> primary,
+    /// so the primary delegate rules still run on it; <c>delegate.failure</c> is a secondary that derives in addition.
+    /// Making it the primary would silently drop every primary delegate rule on rework (the regression this guards).
+    /// </summary>
     [Fact]
-    public void AFailureClusterMarkerClassifiesAsDelegateFailure()
+    public void AFailureClusterMarkerClassifiesAsDelegateWithDelegateFailureAsSecondary()
     {
-        TriggerClassification classification = TriggerClassifier.ClassifySingle(
-            Rework(FirstFailure), "csharp-dev", Rework(FirstFailure).Prompt);
+        ArbiterEvent rework = Rework(FirstFailure);
 
-        Assert.Equal(FailureTrigger, classification.Trigger);
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(
+            rework, "csharp-dev", rework.Prompt);
+
+        Assert.Equal("delegate", classification.Trigger);
+        Assert.Contains(FailureTrigger, SecondaryTriggers.For("delegate", rework));
     }
 
     /// <summary>A delegate without the marker is still a plain <c>delegate</c>, so the failure rule never sees it.</summary>
@@ -244,7 +251,9 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
         Assert.Equal(RuleEffects.SameFailure, result.Outcome);
-        Assert.Equal(RuleEffects.SameFailure, Assert.Single(result.Dispatches).Outcome);
+        ArbiterSecondaryEvaluation secondary = Assert.Single(Assert.Single(result.Dispatches).Secondary);
+        Assert.Equal(FailureTrigger, secondary.Trigger);
+        Assert.Equal(RuleEffects.SameFailure, secondary.Outcome);
     }
 
     /// <summary>The advisory never denies: the same-failure outcome is not a block on the rework dispatch.</summary>

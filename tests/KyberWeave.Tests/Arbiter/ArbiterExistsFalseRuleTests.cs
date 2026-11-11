@@ -61,6 +61,8 @@ public sealed class ArbiterExistsFalseRuleTests
                 "KW-ARB-READONLY-001",
                 "KW-ARB-GATE-REPORT-001",
                 "KW-ARB-LADDER-001",
+                "KW-ARB-DOCIMPACT-001",
+                "KW-ARB-FAILURE-001",
             },
             RulesWithAnExistsFalseClause(Config()).Select(rule => rule.Id).ToHashSet(StringComparer.Ordinal));
     }

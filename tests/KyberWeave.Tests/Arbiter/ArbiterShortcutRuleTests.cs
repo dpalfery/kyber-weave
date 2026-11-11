@@ -94,11 +94,14 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         }
     }
 
-    /// <summary>Adds one step-0 fact to every evaluation, the way the git reader does for the docs rule.</summary>
-    private sealed class FactGitFacts(string name, bool value) : IArbiterGitFacts
+    /// <summary>
+    /// Supplies the run's changed paths the way the git reader does, and nothing else. The docs-impact fact
+    /// <c>docs.governed-paths-changed</c> is derived from these paths by the Arbiter, never supplied by git.
+    /// </summary>
+    private sealed class ChangedPathsGitFacts(params string[] paths) : IArbiterGitFacts
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) =>
-            facts.With(name, value, ArbiterFactLabel.Derived);
+            facts.With("review.changed-paths", paths, ArbiterFactLabel.Derived);
     }
 
     private sealed class PassThroughGitFacts : IArbiterGitFacts
@@ -315,13 +318,18 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         Assert.Contains(DocsImpactTrigger, SecondaryTriggers.For("delegate", DocsImpactDispatch()));
     }
 
-    /// <summary>A docs-dev delegate without the marker derives nothing.</summary>
+    /// <summary>
+    /// A docs-dev delegate without the marker derives no shortcut. docs-dev is an implementation target, so the
+    /// model-targeting secondary <c>delegate.model</c> still derives; only the shortcut triggers must be absent.
+    /// </summary>
     [Fact]
     public void ADocsDevDispatchWithoutTheMarkerDerivesNoShortcut()
     {
         ArbiterEvent plain = DocsImpactDispatch() with { Prompt = Marked("Update the uploader guide.") };
 
-        Assert.Empty(SecondaryTriggers.For("delegate", plain));
+        Assert.DoesNotContain(
+            SecondaryTriggers.For("delegate", plain),
+            trigger => trigger.EndsWith(".shortcut", StringComparison.Ordinal));
     }
 
     // ---- Triage through the evaluator (acceptance: enforced answer denies, shadow only logs) ----
@@ -494,7 +502,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     {
         ScriptedProvider provider = new(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new FactGitFacts(GovernedPathsFact, false));
+            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -508,7 +516,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     {
         ScriptedProvider provider = new(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new FactGitFacts(GovernedPathsFact, true));
+            ArbiterDirectory, provider, new ChangedPathsGitFacts("docs/uploader.md"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -517,13 +525,54 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
         Assert.NotEqual(Answered, result.Outcome);
     }
 
+    /// <summary>
+    /// Inert-fact regression: nothing used to produce <c>docs.governed-paths-changed</c>, so the step-0 <c>touches</c>
+    /// answer never fired and every docs-impact dispatch fell through to the provider. A run whose diff touches a
+    /// docs path must set the fact true at step 0, so the dispatch is kept and the provider is never asked.
+    /// </summary>
+    [Fact]
+    public async Task ADocsPathInTheRunsDiffSetsTheGovernedPathsFactAndKeepsTheDispatch()
+    {
+        ScriptedProvider provider = new(NoDocChange, 0.95);
+        ArbiterEvaluator evaluator = Evaluator(
+            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
+            DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
+
+        ArbiterSecondaryEvaluation docs = Assert.Single(
+            Assert.Single(result.Dispatches).Secondary, secondary => secondary.Trigger == DocsImpactTrigger);
+        Assert.Equal(RuleEffects.Keep, docs.Outcome);
+        Assert.Equal(0, provider.CallCount);
+    }
+
+    /// <summary>
+    /// Inert-fact regression, other side: a run whose diff touches no docs path sets the fact false, so step 0 does
+    /// not keep the dispatch and the provider is asked; a confident no-doc-change answer then shortcuts it.
+    /// </summary>
+    [Fact]
+    public async Task ANonDocsDiffSetsTheGovernedPathsFactFalseAndTheProviderCanAnswer()
+    {
+        ScriptedProvider provider = new(NoDocChange, 0.95);
+        ArbiterEvaluator evaluator = Evaluator(
+            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
+            DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
+
+        Assert.Equal(1, provider.CallCount);
+        ArbiterSecondaryEvaluation docs = Assert.Single(
+            Assert.Single(result.Dispatches).Secondary, secondary => secondary.Trigger == DocsImpactTrigger);
+        Assert.Equal(Answered, docs.Outcome);
+    }
+
     /// <summary>The docs-impact digest is the exact no-doc-change text for the decision that answered.</summary>
     [Fact]
     public async Task TheDocsImpactAnswerCarriesTheNoDocChangeDigest()
     {
         ScriptedProvider provider = new(NoDocChange, 0.95);
         ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new FactGitFacts(GovernedPathsFact, false));
+            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         await evaluator.EvaluateAsync(DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 
