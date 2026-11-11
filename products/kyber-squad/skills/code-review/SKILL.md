@@ -64,21 +64,21 @@ They are independent. Neither waits on the other.
 
 ```bash
 kyber-weave review gates . --base <ref> --out artifacts/gates.json
-kyber-weave review gates . --base <ref> --out artifacts/gates.json --council
+kyber-weave review gates . --base <ref> --council --deadline --out <cycle>/gates.json
 kyber-weave review gates . --base <ref> --gate <gate-id> --out artifacts/gates.json --council
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
-The end-of-run council (`code-reviewer`) runs the second form: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds it.
+The end-of-run council (`code-reviewer`) runs the second form in every review cycle, writing straight into the cycle folder: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds either flag.
 
-The council stops waiting for its gates at `review.council-deadline-seconds` (default 600). The deadline bounds only the full `--council` run: the gate it cuts, and every gate after it, is reported as not run (`KW-REVIEW-039`), and the council goes on to a verdict with the evidence it has. A gate that times out, or that the council deadline stops, is NOT RUN: it is listed as unverified, and it is never a blocking failure. A single-gate re-check with `--gate` and a run without `--council` have no deadline.
+`--deadline` stops the council waiting for its gates at `review.council-deadline-seconds` (default 600): the gate it cuts, and every gate after it, is reported as not run (`KW-REVIEW-039`), and the council goes on to a verdict with the evidence it has. A gate that times out, or that the council deadline stops, is NOT RUN: it is listed as unverified, and it is never a blocking failure. That holds for the council's verdict and for a `--deadline` run's exit code. Without `--deadline` nothing changes for CI, task gates, the pre-push gate or a `--gate` re-check: there is no run deadline, and a blocking gate stopped by its own `timeout-seconds` fails `review gates` (`KW-REVIEW-022`). `--deadline` is refused with `--gate` and with `--agent`.
 
 The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
-Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
-denied write tool on the reviewer does not block the run. Copy the gate report into the
-cycle folder as `gates.json` (step 5), which is the file the verdict command reads. If the
-files cannot be persisted, keep the JSON from the command's response and pass it to
+The other forms write under `artifacts/`; the council's form writes `gates.json` into the
+cycle folder (step 5), which is the file the verdict command reads. The CLI subprocess writes
+them via `process.execute`, so a denied write tool on the reviewer does not block the run. If
+the files cannot be persisted, keep the JSON from the command's response and pass it to
 `review verdict`.
 
 `--base <ref>` names the commit the change is reviewed against — the branch or head the run
@@ -259,7 +259,8 @@ third mechanism. `balanced` (the default) is `min-confidence: 7`, `major-count-b
 host that also declares `min-confidence` or `major-count-blocks` overrides the preset for that
 number. Minor findings never block at any level. Pass the strictness and the effective
 `min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
-findings instead of having them dropped at the source and a lenient host is not flooded.
+findings instead of having them dropped at the source and a lenient host is not flooded. The
+security lens is the one exception: it keeps its own floor of 8 (see its lens file).
 
 **Review loop.** The council re-reviews after every fix round until it returns APPROVE. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council. A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes `--prior <prior cycle folder>`. Minor/Info findings never start a cycle and never block: the `major-count-blocks` threshold and the table above still decide the verdict, and the loop does not rewrite those rules. The `delivery-execution` skill owns the loop's hard stop.
 

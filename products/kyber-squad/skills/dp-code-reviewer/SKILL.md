@@ -1,6 +1,6 @@
 ---
 name: dp-code-reviewer
-description: 'Use when a change has already been reviewed and the author has pushed fixes — re-checks only the prior findings rather than re-running the whole council, then recomputes the verdict. Also use to select a review mode: shadow to calibrate without gating, or full to force a fresh council scan. Do NOT use for the first review of a change; invoke code-review for that.'
+description: 'Use when a change has already been reviewed and the author has pushed fixes — re-checks the prior findings and the fix delta rather than re-running the whole council, then recomputes the verdict. Also use to select a review mode: shadow to calibrate without gating, or full when a person asks for a fresh council scan. Do NOT use for the first review of a change; invoke code-review for that.'
 license: MIT
 ---
 
@@ -19,8 +19,8 @@ lines changed spends the same amount to answer a much smaller question.
 |---|---|---|
 | `shadow` | Full review, verdict emitted, **gates nothing** | Rolling the reviewer out on a repository for the first time |
 | `enabled` | The verdict gates | Normal operation |
-| `verifier` | Re-checks **only the prior findings** | After a fix push |
-| `full` | Forces a complete council re-scan | The change moved on materially, or the prior review is stale |
+| `verifier` | Re-checks **the prior findings and the fix delta** | Every review cycle after the first |
+| `full` | Forces a complete council re-scan | A person selects it: a disputed verdict, or a prior review that predates a lens or policy change |
 
 ### shadow
 
@@ -33,7 +33,7 @@ switch. Do not skip it on a repository the reviewer has never seen.
 
 ### verifier
 
-The default after a fix push, and the reason this skill exists.
+Every review cycle after the first runs in this mode, and it is the reason this skill exists.
 
 A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the
 lenses that own an outstanding finding or whose predicate the delta newly satisfies, and
@@ -63,9 +63,10 @@ verifier cycle in the loop; `full` is a mode a person selects, not one the loop 
 
 ### full
 
-Everything, from scratch, ignoring prior state. Use when escalating from verifier, when the
-prior review predates a change to the lens catalogue or the policy, or when the verdict is
-being disputed.
+Everything, from scratch, ignoring prior state. A person selects it — when the prior review
+predates a change to the lens catalogue or the policy, or when the verdict is being
+disputed. The review loop never switches to it on its own: a fix that reaches beyond its
+finding widens the verifier cycle instead, as above.
 
 ## The re-review loop
 

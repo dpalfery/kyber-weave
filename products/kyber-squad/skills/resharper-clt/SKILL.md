@@ -1,6 +1,6 @@
 ---
 name: resharper-clt
-description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-run InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
+description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-review-cycle InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
 license: MIT
 ---
 
@@ -56,7 +56,7 @@ the path declared as **.agent_scratchpad** where the repository declares one. Su
 | Formatting and cleanup | `dotnet jb cleanupcode <solution>` |
 
 Scope the run to the affected projects when the solution is large and you are iterating by
-hand. The once-per-run review gate takes the full solution: it is the only inspection pass in
+hand. The once-per-review-cycle review gate takes the full solution: it is the only inspection pass in
 the run, so narrowing it drops coverage nothing else replaces.
 
 ## Two cadences, and which one you are in
@@ -218,7 +218,7 @@ no formatter can decide that materializing the sequence is the right fix. The wo
 DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agent_scratchpad/T3/artifacts | baseline: .agent_scratchpad/T3/diagnostics-baseline.md | remaining: none
 ```
 
-**At the end of the run.** The `inspectcode` gate runs once over the whole solution:
+**At the end of the run.** The `inspectcode` gate runs once per review cycle over the whole solution:
 
 ```xml
 <Issue TypeId="PossibleMultipleEnumeration"

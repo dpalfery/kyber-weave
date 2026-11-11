@@ -312,13 +312,15 @@ the policy below:
   `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
   otherwise the command refuses to compute. A file whose name is not a catalogue lens keeps its
   findings but covers no lens, and draws a warning. An unreadable seat file is refused
-  (`KW-REVIEW-040`).
+  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` and also holds
+  findings: it is never counted clean.
 - **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
   its file is moved to the one line that holds its excerpt, or dropped when no single line
   does. A line inside the file is never moved.
 
-A seat that wrote no `Discovery:` line, or read files directly with no index lookup and no
-`Index fallback:` line, draws a warning (`KW-REVIEW-044`); it is never a verdict input.
+A seat that wrote no `Discovery:` line, read files directly with no index lookup and no
+`Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
+warning (`KW-REVIEW-044`); it is never a verdict input.
 
 ```mermaid
 flowchart TD
@@ -379,7 +381,9 @@ clean code cannot pass with failed build, test, or analyzer evidence.
 own limit) or `DeadlinePassed` (the council deadline) reached no result. The engine reports it as
 `KW-REVIEW-039`, a warning that what it checks is unverified; it never trips rule 1 and never
 grades risk `HIGH`. A gate whose program never started still blocks, because approving past it
-would read as a gate that ran and passed.
+would read as a gate that ran and passed. That is the verdict's reading; the `review gates` exit code
+treats a timed-out blocking gate as a failure unless the run passed `--deadline` (see
+[Reaching a verdict in one pass](#reaching-a-verdict-in-one-pass)).
 
 **Exit codes are binary.** `0` for `APPROVE` and `1` for `REQUEST_CHANGES`. Former rules
 `KW-REVIEW-008`, `KW-REVIEW-009`, and `KW-REVIEW-011` are retired in place; review policy no longer
@@ -691,10 +695,11 @@ before any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
 
 #### Reaching a verdict in one pass
 
-A review runs its gates **once**, then reports one verdict. The command that does it is
-`kyber-weave review gates . --base <ref> --council`: `--base` scopes the gates to the change
-under review, `--council` admits the gates marked `full-suite`, and `--out` writes the report
-the verdict reads. Three behaviours make a single run enough, and each is a rule rather than a
+A review cycle runs its gates **once**, then reports one verdict. The command the council runs
+is `kyber-weave review gates . --base <ref> --council --deadline --out <cycle>/gates.json`:
+`--base` scopes the gates to the change under review, `--council` admits the gates marked
+`full-suite`, `--deadline` bounds the run, and `--out` writes the report the verdict reads into
+the cycle folder. Four behaviours make a single run enough, and each is a rule rather than a
 timing accident.
 
 **A refused full-suite gate ends an `--all` run at once.** Under `--all` there is no per-gate
@@ -715,11 +720,16 @@ zero gates, which a reader could take as a pass. `--gate` is exclusive with `--a
 `--paths`, `--base` and `--council`. A reviewer that reads `artifacts/gates.json`, fixes one
 thing and needs that one gate re-checked pays for one gate, not the suite.
 
-**The council deadline bounds the full council run.** `review.council-deadline-seconds`
-(default `600`) applies only to a full `review gates --council` run: a `--gate` re-check and a run
-without `--council` have no deadline. The gate the deadline cuts, and every gate after it, is
-recorded as `DeadlinePassed` and reported NOT RUN (`KW-REVIEW-039`), so the council goes on to a
-verdict on the evidence it has instead of waiting on a slow suite.
+**The council deadline bounds the council's run, and only when asked for.** `--deadline` turns
+on the run-level deadline `review.council-deadline-seconds` (default `600`). The gate the deadline
+cuts, and every gate after it, is recorded as `DeadlinePassed`; a gate its own `timeout-seconds`
+stopped is `TimedOut`. Under `--deadline` either one is reported NOT RUN (`KW-REVIEW-039`, a
+warning) and left out of the exit code, so the council goes on to a verdict on the evidence it
+has instead of waiting on a slow suite. Without `--deadline` nothing changes: CI, task gates,
+`--gate` re-checks and the pre-push self-review have no run deadline, and a blocking gate stopped
+by its own `timeout-seconds` fails `review gates` (`KW-REVIEW-022`, exit `1`) as it always has.
+`--deadline` is refused with `--gate` and with `--agent` (exit `2`). `review verdict` reads a
+`TimedOut` or `DeadlinePassed` result as NOT RUN either way, never as a blocking failure.
 
 **A gate whose dependency is absent does not start.** `requires-paths` turns "the tool was
 never installed" into its own reported fact instead of a code failure the reviewer has to

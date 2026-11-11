@@ -116,7 +116,7 @@ flowchart LR
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Whole-change `council` — `code-reviewer` over the accumulated diff at the end of the run, then again after each fix round (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; at the loop's hard stop the open findings are listed in the PR description as pending human review, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` starts the review loop: every critical and major finding and every failed blocking gate goes to its owning worker, and the council re-reviews in verifier mode until `APPROVE`. The hard stop is 5 cycles, or 3 in a row without the critical and major count falling. Council findings are reported rather than stopping delivery. |
+| Whole-change `council` — `code-reviewer` over the accumulated diff at the end of the run, then again after each fix round (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; at the loop's hard stop the open findings are listed in the PR description as pending human review, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` starts the review loop: every critical and major finding and every failed blocking gate goes to its owning worker, and the council re-reviews in verifier mode until `APPROVE`. The hard stop is 5 cycles, or 3 in a row without the critical and major count falling. Each cycle's gates run as `review gates . --base <base> --council --deadline --out <cycle>/gates.json`: `--deadline` bounds the run at `review.council-deadline-seconds` (default 600), and a gate that times out or that the deadline stops is NOT RUN, never a blocking failure. Without `--deadline` nothing changes for CI, task gates or `--gate` re-checks: a timed-out blocking gate still fails there. Council findings are reported rather than stopping delivery. |
 | Per-task council invocation (without a human asking) | — | Refused: the reviewer says the routing is wrong rather than proceeding | keep (as a ban) | Per-task LLM review was removed by #424 and is not reinstated; the `task-gate` owns per-task evidence. Running fifteen lenses per task is cost without coverage gain. |
 
 ## 6. Pre-push self-review gate
@@ -231,8 +231,8 @@ inventory.
 - Per-task LLM audits — replaced by the deterministic `task-gate` exit gate
   per ADR 0005 and the 2026-10-20 task-gate plan. Removed by #424 — not
   reinstated.
-- Per-task `inspectcode` runs — the analyzer now runs once in the whole-change
-  gate suite, not per task. Removed by #424 — not reinstated.
+- Per-task `inspectcode` runs — the analyzer now runs in the whole-change
+  gate suite, once per review cycle, not per task. Removed by #424 — not reinstated.
 - Duplicate per-phase re-approvals collapsed by #424 — the remaining phase
   gates above are the post-#424 baseline. Removed by #424 — not reinstated.
 
