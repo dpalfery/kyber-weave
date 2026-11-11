@@ -448,7 +448,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <summary>
     /// Classifies one bot review comment as <c>real</c>, <c>nitpick</c> or <c>already-fixed</c> against the code at the
     /// cited line, and records the decision. Returns JSON with <c>class</c>, <c>confidence</c>, <c>decisionId</c>,
-    /// <c>shadow</c> and <c>wouldClass</c>. While the rule is in shadow <c>class</c> is always <c>real</c>.
+    /// <c>shadow</c>, <c>wouldClass</c> and <c>status</c>. While the rule is in shadow <c>class</c> is always <c>real</c>.
+    /// A disabled or absent rule, or no provider, reports <c>status</c> <c>not-evaluated</c>.
     /// </summary>
     /// <param name="path">The repository-relative path the comment cites.</param>
     /// <param name="line">The 1-based line the comment cites.</param>
@@ -510,6 +511,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                     decisionId = item.DecisionId,
                     shadow = item.Shadow,
                     wouldClass = item.WouldClass,
+                    status = item.Status,
                 }),
             });
         }
@@ -542,6 +544,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             decisionId = result.DecisionId,
             shadow = result.Shadow,
             wouldClass = result.WouldClass,
+            status = result.Status,
         });
     }
 

@@ -17,7 +17,8 @@ public sealed record CommentTriageRequest(string Path, int Line, string Body, st
 /// <param name="DecisionId">The id of the decision record written for this classification.</param>
 /// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only and not the model's answer.</param>
 /// <param name="WouldClass">In shadow, the class the model would have delivered without shadow; null when not in shadow or when the model gave no class.</param>
-public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId, bool Shadow, string? WouldClass);
+/// <param name="Status">The provider status the decision carries: <c>answered</c>, or <c>not-evaluated</c> when no question was asked (a disabled or absent rule, or no provider).</param>
+public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId, bool Shadow, string? WouldClass, string Status);
 
 /// <summary>A bot's PR-level summary comment to classify row by row.</summary>
 /// <param name="Body">The summary text, which may carry a findings table.</param>
@@ -33,6 +34,7 @@ public sealed record CommentSummaryRequest(string Body, string? Author);
 /// <param name="DecisionId">The decision record the row was classified under; empty when the row was never sent.</param>
 /// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only; reported for every row, sent or not.</param>
 /// <param name="WouldClass">In shadow, the class the model would have delivered for the row; null when the row was not answered.</param>
+/// <param name="Status">The provider status of the row's decision; <c>not-evaluated</c> when the row was never asked.</param>
 public sealed record CommentSummaryItem(
     string Path,
     int Line,
@@ -41,7 +43,8 @@ public sealed record CommentSummaryItem(
     double? Confidence,
     string DecisionId,
     bool Shadow,
-    string? WouldClass);
+    string? WouldClass,
+    string Status);
 
 /// <summary>The classified rows of one summary comment, in table order.</summary>
 /// <param name="Items">One item per table row; empty when the comment has no table or a row was malformed.</param>
@@ -155,19 +158,22 @@ public sealed class CommentTriageService(
         bool shadow = rule?.Shadow ?? false;
         if (!shadow)
         {
-            return new CommentTriageResult(answer, confidence, decisionId, Shadow: false, WouldClass: null);
+            return new CommentTriageResult(answer, confidence, decisionId, Shadow: false, WouldClass: null, Status: status);
         }
 
         string? wouldClass = given is Real or Nitpick or AlreadyFixed ? answer : null;
-        return new CommentTriageResult(Real, confidence, decisionId, Shadow: true, WouldClass: wouldClass);
+        return new CommentTriageResult(Real, confidence, decisionId, Shadow: true, WouldClass: wouldClass, Status: status);
     }
 
     /// <summary>
     /// The effective <c>KW-ARB-COMMENT-001</c> rule: the one the loaded configuration holds, with any host override applied.
-    /// Null when no such rule is loaded or it has no question to ask.
+    /// Null when no such rule is loaded, when it is disabled, or when it has no question to ask. A disabled rule is left
+    /// out here exactly as the evaluator leaves it out: it is never asked, so no provider call is made for it.
     /// </summary>
     private ArbiterRule? CommentRule() =>
-        _rules.FirstOrDefault(candidate => string.Equals(candidate.Id, CommentRuleId, StringComparison.Ordinal) && candidate.Ask is not null);
+        _rules.FirstOrDefault(candidate => string.Equals(candidate.Id, CommentRuleId, StringComparison.Ordinal)
+            && candidate.Enabled
+            && candidate.Ask is not null);
 
     /// <summary>
     /// Classifies each row of a bot's summary table through <see cref="ClassifyAsync"/>. Only a summary from a
@@ -191,7 +197,7 @@ public sealed class CommentTriageService(
             CommentSummaryRow row = rows[index];
             if (!classify || index >= MaxSummaryRows)
             {
-                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty, shadow, null));
+                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty, shadow, null, ArbiterProviderStatuses.NotEvaluated));
                 continue;
             }
 
@@ -205,7 +211,8 @@ public sealed class CommentTriageService(
                 result.Confidence,
                 result.DecisionId,
                 result.Shadow,
-                result.WouldClass));
+                result.WouldClass,
+                result.Status));
         }
 
         return new CommentSummaryResult(items);
@@ -280,7 +287,8 @@ public sealed class CommentTriageService(
             null,
             null,
             ruleSet ?? string.Empty,
-            [ruleRecord],
+            // No rule entry when the rule did not take part (disabled or absent), as the evaluator records it.
+            rule is null ? [] : [ruleRecord],
             providerRecord,
             answer,
             0,

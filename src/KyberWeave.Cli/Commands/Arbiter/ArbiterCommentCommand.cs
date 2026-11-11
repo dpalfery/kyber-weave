@@ -68,7 +68,9 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
                 .GetResult();
             foreach (CommentSummaryItem item in summary.Items)
             {
-                string shadowNote = item.Shadow ? $" ({Markup.Escape(ShadowNote(item.WouldClass))})" : string.Empty;
+                string shadowNote = item.Shadow
+                    ? $" ({Markup.Escape(ShadowNote(item.WouldClass))})"
+                    : NotAnsweredNote(item.Status);
                 AnsiConsole.MarkupLine(
                     $"{Markup.Escape(item.Path)}:{item.Line} [bold]{Markup.Escape(item.Class)}[/] {Markup.Escape(item.Issue)}{shadowNote}");
             }
@@ -90,6 +92,10 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         {
             AnsiConsole.MarkupLine(Markup.Escape(ShadowNote(result.WouldClass)));
         }
+        else if (result.Status != ArbiterProviderStatuses.Answered)
+        {
+            AnsiConsole.MarkupLine($"status {Markup.Escape(result.Status)}");
+        }
 
         AnsiConsole.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
         return 0;
@@ -101,6 +107,10 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// </summary>
     private static string ShadowNote(string? wouldClass) =>
         wouldClass is null ? "shadow: nothing answered" : $"shadow: would have been {wouldClass}";
+
+    /// <summary>The note a summary row prints when the rule is not in shadow and the row was not answered; empty when it was.</summary>
+    private static string NotAnsweredNote(string status) =>
+        status == ArbiterProviderStatuses.Answered ? string.Empty : $" ({Markup.Escape(status)})";
 
     /// <summary>
     /// The effective rules the root's configuration holds, with host overrides applied. A root with no loadable
