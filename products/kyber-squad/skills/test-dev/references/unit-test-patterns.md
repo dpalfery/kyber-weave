@@ -113,5 +113,4 @@ Builders live next to the tests they serve, typically under a `Builders/` folder
 ```powershell
 dotnet test --filter <TestClass>           # run specific class
 dotnet test --filter "Category=Unit"       # run by category
-dotnet test                                # run all tests
 ```

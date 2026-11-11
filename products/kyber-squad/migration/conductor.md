@@ -6,7 +6,7 @@ selected-baseline: .github/agents/conductor.agent.md
 sources:
   .github/agents/conductor.agent.md: fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
   .github/agents/conductor-v3.agent.md: 0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-final-body-sha256: de931caf568c005a242b9fe92faec646593cb6d8d5d419f97732d95693a1dc45
+final-body-sha256: f4c428e9fff599d6e7025fd747c835f0a44f438eb3f069329e0f141d9cc1179f
 ---
 # conductor migration
 
@@ -16,7 +16,11 @@ The canonical agent was synchronized from `.github/agents/conductor.agent.md` an
 consolidated with `.github/agents/conductor-v3.agent.md` from Hotshot commit
 `677c3a876ba9c62f1083608596b238c9deaff167`. Both source hashes are retained in frontmatter;
 `final-body-sha256` covers the evolved, LF-normalized instruction body after YAML frontmatter,
-including the Arbiter routing-marker list and the status-provenance rule.
+including the Arbiter routing-marker list, the status-provenance rule, and the `COUNCIL_SEATS_NEEDED` handback that lets
+the conductor seat the `review-lens` and `review-triage` lenses for a reviewer whose harness cannot start them.
+The body names the `delivery-execution` skill rather than linking a local reference: the worker execution
+contract that used to sit among the conductor's own reference files is that skill now, so both the
+conductor and the `bug-crusher` workflow load one copy.
 
 ## Canonical projection
 

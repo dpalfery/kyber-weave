@@ -4,9 +4,12 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -19,6 +22,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
 {
+    /// <summary>The bare global hook path the block formats write beneath their own root.</summary>
+    private const string SharedHooksPath = "hooks.json";
+
+    private static readonly DateTimeOffset GlobalInstalledAt =
+        new(2026, 11, 06, 9, 30, 00, TimeSpan.Zero);
+
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();
 
@@ -43,13 +52,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -68,13 +85,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -82,8 +107,8 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     }
 
     /// <summary>
-    /// The refresh travels through the injected seam, never through a child process:
-    /// no process runner sees an arbiter hook argv.
+    /// The refresh never runs a hook script or the arbiter binary, and it runs inside the new kyber-weave:
+    /// the injected seam is the only path to it, so no process runner sees an arbiter hook argv.
     /// </summary>
     [Fact]
     public void Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
@@ -95,18 +120,28 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         List<string> log = [];
         List<string> spawned = [];
 
+        Func<string, IReadOnlyList<string>, int> runProcess = (file, args) =>
+        {
+            spawned.Add(file + " " + string.Join(" ", args));
+            return 0;
+        };
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            _ => null,
+            runProcess,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
         using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
             _ => null,
-            (file, args) =>
-            {
-                spawned.Add(file + " " + string.Join(" ", args));
-                return 0;
-            },
+            runProcess,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: refresher);
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -160,13 +195,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        using SelfUpdater updater = new(
+        LoopbackFinishingProcess loopback = new(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -174,6 +217,368 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             log,
             line => line.Contains("0 project(s)", StringComparison.Ordinal)
                     && line.Contains("1 failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A user-level global target list is part of the update contract: a previously installed
+    /// global hook is refreshed so it points at the current Arbiter binary instead of a stale one.
+    /// </summary>
+    [Fact]
+    public void Refresh_RefreshesExistingGlobalArbiterHookListedInUserConfig()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
+
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A global Factory hook file written before the stop registration existed holds only
+    /// PreToolUse and PostToolUse. The refresh must rewrite them and add SubagentStop, and must
+    /// keep the user's own hook beside them.
+    /// </summary>
+    [Fact]
+    public void Refresh_AddsSubagentStopToAnExistingGlobalFactoryHook()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["factory"]);
+        string hookPath = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        File.WriteAllText(hookPath, """
+            {
+              "PreToolUse": [
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness factory --scope global", "timeout": 5 } ] },
+                { "matcher": "Read", "hooks": [ { "type": "command", "command": "user-own-linter" } ] }
+              ],
+              "PostToolUse": [
+                { "matcher": "Task", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness factory --scope global", "timeout": 5 } ] }
+              ]
+            }
+            """);
+
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(_ => { }, environment);
+        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("\"SubagentStop\"", content, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter hook --harness factory --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+        Assert.Contains("user-own-linter", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Update-time refresh follows the user config gate: an already-installed global hook is refreshed
+    /// only for harnesses named in <c>arbiter.global.targets</c>, and it never rewrites foreign bytes.
+    /// </summary>
+    [Fact]
+    public void Update_RefreshesOnlyListedGlobalArbiterHooksWithoutTouchingForeignBytes()
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
+
+        string foreign = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor), "foreign.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(foreign)!);
+        File.WriteAllText(foreign, "{\"user\":\"keep-me\"}");
+
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => Path.Combine(home, ".config"),
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        string content = File.ReadAllText(hookPath);
+        Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
+        Assert.Equal("{\"user\":\"keep-me\"}", File.ReadAllText(foreign), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A global receipt that owns more than one block survives an update: both targets' hook files
+    /// are refreshed and both recorded blocks are rewritten, so neither reads as drift afterwards.
+    /// This is the path <c>kyber-weave update</c> itself takes, which is not the Squad lifecycle a
+    /// project root's update runs. Before a global block's identity was qualified by its target,
+    /// the receipt holding two <c>hooks.json</c> blocks could not be written back at all.
+    /// </summary>
+    [Fact]
+    public void Update_RefreshesEveryGlobalBlockAndRewritesItsRecordedEntries()
+    {
+        InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "global-block-home"));
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots roots = new(_ => null, home);
+        SquadStateStore store = new(userPaths);
+        SeedGlobalBlocks(store, roots, home);
+        UserHostConfig.WriteGlobalTargets(home, ["cursor", "codex"]);
+        StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Cursor));
+        StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Codex));
+
+        List<string> log = [];
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => userPaths.ApplicationDataDirectory,
+            _ => null,
+        };
+
+        ArbiterHookRefresher refresher = new(log.Add, environment);
+        LoopbackFinishingProcess loopback = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            environment,
+            captureProcess: (_, _) => QuietSuccess,
+            arbiterHookRefresher: refresher,
+            finishingProcess: loopback.Invoke);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(
+            log,
+            line => line.Contains("refreshed arbiter hooks for 2 project(s)", StringComparison.Ordinal));
+        Assert.DoesNotContain("999", File.ReadAllText(GlobalHookFile(roots, SquadTarget.Cursor)), StringComparison.Ordinal);
+        Assert.DoesNotContain("999", File.ReadAllText(GlobalHookFile(roots, SquadTarget.Codex)), StringComparison.Ordinal);
+
+        SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal(["cursor", "codex"], after.Blocks.Select(block => block.Target).ToArray());
+        AssertBlocksMatchTheirFiles(after, roots);
+    }
+
+    private static string GlobalHookFile(SquadGlobalRoots roots, SquadTarget target) =>
+        Path.Combine(roots.ResolveGlobalRoot(target), SharedHooksPath);
+
+    /// <summary>
+    /// Seeds one home with two global blocks whose recorded digests are those of the bytes just
+    /// written, so the deployment starts consistent. The commands are the exact ownership
+    /// signature, which is what lets a refresh replace the entries in place rather than append
+    /// beside them.
+    /// </summary>
+    private static void SeedGlobalBlocks(SquadStateStore store, SquadGlobalRoots roots, string home)
+    {
+        IReadOnlyList<SquadHookOwnedEntry> cursorOwned = SquadHookJsonBlock.SpliceFile(
+            SquadHookBlockFormat.Cursor,
+            GlobalHookFile(roots, SquadTarget.Cursor),
+            [CursorHookEntry()],
+            [CursorHookEntry()]);
+        IReadOnlyList<SquadHookOwnedEntry> codexOwned = SquadHookJsonBlock.SpliceFile(
+            SquadHookBlockFormat.Codex,
+            GlobalHookFile(roots, SquadTarget.Codex),
+            [MatcherGroupHookEntry()],
+            [MatcherGroupHookEntry()]);
+
+        string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(
+            receiptPath,
+            store.SerializeReceipt(new SquadReceipt(
+                "kyber-squad.receipt/v3",
+                SquadDeploymentScope.Global,
+                ".",
+                GlobalInstalledAt,
+                [],
+                [])
+            {
+                Blocks =
+                [
+                    OwnedBlock("cursor", cursorOwned),
+                    OwnedBlock("codex", codexOwned),
+                ],
+            }));
+    }
+
+    private static SquadOwnedBlock OwnedBlock(string target, IReadOnlyList<SquadHookOwnedEntry> owned) =>
+        new(
+            SharedHooksPath,
+            target,
+            true,
+            [.. owned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]);
+
+    private static JsonObject CursorHookEntry() =>
+        new()
+        {
+            ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Cursor, SquadDeploymentScope.Global),
+            ["matcher"] = "Task",
+            ["timeout"] = 5,
+            ["failClosed"] = true,
+        };
+
+    private static JsonObject MatcherGroupHookEntry() =>
+        new()
+        {
+            ["matcher"] = "Task",
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Codex, SquadDeploymentScope.Global),
+                    ["timeout"] = 5,
+                }),
+        };
+
+    /// <summary>
+    /// Ages every entry in a hook file without touching its command, so the recorded digests go
+    /// stale while the entries remain Squad's own. A refresh then has real work to do: it replaces
+    /// them and has to record the new digests, which is the update this test pins.
+    /// </summary>
+    private static void StaleHookTimeouts(string path)
+    {
+        JsonNode root = JsonNode.Parse(File.ReadAllText(path))!;
+        StaleTimeouts(root);
+        File.WriteAllText(path, root.ToJsonString());
+    }
+
+    private static void StaleTimeouts(JsonNode? node)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (string key in obj.Select(property => property.Key).ToArray())
+            {
+                if (string.Equals(key, "timeout", StringComparison.Ordinal)
+                    && obj[key] is JsonValue value
+                    && value.TryGetValue(out int _))
+                {
+                    obj[key] = 999;
+                    continue;
+                }
+
+                StaleTimeouts(obj[key]);
+            }
+
+            return;
+        }
+
+        if (node is not JsonArray array)
+        {
+            return;
+        }
+
+        foreach (JsonNode? item in array)
+        {
+            StaleTimeouts(item);
+        }
+    }
+
+    /// <summary>
+    /// Asserts the refreshed receipt and the two files agree: every recorded entry digest still
+    /// matches the node at its container. Without this the refresh could rewrite both files and
+    /// leave a stale record behind, which reads as drift on the next status.
+    /// </summary>
+    private static void AssertBlocksMatchTheirFiles(SquadReceipt receipt, SquadGlobalRoots roots)
+    {
+        Assert.Equal(2, receipt.Blocks.Count);
+        foreach (SquadOwnedBlock block in receipt.Blocks)
+        {
+            Assert.True(
+                SquadTargetCatalog.TryResolve(block.Target, out SquadTarget target),
+                $"The receipt records block target '{block.Target}', which is not a canonical Squad target.");
+
+            SquadHookBlockFormat format = target switch
+            {
+                SquadTarget.Cursor => SquadHookBlockFormat.Cursor,
+                SquadTarget.Codex => SquadHookBlockFormat.Codex,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(receipt),
+                    target,
+                    "Only cursor and codex blocks are seeded here."),
+            };
+
+            Dictionary<string, string> expected = block.Entries
+                .ToDictionary(entry => entry.Container, entry => entry.Sha256, StringComparer.Ordinal);
+            IReadOnlyList<SquadHookDrift> drifts = SquadHookJsonBlock.FindDrift(
+                format,
+                File.ReadAllText(GlobalHookFile(roots, target)),
+                expected);
+
+            Assert.True(
+                drifts.Count == 0,
+                $"The {block.Target} block drifted after the refresh: "
+                + string.Join("; ", drifts.Select(drift => $"{drift.Location} {drift.Reason}")));
+        }
+    }
+
+    private static string WriteLegacyGlobalHook(string home, SquadTarget target, string legacyCommand)
+    {
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(target), "hooks.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+
+        string token = SquadTargetCatalog.GetToken(target);
+        string content = $$"""
+            {
+              "preToolUse": [
+                {
+                  "command": "{{legacyCommand}} --harness {{token}} --scope global",
+                  "matcher": "Task",
+                  "timeout": 5,
+                  "failClosed": true
+                }
+              ],
+              "postToolUse": []
+            }
+            """;
+
+        File.WriteAllText(hookPath, content);
+        return hookPath;
     }
 
     private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false)

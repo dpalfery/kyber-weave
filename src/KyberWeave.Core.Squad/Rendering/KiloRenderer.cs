@@ -42,10 +42,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// agent the universal MCP predicate entitles to this server emits that wildcard with
 /// <c>allow</c>, the pure orchestrator included, because the server carries
 /// <c>docs_get_coding_standard_for_technology</c>, the tool that hands an agent the standards it
-/// is held to (ADR 0050). An agent the predicate does not entitle emits no entry at all: for a
-/// subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a server the operator
-/// may never have configured would assert more than canonical source does — the capability lattice
-/// declares no MCP capability to derive one from.
+/// is held to (ADR 0050). The code-graph server keeps the orchestrator carve-out, so its own
+/// wildcard is emitted with <c>allow</c> for the agents
+/// <see cref="CapabilityDegradations.GrantsOrchestratorExcludedMcpServers"/> entitles and for no
+/// others; the server names come from the toolchain roster, so a roster declaring no code-graph
+/// server emits no key. A library-lookup server is not named here: the carve-out was widened for
+/// the code graph, not for library lookups. An agent the predicate does not entitle emits no entry
+/// at all: for a subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a
+/// server the operator may never have configured would assert more than canonical source does —
+/// the capability lattice declares no MCP capability to derive one from.
 /// </para>
 /// <para>
 /// <b>The server half of the wiring stays the operator's.</b> An agent file cannot add an MCP
@@ -55,14 +60,23 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// than pretending the entry supplies the connection.
 /// </para>
 /// <para>
-/// <b>Capability permissions remain unexpressed, and that gap is recorded.</b> The
-/// <c>permission</c> map is keyed by tool name — built-in tools by their own names, MCP tools as
+/// <b>Capability permissions remain unexpressed, and that gap is recorded, with one exception.</b>
+/// The <c>permission</c> map is keyed by tool name — built-in tools by their own names, MCP tools as
 /// <c>{server}_{tool}</c> — so the canonical capability vocabulary (<c>filesystem.read</c>,
 /// <c>process.execute</c>, ...) is not a key Kilo reads. Translating the lattice onto Kilo's tool
 /// keys is a separate decision this renderer does not take, so every capability a profile
 /// constrains is recorded as a structured degradation under code
 /// <c>permission-not-expressible</c>, deny decisions included, rather than being silently dropped
 /// (preventing capability widening).
+/// </para>
+/// <para>
+/// <b>The exception is an allowed shell.</b> <c>process.execute: allow</c> renders as
+/// <c>permission: {bash: allow}</c>. Kilo's built-in default for <c>bash</c> is <c>ask</c> for anything outside
+/// a short list of read-only commands (verified against <c>Kilo-Org/kilocode</c>,
+/// <c>packages/opencode/src/kilocode/agent/index.ts</c>, on 2026-11-10), and a subagent under a
+/// run with no attached human has that ask refused, so without the key a developer agent cannot
+/// run a build, a test, <c>git</c> or <c>gh</c>. An agent's own map is merged last, so the entry
+/// wins over the default. <c>ask</c> and <c>deny</c> stay unexpressed and recorded as before.
 /// </para>
 /// <para>
 /// <b>Agent resources are projected beside their principal with a discovery-guard
@@ -104,6 +118,9 @@ public sealed class KiloRenderer : SquadHarnessRenderer
     /// </summary>
     private const string KyberWeaveMcpPermission = $"{McpServerNames.Docs}_*";
 
+    private const string ProcessExecuteCapability = "process.execute";
+    private const string ShellPermission = "bash";
+
     private static readonly SquadHarnessSpec HarnessSpec = new(
         SquadTarget.Kilo,
         "Kilo",
@@ -139,12 +156,34 @@ public sealed class KiloRenderer : SquadHarnessRenderer
         // kw-docs_docs_get_source_repository_and_revision. An unentitled agent emits no entry:
         // absence of "allow" withholds for a headless subagent (its ask fails closed), and a
         // "deny" here would out-assert a canonical source that declares no MCP reach.
+        Dictionary<string, object?> permission = new(StringComparer.Ordinal);
         if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, context.CapabilityProfiles))
         {
-            frontmatter["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            permission[KyberWeaveMcpPermission] = "allow";
+
+            // The code graph keeps the orchestrator carve-out that kw-docs does not, so it is
+            // gated on its own predicate rather than folded into the entry above. The server
+            // names come from the roster, so a roster that declares no code-graph server emits
+            // no key at all instead of an approval that resolves against nothing.
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    context.CapabilityProfiles))
             {
-                [KyberWeaveMcpPermission] = "allow"
-            };
+                foreach (string serverName in context.GetOrCreateState(McpPlan.Create).CodeGraphServerNames)
+                {
+                    permission[$"{serverName}_*"] = "allow";
+                }
+            }
+        }
+
+        if (AllowsShell(agent, context))
+        {
+            permission[ShellPermission] = "allow";
+        }
+
+        if (permission.Count > 0)
+        {
+            frontmatter["permission"] = permission;
         }
 
         context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
@@ -155,7 +194,7 @@ public sealed class KiloRenderer : SquadHarnessRenderer
     /// Kilo loads Bun plugins from <c>.kilo/plugin/*.ts</c> with OpenCode's plugin API.
     /// </summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
-        context.AddArbiterPluginShim(".kilo/plugin/kyber-arbiter.ts");
+        context.AddArbiterPluginShim(".kilo/plugin/kyber-arbiter.ts", "plugin/kyber-arbiter.ts");
 
     private static SquadDegradationRecord? BuildDegradationRecord(SquadHarnessRenderContext context, SquadAgent agent)
     {
@@ -165,16 +204,39 @@ public sealed class KiloRenderer : SquadHarnessRenderer
         }
 
         // Kilo's permission map is keyed by tool name (built-in tools by their own names, MCP tools
-        // as {server}_{tool}), so the capability vocabulary is not a key it reads and this renderer
-        // translates no capability onto one. Every configured decision — allow, ask, deny — is
-        // therefore unexpressed at the harness boundary; recording the deny constraints in
+        // as {server}_{tool}), so the capability vocabulary is not a key it reads. An allowed shell
+        // is the one decision this renderer translates. Every other configured decision — allow,
+        // ask, deny — is unexpressed at the harness boundary; recording the deny constraints in
         // particular ensures canonical restrictions are not silently dropped (preventing capability
         // widening). No record names MCP servers the agent was denied: the entitlement decides only
         // whether an approval is emitted, and an agent that is not entitled gets no entry rather
         // than a deny, so there is no withheld-server sentence to record.
+        bool shellExpressed = AllowsShell(agent, context);
         return context.CapabilitiesNotExpressible(
             agent,
-            context.CapabilityVocabulary.Where(profile.Permissions.ContainsKey).ToList(),
+            context.CapabilityVocabulary
+                .Where(profile.Permissions.ContainsKey)
+                .Where(capability => !(shellExpressed && capability == ProcessExecuteCapability))
+                .ToList(),
             "Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed");
+    }
+
+    private static bool AllowsShell(SquadAgent agent, SquadHarnessRenderContext context) =>
+        context.CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+        profile.Permissions.TryGetValue(ProcessExecuteCapability, out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
+
+    /// <summary>
+    /// The server names this renderer's permission map grants from, resolved once per render.
+    /// </summary>
+    /// <remarks>
+    /// Read from the toolchain roster through the shared derivation rather than spelled in this
+    /// file, so the server is renamed in one place and this target cannot disagree with the other
+    /// single-server targets about which server the widening names (ADR 0050 decision 4).
+    /// </remarks>
+    private sealed record McpPlan(IReadOnlyList<string> CodeGraphServerNames)
+    {
+        public static McpPlan Create(SquadHarnessRenderContext context) => new(
+            CapabilityDegradations.CodeGraphMcpServerNames(context.Source.Toolchain.RequiredMcpTools));
     }
 }

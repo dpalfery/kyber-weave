@@ -10,8 +10,8 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <c>PLAN_FILE</c> and <c>TASK</c> only; nothing is inferred from the plan index.
 /// </summary>
 /// <remarks>
-/// Facts the dispatch input determines (caller, delegation, lens name,
-/// roster and catalog projections, planning directories) carry values. Facts the
+/// Facts the dispatch input determines (caller, delegation, lens name, the finding
+/// a refutation carries, roster and catalog projections, planning directories) carry values. Facts the
 /// evaluation computes later (plan projections, ledger, git, review diffs, file
 /// reads, step-0 answers) are present with a null value so the bag's shape always
 /// matches the catalog row; the step-0 answer pattern <c>rules.&lt;id&gt;.answer</c>
@@ -40,6 +40,12 @@ public static class TriggerFactBuilder
             && !string.Equals(fact, "delegation.target-class", StringComparison.Ordinal)
             && !string.Equals(fact, "delegation.target-profile", StringComparison.Ordinal))
             return ArbiterFactLabel.Asserted;
+
+        // The one gate fact the Arbiter computes rather than receives: it joins a returned
+        // digest to the report it names, so it is derived even though gate.* is usually
+        // dispatch or lens output.
+        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal))
+            return ArbiterFactLabel.Derived;
 
         if (fact.StartsWith("lens.name", StringComparison.Ordinal)
             || fact.StartsWith("finding.", StringComparison.Ordinal)
@@ -124,6 +130,10 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("LENS", out string? lens);
+        block.Headers.TryGetValue("REFUTE", out string? refute);
+        RefuteFinding? finding = refute is not null && string.Equals(trigger, "refute.spawn", StringComparison.Ordinal)
+            ? RefuteFinding.Parse(stripped, refute)
+            : null;
         string? applicability = lens is not null
                                 && catalog.Lenses.TryGetValue(lens, out ArbiterSquadLens? lensEntry)
             ? lensEntry.Applicability
@@ -144,12 +154,23 @@ public static class TriggerFactBuilder
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
                 "delegation.paths" => paths,
+                // The plan-read rule's question, asked by the one detector the docs
+                // validator also uses, so a spelling the rule accepts is a spelling
+                // KW-DOC-TASKS-005 accepts.
+                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(stripped, planningDirs),
                 "delegation.plan-file" => planFile,
+                // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
+                "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
+                "finding.id" => finding is null ? null : refute,
+                "finding.claim" => finding?.Claim,
+                "finding.excerpt" => finding?.Excerpt,
+                "finding.file" => finding?.File,
+                "finding.line" => finding?.Line,
                 "roster.caller.delegates-to" => delegatesTo,
                 "roster.descriptions" => descriptions,
                 "harness.observes-returns" => observesReturns,

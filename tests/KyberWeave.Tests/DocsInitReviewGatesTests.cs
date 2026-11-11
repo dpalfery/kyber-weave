@@ -288,6 +288,76 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
+    ///     The whole-suite gate <c>docs init</c> writes for a family carries <c>full-suite: true</c>, and the
+    ///     gates that run one check do not.
+    /// </summary>
+    /// <remarks>
+    ///     Without the key, a repository scaffolded by <c>docs init</c> hands its developer agents the whole
+    ///     suite that ADR 0059 reserves for the council and CI. Marking every gate full-suite would be the
+    ///     opposite defect: the format check would be refused too. Which gate is the whole-suite one is read
+    ///     from the catalogue's own <c>test</c> role rather than from a list here, so a family that grows a
+    ///     second full-suite gate is covered.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(FamilyFixtureNames))]
+    public void DocsInitWritesFullSuiteOnTheWholeSuiteGateAndOnNoOther(string family)
+    {
+        string repo = NewFixtureRepo(family, TechnologiesFor(family));
+
+        DocsScaffolder.Scaffold(repo);
+
+        GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
+            .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
+        HashSet<string> wholeSuite = catalogue.Gates
+            .Where(gate => string.Equals(gate.Role, "test", StringComparison.Ordinal))
+            .Select(gate => family + "-" + gate.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
+
+        Assert.NotEmpty(config.Review.Gates);
+        string[] wrong = config.Review.Gates
+            .Where(gate => gate.FullSuite != wholeSuite.Contains(gate.Id))
+            .Select(gate => $"'{gate.Id}' is written with full-suite: {(gate.FullSuite ? "true" : "false")}")
+            .ToArray();
+
+        Assert.True(
+            wrong.Length == 0,
+            $"docs init wrote the wrong full-suite status for family '{family}'. A gate that runs the whole " +
+            "suite must declare full-suite: true and one that runs a single check must not:" +
+            Environment.NewLine + string.Join(Environment.NewLine, wrong));
+        Assert.True(
+            config.Review.Gates.Any(gate => gate.FullSuite),
+            $"docs init wrote no gate carrying full-suite: true for family '{family}', so a host scaffolded " +
+            "from this catalogue can run the whole suite through a gate that ADR 0059 reserves for the council.");
+    }
+
+    /// <summary>
+    ///     Every key the generated block carries is a key this release reads, so a fresh host loads without a
+    ///     <c>KW-CONFIG-002</c> warning.
+    /// </summary>
+    /// <remarks>
+    ///     A catalogue that writes a key the shipped binary does not map ships a host a warning it cannot fix
+    ///     and cannot read: the gate it thought it had is not the gate it has. The load reports such a key as a
+    ///     warning rather than failing, so it is exactly the kind of defect that reaches a host unnoticed.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(FamilyFixtureNames))]
+    public void EveryKeyTheGeneratedReviewBlockCarriesIsOneThisReleaseReads(string family)
+    {
+        string repo = NewFixtureRepo(family, TechnologiesFor(family));
+
+        DocsScaffolder.Scaffold(repo);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
+
+        Assert.True(
+            config.Review.Warnings.Count == 0,
+            $"docs init wrote a review block this release reports as containing unknown keys " +
+            $"({KyberWeaveConfigLoader.ConfigWarningCode}): {string.Join("; ", config.Review.Warnings)}");
+    }
+
+    /// <summary>
     ///     After <c>docs init</c> on the rust fixture, <c>review gates --agent rust-dev</c>
     ///     runs that agent's gates instead of reporting that no gates are declared. Toolchain
     ///     runs need cargo; the selection itself is asserted from the written configuration

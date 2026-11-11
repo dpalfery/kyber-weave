@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -59,7 +60,7 @@ public static class ArbiterPluginShim
     /// through could not break out of the literal it lands in.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when the token is not a plain lowercase token.</exception>
-    public static string Render(string harnessToken)
+    public static string Render(string harnessToken, SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
         if (!TokenPattern.IsMatch(harnessToken))
@@ -85,6 +86,14 @@ public static class ArbiterPluginShim
                 $"default-export shape: expected one of opencode, kilo.",
                 nameof(harnessToken)),
         };
+
+        string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
+        string commandLine = scope == SquadDeploymentScope.Global
+            ? ArbiterHookWiring.HookCommandLine(harnessToken, scope)
+            : string.Empty;
+        string globalCommandLineStatement = scope == SquadDeploymentScope.Global
+            ? $"const commandLine = {JsonSerializer.Serialize(commandLine)};\n"
+            : string.Empty;
 
         // JSON string encoding, so the token lands inside the TypeScript literal as data.
         string literal = JsonSerializer.Serialize(harnessToken);
@@ -205,10 +214,10 @@ public static class ArbiterPluginShim
                 "(looked for .kyber-weave/kyber-weave.yml, falling back to .git)");
             }
 
-            async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
+            {{globalCommandLineStatement}}async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
-                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}], {
+                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}{{scopeSuffix}}], {
                   stdin: "pipe",
                   stdout: "pipe",
                   cwd,

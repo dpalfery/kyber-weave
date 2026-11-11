@@ -25,6 +25,8 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
 
     private static readonly string[] UnguardedAgents = [ArbiterSquadFixture.DocsDev, ArbiterSquadFixture.ResearchAgent];
 
+    private static readonly string[] ConductorGuardEvents = ["preToolUse", "userPromptTransformed"];
+
     private const string CliHooksFilePath = ".github/hooks/kyber-arbiter.json";
     private const int HookTimeoutSeconds = 5;
 
@@ -130,10 +132,10 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_EnabledArbiterUnderGlobalScope_RendersNoHookSurfaces()
+    public async Task RenderAsync_EnabledArbiterUnderGlobalScope_RendersOnlyTheConductorGuard()
     {
         // Req 22.4: a global install reads no project configuration, so even an enabled
-        // wiring renders nothing hook-shaped. Under Global scope the .github/ prefix is
+        // wiring renders no dispatch gate. Only the conductor's own role guard remains. Under Global scope the .github/ prefix is
         // stripped, so agents resolve from agents/<name>.agent.md.
         SquadRenderResult result = await RenderAsync(
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
@@ -143,6 +145,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
         foreach (string agentName in DispatcherAgents.Concat(GuardedAgents))
         {
             YamlMappingNode frontmatter = FrontmatterOf(AgentFile(result, agentName, SquadDeploymentScope.Global), agentName);
+            if (agentName == ArbiterSquadFixture.Conductor)
+            {
+                YamlMappingNode hooks = Assert.IsType<YamlMappingNode>(frontmatter.Children[new YamlScalarNode("hooks")]);
+                Assert.Equal(ConductorGuardEvents.OrderBy(name => name, StringComparer.Ordinal), hooks.Children.Keys.Select(key => ((YamlScalarNode)key).Value!).OrderBy(name => name, StringComparer.Ordinal));
+                continue;
+            }
+
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
                 $"Agent '{agentName}' must not carry a 'hooks' frontmatter entry under Global scope.");
@@ -218,6 +227,42 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             RequireScalar(entry, "command", ArbiterSquadFixture.CsharpDev));
     }
 
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project)]
+    [InlineData(SquadDeploymentScope.Global)]
+    public async Task RenderAsync_EnabledArbiter_GuardsTheConductorAndGrantsItsWorkersTools(SquadDeploymentScope scope)
+    {
+        SquadRenderResult result = await RenderAsync(
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
+            scope);
+
+        YamlMappingNode frontmatter = FrontmatterOf(AgentFile(result, ArbiterSquadFixture.Conductor, scope), ArbiterSquadFixture.Conductor);
+        YamlMappingNode hooks = Assert.IsType<YamlMappingNode>(frontmatter.Children[new YamlScalarNode("hooks")]);
+        foreach (string hookEvent in new[] { "preToolUse", "userPromptTransformed" })
+        {
+            YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(hooks.Children[new YamlScalarNode(hookEvent)]);
+            YamlMappingNode entry = Assert.IsType<YamlMappingNode>(Assert.Single(entries.Children));
+            Assert.Equal("kyber-weave-arbiter guard", ((YamlScalarNode)entry.Children[new YamlScalarNode("bash")]).Value);
+        }
+
+        string[] tools = [.. ((YamlSequenceNode)frontmatter.Children[new YamlScalarNode("tools")]).Children.Select(tool => ((YamlScalarNode)tool).Value!)];
+        Assert.Contains("execute", tools);
+        Assert.Contains("edit", tools);
+        Assert.Contains("search", tools);
+        Assert.Contains("web", tools);
+    }
+
+    [Fact]
+    public async Task RenderAsync_NoArbiter_LeavesTheConductorUnguardedAndWithoutWorkerTools()
+    {
+        SquadRenderResult result = await RenderAsync(arbiter: null, SquadDeploymentScope.Global);
+
+        YamlMappingNode frontmatter = FrontmatterOf(AgentFile(result, ArbiterSquadFixture.Conductor, SquadDeploymentScope.Global), ArbiterSquadFixture.Conductor);
+        Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")));
+        string[] tools = [.. ((YamlSequenceNode)frontmatter.Children[new YamlScalarNode("tools")]).Children.Select(tool => ((YamlScalarNode)tool).Value!)];
+        Assert.DoesNotContain("execute", tools);
+    }
+
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -249,7 +294,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     {
         YamlMappingNode hooks = RequireMapping(frontmatter, "hooks", agentName);
         string[] expectedEvents = expectPostToolUse ? ["PreToolUse", "PostToolUse"] : ["PreToolUse"];
-        Assert.Equal(new HashSet<string>(expectedEvents, StringComparer.Ordinal), MappingKeys(hooks));
+        HashSet<string> expectedKeys = new(expectedEvents, StringComparer.Ordinal);
+        if (agentName == ArbiterSquadFixture.Conductor)
+        {
+            expectedKeys.UnionWith(ConductorGuardEvents);
+        }
+
+        Assert.Equal(expectedKeys, MappingKeys(hooks));
 
         foreach (string eventName in expectedEvents)
         {

@@ -20,7 +20,7 @@ namespace KyberWeave.Mcp;
 /// caps its own: a retrieval tool that returns a whole corpus is a slower grep.
 /// </summary>
 [McpServerToolType]
-public sealed partial class DocsTools(DocumentIndexHost host)
+public sealed partial class DocsTools
 {
     /// <summary>Hard ceiling on any single section, so one huge section cannot crowd out
     /// every other document in the response.</summary>
@@ -66,13 +66,46 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         nameof(AnalysisRuleKind.Terminology)
     };
 
-    private readonly DocumentIndexHost _host = host ?? throw new ArgumentNullException(nameof(host));
+    private readonly DocumentIndexHost _host;
     private readonly IDocsAnalysisReader? _analysisReader;
+    private readonly CodeGraphFreshness _freshness;
 
-    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader analysisReader)
-        : this(host)
+    /// <summary>Tools over <paramref name="host"/>, with the documentation analysis surface unavailable.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    public DocsTools(DocumentIndexHost host)
+        : this(host, null, null)
     {
-        _analysisReader = analysisReader ?? throw new ArgumentNullException(nameof(analysisReader));
+    }
+
+    /// <summary>Tools over <paramref name="host"/>, with the analysis tools backed by <paramref name="analysisReader"/>.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    /// <param name="analysisReader">The port the glossary and analysis tools read the corpus through.</param>
+    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader analysisReader)
+        : this(host, analysisReader ?? throw new ArgumentNullException(nameof(analysisReader)), null)
+    {
+    }
+
+    /// <summary>Tools over <paramref name="host"/>, with the given CodeGraph refresh schedule, if any.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    /// <param name="analysisReader">The analysis port, or null when this host has no analysis surface.</param>
+    /// <param name="freshness">
+    /// The refresh schedule the composition root built, or null to answer from the documents on disk
+    /// with no CodeGraph check at all.
+    /// </param>
+    /// <remarks>
+    /// The schedule is opt-in, and null means no schedule, because it is a gate as much as a refresh:
+    /// where the repository declares CodeGraph and the index is unreadable, a scheduled tool returns
+    /// <c>STATUS: TOOL_FAILURE</c> in place of its answer. A caller that passes nothing is asking a
+    /// document question and has not asked for a tool-availability gate — a CI runner has no index to
+    /// satisfy one — so a default schedule would withhold answers those callers can have. Keeping an
+    /// index fresh is a decision for the process, made once at the composition root, which passes the
+    /// schedule explicitly.
+    /// </remarks>
+    public DocsTools(DocumentIndexHost host, IDocsAnalysisReader? analysisReader, CodeGraphFreshness? freshness)
+    {
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _analysisReader = analysisReader;
+        _freshness = freshness ?? new CodeGraphFreshness(_host.RepositoryRoot, refreshEnabled: false);
     }
 
     [McpServerTool(Name = "docs_answer_question_from_repo_documentation", ReadOnly = true, OpenWorld = false)]
@@ -99,19 +132,22 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         string? cursor = null)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         ExploreAnswer answer = index.Explore(query, cursor);
 
         if (answer.IsInvalidCursor)
         {
-            return Lead(provenance, answer.InvalidCursorMessage ?? string.Empty);
+            return Lead(gate, provenance, answer.InvalidCursorMessage ?? string.Empty);
         }
 
         if (answer.IsMiss)
         {
             string docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
-            return Lead(provenance, $"""
+            return Lead(gate, provenance, $"""
                 No document in the documentation tree scored above the relevance threshold for '{query}'.
                 {answer.DocumentsConsidered} documents were considered.
 
@@ -121,7 +157,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 """);
         }
 
-        return Lead(provenance, FormatExploreAnswer(answer));
+        return Lead(gate, provenance, FormatExploreAnswer(answer));
     }
 
     private const string ExploreReadingRule =
@@ -172,13 +208,17 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     public string ForSymbol(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
         if (hits.Count == 0)
         {
             return Lead(
+                gate,
                 provenance,
                 $"No document declares '{symbol}' in its code-refs frontmatter. " +
                 "It may be undocumented, or documented only in prose.");
@@ -195,7 +235,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             AppendJoins(sb, hit);
         }
 
-        return Lead(provenance, sb.ToString());
+        return Lead(gate, provenance, sb.ToString());
     }
 
     [McpServerTool(Name = "docs_find_duplicates_conflicts_ambiguous_terms", ReadOnly = true, OpenWorld = false)]
@@ -215,16 +255,20 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         int effectiveBudget = Math.Max(0, Math.Clamp(charBudget, 0, AnalysisCharCap) - provenance.Length - 1);
 
         if (_analysisReader is null)
-            return Lead(provenance, "Documentation analysis is unavailable in this host.");
+            return Lead(gate, provenance, "Documentation analysis is unavailable in this host.");
 
         if (!TryParseKind(kind, out AnalysisRuleKind? parsedKind))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"Unknown documentation-analysis kind '{kind}'. Use duplicate, conflict, or terminology.",
@@ -239,6 +283,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"Documentation analysis is unavailable: {exception.Message}",
@@ -257,6 +302,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         if (start < 0)
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"The analysis cursor '{cursor}' is no longer present. Start again without a cursor.",
@@ -272,7 +318,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             sb.AppendLine(parsedKind is null
                 ? "No documentation-analysis candidates are pending."
                 : $"No {parsedKind.Value.ToString().ToUpperInvariant()} candidates are pending.");
-            return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+            return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
         }
 
         int emitted = 0;
@@ -295,6 +341,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
         if (emitted == 0)
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     sb.AppendLine("The response budget is too small for a candidate.").ToString(),
@@ -306,7 +353,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             if (sb.Length + footer.Length <= effectiveBudget) sb.Append(footer);
         }
 
-        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+        return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
     [McpServerTool(Name = "docs_look_up_glossary_term_definition", ReadOnly = true, OpenWorld = false)]
@@ -323,14 +370,17 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     public string Glossary(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         int effectiveBudget = Math.Max(0, AnalysisCharCap - provenance.Length - 1);
 
         if (_analysisReader is null)
-            return Lead(provenance, "The managed documentation glossary is unavailable in this host.");
+            return Lead(gate, provenance, "The managed documentation glossary is unavailable in this host.");
         if (string.IsNullOrWhiteSpace(term))
-            return Lead(provenance, "Provide a glossary term to look up.");
+            return Lead(gate, provenance, "Provide a glossary term to look up.");
 
         GlossaryLookupResult result;
         try
@@ -340,6 +390,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"The managed documentation glossary is unavailable: {exception.Message}",
@@ -349,6 +400,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         if (result.Senses.Count == 0)
         {
             return Lead(
+                gate,
                 provenance,
                 CapToBudget(
                     $"No glossary senses are declared for '{result.Term.ReplaceLineEndings(" ")}'.",
@@ -388,7 +440,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
         if (result.Senses.Count > AnalysisCandidateCap)
             sb.AppendLine(CultureInfo.InvariantCulture, $"… {result.Senses.Count - AnalysisCandidateCap} more senses omitted by the hard cap.");
-        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
+        return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
     [McpServerTool(Name = "docs_validate_governed_document_schema", ReadOnly = true, OpenWorld = false)]
@@ -417,11 +469,14 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
         DiagnosticReport report = new();
         if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
-            return FormatGateResponse(provenance, report, charBudget);
+            return FormatGateResponse(gate, provenance, report, charBudget);
 
         try
         {
@@ -444,7 +499,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Hint: "Fix the repository configuration or corpus access, then call docs_validate_governed_document_schema again."));
         }
 
-        return FormatGateResponse(provenance, report, charBudget);
+        return FormatGateResponse(gate, provenance, report, charBudget);
     }
 
     [McpServerTool(Name = "docs_detect_drift_between_documents_and_code", ReadOnly = true, OpenWorld = false)]
@@ -463,11 +518,18 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
+
+        // This tool answers even when the gate reports a failure, and that is deliberate: its
+        // verdict is the CodeGraph failure report the caller came for — the linter emits a
+        // critical diagnostic naming the unreadable index and its remedy, and its result line is
+        // the documented second line of the response. Replacing that with the generic block would
+        // throw away the findings. The gate's one-line note still rides above the verdict.
         DiagnosticReport report = new();
         if (!TryLoadHostConfiguration(report, out KyberWeaveConfig _))
-            return FormatGateResponse(provenance, report, charBudget);
+            return FormatGateResponse(gate, provenance, report, charBudget);
 
         try
         {
@@ -485,7 +547,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 Hint: "Fix the repository configuration or corpus access, then call docs_detect_drift_between_documents_and_code again."));
         }
 
-        return FormatGateResponse(provenance, report, charBudget);
+        return FormatGateResponse(gate, provenance, report, charBudget);
     }
 
     /// <summary>
@@ -539,7 +601,9 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         Pass the technology ('csharp', 'test') or the property name the repository instructions
         use for it ('csharp-coding-standard'). A technology this repository declares no standard
         for is an explicit miss that names the ones it does declare, and a standard whose status
-        is not current still answers and says so.
+        is not current still answers and says so. A topic that matches no section still returns
+        the standard, with a one-line note that the topic selected nothing, so the prose is
+        there rather than a list of headings to go and read.
         """)]
     public string AgentCodingStandards(
         [Description("""
@@ -557,6 +621,8 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             the floor behaves as the floor rather than as an empty answer.
             """)] int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        CodeGraphGate gate = CheckCodeGraph();
+        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
 
@@ -564,16 +630,17 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         // otherwise be answered with "no standard for ''". Usage prose is the honest reply to
         // a call that named nothing.
         if (string.IsNullOrWhiteSpace(technology))
-            return Lead(provenance, StandardUsage);
+            return Lead(gate, provenance, StandardUsage);
 
         string requested = technology.Trim().ReplaceLineEndings(" ");
-        IReadOnlyList<DocumentHit> hits = index.CodingStandards(
-            requested,
-            topic,
-            Math.Clamp(charBudget, MinCharBudget, MaxCharBudget));
+        int budget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
+        IReadOnlyList<DocumentHit> hits = index.CodingStandards(requested, topic, budget);
 
         if (hits.Count == 0)
-            return Lead(provenance, StandardMiss(index, requested));
+            return Lead(gate, provenance, StandardMiss(index, requested));
+        // A topic that matched nothing still returns the standard, which means the same call
+        // made without a topic — built once, and only when a standard's topic actually missed.
+        IReadOnlyDictionary<string, DocumentExcerpt>? withoutTopic = null;
 
         StringBuilder sb = new();
         AppendStandardCount(sb, requested, hits);
@@ -591,29 +658,70 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
             if (hit.Excerpt.Sections.Count == 0)
             {
-                AppendEmptyExcerpt(sb, hit, topic, withheld);
+                if (hit.Document.Sections.Count == 0)
+                {
+                    AppendBodyWithNoSections(sb);
+                    continue;
+                }
+
+                withoutTopic ??= index
+                    .CodingStandards(requested, charBudget: budget)
+                    .ToDictionary(
+                        whole => whole.Document.RelativePath,
+                        whole => whole.Excerpt,
+                        StringComparer.Ordinal);
+
+                // A blank topic cannot reach here — it selects the whole standard rather than
+                // ranking sections — but the note names a topic, so it is only written for one.
+                if (!string.IsNullOrWhiteSpace(topic)) AppendTopicMiss(sb, topic);
+
+                DocumentExcerpt standard = withoutTopic.TryGetValue(
+                    hit.Document.RelativePath, out DocumentExcerpt? wholeExcerpt)
+                    ? wholeExcerpt
+                    : DocumentExcerpt.Empty;
+                AppendExcerpt(sb, withheld.Elide(standard), "topic");
                 continue;
             }
 
             AppendExcerpt(sb, withheld.Elide(hit.Excerpt), "topic");
         }
 
-        return Lead(provenance, sb.ToString());
+        return Lead(gate, provenance, sb.ToString());
     }
+
+    /// <summary>
+    /// The one CodeGraph gate every tool except <see cref="DocsStatus"/> consults before it
+    /// answers: refresh the index on the server's own schedule, then decide whether this call may
+    /// answer at all.
+    /// </summary>
+    /// <remarks>
+    /// One gate rather than a check per tool, because the question is the same for all of them:
+    /// the joins these tools report come from CodeGraph, and an answer with the joins silently
+    /// missing reads exactly like a complete one. <see cref="DocsStatus"/> is exempt because it is
+    /// the tool a caller reaches for once something else has failed, and it has to answer.
+    /// </remarks>
+    private CodeGraphGate CheckCodeGraph() => _freshness.Evaluate(_host.CreateCodeGraphResolver);
 
     /// <summary>
     /// The provenance header for a response answered from <paramref name="index"/>. Every
     /// user-visible return leads with this so a caller can tell which corpus answered.
     /// </summary>
-    private string Provenance(DocumentIndex index) =>
-        CorpusProvenance.Line(_host.RepositoryRoot, index.DocumentCount, _host.CorpusBuilds);
+    private string Provenance(DocumentIndex? index = null) =>
+        CorpusProvenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? _host.DocumentCount, _host.CorpusBuilds);
 
     /// <summary>
-    /// Puts the provenance line first, then the body. The header is emitted whole and the
-    /// body is what gets clipped, so the tell is never the part truncated away.
+    /// Puts the provenance line first, then the gate's one-line note when it has one, then the
+    /// body. The header is emitted whole and the body is what gets clipped, so the tell is never
+    /// the part truncated away.
     /// </summary>
-    private static string Lead(string provenance, string body) =>
-        provenance + "\n" + body;
+    private static string Lead(CodeGraphGate gate, string provenance, string body) =>
+        gate.Note is { } note ? provenance + "\n" + note + "\n" + body : provenance + "\n" + body;
+
+    /// <summary>
+    /// The response of a tool the gate stopped: the provenance line, so the failure names the
+    /// corpus it is about, then the failure itself and nothing else.
+    /// </summary>
+    private static string Blocked(string provenance, string failure) => provenance + "\n" + failure;
 
     private bool TryLoadHostConfiguration(DiagnosticReport report, out KyberWeaveConfig config)
     {
@@ -645,7 +753,11 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return true;
     }
 
-    private static string FormatGateResponse(string provenance, DiagnosticReport report, int charBudget)
+    private static string FormatGateResponse(
+        CodeGraphGate gate,
+        string provenance,
+        DiagnosticReport report,
+        int charBudget)
     {
         int effectiveBudget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
         string verdict = report.HasErrors ? "fail" : "pass";
@@ -731,7 +843,7 @@ public sealed partial class DocsTools(DocumentIndexHost host)
             ? resultLine
             : resultLine + "\n" + findingsText.ToString().TrimEnd('\r', '\n');
 
-        return Lead(provenance, body);
+        return Lead(gate, provenance, body);
     }
 
     private static string FormatGateFinding(Diagnostic diagnostic)
@@ -1105,54 +1217,44 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     };
 
     /// <summary>
-    /// Why a standard contributed no prose, said in the terms of what actually happened.
+    /// Why a standard contributed no prose when its body has no <c>##</c> headings at all:
+    /// there was nothing to excerpt.
     /// </summary>
     /// <remarks>
-    /// Two different things leave an empty excerpt, and the excerpt cannot tell them apart —
-    /// the document's own section count can. A body of prose with no <c>##</c> headings has
-    /// nothing to excerpt and is said to be exactly that. A body that <em>does</em> carry
-    /// headings and returns none cleared the relevance gate is a topic that matched nothing,
-    /// and blaming the document for it would send a caller away from a standard sitting right
-    /// there — while returning the sections instead would answer a narrower question with
-    /// everything. Naming the headings that did not match says what the document holds without
-    /// giving up the topic as the question being answered.
+    /// Saying so beats an identity block followed by nothing, which reads as an empty document.
+    /// The other reason an excerpt comes back empty — a topic no section matched — is not a
+    /// statement about the document and is answered by <see cref="AppendTopicMiss"/>.
     /// </remarks>
     /// <param name="sb">The response being built; the explanation is appended to it.</param>
-    /// <param name="hit">The standard that returned no prose.</param>
-    /// <param name="topic">The topic the caller named, when it named one.</param>
-    /// <param name="withheld">
-    /// The ids this response may not print, applied to the headings it names. They are read
-    /// straight from the document here rather than from the excerpt — an excerpt with no
-    /// sections carries no headings to elide — so this is the one echo site the excerpt's own
-    /// elision would never reach.
-    /// </param>
-    private static void AppendEmptyExcerpt(
-        StringBuilder sb,
-        DocumentHit hit,
-        string? topic,
-        WithheldRuleIds withheld)
-    {
-        if (hit.Document.Sections.Count == 0)
-        {
-            // A standard that is prose and no ## headings: saying so beats an identity
-            // block followed by nothing, which reads as an empty document.
-            sb.AppendLine(
-                "no sections: this standard's body carries no ## headings, so there is "
-                + "nothing to excerpt from it.");
-            return;
-        }
+    private static void AppendBodyWithNoSections(StringBuilder sb) =>
+        sb.AppendLine(
+            "no sections: this standard's body carries no ## headings, so there is "
+            + "nothing to excerpt from it.");
 
+    /// <summary>
+    /// The one line that says the topic matched nothing in this standard, printed before the
+    /// prose it introduces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The note stands on its own and says the standard follows without it, because that is
+    /// what happens: the caller gets the standard's prose up to its budget rather than an
+    /// identity block and a list of headings to go and read. A caller with no shell cannot act
+    /// on that list, so withholding the prose made the miss expensive only for the callers the
+    /// tool exists for.
+    /// </para>
+    /// <para>
+    /// It is stated before the prose rather than after, because a reader who meets the sections
+    /// first reads the miss note as a contradiction.
+    /// </para>
+    /// </remarks>
+    /// <param name="sb">The response being built; the note is appended to it.</param>
+    /// <param name="topic">The topic the caller named, when it named one.</param>
+    private static void AppendTopicMiss(StringBuilder sb, string? topic)
+    {
         string requested = topic?.Trim().ReplaceLineEndings(" ") ?? string.Empty;
         sb.Append("no section matches the topic '").Append(requested)
-          .AppendLine("', so nothing is excerpted for it.");
-
-        List<string> headings = hit.Document.Sections
-            .OrderBy(section => section.LineNumber)
-            .Select(section => withheld.Elide(section.Heading))
-            .Where(heading => heading.Length > 0)
-            .ToList();
-
-        if (headings.Count > 0) AppendOmittedHeadingsMarker(sb, headings, "topic");
+          .AppendLine("', so the standard follows without it.");
     }
 
     /// <summary>
@@ -1162,8 +1264,8 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     /// <param name="sb">The response being built; the marker line is appended to it.</param>
     /// <param name="headings">
     /// The heading names to list, in document order. Eliding them is the caller's job: a heading
-    /// is document text, and two of the three places this response echoes a heading — the
-    /// excerpt's omitted list and the no-matching-topic path — do not pass through a section.
+    /// is document text, and the place this response echoes a heading — the excerpt's omitted
+    /// list — does not pass through a section.
     /// </param>
     /// <param name="requestLabel">
     /// What the caller asked with — <c>query</c> from <see cref="Explore"/>, <c>topic</c> from
@@ -1225,6 +1327,14 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 sb.Append("[omitted for space, ask again with a larger charBudget: ")
                   .Append(string.Join(" · ", excerpt.OmittedHeadings))
                   .AppendLine("]");
+
+                // Naming what is missing tells a reader that something exists; it does not tell
+                // them the omission is a size cut rather than a gap in the answer. Without this a
+                // reader who has not been told opens the file to see what is missing, which is
+                // the cost this whole response exists to avoid.
+                sb.AppendLine(
+                    "[this cut is expected: the document is longer than the charBudget, so what "
+                    + "did not fit is left out rather than missing]");
             }
             else
             {

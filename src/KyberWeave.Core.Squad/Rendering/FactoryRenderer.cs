@@ -66,8 +66,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>, the
 ///         renderer returns a <c>factory</c> <see cref="SquadRenderedBlock"/> for
 ///         <c>.factory/hooks.json</c> holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher
-///         groups with matcher <c>Task</c>, each with one <c>kyber-weave-arbiter hook --harness
-///         factory</c> command hook carrying the wiring timeout ([F11]). Factory reads event
+///         groups with matcher <c>Task</c>, plus a <c>SubagentStop</c> group with no matcher, each
+///         with one <c>kyber-weave-arbiter hook --harness factory</c> command hook carrying the wiring
+///         timeout ([F11]). <c>SubagentStop</c> is Factory-only: Factory runs <c>Task</c> in the
+///         background, so its launch-time <c>PostToolUse</c> carries no worker report, and the report
+///         arrives on the stop event. The verified registration has no <c>matcher</c> key. Factory reads event
 ///         names at the top level of <c>hooks.json</c> — no <c>hooks</c> wrapper — so each entry
 ///         <em>is</em> one matcher group and the block splices under the event containers. The
 ///         command carries no <c>--caller</c>: a shared hook file gates project-wide, not per
@@ -195,7 +198,10 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     /// only the first is true when the wiring is absent.
     /// </summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
-        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Factory, ArbiterMatcher);
+        context.AddArbiterMatcherGroupBlock(
+            SquadHookBlockFormat.Factory,
+            ArbiterMatcher,
+            includeSubagentStop: true);
 
     private static SquadDeploymentFile RenderDroid(
         SquadHarnessRenderContext context,
@@ -289,7 +295,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     missing or non-object <c>mcpServers</c> yields no names, so a malformed declaration
     ///     fails closed instead of inheriting the parent session.
     /// </remarks>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    internal static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
     {
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
             servers.ValueKind != JsonValueKind.Object)

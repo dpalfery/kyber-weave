@@ -16,7 +16,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// Contract for task 4.1b: the production hook decision engine runs
 /// <see cref="ArbiterEvaluator"/> end to end through <c>HookCommand</c> against a
 /// temp repo and a fake provider — one deny, one allow, one escalate and one
-/// exception-to-block. The scripted-engine host tests stay untouched.
+/// exception-to-allow-loudly. A hook or decision-model failure writes to the log
+/// and the chat-visible note and lets the dispatch continue; it never blocks.
 /// RED: <see cref="ArbiterHookDecisionEngine"/> does not exist yet.
 /// </summary>
 public sealed class ArbiterRealEngineTests : IDisposable
@@ -218,7 +219,30 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_EvaluatorException_BlocksFailClosedWithHookCode()
+    public void RealEngine_EvaluatorException_AllowsLoudlyWithHookCode()
+    {
+        WriteConfig(DisabledShippedRules());
+        HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
+
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string note = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
+        Assert.Contains("git facts exploded", note, StringComparison.Ordinal);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A loud allow to an implementation specialist still strips the routing headers: the
+    /// worker gets a clean prompt plus the note, never the headers the strip exists to
+    /// remove.
+    /// </summary>
+    [Fact]
+    public void RealEngine_LoudAllowToASpecialistStillStripsHeaders()
     {
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
@@ -227,15 +251,15 @@ public sealed class ArbiterRealEngineTests : IDisposable
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
-        string reason = doc.RootElement
-            .GetProperty("hookSpecificOutput")
-            .GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string updated = output.GetProperty("updatedInput").GetProperty("prompt").GetString() ?? string.Empty;
+        Assert.DoesNotContain("KYBER-ARBITER", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("TASK: T3", updated, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RealEngine_RemoteProviderWithoutSecretTool_BlocksWithActionableEvidence()
+    public void RealEngine_RemoteProviderWithoutSecretTool_AllowsLoudlyWithActionableEvidence()
     {
         WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
         HookCommand command = CreateCommand(
@@ -244,22 +268,22 @@ public sealed class ArbiterRealEngineTests : IDisposable
                 new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
         JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
-        Assert.Contains("TYPESAFE_API_KEY", reason, StringComparison.Ordinal);
-        Assert.Contains("libsecret-tools", reason, StringComparison.Ordinal);
-        Assert.DoesNotContain("An error occurred trying to start process", reason, StringComparison.Ordinal);
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string note = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
+        Assert.Contains("TYPESAFE_API_KEY", note, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred trying to start process", note, StringComparison.Ordinal);
+        Assert.Contains("TYPESAFE_API_KEY", log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RealEngine_RemoteProviderWithRealSecretServiceAndNoSecretTool_BlocksWithActionableEvidence()
+    public void RealEngine_RemoteProviderWithRealSecretServiceAndNoSecretTool_AllowsLoudlyWithActionableEvidence()
     {
         Assert.SkipWhen(SecretToolOnPath(), "secret-tool is installed, so the missing-tool path is not reachable here.");
         WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
@@ -268,15 +292,16 @@ public sealed class ArbiterRealEngineTests : IDisposable
             credentialStoreFactory: () => new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
         JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains("TYPESAFE_API_KEY", reason, StringComparison.Ordinal);
-        Assert.Contains("libsecret-tools", reason, StringComparison.Ordinal);
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string note = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains("TYPESAFE_API_KEY", note, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", note, StringComparison.Ordinal);
+        Assert.Contains("TYPESAFE_API_KEY", log, StringComparison.Ordinal);
     }
 
     private const string RemoteProviderYaml =
@@ -297,7 +322,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_ProviderCrash_BlocksRatherThanPasses()
+    public void RealEngine_ProviderCrash_AllowsLoudlyRatherThanBlocks()
     {
         WriteConfig(
             DisabledShippedRules() + "\n" +
@@ -312,15 +337,140 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { adds-work: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider { Throw = true });
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
 
-        // A provider crash degrades to undecidable, which escalates a conductor
-        // trigger: the dispatch blocks, never passes.
+        // A provider crash lets the dispatch continue loudly: the failure is written
+        // to the log and the chat-visible note, never a block.
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
+        string note = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
+        Assert.Contains("the decision model failed", note, StringComparison.Ordinal);
+        Assert.Contains("judged by no model", note, StringComparison.Ordinal);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Runs one factory <c>PreToolUse</c> <c>Task</c> dispatch to <c>architect</c> through the
+    /// production hook command, with the shipped rules active and a <c>kind: none</c> provider.
+    /// </summary>
+    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string? sessionId)
+    {
+        Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n" +
+            "  docs-root: docs\n" +
+            "arbiter:\n" +
+            "  enabled: true\n" +
+            "  provider:\n" +
+            "    kind: none\n");
+
+        string cwd = _repo.Path.Replace("\\", "\\\\", StringComparison.Ordinal);
+        string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["description"] = "Write the plan",
+            ["prompt"] = prompt,
+            ["subagent_type"] = "architect",
+        });
+        string session = sessionId is null ? string.Empty : "\"session_id\":\"" + sessionId + "\",";
+        string stdin = "{\"hook_event_name\":\"PreToolUse\"," + session +
+            "\"cwd\":\"" + cwd + "\",\"tool_name\":\"Task\",\"tool_input\":" + toolInput + "}";
+
+        HookCommand command = CreateCommand(new FakeProvider());
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run("factory", null, stdin, stdout, log);
+        return (exit, stdout.ToString(), log.ToString());
+    }
+
+    private static string DenyReason(string stdout)
+    {
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        return doc.RootElement.GetProperty("hookSpecificOutput")
+            .GetProperty("permissionDecisionReason")
+            .GetString() ?? string.Empty;
+    }
+
+    [Fact]
+    public void RealEngine_Factory_AbsolutePlanFile_DeniesWithTheRealReason()
+    {
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
+            "sess-factory-absolute");
+
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
         JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
         Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
         string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains("STATUS: ARBITER_ESCALATION", reason, StringComparison.Ordinal);
+        Assert.Contains("ANSWER: plan-file-invalid (step 0)", reason, StringComparison.Ordinal);
+        Assert.Contains("CALLER: conductor (factory)", reason, StringComparison.Ordinal);
+        Assert.Contains("repository-relative", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("recognised marker", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_RelativePlanFile_Allows()
+    {
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nWrite the plan.",
+            "sess-factory-relative");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Theory]
+    [InlineData("INTAKE: docs/todo/item.md")]
+    [InlineData("FINDINGS:")]
+    [InlineData("STATUS: ARBITER_ESCALATION")]
+    [InlineData("FEATURE: search\nPHASE: design")]
+    public void RealEngine_Factory_MarkerOnlyPlannerDispatch_Allows(string body)
+    {
+        (int exit, string stdout, _) = RunFactory($"KYBER-ARBITER: true\n\n{body}", "sess-factory-marker");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_UnmarkedPlannerDispatch_PassesThrough()
+    {
+        (int exit, string stdout, _) = RunFactory("Plan the upgrade.", "sess-factory-unmarked");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_RepeatWithoutPlanFile_CountsOneSession()
+    {
+        const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
+
+        string first = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
+        string otherSession = DenyReason(RunFactory(WithoutPlanFile, "sess-B").Stdout);
+
+        Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 2", second, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 1", otherSession, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether(string? sessionId)
+    {
+        const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
+
+        string first = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
+
+        Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
+        Assert.Contains("REPEAT: 1", second, StringComparison.Ordinal);
     }
 }

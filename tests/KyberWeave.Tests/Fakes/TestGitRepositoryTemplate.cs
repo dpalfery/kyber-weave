@@ -57,6 +57,21 @@ public static class TestGitRepositoryTemplate
     }
 
     /// <summary>
+    ///     Creates an isolated copy of the pre-seeded <c>ReviewSuppressionsCommandTests</c> repository
+    ///     carrying <c>src/a.cs</c> with a committed suppression that gives no reason, <c>src/a.csproj</c>,
+    ///     <c>notes/readme.md</c>, and the initial commit.
+    /// </summary>
+    /// <remarks>
+    ///     The suppression has to be in history rather than in the working diff: the scan judges the
+    ///     lines a change adds, so a pre-existing suppression can only be shown to be ignored when it
+    ///     was committed before the change under test.
+    /// </remarks>
+    public static void CreateSuppressionScanRepository(string destinationPath)
+    {
+        CreateRepositoryCopy("suppression-scan", destinationPath, InitializeSuppressionScanTemplate);
+    }
+
+    /// <summary>
     ///     Creates an isolated copy of the pre-seeded <c>DocsInitReviewGatesTests</c> repository
     ///     initialized from the specified gate catalogue fixture family clean directory and host technologies.
     /// </summary>
@@ -201,6 +216,23 @@ public static class TestGitRepositoryTemplate
         ConfigureTemplateRepository(repo);
         WriteFile(repo, "src/a.cs", "// a\n");
         WriteFile(repo, "src/gone.cs", "// gone\n");
+        WriteFile(repo, "notes/readme.md", "# readme\n");
+        RunGit(repo, "add", "-A");
+        RunGit(
+            repo,
+            "-c", "user.name=t2r",
+            "-c", "user.email=t2r@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "--quiet", "--allow-empty", "-m", "initial");
+        AppendInfoExclude(repo, ".kyber-weave/\n");
+    }
+
+    private static void InitializeSuppressionScanTemplate(string repo)
+    {
+        RunGit(repo, "init", "--quiet");
+        ConfigureTemplateRepository(repo);
+        WriteFile(repo, "src/a.cs", "// a\n#pragma warning disable CS0168\n");
+        WriteFile(repo, "src/a.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>\n");
         WriteFile(repo, "notes/readme.md", "# readme\n");
         RunGit(repo, "add", "-A");
         RunGit(

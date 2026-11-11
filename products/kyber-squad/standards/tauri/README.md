@@ -86,13 +86,20 @@ Where the app ships a Python component:
 - If it runs as a long-lived local API server instead, it binds to localhost only and the
   Rust core proxies to it; the frontend never calls it directly.
 
-## Commands
+## Completion
 
 `cargo clippy` runs with warnings denied in CI.
 
 ```bash
 cargo fmt --check
 cargo clippy -- -D warnings
-cargo test
+cargo test '<name>'
 npm run tauri build
 ```
+
+`cargo fmt --check` is the format check and writes nothing. `cargo clippy -- -D warnings` compiles
+the crate and denies a warning, so the build is green only when it is. The `cargo test` line is
+filtered to the tests covering your change — the gate the review council and CI run is the
+unfiltered crate's run, and a dev agent never runs the whole crate's tests. `npm run tauri build`
+is the bundle, and it is the last command: a bundle is evidence that the Rust and the frontend
+agree, not a substitute for the tests.

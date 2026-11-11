@@ -35,7 +35,16 @@ public sealed class OpenWorkValidator
     /// <summary>A plan or specification still in its active folder when the change merges.</summary>
     public const string OpenWork = "KW-DOC-LIFECYCLE-003";
 
+    /// <summary>A task file left behind when the change merges.</summary>
+    public const string LeftoverTaskFile = "KW-DOC-LIFECYCLE-005";
+
     private const string FolderIndexName = "README.md";
+
+    // The task file a specification folder carries is `tasks.json`; a plan's is
+    // `<plan>.tasks.json` beside the plan. Both names are left behind the same way.
+    private const string FolderTaskFileName = "tasks.json";
+    private const string PlanTaskFileSuffix = ".tasks.json";
+    private const string JsonSearchPattern = "*.json";
 
     private static readonly (string Property, string Kind, string ArchiveFolder, DocType[] WorkTypes)[] Inventories =
     [
@@ -44,12 +53,20 @@ public sealed class OpenWorkValidator
     ];
 
     private readonly KyberWeaveConfig _config;
+    private readonly string? _repoRoot;
 
     /// <summary>Creates the validator over the registry and ontology in <paramref name="config"/>.</summary>
-    public OpenWorkValidator(KyberWeaveConfig config)
+    /// <param name="config">The effective host configuration, with its ontology applied.</param>
+    /// <param name="repoRoot">
+    /// The absolute repository root, needed to find a task file left behind: those are not
+    /// Markdown and so are not loaded as documents. Null skips that rule, which is what a caller
+    /// checking a document set alone asks for.
+    /// </param>
+    public OpenWorkValidator(KyberWeaveConfig config, string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
+        _repoRoot = repoRoot;
     }
 
     /// <summary>One error per plan or specification still open in its active folder.</summary>
@@ -81,6 +98,65 @@ public sealed class OpenWorkValidator
                     work.Key, first.RelativePath,
                     $"Once the work is done, move it to {_config.Ontology.DocsRoot}/archive/{archiveFolder}/ " +
                     $"and update {indexPath}."));
+            }
+        }
+
+        report.AddRange(LeftoverTaskFiles().Items);
+        return report;
+    }
+
+    /// <summary>One error per task file still in the corpus when the change merges.</summary>
+    /// <remarks>
+    /// <para>
+    /// A task file has a shelf life of exactly one plan: the commit that archives the plan deletes
+    /// it. One left behind describes work nobody is doing, and the next architect reads it as
+    /// live — so the merge is the last moment it can be caught.
+    /// </para>
+    /// <para>
+    /// The archive is inside the walk on purpose. A specification's task file lives in its
+    /// specification folder, so the closeout moves it with the folder; looking only in the active
+    /// folders would let a file ride into the archive beside its specification, where it stays
+    /// readable and forever stale.
+    /// </para>
+    /// <para>
+    /// A task file is not Markdown, so it is not a document and no document set can find it. The
+    /// walk is over the configured docs root, one level at a time and without following a link
+    /// (see <see cref="DocsRootPath" />), because the corpus is user-controlled.
+    /// </para>
+    /// </remarks>
+    private DiagnosticReport LeftoverTaskFiles()
+    {
+        DiagnosticReport report = new();
+        if (_repoRoot is null)
+            return report;
+
+        HashSet<string> seen = new(DocsRootPath.PathComparer);
+        foreach (string root in _config.Ontology.DocsRoots)
+        {
+            string docsRoot = Path.Combine(_repoRoot, root.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(docsRoot))
+                continue;
+
+            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, JsonSearchPattern))
+            {
+                string name = Path.GetFileName(file);
+                if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                    && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string relativePath = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
+                if (!seen.Add(relativePath))
+                    continue;
+
+                report.Add(new Diagnostic(
+                    LeftoverTaskFile, Severity.Error,
+                    $"Task file '{relativePath}' is left behind. A task file lives only as long as the plan or " +
+                    "specification it was written from, and a merge must not carry one.",
+                    relativePath, relativePath,
+                    "Remove it with `git rm` in the same commit that archives the plan. The archived plan keeps " +
+                    "the decisions, tasks and test contract, so nothing durable is lost."));
             }
         }
 

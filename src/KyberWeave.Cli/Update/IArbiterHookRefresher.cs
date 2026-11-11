@@ -11,8 +11,9 @@ public readonly record struct ArbiterHookRefreshResult(int Refreshed, int Failed
 /// <remarks>
 /// The update replaces the <c>kyber-weave-arbiter</c> binary, whose hook source is embedded in the
 /// CLI (<c>ArbiterPluginShim.Render</c>); already-deployed projects must be re-rendered or they keep
-/// running the old hook source. The seam is constructor injection, never a child process:
-/// implementations reuse <c>SquadLifecycleService.UpdateAsync</c> and never shell out to a hook script.
+/// running the old hook source. The refresh runs inside the new kyber-weave, which the old process starts
+/// after the swap, so it renders from that release's own templates. It never runs a hook script or the
+/// arbiter binary: implementations reuse <c>SquadLifecycleService.UpdateAsync</c> in-process.
 /// </remarks>
 public interface IArbiterHookRefresher
 {

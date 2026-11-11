@@ -70,10 +70,14 @@ public sealed class RepositoryDoctorTests : IDisposable
         Assert.Equal(0, report.ExitCode);
     }
 
-    /// <summary>An existing <c>.codegraph/</c> is incrementally indexed, never re-initialised.</summary>
-    /// <remarks>D3 "always index" on provisioning: <c>index</c> is the cheap path once an index exists.</remarks>
+    /// <summary>An existing <c>.codegraph/</c> is brought up to date with <c>sync</c>, never re-initialised.</summary>
+    /// <remarks>
+    /// D22: provisioning runs <c>sync</c> when an index exists and <c>init</c> when it does not. <c>index</c> is the
+    /// repair step for a failed <c>sync</c>, never the routine one: re-indexing after a successful sync would rebuild
+    /// the whole index on every provision for no new information, which is the cost this slice removes.
+    /// </remarks>
     [Fact]
-    public void Doctor_Provision_IndexPresent_RunsIndex()
+    public void Doctor_Provision_IndexPresent_RunsSync()
     {
         Directory.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
@@ -87,18 +91,18 @@ public sealed class RepositoryDoctorTests : IDisposable
 
         Assert.Contains(
             executor.CallsTo("codegraph"),
-            call => call.ArgumentList.Contains("index", StringComparer.Ordinal));
+            call => call.ArgumentList.Contains("sync", StringComparer.Ordinal));
         DoctorHarness.AssertNoCall(executor, "init");
         Assert.True(DoctorHarness.CheckNamed(report, "codegraph.index").Passed);
     }
 
     /// <summary>
-    /// An index that exceeds the timeout fails the check with exit 1. The tree kill itself happens in the process
+    /// A <c>sync</c> that exceeds the timeout fails the check with exit 1. The tree kill itself happens in the process
     /// executor, which this unit test cannot observe.
     /// </summary>
     /// <remarks>
     /// The executor surfaces a timeout as <see cref="TimeoutException"/>, the production contract of
-    /// <c>ProcessExecutor</c>. Without the failure path, a hung index would hang the doctor or pass silently.
+    /// <c>ProcessExecutor</c>. Without the failure path, a hung sync would hang the doctor or pass silently.
     /// </remarks>
     [Fact]
     public void Doctor_Provision_IndexTimeout_KillsTreeExits1()
@@ -106,8 +110,8 @@ public sealed class RepositoryDoctorTests : IDisposable
         Directory.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
             Root,
-            arguments => arguments.Contains("index", StringComparer.Ordinal)
-                ? throw new TimeoutException("codegraph index exceeded its timeout.")
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? throw new TimeoutException("codegraph sync exceeded its timeout.")
                 : DoctorHarness.Ok());
 
         DoctorReport report = RepositoryDoctor.Run(
@@ -491,5 +495,69 @@ public sealed class RepositoryDoctorTests : IDisposable
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
         }
+    }
+
+    /// <summary>
+    /// The ensure run spends exactly one <c>codegraph explore</c> call and exactly one docs tool call,
+    /// so the command proves both tools work without becoming a second retrieval loop.
+    /// </summary>
+    /// <remarks>
+    /// D22: one <c>codegraph explore</c>, one <c>kw-docs</c> call. A probe that queried repeatedly
+    /// would make every worker start cost several index and corpus reads, which is the run-speed
+    /// problem this slice exists to fix rather than to move.
+    /// </remarks>
+    [Fact]
+    public void Doctor_Ensure_MakesOneExploreCallAndOneDocsCall()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        string callLog = Path.Combine(_stubs.Path, "calls.log");
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
+
+        int exitCode = DoctorAppHarness.Run(
+            new KyberWeave.Cli.Commands.Doctor.DoctorCommand
+            {
+                Executor = executor,
+                IsTerminal = () => false,
+                ReadEnvironment = _ => null,
+                McpExecutable = AppendingStub(callLog)
+            },
+            "doctor",
+            "--ensure",
+            Root);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("explore", StringComparer.Ordinal));
+        Assert.Single(File.ReadAllLines(callLog));
+    }
+
+    /// <summary>
+    /// A docs stub that records one line per <c>tools/call</c> it receives, so a second probe is
+    /// visible rather than overwritten.
+    /// </summary>
+    private string AppendingStub(string callLog)
+    {
+        string path = Path.Combine(_stubs.Path, "kyber-weave-mcp-counting");
+        File.WriteAllText(
+            path,
+            "#!/bin/sh\n"
+            + "read _initialize\n"
+            + $"printf '%s\\n' '{DoctorHarness.InitializeReply}'\n"
+            + "read _initialized\n"
+            + "read _call\n"
+            + $"printf '%s\\n' \"$_call\" >> \"{callLog}\"\n"
+            + "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root="
+            + Root
+            + "\"}]}}'\n"
+            + "cat > /dev/null\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
     }
 }

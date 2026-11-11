@@ -60,15 +60,55 @@ Write descriptions in the requester's words ("runbook", "how to run"), not the p
 ("governed corpus", "code joins"). The documentation-first rule also lives in
 `DocsServerInstructions`, which clients load before the model weighs any tool; keep the two
 consistent.
-Every tool response must also lead with the shared provenance header — the absolute root,
-short HEAD revision with dirty marker, and live document count — so a caller can tell which
-corpus answered. `CorpusProvenance` formats it, `docs_get_source_repository_and_revision` returns it alone, and the
+Every tool response must also lead with the shared provenance header — the absolute root, the
+branch, the git directory the repository's worktrees share, the short HEAD revision with dirty
+marker, and the live document count — so a caller can tell which corpus answered, and about which
+revision. `CorpusProvenance` formats it, `docs_get_source_repository_and_revision` returns it alone, and the
 header is emitted whole while any budget is taken from the body.
+
+**Compare `repo=`, not `root=`.** A second worktree of this repository has a different `root=` and
+the same `repo=`, which is a different checkout of the same repository and a legitimate answer about
+another branch; only a different `repo=` is the wrong repository. `branch=` says which revision the
+answer describes. Adding a field to the header means teaching `McpLiveProbe`'s trailing-metadata
+regex the same field, or `mcp.root` starts failing on a healthy server.
 
 ## Staleness is handled for you
 
 `DocumentIndexHost.Current()` rebuilds whichever half has gone stale on each call. Do not
 add caching in the tools layer.
+
+## The server keeps the code graph fresh, and fails its tools
+
+The joins these tools report come from `.codegraph/`, and the server is the only route to them
+for a role with no shell. `CodeGraphFreshness` refreshes that index on tool calls: first call,
+then at most once every 60 seconds (`RefreshInterval`), under a 30-second bound
+(`RefreshBound`), reusing `CodeGraphProvisioner` and its cross-process lock with a **zero** wait
+so a tool call never blocks on the provisioner's 600-second index timeout.
+
+- **A busy lock is a note, not a failure.** Another process refreshing means a worker's
+  `doctor --ensure` or the CodeGraph daemon got there first: one `note:` line above the body, and
+  the answer proceeds.
+- **A real failure fails the tool.** `CodeGraphGate.Blocking` returns `STATUS: TOOL_FAILURE` with
+  `tool:`, `reason:` and `fix:` lines, and nothing else, under the default stop rule; under
+  `stop-on-tool-failure: false` the same detail arrives as the `warning:` advisory instead. The
+  token is a whole line so a passing mention cannot satisfy a caller that routes on it.
+- **Two tools answer anyway, deliberately.** `docs_get_source_repository_and_revision` always
+  answers so a failure can be diagnosed, and `docs_detect_drift_between_documents_and_code` answers
+  with the failure because its verdict is the failure report. The other six go through
+  `CheckCodeGraph` and return the block.
+- **Where it applies.** Only where the bound repository lists `codegraph` under
+  `mcp.required-servers` (`McpConfig.DeclaresCodeGraph`). A host that never declared it takes no
+  lock and reports nothing. Settings are read at each refresh, so an edit needs no restart.
+- **`--no-codegraph-refresh` disables it.** `doctor --check` starts the server with that flag,
+  because `--check` promises it never runs `init` or `index` and its probe makes a real docs call.
+- **The schedule is opt-in at the tools level.** A `DocsTools` constructed without one answers
+  from the documents on disk and consults no CodeGraph. The schedule is a gate as much as a
+  refresh, and a CI runner has no index to satisfy one, so a test that builds the tools directly
+  must not inherit it. The composition roots pass it explicitly.
+- **Nothing reaches stdout.** The refresh runs through `ProcessRunner`, which captures both
+  streams. A log or a child's output on stdout corrupts the transport.
+
+The rule and its alternatives are [ADR 0062](../../docs/adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md).
 
 ## Documented behaviour
 

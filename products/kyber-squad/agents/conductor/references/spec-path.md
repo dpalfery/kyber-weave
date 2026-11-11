@@ -18,7 +18,9 @@ Use this path when the user supplies a specification or selects one from the dir
 - `STATUS: SPEC_READY` — verify all phases are approved, the task artifact persists `development-mode` and the matching Test or verification contract, the declared scale and its `Design harvest` (with target components) are verified, and the specification index is synchronized as Draft awaiting final approval.
 - `STATUS: SPEC_WRITE_ERROR` or `STATUS: BLOCKED` — relay the exact failure and stop. If `product-owner` reports a write error on a nonexistent file because the host harness withholds file creation from subagents, pre-create the empty phase file before redispatching as a degradation fallback.
 
-After `SPEC_READY`, ask the final blocking question as **approve and execute**, stating the declared scale and components so the owner confirms the impact before execution (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence.
+After `SPEC_READY`, ask the final blocking question as **approve and execute**, stating the declared scale and components so the owner confirms the impact before execution (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence, and load the `delivery-execution` skill when it does: that skill, not this path, holds the dispatch, verification, digest, findings and closeout rules.
+
+The specification form of the task file is `<spec-folder>/tasks.json`, beside its `tasks.md`. Validate it before the first dispatch and dispatch each worker's prompt from it unchanged: `tasks.md` is the approved record, not the dispatch source.
 
 ## Gate collapse in autonomous mode
 

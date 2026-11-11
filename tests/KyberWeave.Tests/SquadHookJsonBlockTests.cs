@@ -16,6 +16,7 @@ public sealed class SquadHookJsonBlockTests
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",
+            SquadHookBlockFormat.Claude => "claude",
             SquadHookBlockFormat.Codex => "codex",
             SquadHookBlockFormat.Factory => "factory",
             SquadHookBlockFormat.Devin => "devin",
@@ -54,6 +55,20 @@ public sealed class SquadHookJsonBlockTests
                 [CursorEntry("kyber-weave-arbiter hook --harness cursor", "Edit", 10, false)])
             : ([ManagedGroup(format, "pre-matcher")], [ManagedGroup(format, "post-matcher")]);
 
+    [Fact]
+    public void SpliceFile_SubagentStopForAnotherFormat_NamesTheCallerBug()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "kw-hook-" + Guid.NewGuid().ToString("N") + ".json");
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Cursor);
+
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
+            () => SquadHookJsonBlock.SpliceFile(SquadHookBlockFormat.Cursor, path, pre, post, pre));
+
+        Assert.Contains("Only the Factory", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("does not parse", failure.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(path));
+    }
+
     private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) UserEntries(SquadHookBlockFormat format) =>
         format == SquadHookBlockFormat.Cursor
             ? ([CursorEntry("user-linter --fast", "Edit", 3, false)],
@@ -75,7 +90,7 @@ public sealed class SquadHookJsonBlockTests
                     ["postToolUse"] = new JsonArray(post.Select(Clone).ToArray()),
                 },
             },
-            SquadHookBlockFormat.Codex => new JsonObject
+            SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude => new JsonObject
             {
                 ["hooks"] = new JsonObject
                 {
@@ -449,5 +464,61 @@ public sealed class SquadHookJsonBlockTests
             () => SquadHookJsonBlock.RemoveFile(format, path));
         Assert.Contains(path, removeFailure.Message, StringComparison.Ordinal);
         Assert.Equal(Garbage, File.ReadAllText(path));
+    }
+}
+
+public sealed class SquadHookFormatResolutionTests
+{
+    private static SquadOwnedBlock Block(string relativePath, string target) =>
+        new(relativePath, target, false, []);
+
+    [Fact]
+    public void BareGlobalPathResolvesByRecordedTarget()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block("hooks.json", "codex"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Codex, format);
+    }
+
+    [Theory]
+    [InlineData("hooks.json")]
+    [InlineData(".agents/hooks.json")]
+    public void AntigravityResolvesBothTheGlobalPathAndTheStaleGlobalRecordFromBeforeTheFix(string relativePath)
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(relativePath, "antigravity"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Antigravity, format);
+    }
+
+    [Fact]
+    public void PrefixedProjectPathResolvesByRecordedTarget()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(".codex/hooks.json", "codex"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Codex, format);
+    }
+
+    [Fact]
+    public void MismatchedTargetAndPathFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block(".cursor/hooks.json", "codex"), out _));
+    }
+
+    [Fact]
+    public void CrossBareNameMismatchFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("hooks.v1.json", "codex"), out _));
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("settings.json", "codex"), out _));
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("hooks.json", "devin"), out _));
+    }
+
+    [Fact]
+    public void UnknownTargetFallsBackToPathMatch()
+    {
+        Assert.True(SquadHookJsonBlock.TryResolveFormat(Block(".cursor/hooks.json", "hal9000"), out SquadHookBlockFormat format));
+        Assert.Equal(SquadHookBlockFormat.Cursor, format);
+    }
+
+    [Fact]
+    public void UnknownTargetAndUnknownPathFailsClosed()
+    {
+        Assert.False(SquadHookJsonBlock.TryResolveFormat(Block("nope.json", "hal9000"), out _));
     }
 }

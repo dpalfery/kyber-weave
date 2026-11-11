@@ -45,15 +45,53 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     private const string TitleOnlyRuleId = "KW-TITLE-999";
 
     /// <summary>
-    /// The header contract every docs tool response leads with — root, a short revision or the
-    /// literal <c>unavailable</c>, a dirty marker or <c>unknown</c>, and the live document
-    /// count. Repeated rather than shared because the copy in <c>McpDocsProvenanceTests</c> is
-    /// private to that class, and a helper hoisted across test files belongs to neither.
+    /// The header contract every docs tool response leads with — root, the branch and git
+    /// directory it was read from, a short revision or the literal <c>unavailable</c>, a dirty
+    /// marker or <c>unknown</c>, and the live document count. Repeated rather than shared because
+    /// the copy in <c>McpDocsProvenanceTests</c> is private to that class, and a helper hoisted
+    /// across test files belongs to neither.
     /// </summary>
+    /// <remarks>
+    /// The tokens after the root are named rather than assumed adjacent to it: <c>branch=</c> and
+    /// <c>repo=</c> sit between the root and <c>rev=</c>, and a pattern that expected <c>rev=</c>
+    /// straight after the root read both of them as part of the root path.
+    /// </remarks>
     private static readonly Regex ProvenancePattern = new(
-        "^provenance: root=(?<root>.+?) rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
+        "^provenance: root=(?<root>.+?) branch=\\S+ repo=.+? rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
         + "dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\\d+)$",
         RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A line that says the topic matched nothing. Read by meaning rather than by wording: the
+    /// note and the sentence that used to follow it ("so nothing is excerpted for it") are no
+    /// longer the same claim, because on a miss the standard's prose now comes back.
+    /// </summary>
+    private static readonly Regex NegatedMatch = new(
+        "\\b(?:no|none|nothing|not)\\b[^.]{0,80}?\\bmatch(?:es|ed)?\\b"
+        + "|\\bmatch(?:es|ed)?\\b[^.]{0,80}?\\b(?:nothing|none|no section)\\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Wording a response may use for "this cut is the ordinary outcome". A set rather than one
+    /// phrase, because the requirement is the meaning: a standard larger than the budget is cut
+    /// on purpose, not a document with a gap in it.
+    /// </summary>
+    private static readonly Regex CutIsExpected = new(
+        "\\b(?:expected|expect|normal|by design|deliberate(?:ly)?|routine|as intended|not a failure)\\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>A note that could be talking about the budget, the cut, or the omitted sections.</summary>
+    private static readonly Regex NamesTheBudgetOrTheCut = new(
+        "\\b(?:charBudget|budget|omitted|cut|truncated|characters)\\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The tool surface over this repository's own corpus, built once. The tests that use it are
+    /// about the standards this repository actually ships — how large they are, which sections
+    /// they hold, and which of those a caller's topic has to reach — so a fixture would measure
+    /// the fixture instead of the answer a worker receives.
+    /// </summary>
+    private static readonly Lazy<DocsTools> RepositorySurface = new(BuildRepositorySurface);
 
     private readonly DocFixture _corpus = new();
 
@@ -385,20 +423,30 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     }
 
     /// <summary>
-    /// The fourth echo site, and the one no returned section carries: a topic that matches
-    /// nothing names every heading the document holds, and that list is read straight from the
-    /// document <em>because</em> the excerpt is empty — there are no sections for the excerpt's
-    /// elision to reach, so a heading citing an id past the cap would come back verbatim.
+    /// The echo sites a topic miss reaches. A topic that matches nothing now returns the
+    /// standard's prose rather than a list of its headings, so what this call echoes is the
+    /// section text — and the cap the index above it states is still a cap the response keeps,
+    /// in every section it returns and in the title it repeats.
     /// </summary>
     /// <remarks>
-    /// The test above exercises three echo sites through one call and cannot see this one: its
-    /// topic matches a section, so the empty-excerpt branch never runs. Here the topic matches
-    /// none, and the headings the response names include four that cite withheld ids — so
-    /// dropping the elision from that one list prints an id the index above it declined to name,
-    /// on the same response that counts it as omitted.
+    /// <para>
+    /// The test above exercises three echo sites through one call and cannot see this path: its
+    /// topic matches a section, so the miss branch never runs. Here the topic matches none.
+    /// </para>
+    /// <para>
+    /// What this pin lost, and why that is not a weakened assertion: the earlier version asserted
+    /// the exact text of the
+    /// <c>[also in this document, not matching this topic: …]</c> marker, which existed because
+    /// an empty excerpt forced the tool to name the document's headings from the document itself.
+    /// No prose came back, there was nothing for the excerpt's own elision to reach, and that one
+    /// list was the fourth place a withheld id could escape. Once a miss returns the prose, the
+    /// id arrives through the same elided sections every other response uses, so the separate
+    /// echo site is gone — and the invariant that mattered, that no withheld id is printed
+    /// anywhere in the response, now covers the prose this call actually returns.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void AWithheldRuleIdIsNotPrintedInTheHeadingsNamedWhenTheTopicMatchesNoSection()
+    public void AWithheldRuleIdIsNotPrintedAnywhereWhenTheTopicMatchesNoSection()
     {
         const string unmatched = "zzz-no-such-topic-zzz";
         (DocsTools tools, _) = Corpus(
@@ -410,27 +458,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         for (int index = 1; index <= 60; index++) cited.Add(RuleId(index));
         List<string> withheld = cited.Skip(50).ToList();
 
-        // The call really did take the empty-excerpt path: the topic is named as a miss, which
-        // is the branch that builds its heading list from the document rather than the excerpt.
-        List<string> notices = new();
-        foreach (string line in response.Split('\n'))
-        {
-            if (line.Contains("no section matches the topic", StringComparison.Ordinal))
-                notices.Add(line.TrimEnd('\r'));
-        }
-
-        string notice = Assert.Single(notices);
-        Assert.Contains("'" + unmatched + "'", notice, StringComparison.Ordinal);
-
-        // The headings are named, and one of them per withheld citation is replaced where the id
-        // stood — so the assertion below is not vacuous: these are the headings this call echoes.
-        string marker = response.Split('\n').Single(line =>
-            line.StartsWith("[also in this document, not matching this topic:", StringComparison.Ordinal));
-        Assert.Equal(
-            "[also in this document, not matching this topic: Rules · Quantum checks ([rule id withheld])"
-            + " · Deferred checks ([rule id withheld]) · Appendix checks ([rule id withheld])"
-            + " · Legacy checks ([rule id withheld])]",
-            marker);
+        // The call really did take the miss path, and it returned prose rather than nothing — so
+        // the assertion below is not vacuous: these are the sections this response prints.
+        AssertATopicMissIsNamed(response, unmatched);
+        Assert.Contains("## Rules", response, StringComparison.Ordinal);
+        Assert.Contains("[rule id withheld]", response, StringComparison.Ordinal);
 
         // The identity block echoes the frontmatter title, which cites the last withheld id.
         string title = response.Split('\n').Single(line => line.StartsWith("### ", StringComparison.Ordinal));
@@ -604,16 +636,55 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     }
 
     /// <summary>
-    /// The other cause of an empty excerpt, told apart from the first: the <c>##</c> headings
-    /// are there and none of them answers the topic, so the response says the topic matched
-    /// nothing and then names the headings it did not match. Saying the body carries no
-    /// headings would send a caller away from a standard sitting right there, and returning the
-    /// whole document instead would answer a narrower question with everything.
+    /// The tool's own documented example, and the call the whole tool exists for: a caller about
+    /// to write error handling in this repository's C# asks for <c>error handling</c> and is
+    /// returned the section headed <c>Errors and diagnostics</c>. It currently returns no prose
+    /// at all, and tells the caller so — naming every heading it did not match, including that
+    /// one. The topic was vectorised as a phrase, so the pair <c>errorhandling</c>, which no
+    /// section states, carried most of the query's weight and pushed the one section that does
+    /// discuss errors under the relevance floor.
     /// </summary>
+    /// <remarks>
+    /// Measured against this repository's own standard rather than a fixture, because the margin
+    /// is what makes the bug: the section scores just under the floor with the fused pair in the
+    /// query and just over it without, and a fixture corpus cannot reproduce that ratio. Its
+    /// inverse document frequencies are all about equal on a handful of documents, while here the
+    /// compound <c>errorhandling</c> appears in none of the corpus and <c>error</c> appears in
+    /// many, which is the asymmetry that costs the section its place.
+    /// </remarks>
     [Fact]
-    public void ATopicThatMatchesNoSectionIsNamedAsATopicMissRatherThanAsAStandardWithNoHeadings()
+    public void ATopicOfTwoWordsReachesTheSectionThatDiscussesThoseWords()
     {
-        string unmatched = "zebra-quantum-flux";
+        string response = Ask(RepositorySurface.Value, "csharp", "error handling");
+
+        Assert.Contains("## Errors and diagnostics", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("no section matches", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The headings are there and none of them answers the topic. The response names the topic as
+    /// a miss in one line, and then still returns the standard up to the budget — because a
+    /// caller handed an identity block and a list of headings has to go and read the file, which
+    /// is the cost this tool exists to remove.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This pin replaces one that asserted the opposite: a topic that matched nothing returned no
+    /// prose at all, and the whole document was withheld deliberately so that a narrow question
+    /// was not answered with everything. That trade was made for a caller who can read the file,
+    /// and its cost lands on a caller who cannot. What survives from the earlier pin is that the
+    /// miss is named as a miss and is never misreported as a standard with no headings.
+    /// </para>
+    /// <para>
+    /// Both budgets are exercised, because "up to the budget" is the whole of the new rule: the
+    /// prose comes back, and the same budget still governs how much of it. A miss that returned
+    /// the entire standard whatever the caller asked for would be the opposite defect.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATopicThatMatchesNoSectionIsNamedAsATopicMissAndTheStandardStillComesBack()
+    {
+        const string unmatched = "zebra-quantum-flux";
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
             "csharp",
             "standards/csharp",
@@ -621,39 +692,83 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "current",
             Sections(
                 ("Naming", Prose("convention", 60)),
-                ("Error handling", Prose("diagnostic", 60))))));
+                ("Error handling", Prose("diagnostic", 60)),
+                ("Third", Prose("appendix", 200))))));
 
-        string response = Ask(tools, "csharp", unmatched, 120_000);
+        string whole = Ask(tools, "csharp", unmatched, 120_000);
+        string cut = Ask(tools, "csharp", unmatched, 1000);
 
-        Assert.Contains("path: " + CsharpStandardPath, response, StringComparison.Ordinal);
-        Assert.DoesNotContain("carries no ## headings", response, StringComparison.Ordinal);
-
-        List<string> notices = new();
-        foreach (string line in response.Split('\n'))
+        foreach (string response in new[] { whole, cut })
         {
-            if (line.Contains("no section matches the topic", StringComparison.Ordinal))
-                notices.Add(line.TrimEnd('\r'));
+            Assert.Contains("path: " + CsharpStandardPath, response, StringComparison.Ordinal);
+
+            // The note says what happened before the prose explains why it does not matter: a
+            // reader who meets the sections first reads the miss note as a contradiction.
+            string notice = AssertATopicMissIsNamed(response, unmatched);
+            int firstSection = response.IndexOf("\n## ", StringComparison.Ordinal);
+            Assert.True(
+                firstSection > response.IndexOf(notice, StringComparison.Ordinal),
+                $"The topic miss must be stated before the prose it introduces; response was: {response}");
+
+            // The prose itself, not only the heading: a heading with nothing under it is the
+            // directory listing the tool already returned.
+            Assert.Contains("## Naming", response, StringComparison.Ordinal);
         }
 
-        string notice = Assert.Single(notices);
-        Assert.Contains("'" + unmatched + "'", notice, StringComparison.Ordinal);
+        // The generous budget returns the standard whole, so the miss really is a note about the
+        // topic rather than a limit on the answer.
+        Assert.Contains("## Naming", whole, StringComparison.Ordinal);
+        Assert.Contains("convention convention", whole, StringComparison.Ordinal);
+        Assert.Contains("## Error handling", whole, StringComparison.Ordinal);
+        Assert.Contains("diagnostic diagnostic", whole, StringComparison.Ordinal);
+        Assert.Contains("[complete document]", whole, StringComparison.Ordinal);
 
-        // The headings are named with the marker an off-topic section already gets, so the
-        // caller learns what the document does hold instead of being sent back to Read.
-        Assert.Contains(
-            "[also in this document, not matching this topic: Naming · Error handling]",
-            response,
-            StringComparison.Ordinal);
+        // The small budget still governs it.
+        Assert.Contains("## Naming", cut, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Third", cut, StringComparison.Ordinal);
+        Assert.Contains("[omitted for space", cut, StringComparison.Ordinal);
+    }
 
-        // Naming the headings is not returning them: a topic that matched nothing must not fall
-        // back to the whole standard's prose.
-        Assert.DoesNotContain("convention", response, StringComparison.Ordinal);
-        Assert.DoesNotContain("diagnostic", response, StringComparison.Ordinal);
+    /// <summary>
+    /// The test standard is larger than the 12,000-character default, so what the cut drops names
+    /// sections the reader is not getting. The response names them, and says the cut is expected: a
+    /// standard larger than the budget is the ordinary case and the reader is not missing anything
+    /// the tool failed to find.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are load-bearing and only one of them is there today. Naming what was omitted
+    /// tells a reader that something exists; it does not tell them the omission is a size cut
+    /// rather than a gap, so the reader who is not told opens the file to see what is missing —
+    /// the whole cost this tool removes. Asserted against this repository's own test standard
+    /// because its size against the default budget is the case, not a fixture that would have to
+    /// be built to be just as large.
+    /// </remarks>
+    [Fact]
+    public void AStandardLargerThanTheDefaultBudgetNamesTheCutAndSaysTheCutIsExpected()
+    {
+        string response = Ask(RepositorySurface.Value, "test");
 
-        Assert.True(
-            response.IndexOf("no section matches the topic", StringComparison.Ordinal)
-            < response.IndexOf("[also in this document", StringComparison.Ordinal),
-            $"The topic miss must be stated before the headings it names; response was: {response}");
+        string omission = Assert.Single(OmissionLines(response));
+
+        // The sections the cut drops are asserted from the standard itself rather than by name:
+        // a renamed heading (slice 7 renamed `## Commands` to `## Completion`) would otherwise make
+        // this pin fail for the rename rather than for a lost omission line. What must hold is that
+        // every omitted section is named, whatever the headings are called today.
+        string standard = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "README.md"));
+        int namesAt = omission.IndexOf(':', StringComparison.Ordinal);
+        string named = namesAt >= 0 ? omission[(namesAt + 1)..] : omission;
+        named = named.TrimEnd(']', '\r', '\n', ' ');
+        string[] omitted = named
+            .Split(" · ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToArray();
+        Assert.NotEmpty(omitted);
+        Assert.All(
+            omitted,
+            section => Assert.Contains($"## {section}", standard, StringComparison.Ordinal));
+        Assert.DoesNotContain("not matching this topic", omission, StringComparison.Ordinal);
+
+        AssertTheCutIsSaidToBeExpected(response);
     }
 
     /// <summary>
@@ -807,6 +922,88 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     private static string Body(string response)
     {
         return string.Join('\n', response.Split('\n').Skip(1));
+    }
+
+    /// <summary>
+    /// Asserts the response names the topic as one that matched nothing, and returns that one
+    /// line. A miss is named once and in the caller's own words, so a response that names the
+    /// topic twice leaves the caller unsure which of the two is the miss.
+    /// </summary>
+    private static string AssertATopicMissIsNamed(string response, string topic)
+    {
+        List<string> notices = new();
+        foreach (string rawLine in response.Split('\n'))
+        {
+            string line = rawLine.TrimEnd('\r');
+            if (!line.Contains("'" + topic + "'", StringComparison.Ordinal)) continue;
+            if (!NegatedMatch.IsMatch(line)) continue;
+            notices.Add(line);
+        }
+
+        string notice = Assert.Single(notices);
+
+        // The two reasons an excerpt is empty are still told apart: a miss is not a standard whose
+        // body carries no headings.
+        Assert.DoesNotContain("carries no ## headings", response, StringComparison.Ordinal);
+        return notice;
+    }
+
+    /// <summary>The marker naming the sections the budget cut, one line, so a response naming them twice fails here.</summary>
+    private static List<string> OmissionLines(string response)
+    {
+        List<string> lines = new();
+        foreach (string rawLine in response.Split('\n'))
+        {
+            if (rawLine.StartsWith("[omitted for space", StringComparison.Ordinal))
+                lines.Add(rawLine.TrimEnd('\r'));
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// Asserts some line says the cut is expected — that the standard is larger than the budget and
+    /// the omission is the ordinary outcome — as well as naming what was cut, which is the other
+    /// half of the same sentence's job. Without the first half a reader opens the file to find
+    /// what is missing, which is the cost this response exists to avoid.
+    /// </summary>
+    private static void AssertTheCutIsSaidToBeExpected(string response)
+    {
+        List<string> said = new();
+        foreach (string rawLine in response.Split('\n'))
+        {
+            string line = rawLine.TrimEnd('\r');
+            if (!CutIsExpected.IsMatch(line)) continue;
+            if (!NamesTheBudgetOrTheCut.IsMatch(line)) continue;
+            said.Add(line);
+        }
+
+        Assert.True(
+            said.Count > 0,
+            "A standard larger than the budget must say the cut is expected — that asking for "
+            + "12000 characters of a longer standard cuts it as a matter of course, rather than "
+            + "leaving a gap the reader has to open the file to fill. Keep the existing "
+            + "'[omitted for space, ask again with a larger charBudget: …]' marker and the "
+            + "'not matching this topic' marker as they are, and say the cut is expected as well. "
+            + $"Response was: {response}");
+    }
+
+    /// <summary>
+    /// The tool surface over this repository's own corpus. Built once, because the two callers
+    /// both need the real documents and a second build would parse 192 of them again for the same
+    /// answer.
+    /// </summary>
+    private static DocsTools BuildRepositorySurface()
+    {
+        string root = KyberWeaveTestPaths.ToolRoot;
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        DocumentIndexHost host = new(
+            root,
+            () => CodeGraphResolverAdapter.ForRepository(root),
+            () => new DocumentLoader(root, config.Ontology).Load(),
+            config.Ontology.DocsRoots,
+            config.Ontology.ResolvedCatalogPath);
+        return new DocsTools(host);
     }
 
     /// <summary>

@@ -29,8 +29,18 @@ public sealed class McpDocsGateToolsTests : IDisposable
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    /// <summary>
+    /// The header contract a gate tool leads with: root, the branch and git directory it was read
+    /// from, a short revision or <c>unavailable</c>, a dirty marker or <c>unknown</c>, and the live
+    /// document count.
+    /// </summary>
+    /// <remarks>
+    /// The tokens are named rather than assumed adjacent to the root: <c>branch=</c> and
+    /// <c>repo=</c> sit between the root and <c>rev=</c>, and a pattern that expected them next to
+    /// each other swallowed both into the root capture.
+    /// </remarks>
     private static readonly Regex ProvenancePattern = new(
-        @"^provenance: root=(?<root>.+?) rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
+        @"^provenance: root=(?<root>.+?) branch=\S+ repo=.+? rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
         + @"dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\d+)$",
         RegexOptions.CultureInvariant);
 
@@ -264,7 +274,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     }
 
     [Fact]
-    public void SharedArchitectProfileWithholdsProcessExecuteWithoutAskOrAllow()
+    public void SharedArchitectProfileGrantsProcessExecute()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadCapabilityProfile architect = source.CapabilityProfiles.Profiles["architect"];
@@ -272,9 +282,11 @@ public sealed class McpDocsGateToolsTests : IDisposable
         Assert.True(
             architect.Permissions.TryGetValue("process.execute", out SquadPermissionDecision decision),
             "The shared architect profile must declare process.execute.");
-        Assert.Equal(SquadPermissionDecision.Deny, decision);
-        Assert.NotEqual(SquadPermissionDecision.Ask, decision);
-        Assert.NotEqual(SquadPermissionDecision.Allow, decision);
+        // The shell lets the architect run the CLI gates and the CodeGraph CLI in a worktree.
+        // The lattice cannot scope commands; the agent body's command list and the Arbiter
+        // classification (not pinned here) are the controls. ask would narrow to deny on
+        // some targets.
+        Assert.Equal(SquadPermissionDecision.Allow, decision);
     }
 
     [Fact]

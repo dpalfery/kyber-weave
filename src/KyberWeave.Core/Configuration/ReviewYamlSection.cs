@@ -8,6 +8,9 @@ internal sealed class ReviewYamlSection
     /// <summary>Agent slug to its ordered task gates, as the operator wrote them.</summary>
     public Dictionary<string, List<ReviewTaskGateYaml>?>? TaskGates { get; init; }
 
+    /// <summary>Source glob to the fully qualified test classes that cover it, as the operator wrote them.</summary>
+    public Dictionary<string, List<string>?>? TestMap { get; init; }
+
     public ReviewCoverageYaml? Coverage { get; init; }
 
     public ReviewDuplicatesYaml? Duplicates { get; init; }
@@ -44,6 +47,10 @@ internal sealed class ReviewGateYaml
     public string? WorkingDirectory { get; init; }
 
     public bool? FailOnOutput { get; init; }
+
+    public bool? FullSuite { get; init; }
+
+    public List<string>? RequiresPaths { get; init; }
 }
 
 /// <summary>One entry's <c>applies-when</c> mapping: the paths the gate applies to.</summary>

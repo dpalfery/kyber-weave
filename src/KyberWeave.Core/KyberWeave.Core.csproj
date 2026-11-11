@@ -45,6 +45,8 @@
   <ItemGroup>
     <!-- Each technology's gate catalogue, embedded from products/kyber-squad/standards. The
          standards templates beside them belong to KyberWeave.Core.Docs. -->
+    <!-- The Copilot system prompt `squad copilot-prompt install` writes. Its logical name is what CopilotPromptFile reads. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\copilot\system-prompt.yaml" LogicalName="CopilotPrompt.system-prompt.yaml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\gates.yml" LogicalName="Gates.csharp.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\gates.yml" LogicalName="Gates.typescript.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
@@ -72,7 +74,7 @@
       sanctioned way to say "constructed by something you cannot see".
     -->
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
-    <PackageReference Include="Markdig" Version="1.5.0" />
+    <PackageReference Include="Markdig" Version="1.5.1" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 

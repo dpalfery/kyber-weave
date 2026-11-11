@@ -14,11 +14,14 @@ public static class ReviewConfigLoader
     /// misspelt token would otherwise reach the runner as a literal argument and fail far from the
     /// line that caused it.
     /// </summary>
-    private static readonly string[] KnownTokens = ["changed", "task"];
+    private static readonly string[] KnownTokens = ["changed", "task", "tests"];
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
-        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output", "applies-when"];
+    [
+        "id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output",
+        "applies-when", "full-suite", "requires-paths"
+    ];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] TaskGateKeys =
@@ -52,6 +55,7 @@ public static class ReviewConfigLoader
             TaskGates = section.TaskGates is null
                 ? defaults.TaskGates
                 : ParseTaskGates(section.TaskGates, repositoryRoot),
+            TestMap = section.TestMap is null ? defaults.TestMap : ParseTestMap(section.TestMap),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
             MaxConcurrentWorkers =
@@ -113,7 +117,9 @@ public static class ReviewConfigLoader
                 ParseAppliesWhen(gate.Id!, gate.AppliesWhen))
             {
                 Include = include,
-                FailOnOutput = gate.FailOnOutput ?? false
+                FailOnOutput = gate.FailOnOutput ?? false,
+                FullSuite = gate.FullSuite ?? false,
+                RequiresPaths = ParseRequiresPaths(gate.RequiresPaths, gateWhere)
             });
         }
 
@@ -172,6 +178,88 @@ public static class ReviewConfigLoader
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
+    }
+
+    /// <summary>
+    /// Validates <c>review.test-map</c>: a source glob to the fully qualified test classes that cover it.
+    /// </summary>
+    /// <remarks>
+    /// Entries are checked where the operator wrote them, for the same reason the gates are: a value that is
+    /// not a fully qualified class name reaches the runner as a filter that matches nothing, and a filter
+    /// that matches nothing exits zero.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseTestMap(
+        Dictionary<string, List<string>?> declared)
+    {
+        Dictionary<string, IReadOnlyList<string>> parsed = new(declared.Count, StringComparer.Ordinal);
+
+        foreach (KeyValuePair<string, List<string>?> entry in declared)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                throw new YamlException(
+                    "review.test-map has an empty path pattern. Name the source glob the classes cover, such as " +
+                    "\"src/KyberWeave.Core/Review/**\".");
+            }
+
+            string pattern = entry.Key.Trim();
+
+            if (entry.Value is null || entry.Value.Count == 0)
+            {
+                throw new YamlException(
+                    $"review.test-map '{pattern}' declares no test classes. Name at least one, or remove the entry.");
+            }
+
+            List<string> classes = new(entry.Value.Count);
+            foreach (string? name in entry.Value)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new YamlException(
+                        $"review.test-map '{pattern}' has an empty class name. Name a fully qualified test class, " +
+                        "such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
+                }
+
+                string trimmed = name.Trim();
+                if (!IsClassName(trimmed))
+                {
+                    throw new YamlException(
+                        $"review.test-map '{pattern}' has '{name}', which is not a fully qualified class name. " +
+                        "Give the class's namespace and name, such as 'KyberWeave.Tests.TaskGateSelectionTests'.");
+                }
+
+                classes.Add(trimmed);
+            }
+
+            if (!parsed.TryAdd(pattern, classes))
+            {
+                throw new YamlException(
+                    $"review.test-map declares duplicate pattern '{pattern}'. Consolidate its test classes under one key.");
+            }
+        }
+
+        return new ReadOnlyDictionary<string, IReadOnlyList<string>>(parsed);
+    }
+
+    /// <summary>Whether the value has the shape of a fully qualified type name: dot-separated identifiers.</summary>
+    private static bool IsClassName(string name)
+    {
+        if (name.Length == 0 || !name.Contains('.', StringComparison.Ordinal))
+            return false;
+
+        foreach (string segment in name.Split('.'))
+        {
+            if (segment.Length == 0 || (!char.IsLetter(segment[0]) && segment[0] != '_'))
+                return false;
+
+            foreach (char character in segment)
+            {
+                if (!char.IsLetterOrDigit(character) && character != '_')
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(
@@ -246,6 +334,79 @@ public static class ReviewConfigLoader
         return [.. include];
     }
 
+    /// <summary>
+    /// Validates a gate's <c>requires-paths</c> and returns them with '/' separators.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>working-directory</c>, a declared path is not required to exist here: its absence is the very
+    /// fact the gate reports at run time, and a host whose dependencies are not installed must still load its
+    /// configuration. A path that could never name something inside the repository is refused here, where the
+    /// operator wrote it.
+    /// </remarks>
+    private static IReadOnlyList<string> ParseRequiresPaths(List<string>? declared, string gateWhere)
+    {
+        if (declared is null)
+            return [];
+
+        string where = $"{gateWhere} requires-paths";
+        if (declared.Count == 0)
+            throw new YamlException(
+                $"{where} is an empty list. Name a path such as 'dash/node_modules', or remove the key.");
+
+        List<string> parsed = new(declared.Count);
+        foreach (string? path in declared)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new YamlException($"{where} has an empty entry. Name a path such as 'dash/node_modules'.");
+
+            string trimmed = path.Trim();
+            // Both separators are accepted on every host; the stored form uses '/' only.
+            string spelled = trimmed.Replace('\\', '/');
+            if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
+            {
+                throw new YamlException(
+                    $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
+            }
+
+            List<string> segments = [];
+            foreach (string segment in spelled.Split('/'))
+            {
+                string clean = segment.Trim();
+                if (clean is "" or ".")
+                    continue;
+
+                if (clean == "..")
+                {
+                    throw new YamlException(
+                        $"{where} '{path}' contains '..' and would leave the repository root. Name a path inside it.");
+                }
+
+                segments.Add(clean);
+            }
+
+            if (segments.Count == 0)
+            {
+                throw new YamlException(
+                    $"{where} '{path}' names the repository root. Name a path inside it, such as 'dash/node_modules'.");
+            }
+
+            if (segments[0] == "~")
+            {
+                throw new YamlException(
+                    $"{where} '{path}' is absolute. Name a path relative to the repository root, such as 'dash/node_modules'.");
+            }
+
+            parsed.Add(string.Join('/', segments));
+        }
+
+        return parsed;
+    }
+
+    private static bool LooksLikeWindowsDriveAbsolute(string path) =>
+        path.Length >= 2
+        && char.IsAsciiLetter(path[0])
+        && path[1] == ':';
+
     /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
     private static string? ParseOs(string? os, string gateWhere)
     {
@@ -287,9 +448,10 @@ public static class ReviewConfigLoader
                 $"{where} is empty. Name a directory relative to the repository root, or remove the key.");
         }
 
+        string trimmed = declared.Trim();
         // Both separators are accepted on every host; the stored form uses '/' only.
-        string spelled = declared.Replace('\\', '/');
-        if (spelled.StartsWith('/') || Path.IsPathRooted(declared))
+        string spelled = trimmed.Replace('\\', '/');
+        if (spelled.StartsWith('/') || Path.IsPathRooted(trimmed) || LooksLikeWindowsDriveAbsolute(spelled))
         {
             throw new YamlException(
                 $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
@@ -298,21 +460,28 @@ public static class ReviewConfigLoader
         List<string> segments = [];
         foreach (string segment in spelled.Split('/'))
         {
-            if (segment is "" or ".")
+            string clean = segment.Trim();
+            if (clean is "" or ".")
                 continue;
 
-            if (segment == "..")
+            if (clean == "..")
             {
                 throw new YamlException(
                     $"{where} '{declared}' contains '..' and would leave the repository root. Name a directory inside it.");
             }
 
-            segments.Add(segment);
+            segments.Add(clean);
         }
 
         // Nothing left means the repository root itself, which is what an absent key already means.
         if (segments.Count == 0)
             return null;
+
+        if (segments[0] == "~")
+        {
+            throw new YamlException(
+                $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
+        }
 
         if (commands.Any(argv => argv.Any(element => element.Contains("{changed}", StringComparison.Ordinal))))
         {
@@ -488,7 +657,7 @@ public static class ReviewConfigLoader
     /// <summary>
     /// Refuses a brace token that the runner would not expand. <c>{changed}</c> is expanded only as a
     /// whole argument, because splicing a file list into a larger string would hand the runner a string
-    /// it cannot reason about. <c>{task}</c> may sit inside an argument.
+    /// it cannot reason about. <c>{task}</c> and <c>{tests}</c> may sit inside an argument.
     /// </summary>
     private static void ValidateTokens(string element, string where)
     {
@@ -510,7 +679,7 @@ public static class ReviewConfigLoader
             string token = element[open..(i + 1)];
             open = -1;
 
-            if (name == "task")
+            if (name is "task" or "tests")
                 continue;
 
             if (name == "changed")
@@ -527,7 +696,7 @@ public static class ReviewConfigLoader
 
             throw new YamlException(
                 $"{where} has unknown token '{token}' in '{element}'. Did you mean '{{" +
-                NearestKnownToken(name) + "}'? Known tokens are {changed} (whole argument only) and {task}.");
+                NearestKnownToken(name) + "}'? Known tokens are {changed} (whole argument only), {task} and {tests}.");
         }
     }
 

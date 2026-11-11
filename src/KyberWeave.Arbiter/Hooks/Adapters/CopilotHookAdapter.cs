@@ -260,6 +260,9 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 HookOutcomeKind.Deny => RenderLocalPreDeny(
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine denied without a reason.")),
+                HookOutcomeKind.AllowWithNote => RenderLocalPreAllowNote(
+                    outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine allowed with a note but wrote none.")),
                 _ => throw new InvalidOperationException(
                     $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
             };
@@ -326,6 +329,9 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.PostAnnotation => RenderLocalPostAnnotation(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine annotated without a note.")),
+            HookOutcomeKind.AllowWithNote => RenderLocalPostAnnotation(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
@@ -360,6 +366,9 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 HookOutcomeKind.Deny => RenderCliDeny(
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine denied without a reason.")),
+                HookOutcomeKind.AllowWithNote => RenderCliAllowNote(
+                    outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine allowed with a note but wrote none.")),
                 _ => throw new InvalidOperationException(
                     $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
             };
@@ -387,6 +396,9 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             HookOutcomeKind.PostAnnotation => RenderCliPostAnnotation(
                 postOutcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine annotated without a note.")),
+            HookOutcomeKind.AllowWithNote => RenderCliPostAnnotation(
+                postOutcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{postOutcome.Kind}' for a post-dispatch event."),
         };
@@ -749,6 +761,17 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         return string.Join("/", parts);
     }
 
+    private static string RenderLocalPreAllowNote(string note) =>
+        new JsonObject
+        {
+            ["hookSpecificOutput"] = new JsonObject
+            {
+                ["hookEventName"] = "PreToolUse",
+                ["permissionDecision"] = "allow",
+                ["permissionDecisionReason"] = note,
+            },
+        }.ToJsonString();
+
     private static string RenderLocalPreDeny(string reason) =>
         new JsonObject
         {
@@ -828,6 +851,13 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 ["hookEventName"] = "PostToolUse",
                 ["additionalContext"] = note,
             },
+        }.ToJsonString();
+
+    private static string RenderCliAllowNote(string note) =>
+        new JsonObject
+        {
+            ["permissionDecision"] = "allow",
+            ["permissionDecisionReason"] = note,
         }.ToJsonString();
 
     private static string RenderCliDeny(string reason) =>

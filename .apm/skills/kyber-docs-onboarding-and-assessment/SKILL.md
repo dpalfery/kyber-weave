@@ -1,6 +1,6 @@
 ---
 name: kyber-docs-onboarding-and-assessment
-description: "Bootstraps or audits a repository's documentation architecture — root AGENTS.md, canonical tree, catalog, config registry, and plan lifecycle. Also runs owner-started assessment and remediation of archived plans and specs, classifying each as harvested, partial, or not harvested and grouping docs-dev fixes into a batch delivered as a pull request. Use when setting up documentation for a new or existing repo, auditing whether docs match a standard, mentioning config registry, documentation architecture, ADR, plan lifecycle, or catalog, when project facts are hardcoded in skills instead of canonical docs, or when the owner asks to assess archived plans and specs for harvest gaps. Not for authoring a single governed document — that is kyber-docs-authoring."
+description: "Bootstraps or audits a repository's documentation architecture — root AGENTS.md, canonical tree, catalog, config registry, and plan lifecycle. Also runs owner-started assessment and remediation of archived plans and specs, classifying each as harvested, partial, or not harvested and grouping docs-dev fixes into a batch delivered as a pull request; and runs the onboarding step a stopped run sends the operator to. Use when setting up documentation for a new or existing repo, auditing whether docs match a standard, mentioning config registry, documentation architecture, ADR, plan lifecycle, or catalog, when project facts are hardcoded in skills instead of canonical docs, when a run reports the repository's onboarding setting is unset, or when the owner asks to assess archived plans and specs for harvest gaps. Not for authoring a single governed document — that is kyber-docs-authoring."
 license: MIT
 metadata:
   author: dpalfery
@@ -19,9 +19,26 @@ This is architecture-level. If the task is writing or updating one component's a
 
 **Audit** — the repo already has some of this. Walk the checklist below, report what's missing or drifted (a fact duplicated in two places, a skill hardcoding something the registry should own, a plan sitting `Completed` but never archived), and fix only what you're authorized to fix. Don't rewrite what's already correct.
 
+**Onboarding** — the repo has the scaffolding but has never chosen which technologies, gates and standards it wants. See [Onboarding mode](#onboarding-mode-the-choice-a-run-stops-for) below; a stopped run sends the operator here.
+
 **Assessment and remediation** — owner-started: assess archived plans and specs for harvest gaps, report for owner picks, then remediate in batches. See below.
 
 Ask the user which mode applies if it isn't obvious from the request.
+
+## Onboarding mode (the choice a run stops for)
+
+A repository that has never answered the onboarding question records no `onboarding:` value in `.kyber-weave/kyber-weave.yml`, and `kyber-weave run start` stops before it checks anything else. This mode is what answers it. It runs once per repository.
+
+**What makes the question worth asking.** A gate suite and a set of coding standards arrived from defaults — the ones `docs init` wrote — and nobody has looked at them. Every later run is held to those choices, so the stop happens before the work rather than at the end of the first run.
+
+1. **Find the technologies.** Read `ontology.technologies` from `.kyber-weave/kyber-weave.yml`; that list is the declared set. Mark each one whose standard exists under the standards folder (**<standards-root>**, from the registry), so a technology declared with no standard is visible as a gap rather than as a default.
+2. **Show each technology's default.** For the gates, run `kyber-weave review catalogue . --technology <slug>`: it prints the exact `review:` block a scaffold would write, and writes nothing, so accepting a default and changing one cost the same. For the finish commands, read that technology's standard `## Completion` section through `docs_get_coding_standard_for_technology(technology, topic: "completion")`. If the repository holds no standard for it yet, show what `kyber-weave docs init . --kyber-standards` would scaffold instead of inventing one.
+3. **Ask, per technology, whether to accept or change it.** Present the gates and the finish commands together, because they answer one question: what does a worker run here, and how does it finish. Record a change as a concrete edit — a gate's `include`, a command's argv, a line in the `## Completion` section — not as an intention.
+4. **Write the answers where they live.** Gates go in `review.gates` (the whole change) and `review.task-gates` (per agent, per task) in `.kyber-weave/kyber-weave.yml`. Finish commands go in that technology's `## Completion` section, one per standard, with no separate `## Commands` section beside it. Never put a project's commands in a portable agent or skill: the standard and the configuration are the host's, and the portable tree ships to every repository.
+5. **Record the answer.** `kyber-weave docs onboarding done .` once the choices are written, or `kyber-weave docs onboarding declined .` if the user declines. Either one ends the question, so no later run asks it again; `declined` is the honest record of a repository that chose not to have project gates, and a report of `TASK_GATE: NONE_DECLARED` then says so. The verb writes the value in place, keeping every comment and other key, and re-splices the registry block that publishes it.
+6. **Report what you changed and what you left at its default.** The operator should be able to tell an accepted default from a chosen change without reading the diff.
+
+**What this mode does not do.** It does not choose the repository's documentation root, its components or its ADR set — those are the other modes. It does not add a technology; that is `ontology.technologies` plus `kyber-weave docs init .`. And it does not reopen the question when a technology appears later: the worker that needs that standard returns its own question, and the answer is to add the technology and answer for it, not to stop every run again.
 
 ## The architecture
 

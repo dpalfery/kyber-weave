@@ -20,9 +20,10 @@
 // nothing.
 //
 // A third signal path serves `POST /v1/metrics`: Factory's native
-// OpenTelemetry export posts its metrics there, and OTLP/JSON is the
-// encoding it speaks. Metrics decode to their own shape and are handed to
-// the metrics sink port; the trace and log paths are untouched by them.
+// OpenTelemetry export and standard OTel exporters post their metrics there
+// in both OTLP encodings: Protobuf and JSON. Metrics decode to their own shape
+// and are handed to the metrics sink port; the trace and log paths are
+// untouched by them.
 //
 // Protobuf is decoded by hand — a wire-format reader plus the OTLP trace
 // schema's field numbers — because the schema is small and stable, and
@@ -71,7 +72,7 @@ export const OTLP_LOGS_PATH = '/v1/logs'
  * OTLP/HTTP metrics export path. The third signal path: Factory's native
  * OpenTelemetry export posts its metrics here (`{endpoint}/v1/metrics`), so a
  * developer can point that export straight at this receiver — no collector in
- * between. The export speaks OTLP/JSON on this path.
+ * between. Accepts OTLP/Protobuf and OTLP/JSON on this path.
  */
 export const OTLP_METRICS_PATH = '/v1/metrics'
 
@@ -1285,6 +1286,221 @@ function spanFromProtobuf(
   }
 }
 
+/**
+ * Decode an OTLP/Protobuf `ExportMetricsServiceRequest` body into metrics.
+ *
+ * Protobuf mirror of `decodeOtlpMetricsJson`: preserves absence as null
+ * rather than zero, skips unknown fields, strips account identity from
+ * resources and data points, and surfaces structural corruption as
+ * `OtlpDecodeError`.
+ */
+export function decodeOtlpMetricsProtobuf(body: Uint8Array): OtlpMetric[] {
+  const request = readMessage(body)
+  const metrics: OtlpMetric[] = []
+
+  for (const [rmIndex, resourceMetric] of pbMessages(request, 1, 'resource_metrics').entries()) {
+    const rmWhere = `resource_metrics[${rmIndex}]`
+    const resourceMessage = pbMessage(resourceMetric, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
+
+    for (const [smIndex, scopeMetric] of pbMessages(resourceMetric, 2, `${rmWhere}.scope_metrics`).entries()) {
+      const smWhere = `${rmWhere}.scope_metrics[${smIndex}]`
+      const scopeMessage = pbMessage(scopeMetric, 1)
+      const scope: OtlpScope = {}
+      if (scopeMessage !== undefined) {
+        const name = pbString(scopeMessage, 1)
+        const version = pbString(scopeMessage, 2)
+        if (name !== undefined && name.length > 0) scope.name = name
+        if (version !== undefined && version.length > 0) scope.version = version
+      }
+
+      for (const [mIndex, metricMessage] of pbMessages(scopeMetric, 2, `${smWhere}.metrics`).entries()) {
+        const mWhere = `${smWhere}.metrics[${mIndex}]`
+        metrics.push(metricFromProtobuf(metricMessage, resource, scope, mWhere))
+      }
+    }
+  }
+
+  return metrics
+}
+
+function pbTimestampString(message: PbMessage, field: number): string | null {
+  const nano = pbBigInt(message, field)
+  return nano !== undefined ? nano.toString() : null
+}
+
+function decodeNumberDataPoint(pointMsg: PbMessage): OtlpMetricDataPoint {
+  let value: number | null = null
+  const asIntBits = pbBigInt(pointMsg, 6)
+  if (asIntBits !== undefined) {
+    value = Number(BigInt.asIntN(64, asIntBits))
+  } else {
+    const asDoubleBits = pbBigInt(pointMsg, 4)
+    if (asDoubleBits !== undefined) {
+      const d = pbFixed64ToDouble(asDoubleBits)
+      value = Number.isFinite(d) ? d : null
+    }
+  }
+
+  return {
+    attributes: stripIdentityAttributes(pbKeyValues(pointMsg, 7)),
+    timeUnixNano: pbTimestampString(pointMsg, 3),
+    startTimeUnixNano: pbTimestampString(pointMsg, 2),
+    value,
+    count: null,
+    sum: null,
+  }
+}
+
+function decodeQuantileOrBucketDataPoint(pointMsg: PbMessage, attrField: number): OtlpMetricDataPoint {
+  const countBits = pbBigInt(pointMsg, 4)
+  const count = countBits !== undefined ? Number(countBits) : null
+  const sumBits = pbBigInt(pointMsg, 5)
+  let sum: number | null = null
+  if (sumBits !== undefined) {
+    const d = pbFixed64ToDouble(sumBits)
+    sum = Number.isFinite(d) ? d : null
+  }
+
+  return {
+    attributes: stripIdentityAttributes(pbKeyValues(pointMsg, attrField)),
+    timeUnixNano: pbTimestampString(pointMsg, 3),
+    startTimeUnixNano: pbTimestampString(pointMsg, 2),
+    value: null,
+    count: count !== null && Number.isFinite(count) ? count : null,
+    sum,
+  }
+}
+
+function pbTemporality(message: PbMessage, where: string): number | undefined {
+  const t = pbNumber(message, 2)
+  if (t === undefined || t === 0) return undefined
+  if (t === 1 || t === 2) return t
+  throw new OtlpDecodeError(
+    `${where}.aggregation_temporality must be 1 (delta) or 2 (cumulative), got ${t}`,
+  )
+}
+
+function metricFromProtobuf(
+  message: PbMessage,
+  resource: Record<string, unknown>,
+  scope: OtlpScope,
+  where: string,
+): OtlpMetric {
+  const name = pbString(message, 1)
+  if (name === undefined || name.length === 0) {
+    throw new OtlpDecodeError(`${where}.name is required`)
+  }
+  const description = pbString(message, 2)
+  const unit = pbString(message, 3)
+
+  const gaugeMsg = pbMessage(message, 5)
+  const sumMsg = pbMessage(message, 7)
+  const histMsg = pbMessage(message, 9)
+  const expHistMsg = pbMessage(message, 10)
+  const summaryMsg = pbMessage(message, 11)
+
+  const presentShapes = [gaugeMsg, sumMsg, histMsg, expHistMsg, summaryMsg].filter(
+    (m) => m !== undefined,
+  )
+  if (presentShapes.length > 1) {
+    throw new OtlpDecodeError(`${where}: multiple metric data oneof fields set`)
+  }
+
+  const metricResource = structuredClone(resource)
+  const metricScope = { ...scope }
+
+  if (gaugeMsg !== undefined) {
+    const dataPoints = pbMessages(gaugeMsg, 1, `${where}.gauge.data_points`).map(decodeNumberDataPoint)
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'gauge',
+      dataPoints,
+      resource: metricResource,
+      scope: metricScope,
+    }
+  }
+
+  if (sumMsg !== undefined) {
+    const temporality = pbTemporality(sumMsg, `${where}.sum`)
+    const isMonotonicRaw = pbBigInt(sumMsg, 3)
+    const dataPoints = pbMessages(sumMsg, 1, `${where}.sum.data_points`).map(decodeNumberDataPoint)
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'sum',
+      ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
+      ...(isMonotonicRaw !== undefined ? { isMonotonic: isMonotonicRaw !== 0n } : {}),
+      dataPoints,
+      resource: metricResource,
+      scope: metricScope,
+    }
+  }
+
+  if (histMsg !== undefined) {
+    const temporality = pbTemporality(histMsg, `${where}.histogram`)
+    const dataPoints = pbMessages(histMsg, 1, `${where}.histogram.data_points`).map((p) =>
+      decodeQuantileOrBucketDataPoint(p, 9),
+    )
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'histogram',
+      ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
+      dataPoints,
+      resource: metricResource,
+      scope: metricScope,
+    }
+  }
+
+  if (expHistMsg !== undefined) {
+    const temporality = pbTemporality(expHistMsg, `${where}.exponential_histogram`)
+    const dataPoints = pbMessages(expHistMsg, 1, `${where}.exponential_histogram.data_points`).map((p) =>
+      decodeQuantileOrBucketDataPoint(p, 1),
+    )
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'exponentialHistogram',
+      ...(temporality !== undefined ? { aggregationTemporality: temporality } : {}),
+      dataPoints,
+      resource: metricResource,
+      scope: metricScope,
+    }
+  }
+
+  if (summaryMsg !== undefined) {
+    const dataPoints = pbMessages(summaryMsg, 1, `${where}.summary.data_points`).map((p) =>
+      decodeQuantileOrBucketDataPoint(p, 7),
+    )
+    return {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      kind: 'summary',
+      dataPoints,
+      resource: metricResource,
+      scope: metricScope,
+    }
+  }
+
+  return {
+    name,
+    ...(description !== undefined ? { description } : {}),
+    ...(unit !== undefined ? { unit } : {}),
+    kind: 'unknown',
+    dataPoints: [],
+    resource: metricResource,
+    scope: metricScope,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The receiver
 // ---------------------------------------------------------------------------
@@ -1635,13 +1851,9 @@ export class OtlpReceiver {
       })
       return
     }
+    // Traces, logs, and metrics accept both OTLP encodings: JSON and Protobuf.
     const encoding = encodingForContentType(req.headers['content-type'])
-    // The metrics path speaks OTLP/JSON only — the encoding Factory's native
-    // export posts there — so a protobuf body is refused with a diagnostic
-    // instead of being decoded as something it is not.
-    const encodingAccepted =
-      encoding !== undefined && (path !== OTLP_METRICS_PATH || encoding === 'json')
-    if (!encodingAccepted) {
+    if (encoding === undefined) {
       this.recordOtlpFailure(
         'OTLP_UNSUPPORTED_MEDIA_TYPE',
         `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported on ${path}`,
@@ -1649,10 +1861,7 @@ export class OtlpReceiver {
       respondJson(res, 415, {
         error: {
           code: 'OTLP_UNSUPPORTED_MEDIA_TYPE',
-          message:
-            path === OTLP_METRICS_PATH
-              ? `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: the metrics path speaks application/json`
-              : `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: use application/json or application/x-protobuf`,
+          message: `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported: use application/json or application/x-protobuf`,
         },
       })
       return
@@ -1660,7 +1869,8 @@ export class OtlpReceiver {
 
     const body = await this.readBody(req)
     if (path === OTLP_METRICS_PATH) {
-      const metrics = decodeOtlpMetricsJson(body.toString('utf8'))
+      const metrics =
+        encoding === 'json' ? decodeOtlpMetricsJson(body.toString('utf8')) : decodeOtlpMetricsProtobuf(body)
       const nested = this.store as unknown as { metrics?: { writeMetrics(metrics: readonly OtlpMetric[], hint?: OtlpWriteHint): void } }
       const sink = nested.metrics ?? (this.store as Partial<OtlpMetricsStore>)
       if (typeof sink.writeMetrics !== 'function') {

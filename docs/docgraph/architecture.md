@@ -6,11 +6,15 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-07
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0057-squad-and-docs-are-their-own-assemblies
+  - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 code-refs:
+  - CodeGraphFreshness
+  - CodeGraphProvisioner
+  - CorpusProvenance
   - DocumentLoader
   - DocumentCorpus
   - DocumentIndex
@@ -182,6 +186,16 @@ Because the kind travels on the entry, a mode property is also reserved: a host 
 declare one under `config-reg:`, because that would replace a setting with a path and break
 the promise the registry makes.
 
+**The run settings are the next three.** `stop-on-tool-failure` at the top level, and
+`run.base-branch` and `run.harness-names`, publish `<stop-on-tool-failure>`,
+`<run-base-branch>` and `<run-harness-names>` as mode properties. A key the operator never
+wrote publishes nothing at all: an agent already applies the documented default, only a value
+somebody chose can differ from it, and a published default would claim a choice the repository
+never made. `run.base-branch` carries a branch name rather than a mode word, and the kind still
+applies — the value names nothing on disk, so `KW-CONFIG-REG-001` must not look for it there
+while `KW-CONFIG-REG-002` still checks the line. See
+[Run controls](../configuration.md#run-controls).
+
 ## Provisioning the index
 
 The graph lives in `.codegraph/` at the git root, and `docs drift` is the gate that needs it.
@@ -190,9 +204,18 @@ than in each caller's shell script:
 
 - **Repository-local only.** The root is the git root. Doctor refuses (exit `2`) when the path
   is not a repository or is the user's home, and it never provisions another checkout.
-- **Init once, index thereafter.** `codegraph init .` runs only when `.codegraph/` is absent;
-  every later provisioning run is `codegraph index .`. Both run with the root as the working
-  directory, under a 600-second bound that kills the process tree on expiry.
+- **Init once, sync thereafter.** `codegraph init .` runs only when `.codegraph/` is absent;
+  every later provisioning run is `codegraph sync .`, which brings an existing index up to
+  date. `codegraph index .` rebuilds the whole index and is the **repair** step, never the
+  routine one — running it on a healthy index pays a full rebuild for no new information.
+  Each child runs with the root as the working directory, under a 600-second bound that kills
+  the process tree on expiry.
+- **The worker's first command is `doctor --ensure`.** It is `sync` or `init`, then a restore
+  of any tracked file the preparation rewrote, then one `codegraph explore` and one docs-server
+  call, then a single `codegraph index` repair and a single retry. The restore is the reason it
+  is not a shell alias: initialization rewrites tracked files, and reverting the operator's own
+  edits would be unrecoverable. The set of dirty tracked files is recorded before the index
+  work starts, so only what the index itself wrote is reverted.
 - **Never delete, never install.** A corrupt or unwritable `.codegraph/` is reported with a
   remedy a human applies; callers of the CLI are told to install CodeGraph rather than it being
   installed for them. The binary's absence is exit `3`, not a failure to route around.
@@ -200,11 +223,50 @@ than in each caller's shell script:
   serialises concurrent runs; the second waits up to the index timeout and then reports
   `codegraph.index busy`. It is deliberately never removed, so a third run cannot slip past a
   holder that still holds it.
-- **A running daemon is left alone.** `index` coexists with it. Doctor never stops or restarts
-  it, and never touches its files.
+- **A running daemon is left alone.** Sync and index coexist with it. Doctor never stops or
+  restarts it, and never touches its files.
 
 Read-only callers use `doctor --check`: it detects the binary and the index and runs the live
 MCP proof, and never writes.
+
+## The server keeps the index fresh, and fails its tools when it cannot
+
+The docs server used to answer from whatever index happened to be on disk, which for a role
+with no shell was the only index it would ever see. It now refreshes the index itself
+([ADR 0061](../adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
+
+- **The refresh.** On the first tool call of the process, then at most once every 60 seconds,
+  the server runs the same `sync` (or `init`) the doctor runs, through
+  `CodeGraphProvisioner`, under a 30-second bound. It takes the same cross-process lock, with
+  a **zero wait**: a tool call cannot block for the 600-second index timeout.
+- **Contention is a note, not a failure.** A held lock means another process is refreshing the
+  index — a worker's `doctor --ensure`, the CodeGraph daemon — so the answer proceeds with one
+  `note:` line above the body. A refresh that fails while the lock is held is treated the same
+  way, because the lock is the one honest witness that someone is already working on it.
+- **Failure is a token, not a sentence.** A missing binary or a failed `sync` returns
+  `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines under the stop rule, or the
+  same detail as a `warning:` line under `stop-on-tool-failure: false`. The token is a whole
+  line so a passing mention cannot satisfy an orchestrator that routes on it. Seven of the
+  eight tools return the block; `docs_get_source_repository_and_revision` always answers so a
+  failure can be diagnosed, and
+  `docs_detect_drift_between_documents_and_code` answers **with** the failure because its
+  verdict is the failure report.
+- **Read-only for documents, a writer for a cache.** The tools write `.codegraph/`, which is
+  gitignored, and never write a document. The server keeps its contract with a client that
+  reads it as a read-only corpus service.
+- **Gated on the declaration.** The refresh and the failure apply only where the repository
+  lists `codegraph` under `mcp.required-servers`. A repository that never declared it takes
+  no index lock, reports nothing, and answers exactly as it did before. Settings are read at
+  each refresh, so an edit takes effect without a restart, and
+  `kyber-weave-mcp --no-codegraph-refresh` disables the refresh entirely — which is how
+  `doctor --check` keeps its promise never to run `init` or `index`.
+
+**Provenance is what makes a wrong answer visible.** Every response leads with
+`root=`, `branch=`, `repo=`, `rev=`, `dirty=` and `documents=`. `repo=` is the git directory
+every worktree of the repository shares, so a `root=` from another worktree with a matching
+`repo=` is the same repository on another branch, and only a different `repo=` is a foreign
+checkout. A worktree does not share the canonical checkout's index: it indexes itself with
+`doctor --ensure`, and a worker with a shell asks its own index through the CLI.
 
 ## Related
 

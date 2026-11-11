@@ -59,9 +59,9 @@ audits are.
    sending it. The script's header does not list this hook. If it were ever set in a real
    environment, per-pid signalling would be a no-op. Document it in the header, and refuse it
    outside the test suite or remove it.
-9. **The watchdog's `seen` list grows without bound.** `scripts/proc-guard.sh` appends every
-   descendant pid on each 0.5 s poll (about line 333) with no de-duplication, so the list grows for
-   the length of the run. Keep it de-duplicated (`sort -u`, or an associative array).
+9. **The watchdog's `seen` list grows without bound.** Resolved: `scripts/proc-guard.sh` now checks
+   each descendant pid for membership on every poll and adds it only if absent, so the list holds
+   each pid once however long the run is.
 10. **An unreproduced 1500-second silent hang under the watchdog.** On 2026-10-31,
     `scripts/proc-guard.sh run --timeout 1500 -- dotnet run --project src/KyberWeave.Cli -- review gates . --all`
     hung once. The watchdog killed it at the timeout (exit 124). The node count stayed flat at 5 to 6,

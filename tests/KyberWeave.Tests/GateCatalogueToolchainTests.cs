@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Review;
 using KyberWeave.Core.Review.Catalogue;
 using Spectre.Console.Cli;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests;
 
@@ -19,6 +21,12 @@ namespace KyberWeave.Tests;
 /// every case skips unless <c>KW_GATE_TOOLCHAIN=1</c> (the <c>gate-catalogue-toolchains</c>
 /// CI job on <c>ubuntu-latest</c> sets it). A local macOS run iterates the shape but is
 /// recorded as "macOS, not Linux" and never closes the task.
+/// </para>
+/// <para>
+/// One case is exempt: <c>TheCatalogueShipsAGateThatSelectsEachFileKindNoLanguageGateSelects</c>
+/// starts no tool. It reads the family files and matches globs, so it costs milliseconds and runs in
+/// the default suite, where a catalogue that drops a gate, its <c>os</c> restriction or its install
+/// path is caught on every change rather than only in the toolchain job.
 /// </para>
 /// <para>
 /// Each case copies the fixture into a fresh temp git repository, declares the family's
@@ -153,6 +161,123 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         }
     }
 
+    /// <summary>
+    /// The catalogue ships a gate that selects each file kind a task can edit without any language gate
+    /// selecting it: workflow YAML, a shell script, and the review configuration itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A task that edits only <c>.github/workflows/ci.yml</c>, a script under <c>scripts/</c>, or
+    /// <c>.kyber-weave/kyber-weave.yml</c> used to select no gate at all, so its report read
+    /// <c>NONE_APPLICABLE</c>. Nothing deterministic ran, and a reader of the digest cannot tell that apart from
+    /// a change that was checked and passed.
+    /// </para>
+    /// <para>
+    /// Each of these gates drives a tool the language toolchain does not supply, so each states its <c>os</c>
+    /// restriction and an install path. The install path is the family's <c>sources:</c> entry for the gate id,
+    /// which is where every family already records where its tools come from. A gate missing either one is
+    /// skipped on an unsupported host with nothing to act on, which reads as a gate that passed.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(".github/workflows/ci.yml")]
+    [InlineData("scripts/proc-guard.sh")]
+    [InlineData(".kyber-weave/kyber-weave.yml")]
+    public void TheCatalogueShipsAGateThatSelectsEachFileKindNoLanguageGateSelects(string changed)
+    {
+        Dictionary<string, Dictionary<string, string>> installPaths = InstallPaths();
+        List<(GateCatalogueFamily Catalogue, FamilyGate Gate)> matches = [];
+        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        {
+            foreach (FamilyGate gate in catalogue.Gates.Concat(catalogue.TaskGates))
+            {
+                bool selects = gate.Include.Any(pattern => PathGlob.IsMatch(
+                    pattern.Replace("{{root-glob}}", string.Empty, StringComparison.Ordinal)
+                        .Replace("{{root}}", ".", StringComparison.Ordinal)
+                        .Replace("{{marker}}", string.Empty, StringComparison.Ordinal),
+                    changed));
+                if (selects)
+                    matches.Add((catalogue, gate));
+            }
+        }
+
+        Assert.True(
+            matches.Count > 0,
+            $"No catalogue gate selects '{changed}', so a task editing only that file runs no gate and reports " +
+            "NONE_APPLICABLE. Add the gate to the family that covers the stack the file belongs to.");
+
+        string[] withoutOs = matches
+            .Where(match => match.Gate.Os is null)
+            .Select(match => $"{match.Catalogue.Family}-{match.Gate.Id}")
+            .ToArray();
+        Assert.True(
+            withoutOs.Length == 0,
+            $"These catalogue gates select '{changed}' and state no os restriction: {string.Join(", ", withoutOs)}. " +
+            "A gate runs only on the platform its tool supports, so the restriction is part of the entry.");
+
+        string[] withoutInstallPath = matches
+            .Where(match => !NamesAnInstallPath(installPaths, match.Catalogue.Family, match.Gate.Id))
+            .Select(match => $"{match.Catalogue.Family}-{match.Gate.Id}")
+            .ToArray();
+        Assert.True(
+            withoutInstallPath.Length == 0,
+            $"These catalogue gates select '{changed}' and name no install path under sources: in their family " +
+            $"file: {string.Join(", ", withoutInstallPath)}. A host that does not have the tool needs to know how " +
+            "to get it.");
+    }
+
+    private static string FamilyFilePath(string family)
+    {
+        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", family, "gates.yml");
+    }
+
+    private static bool NamesAnInstallPath(
+        Dictionary<string, Dictionary<string, string>> installPaths,
+        string family,
+        string gateId)
+    {
+        return installPaths.TryGetValue(family, out Dictionary<string, string>? sources)
+               && sources.TryGetValue(gateId, out string? url)
+               && !string.IsNullOrWhiteSpace(url);
+    }
+
+    /// <summary>
+    /// Each family file's <c>sources:</c> block, parsed once: the gate id to the URL that documents or installs
+    /// the tool the gate names.
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, string>> InstallPaths()
+    {
+        Dictionary<string, Dictionary<string, string>> byFamily = new(StringComparer.Ordinal);
+        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        {
+            string path = FamilyFilePath(catalogue.Family);
+            Assert.True(File.Exists(path), $"The catalogue family '{catalogue.Family}' has no file at '{path}'.");
+
+            YamlStream stream = new();
+            using (StreamReader reader = new(path))
+            {
+                stream.Load(reader);
+            }
+
+            Assert.NotEmpty(stream.Documents);
+            YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
+            Dictionary<string, string> sources = new(StringComparer.Ordinal);
+            if (root.Children.FirstOrDefault(pair => pair.Key is YamlScalarNode key && key.Value == "sources")
+                .Value is YamlMappingNode declared)
+            {
+                foreach (KeyValuePair<YamlNode, YamlNode> pair in declared.Children)
+                {
+                    if (pair.Key is YamlScalarNode id && pair.Value is YamlScalarNode url)
+                        sources[id.Value ?? string.Empty] = url.Value ?? string.Empty;
+                }
+            }
+
+            byFamily[catalogue.Family] = sources;
+        }
+
+        return byFamily;
+    }
+
     // -----------------------------------------------------------------------------------------
     // Toolchain gate and repository setup.
     // -----------------------------------------------------------------------------------------
@@ -249,9 +374,16 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         return Path.Combine(_temp.Path, label + "-" + Guid.NewGuid().ToString("N") + ".json");
     }
 
+    /// <summary>
+    /// The council run's arguments. <c>--council</c> is not optional here: a catalogue gate whose
+    /// <c>role</c> is <c>test</c> is rendered <c>full-suite: true</c>, and a run that does not declare
+    /// itself the council is refused that gate with <c>KW-REVIEW-033</c> rather than running it. The
+    /// refusal is the pass rule working, but it makes the run no evidence that the gate itself works,
+    /// which is what this fixture exists to check.
+    /// </summary>
     private static string[] CouncilArguments(string repo, string reportPath)
     {
-        return ["review", "gates", repo, "--format", "json", "--out", reportPath];
+        return ["review", "gates", repo, "--council", "--format", "json", "--out", reportPath];
     }
 
     private static string[] AgentArguments(string repo, string agent, string sourcePath, string reportPath)

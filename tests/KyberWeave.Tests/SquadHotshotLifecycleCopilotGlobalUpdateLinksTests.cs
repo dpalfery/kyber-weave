@@ -20,7 +20,6 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
         "plan-path.md",
         "spec-path.md",
         "intake-path.md",
-        "execution-and-review.md",
         "autonomy.md",
     ];
 

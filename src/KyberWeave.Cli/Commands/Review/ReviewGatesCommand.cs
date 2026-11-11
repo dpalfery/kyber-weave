@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -31,11 +30,23 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (settings.All && (settings.Agent is not null || settings.BaseRef is not null || settings.Paths.Length > 0))
+        bool scopesTheRun = settings.Agent is not null || settings.BaseRef is not null
+                            || settings.Paths.Length > 0 || settings.Gate.Length > 0;
+        if (settings.All && scopesTheRun)
         {
             WriteClientInputError(
                 $"{InvalidInput}: --all runs all declared repository gates unscoped and cannot be combined with " +
-                "--agent, --base, or --paths.");
+                "--agent, --base, --paths, or --gate.");
+            return ClientInputExitCode;
+        }
+
+        // --gate selects from review.gates, and --agent selects from review.task-gates. A run cannot be both,
+        // so it is refused rather than silently resolving to one of them.
+        if (settings.Gate.Length > 0 && settings.Agent is not null)
+        {
+            WriteClientInputError(
+                $"{InvalidInput}: --gate names a gate declared under review.gates, so it cannot be combined with " +
+                "--agent, which runs one agent's task gates.");
             return ClientInputExitCode;
         }
 
@@ -95,10 +106,28 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return 0;
         }
 
+        // --gate narrows the run to the gates named, so a reviewer re-checks one gate without paying for the whole
+        // suite again. Selection happens before anything else reads the gate list, so include matching, the
+        // full-suite admission rule and the report all see the same set.
+        IReadOnlyList<ReviewGate> declared = config.Review.Gates;
+        if (settings.Gate.Length > 0)
+        {
+            List<string> gateRefusals = [];
+            declared = SelectNamedGates(config.Review.Gates, settings.Gate, gateRefusals);
+            if (gateRefusals.Count > 0)
+            {
+                return RefuseInput(
+                    report,
+                    settings,
+                    gateRefusals,
+                    "Refused before any gate started. --gate takes the id of a gate declared under review.gates.");
+            }
+        }
+
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
         string? unknownReason = null;
-        if (!settings.All && NeedsChangedSet(config.Review.Gates))
+        if (!settings.All && NeedsChangedSet(declared))
         {
             (changed, unknownReason) = ResolveCouncilChangedSet(root, settings);
             if (changed is null)
@@ -123,7 +152,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             }
         }
 
-        CouncilGatePlan plan = CouncilGateSelection.Plan(config.Review.Gates, changed, CurrentOs());
+        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, CurrentOs());
         foreach (SkippedTaskGate skip in plan.Skipped)
             report.Add(new Diagnostic(
                 GateSkipped,
@@ -131,11 +160,36 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 $"{skip.Id}: skipped, {skip.Reason}.",
                 skip.Id));
 
+        // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
+        // error that never starts its gate, so it is reported as not started, never as a gate that ran and failed.
+        FullSuiteSelection fullSuite = FullSuiteGate.Select(plan.Run, settings.Council, !Console.IsInputRedirected);
+        foreach (FullSuiteRefusal refusal in fullSuite.Refused)
+            report.Add(new Diagnostic(
+                GateNotStarted,
+                Severity.Error,
+                $"{refusal.GateId}: refused. {refusal.Message}",
+                refusal.GateId));
+
+        // --all asks for the whole declared suite at once, so once one of its gates is refused the suite cannot be
+        // delivered and no gate starts: running the rest would spend the run on a review the caller was just told
+        // it may not have, and the report would read as a review that ran. A scoped run is the opposite case — the
+        // pre-push self-review reads the other gates as its evidence — so it keeps running them.
+        if (settings.All && fullSuite.Refused.Count > 0)
+        {
+            CommandHelpers.TryWriteReport(
+                settings.Out,
+                ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
+                ReportWriteFailed,
+                report);
+            CommandHelpers.Finish(report, settings, "review gates", "Gate");
+            return 1;
+        }
+
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
         // configuration of their own and the runner itself stays unchanged. The changed set and base
         // are still passed so applies-when is evaluated from the same facts include was selected on.
         GateReport gates = GateRunner.Run(
-            new ReviewConfig { Gates = plan.Run },
+            new ReviewConfig { Gates = fullSuite.Admitted },
             root,
             settings.StopOnFailure,
             changed,
@@ -233,7 +287,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 return RefuseInput(report, settings, gitRefusals);
         }
 
-        TaskGatePlan plan = TaskGateSelection.Plan(agentGates, changed, settings.TaskSlug, CurrentOs());
+        string repoRoot = EnclosingRepositoryRoot(root);
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap);
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
@@ -265,17 +321,56 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         return report.HasErrors ? 1 : 0;
     }
 
-    /// <summary>Reports every refusal, then ends the run before any gate process has started.</summary>
-    private static int RefuseInput(DiagnosticReport report, ReviewGatesSettings settings, IEnumerable<string> reasons)
+    /// <summary>
+    ///     The declared gates the caller named with <c>--gate</c>, in declaration order, or an empty list with a
+    ///     refusal naming what is wrong.
+    /// </summary>
+    /// <remarks>
+    ///     Declaration order rather than the order the ids were given, because the gate report reads in the order the
+    ///     host declares its suite. An id that names no declared gate is refused: a run that quietly executed nothing
+    ///     would report zero gates, which a reader is entitled to take as a review that passed.
+    /// </remarks>
+    private static IReadOnlyList<ReviewGate> SelectNamedGates(
+        IReadOnlyList<ReviewGate> gates, IReadOnlyList<string> named, List<string> refusals)
     {
+        HashSet<string> wanted = new(named, StringComparer.Ordinal);
+        List<string> unknown = [];
+        foreach (string id in named)
+        {
+            if (!gates.Any(gate => string.Equals(gate.Id, id, StringComparison.Ordinal))
+                && !unknown.Contains(id, StringComparer.Ordinal))
+            {
+                unknown.Add(id);
+            }
+        }
+
+        if (unknown.Count > 0)
+        {
+            refusals.Add(
+                $"--gate names no declared repository gate: {string.Join(", ", unknown)}. " +
+                $"review.gates declares {string.Join(", ", gates.Select(gate => gate.Id))}.");
+            return [];
+        }
+
+        return [.. gates.Where(gate => wanted.Contains(gate.Id))];
+    }
+
+    /// <summary>Reports every refusal, then ends the run before any gate process has started.</summary>
+    private static int RefuseInput(
+        DiagnosticReport report,
+        ReviewGatesSettings settings,
+        IEnumerable<string> reasons,
+        string? hint = null)
+    {
+        string defaultHint = "Refused before any gate started. Pass repository-relative paths, and a task slug " +
+                             "made of lowercase alphanumerics and single hyphens.";
         foreach (string reason in reasons)
             report.Add(new Diagnostic(
                 InvalidInput,
                 Severity.Error,
                 reason,
                 "review gates",
-                Hint: "Refused before any gate started. Pass repository-relative paths, and a task slug " +
-                      "made of lowercase alphanumerics and single hyphens."));
+                Hint: hint ?? defaultHint));
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         return 1;
@@ -353,6 +448,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// </summary>
     internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
         gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
+
+    private static string EnclosingRepositoryRoot(string path)
+    {
+        for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
+        {
+            string gitPath = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitPath) || File.Exists(gitPath) || Directory.Exists(Path.Combine(dir.FullName, ".kyber-weave")))
+                return dir.FullName;
+        }
+        return path;
+    }
 
     private static string CurrentOs()
     {

@@ -167,7 +167,16 @@ public sealed class GateCatalogueRenderTests
         RenderedReviewBlock block = GateCatalogue.Render(["csharp"], roots, repository.Path);
         KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
 
-        string[] expected = ["csharp-format-analyzers", "csharp-format-style", "csharp-format-whitespace"];
+        // `csharp-suppressions` joined this set when the conductor run-speed programme added the
+        // suppression gate: test-dev writes C# tests and can add a `#pragma` or a SuppressMessage
+        // like any other author, so the same gate applies. The assertion stays an exact set.
+        string[] expected =
+        [
+            "csharp-format-analyzers",
+            "csharp-format-style",
+            "csharp-format-whitespace",
+            "csharp-suppressions",
+        ];
         string[] actual = config.Review.TaskGates["test-dev"]
             .Select(gate => gate.Id)
             .OrderBy(id => id, StringComparer.Ordinal)
@@ -433,9 +442,99 @@ public sealed class GateCatalogueRenderTests
         Assert.Contains("file", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// A rendered gate that runs the whole suite declares <c>full-suite: true</c>, and no gate that runs one
+    /// check does.
+    /// </summary>
+    /// <remarks>
+    /// The key is what makes <c>kyber-weave review gates</c> refuse the gate unless the caller is the council or CI
+    /// (ADR 0059), so a host scaffolded by <c>docs init</c> cannot hand a developer agent the whole suite. Both
+    /// directions are pinned in one comparison: a scaffold that marks every gate full-suite would refuse the
+    /// format check, and one that marks none would let the suite run unguarded. What counts as the whole suite is
+    /// read from the catalogue's own <c>test</c> role, so a family that adds a second full-suite gate is covered
+    /// without editing this test.
+    /// </remarks>
+    [Fact]
+    public void WholeSuiteCatalogueGatesRenderFullSuiteAndATargetedGateDoesNot()
+    {
+        IReadOnlyList<GateCatalogueFamily> families = GateCatalogue.LoadEmbedded();
+        string[] declared = families.SelectMany(family => family.Technologies).ToArray();
+        using TempDirectory repository = new();
+        Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot(families);
+
+        RenderedReviewBlock block = GateCatalogue.Render(declared, roots, repository.Path);
+        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+
+        HashSet<string> wholeSuite = new(StringComparer.Ordinal);
+        foreach (GateCatalogueFamily family in families)
+        {
+            foreach (string gateId in family.Gates.Concat(family.TaskGates).Where(gate => gate.Role == "test").Select(gate => gate.Id))
+                wholeSuite.Add(family.Family + "-" + gateId);
+        }
+
+        Assert.NotEmpty(config.Review.Gates);
+        string[] wrong = config.Review.Gates
+            .Where(gate => gate.FullSuite != wholeSuite.Contains(gate.Id))
+            .Select(gate => $"'{gate.Id}' renders full-suite: {(gate.FullSuite ? "true" : "false")}, " +
+                            $"and the catalogue gives it the role " +
+                            $"'{FamilyGateRole(gate.Id, families) ?? "<not a catalogue gate>"}'.")
+            .ToArray();
+
+        Assert.True(
+            wrong.Length == 0,
+            "A gate that runs the whole suite must declare full-suite: true, and one that runs a single check " +
+            "must not:" + Environment.NewLine + string.Join(Environment.NewLine, wrong));
+        Assert.True(
+            config.Review.Gates.Any(gate => gate.FullSuite),
+            "No rendered gate declares full-suite: true, so the key is absent from the block docs init writes " +
+            "and the whole suite the catalogue ships is unguarded.");
+    }
+
+    private static string? FamilyGateRole(string gateId, IReadOnlyList<GateCatalogueFamily> families)
+    {
+        foreach (GateCatalogueFamily family in families)
+        {
+            string prefix = family.Family + "-";
+            if (!gateId.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+
+            string local = gateId[prefix.Length..];
+            FamilyGate? gate = family.Gates.FirstOrDefault(candidate => candidate.Id == local);
+            if (gate is not null)
+                return gate.Role;
+        }
+
+        return null;
+    }
+
     private static GateCatalogueFamily Family(string name)
     {
         return GateCatalogue.LoadEmbedded().Single(family => family.Family == name);
+    }
+
+    [Fact]
+    public void NonCsharpHostWithGithubActionsRendersPlumbingGatesLive()
+    {
+        using TempDirectory repository = new();
+        Dictionary<string, ProjectRootSet> roots = new(StringComparer.Ordinal)
+        {
+            ["go"] = new ProjectRootSet([new ProjectRoot(".", "go.mod", "root")], false),
+            ["csharp"] = new ProjectRootSet([], false)
+        };
+
+        RenderedReviewBlock block = GateCatalogue.Render(["go", "github-actions"], roots, repository.Path);
+        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+
+        // Zero csharp council gates rendered
+        Assert.DoesNotContain(config.Review.Gates, gate => gate.Id.StartsWith("csharp-", StringComparison.Ordinal));
+
+        // Plumbing task gates are rendered for github-devops and docs-dev
+        Assert.True(config.Review.TaskGates.TryGetValue("github-devops", out IReadOnlyList<ReviewTaskGate>? devopsGates));
+        Assert.Contains(devopsGates!, gate => gate.Id == "csharp-workflow-lint");
+        Assert.Contains(devopsGates!, gate => gate.Id == "csharp-shellcheck");
+
+        Assert.True(config.Review.TaskGates.TryGetValue("docs-dev", out IReadOnlyList<ReviewTaskGate>? docsGates));
+        Assert.Contains(docsGates!, gate => gate.Id == "csharp-review-config");
     }
 
     /// <summary>One synthetic root per family at the repository root, using the family's first marker.</summary>

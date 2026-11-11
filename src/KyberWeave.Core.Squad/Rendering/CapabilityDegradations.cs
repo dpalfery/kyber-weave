@@ -59,6 +59,27 @@ internal static class CapabilityDegradations
     public const string UniversalMcpServer = McpServerNames.Docs;
 
     /// <summary>
+    /// The code-graph server: the member of the orchestrator-excluded class that the targets
+    /// naming a single server widen to. It keeps the carve-out, because a role that only routes
+    /// work has no use for a code graph (ADR 0050 decision 2).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GrantsOrchestratorExcludedMcpServers"/> covers more than this server — a
+    /// library-lookup server keeps the same carve-out — so naming this one is a decision a call
+    /// site takes rather than a restatement of the partition, and widening the carve-out for the
+    /// code graph widens nothing else. The targets that grant it therefore spell it once, and a
+    /// rename reaches all of them instead of leaving one rendering the old name.
+    /// <para>
+    /// The name itself is declared in <see cref="McpConfig.CodeGraphServer"/> and re-exported here,
+    /// because the configuration is what branches on it: a repository declares the server in
+    /// <c>mcp.required-servers</c> and the docs server gates its refresh on that declaration. A
+    /// second literal would let the renderers and the server disagree about which declared server
+    /// is the code graph.
+    /// </para>
+    /// </remarks>
+    public const string CodeGraphMcpServer = McpConfig.CodeGraphServer;
+
+    /// <summary>
     /// The capability profile whose holder routes work rather than researching it. Declared by id
     /// because the exemption belongs to the role, not to a permission the profile happens to
     /// carry — and declared here so the renderers that apply the carve-out cannot disagree about
@@ -161,6 +182,46 @@ internal static class CapabilityDegradations
         IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
     {
         return QualifiedMcpToolNames(requiredMcpTools, IsUniversalMcpServer);
+    }
+
+    /// <summary>
+    /// The qualified <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> names of
+    /// <see cref="CodeGraphMcpServer"/>, in tool order, for the targets that enumerate tool names
+    /// rather than gate a server.
+    /// </summary>
+    /// <remarks>
+    /// A roster that declares no code-graph server yields nothing, so the grant falls to empty
+    /// rather than to a name the source never declared. The tool names themselves come from the
+    /// roster, so a tool added to <c>toolchain.yml</c> reaches every target that grants it.
+    /// </remarks>
+    /// <param name="requiredMcpTools">The toolchain's declared <c>required-mcp-tools</c> roster.</param>
+    public static IReadOnlyList<string> CodeGraphMcpToolNames(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
+    {
+        return QualifiedMcpToolNames(requiredMcpTools, IsCodeGraphMcpServer);
+    }
+
+    /// <summary>
+    /// The declared names of <see cref="CodeGraphMcpServer"/>, in ordinal order, for the targets
+    /// that gate a whole server under a <c>{server}_*</c> permission key.
+    /// </summary>
+    /// <remarks>
+    /// The server name rather than its tools, because a permission key names the server once and
+    /// covers every tool behind it. Empty when the roster declares no code-graph server, for the
+    /// same reason the tool derivation is: a key for an undeclared server would make the render
+    /// assert more than the source does.
+    /// </remarks>
+    /// <param name="requiredMcpTools">The toolchain's declared <c>required-mcp-tools</c> roster.</param>
+    public static IReadOnlyList<string> CodeGraphMcpServerNames(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
+    {
+        ArgumentNullException.ThrowIfNull(requiredMcpTools);
+        return
+        [
+            .. requiredMcpTools.Keys
+                .Where(IsCodeGraphMcpServer)
+                .OrderBy(name => name, StringComparer.Ordinal)
+        ];
     }
 
     /// <summary>
@@ -277,6 +338,15 @@ internal static class CapabilityDegradations
     private static bool IsUniversalMcpServer(string serverName)
     {
         return string.Equals(serverName, UniversalMcpServer, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether a declared server name is the code graph: the one orchestrator-excluded server the
+    /// single-server targets grant.
+    /// </summary>
+    private static bool IsCodeGraphMcpServer(string serverName)
+    {
+        return string.Equals(serverName, CodeGraphMcpServer, StringComparison.Ordinal);
     }
 
     /// <summary>

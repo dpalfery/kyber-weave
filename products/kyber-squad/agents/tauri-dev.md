@@ -5,7 +5,7 @@ description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contr
 invocation: subagent
 model-profile: general
 capability-profile: worker
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -40,12 +40,13 @@ contract, but stop there — don't build UI components.
 
 When a request mixes both sides, do your half, write the contract down, and use the handoff.
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ## Operating workflow
 
-1. **Read the standard.** Read the path declared as **<tauri-coding-standard>** before
-   writing any Rust.
+1. **Fetch the standard.** Fetch **<tauri-coding-standard>** before writing any Rust through
+   `docs_get_coding_standard_for_technology` — name the technology, and the topic when you
+   need one. Read the file only when the tool is missing.
 2. **Locate the boundary.** Is this a Rust-core task, a frontend task, or both? Keep to
    your half and hand off the rest.
 3. **Verify the API.** Confirm the relevant Tauri v2 command/config/permission against the
@@ -70,7 +71,7 @@ Use the `task-gate` skill as the deterministic exit check on your own changed fi
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.

@@ -61,7 +61,7 @@ internal static class SystemOneContracts
         IReadOnlyList<ArbiterRule> askRules,
         ArbiterFactSet facts,
         string model,
-        Func<ArbiterRule, string?>? instructionsResolver)
+        Func<ArbiterRule, ArbiterFactSet, string?>? instructionsResolver)
     {
         ArgumentNullException.ThrowIfNull(askRules);
         ArgumentNullException.ThrowIfNull(facts);
@@ -84,7 +84,7 @@ internal static class SystemOneContracts
             Dictionary<string, object?> question = new(StringComparer.Ordinal)
             {
                 ["type"] = ask.Type,
-                ["instructions"] = ResolveInstructions(rule, ask, instructionsResolver),
+                ["instructions"] = ResolveInstructions(rule, ask, facts, instructionsResolver),
             };
             if (string.Equals(ask.Type, "choice", StringComparison.Ordinal) && ask.Criteria is not null)
             {
@@ -127,11 +127,13 @@ internal static class SystemOneContracts
     internal static string ResolveInstructions(
         ArbiterRule rule,
         RuleAsk ask,
-        Func<ArbiterRule, string?>? instructionsResolver)
+        ArbiterFactSet facts,
+        Func<ArbiterRule, ArbiterFactSet, string?>? instructionsResolver)
     {
         ArgumentNullException.ThrowIfNull(rule);
         ArgumentNullException.ThrowIfNull(ask);
-        string? resolved = instructionsResolver?.Invoke(rule);
+        ArgumentNullException.ThrowIfNull(facts);
+        string? resolved = instructionsResolver?.Invoke(rule, facts);
         string candidate = string.IsNullOrWhiteSpace(resolved) ? rule.Question : resolved;
         if (string.Equals(ask.Type, "noul", StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(ask.Question))
@@ -233,10 +235,40 @@ internal static class SystemOneContracts
             && answer.TryGetProperty("noul", out JsonElement noulValue)
             && noulValue.ValueKind == JsonValueKind.Number
             && noulValue.TryGetDouble(out probability)
-            && double.IsFinite(probability)
-            && probability >= 0
-            && probability <= 1;
+            && IsUnitInterval(probability);
     }
+
+    /// <summary>
+    /// Reads the answer's <c>probabilities</c> in the order of <paramref name="keys"/>, since
+    /// the provider's dictionary order means nothing. Returns null unless every key has a
+    /// value in the 0 to 1 range, so a position in the list always names the same option.
+    /// </summary>
+    internal static IReadOnlyList<double>? ReadProbabilities(JsonElement answer, IReadOnlyList<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Count == 0
+            || !answer.TryGetProperty("probabilities", out JsonElement probabilities)
+            || probabilities.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        double[] values = new double[keys.Count];
+        for (int index = 0; index < keys.Count; index++)
+        {
+            if (!probabilities.TryGetProperty(keys[index], out JsonElement value)
+                || value.ValueKind != JsonValueKind.Number
+                || !value.TryGetDouble(out values[index])
+                || !IsUnitInterval(values[index]))
+            {
+                return null;
+            }
+        }
+
+        return values;
+    }
+
+    private static bool IsUnitInterval(double value) => value is >= 0 and <= 1;
 
     private static bool IsType(JsonElement answer, string type) =>
         answer.ValueKind == JsonValueKind.Object
@@ -254,7 +286,7 @@ internal static class SystemOneContracts
 
         if (confidenceValue.ValueKind != JsonValueKind.Number
             || !confidenceValue.TryGetDouble(out double value)
-            || !double.IsFinite(value))
+            || !IsUnitInterval(value))
         {
             return false;
         }

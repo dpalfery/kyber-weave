@@ -53,6 +53,12 @@ public sealed record ConfigRegEntry(
 /// than allowed to replace the derived entry with a path. The registry's promise survives —
 /// every path value resolves — because only the entry kind that is not a path is exempt.
 /// </para>
+/// <para>
+/// A setting that publishes a mode property is held here rather than on a type of its own,
+/// because this is what renders the line: the value an agent reads and the value the code
+/// applies then come from one place and cannot disagree. <c>autonomy:</c> was the first, the
+/// run settings are the rest.
+/// </para>
 /// </remarks>
 public sealed class ConfigRegConfig
 {
@@ -75,6 +81,31 @@ public sealed class ConfigRegConfig
     public const string AutonomousAutonomy = "autonomous";
 
     /// <summary>
+    /// Registry property carrying this repository's answer to the onboarding question. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from the top-level
+    /// <c>onboarding:</c> setting and reserved: a host may not declare it under
+    /// <c>config-reg:</c>.
+    /// </summary>
+    public const string OnboardingProperty = "onboarding";
+
+    /// <summary>
+    /// The value <see cref="OnboardingProperty"/> carries when the repository has answered and
+    /// accepted the onboarding step. Absence of the property is the unanswered state, so there
+    /// is no word for it.
+    /// </summary>
+    public const string OnboardingDone = "done";
+
+    /// <summary>
+    /// The value <see cref="OnboardingProperty"/> carries when the repository was offered the
+    /// onboarding step and chose not to take it. It behaves as <see cref="OnboardingDone"/>
+    /// does for every reader: the question has been asked and answered, so it is never repeated.
+    /// </summary>
+    public const string OnboardingDeclined = "declined";
+
+    /// <summary>Every value <c>onboarding:</c> accepts, in the order a refusal names them.</summary>
+    public static IReadOnlyList<string> OnboardingAnswers { get; } = [OnboardingDone, OnboardingDeclined];
+
+    /// <summary>
     /// Registry property reporting whether this repository opted in to the intake assessment.
     /// A <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>ontology.intake:</c>
     /// and reserved: a host may not declare it under <c>config-reg:</c>.
@@ -87,6 +118,35 @@ public sealed class ConfigRegConfig
     /// finds no property skips the assessment, and one that finds <em>a</em> value runs it.
     /// </summary>
     public const string IntakeAssessmentEnabled = "enabled";
+
+    /// <summary>
+    /// Registry property carrying whether a failed tool stops a run. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from the top-level
+    /// <c>stop-on-tool-failure:</c> setting and reserved: a host may not declare it under
+    /// <c>config-reg:</c>.
+    /// </summary>
+    public const string StopOnToolFailureProperty = "stop-on-tool-failure";
+
+    /// <summary>
+    /// Registry property carrying the branch a run is compared against. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>run.base-branch</c> and
+    /// reserved: a host may not declare it under <c>config-reg:</c>.
+    /// </summary>
+    public const string RunBaseBranchProperty = "run-base-branch";
+
+    /// <summary>
+    /// Registry property carrying whether a harness name is published at all. A
+    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>run.harness-names</c> and
+    /// reserved: a host may not declare it under <c>config-reg:</c>.
+    /// </summary>
+    public const string RunHarnessNamesProperty = "run-harness-names";
+
+    /// <summary>
+    /// The branch a run is compared against when the operator named none. <c>origin/HEAD</c>
+    /// rather than <c>main</c>: the default branch differs per repository, and a hard-coded
+    /// <c>main</c> compares against a branch that may not exist while looking authoritative.
+    /// </summary>
+    public const string DefaultBaseBranch = "origin/HEAD";
 
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
@@ -119,6 +179,56 @@ public sealed class ConfigRegConfig
     /// </summary>
     public string? Autonomy { get; init; }
 
+    /// <summary>
+    /// The top-level <c>onboarding:</c> setting — <see cref="OnboardingDone"/> or
+    /// <see cref="OnboardingDeclined"/> — or null when the repository never answered, which
+    /// <c>run start</c> reads as "stop and offer the onboarding skill". Rendered into the
+    /// Config Reg block only when set, and never resolved as a path.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than a default word, because the three states are not two: unanswered is
+    /// what makes a run stop, and a default would erase the difference between a repository
+    /// that declined and one nobody ever asked.
+    /// </remarks>
+    public string? Onboarding { get; init; }
+
+    /// <summary>
+    /// The top-level <c>stop-on-tool-failure:</c> setting as the operator wrote it, or null when
+    /// the repository did not set one. Read <see cref="StopsOnToolFailure"/> for the decision a
+    /// run makes; this member only reports what the file said.
+    /// </summary>
+    public bool? StopOnToolFailure { get; init; }
+
+    /// <summary>
+    /// Whether a failed tool stops a run. An absent setting stops, and that default is applied
+    /// here in code: absence is the common case, and instruction text an agent may or may not
+    /// have read is not something a run can rely on for it.
+    /// </summary>
+    public bool StopsOnToolFailure => StopOnToolFailure ?? true;
+
+    /// <summary>
+    /// The <c>run.base-branch</c> setting as the operator wrote it, or null when the repository
+    /// did not set one. Read <see cref="BaseBranch"/> for the branch a run actually uses.
+    /// </summary>
+    public string? RunBaseBranch { get; init; }
+
+    /// <summary>
+    /// The branch a run is compared against: the configured one, or
+    /// <see cref="DefaultBaseBranch"/> when the operator never set one.
+    /// </summary>
+    public string BaseBranch =>
+        string.IsNullOrWhiteSpace(RunBaseBranch) ? DefaultBaseBranch : RunBaseBranch;
+
+    /// <summary>
+    /// The <c>run.harness-names</c> setting as the operator wrote it, or null when the
+    /// repository did not set one. Read <see cref="PublishesHarnessNames"/> for the effective
+    /// setting.
+    /// </summary>
+    public bool? RunHarnessNames { get; init; }
+
+    /// <summary>Whether a harness name is published in a rendered artifact; absent means yes.</summary>
+    public bool PublishesHarnessNames => RunHarnessNames ?? true;
+
     public static ConfigRegConfig ProductDefaults { get; } = new();
 
     /// <summary>
@@ -140,11 +250,11 @@ public sealed class ConfigRegConfig
         string root = ontology.DocsRoot;
         List<ConfigRegEntry> entries =
         [
-            new ConfigRegEntry(DocsRootProperty, root),
-            new ConfigRegEntry(DocumentationIndexProperty, DocsLayout.Index(root)),
-            new ConfigRegEntry(DocumentationOntologyProperty, DocsLayout.Ontology(root)),
-            new ConfigRegEntry(ComponentCatalogProperty, ontology.ResolvedCatalogPath),
-            new ConfigRegEntry(StandardsRootProperty, DocsLayout.Folder(root, DocsLayout.Standards))
+            new(DocsRootProperty, root),
+            new(DocumentationIndexProperty, DocsLayout.Index(root)),
+            new(DocumentationOntologyProperty, DocsLayout.Ontology(root)),
+            new(ComponentCatalogProperty, ontology.ResolvedCatalogPath),
+            new(StandardsRootProperty, DocsLayout.Folder(root, DocsLayout.Standards))
         ];
 
         foreach (string technology in ontology.Technologies)
@@ -179,6 +289,48 @@ public sealed class ConfigRegConfig
                 ConfigRegEntryKind.Mode));
         }
 
+        // Same rule for the run settings: a property an operator did not write publishes
+        // nothing, because an agent already applies the documented default. Only a value that
+        // was actually chosen is worth a line, and only a chosen value can differ from it.
+        // stop-on-tool-failure is deliberately not published: the CLI and the MCP server are
+        // the readers, not an agent instruction file (ADR 0061).
+        if (!string.IsNullOrWhiteSpace(RunBaseBranch))
+        {
+            entries.Add(new ConfigRegEntry(
+                RunBaseBranchProperty,
+                RunBaseBranch,
+                ConfigRegEntryKind.Mode));
+        }
+
+        if (RunHarnessNames is not null)
+        {
+            entries.Add(new ConfigRegEntry(
+                RunHarnessNamesProperty,
+                ModeWord(RunHarnessNames.Value),
+                ConfigRegEntryKind.Mode));
+        }
+
+        // The onboarding answer is published for the same reason autonomy is: a run-start
+        // check a worker cannot read from its instructions is one it cannot honour. An
+        // unanswered repository publishes nothing, so no reader mistakes silence for 'done'.
+        if (!string.IsNullOrWhiteSpace(Onboarding))
+        {
+            entries.Add(new ConfigRegEntry(
+                OnboardingProperty,
+                Onboarding,
+                ConfigRegEntryKind.Mode));
+        }
+
         return entries;
+    }
+
+    /// <summary>
+    /// A boolean as the registry spells it. Deliberately not <c>bool.ToString()</c>, which
+    /// capitalises: the rendered block is read by agents comparing against <c>true</c> and
+    /// <c>false</c>, not against the framework's formatting.
+    /// </summary>
+    private static string ModeWord(bool value)
+    {
+        return value ? "true" : "false";
     }
 }

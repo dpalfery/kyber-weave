@@ -71,7 +71,7 @@ static async Task<int> ServeAsync(string[] args)
             repoRoot,
             new ArbiterHookDecisionEngine(),
             Console.Error,
-            Composition.LoadHostConfig,
+            root => Composition.LoadHostConfig(root),
             ServeKeyResolved,
             ServeEffectiveProvider));
 

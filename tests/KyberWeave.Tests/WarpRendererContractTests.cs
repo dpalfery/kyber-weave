@@ -113,7 +113,9 @@ public sealed class WarpRendererContractTests : IDisposable
                 result.Files,
                 f => f.RelativePath == $".warp/skills/{outputIdentity}/SKILL.md");
             Assert.Equal(outputIdentity, RequireScalar(ReadFrontmatter(file), "name"));
-            Assert.Equal(NormalizeBody(agent.InstructionBody), ReadBody(file));
+            Assert.Equal(
+                NormalizeBody(TestSquadCorpus.ExpectedBodyText(SquadTarget.Warp, agent)),
+                ReadBody(file));
         }
 
         Assert.Equal(

@@ -13,7 +13,8 @@ public enum SquadHookBlockFormat
     Codex,
     Factory,
     Devin,
-    Antigravity
+    Antigravity,
+    Claude,
 }
 
 /// <summary>One managed entry written by a splice: its JSON pointer and canonical digest.</summary>
@@ -43,6 +44,18 @@ public static class SquadHookJsonBlock
 
     private const string AntigravityGroupKey = "kyber-arbiter";
 
+    private const string PreToolUseContainer = "PreToolUse";
+
+    private const string PostToolUseContainer = "PostToolUse";
+
+    // Factory alone fires a hook when a background subagent stops. Its launch-time PostToolUse
+    // carries no worker report, so the Arbiter reads the report on this container.
+    private const string SubagentStopContainer = "SubagentStop";
+
+    private static readonly string[] PreAndPostContainers = [PreToolUseContainer, PostToolUseContainer];
+
+    private static readonly string[] AllContainers = [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer];
+
     private const string MissingReason = "missing";
 
     private const string ModifiedReason = "modified";
@@ -66,8 +79,63 @@ public static class SquadHookJsonBlock
             SquadHookBlockFormat.Factory => ".factory/hooks.json",
             SquadHookBlockFormat.Devin => ".devin/hooks.v1.json",
             SquadHookBlockFormat.Antigravity => ".agents/hooks.json",
+            SquadHookBlockFormat.Claude => "settings.json",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
+
+    /// <summary>
+    /// Resolves the hook-file shape of one receipt-owned block, reading the receipt that recorded
+    /// it rather than a render that may no longer exist.
+    /// </summary>
+    /// <remarks>
+    /// The recorded target decides the shape first: four of the six formats write the same bare
+    /// <c>hooks.json</c> beneath their own global root, so under global scope the path names the
+    /// file but cannot name the format (global block identity plan, D8). A target that owns no
+    /// shared hook file falls through to the per-format portable path, which is the
+    /// project- and instance-scope shape where the path alone is unique. A corrupt record —
+    /// a target whose own shape names a different path than the one recorded — fails closed
+    /// instead of resolving, so status, doctor and uninstall report the corrupt receipt
+    /// rather than operating on the wrong shape.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the block's shape is known; otherwise <see langword="false"/>.</returns>
+    public static bool TryResolveFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+
+        SquadHookBlockFormat? ownedByTarget = SquadTargetCatalog.TryResolve(block.Target, out SquadTarget target)
+            ? FormatOwnedBy(target)
+            : null;
+        if (ownedByTarget is { } known)
+        {
+            string expectedPath = RelativePath(known);
+            string expectedFileName = Path.GetFileName(expectedPath);
+            string recordedFileName = Path.GetFileName(block.RelativePath);
+            bool fileNameMatchesOwnShape =
+                string.Equals(recordedFileName, expectedFileName, StringComparison.OrdinalIgnoreCase);
+            bool pathMatchesOwnShape =
+                string.Equals(block.RelativePath, expectedPath, StringComparison.OrdinalIgnoreCase);
+            if (fileNameMatchesOwnShape && (pathMatchesOwnShape || !block.RelativePath.Contains('/', StringComparison.Ordinal)))
+            {
+                format = known;
+                return true;
+            }
+
+            format = default;
+            return false;
+        }
+
+        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
+        {
+            if (string.Equals(RelativePath(candidate), block.RelativePath, StringComparison.OrdinalIgnoreCase))
+            {
+                format = candidate;
+                return true;
+            }
+        }
+
+        format = default;
+        return false;
+    }
 
     /// <summary>Whether a hook entry (or group) is one of Squad's, by command signature.</summary>
     /// <remarks>
@@ -88,8 +156,15 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude)
         {
+            if (obj["hooks"] is JsonArray cursorHooks)
+            {
+                return cursorHooks.Count > 0
+                    && cursorHooks.All(hook => hook is JsonObject hookObj
+                        && HasSignature(hookObj["command"], Harness(format)));
+            }
+
             return HasSignature(obj["command"], Harness(format));
         }
 
@@ -106,27 +181,29 @@ public static class SquadHookJsonBlock
     }
 
     /// <summary>
-    /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>
-    /// and <paramref name="postToolUse"/>, appending them at the end of each owned container
-    /// (or setting the Antigravity group key). A missing or blank file starts from the minimal
-    /// document. Returns the owned entries written.
+    /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>,
+    /// <paramref name="postToolUse"/> and, for Factory, <paramref name="subagentStop"/>, appending
+    /// them at the end of each owned container (or setting the Antigravity group key). A missing
+    /// or blank file starts from the minimal document. Returns the owned entries written.
     /// </summary>
     public static IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
         SquadHookBlockFormat format,
         string filePath,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode>? subagentStop = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(preToolUse);
         ArgumentNullException.ThrowIfNull(postToolUse);
+        RefuseForeignSubagentStop(format, subagentStop);
 
         string? existing = File.Exists(filePath) ? File.ReadAllText(filePath) : null;
         string content;
         IReadOnlyList<SquadHookOwnedEntry> owned;
         try
         {
-            (content, owned) = SpliceContent(format, existing, preToolUse, postToolUse);
+            (content, owned) = SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
         }
         catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
         {
@@ -207,7 +284,7 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        JsonObject? parent = format == SquadHookBlockFormat.Cursor || format == SquadHookBlockFormat.Codex
+        JsonObject? parent = format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude
             ? root["hooks"] as JsonObject
             : root;
         if (parent is null)
@@ -338,6 +415,15 @@ public static class SquadHookJsonBlock
         return false;
     }
 
+    private static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
+    {
+        if (format != SquadHookBlockFormat.Factory && subagentStop is { Count: > 0 })
+        {
+            throw new InvalidOperationException(
+                $"Only the Factory hook file holds SubagentStop entries; '{Harness(format)}' does not.");
+        }
+    }
+
     /// <summary>
     /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
     /// touching the disk: the single implementation behind both <see cref="SpliceFile"/> and
@@ -346,12 +432,21 @@ public static class SquadHookJsonBlock
     /// <see cref="JsonException"/> or <see cref="InvalidOperationException"/> when the
     /// content is not a usable hook file, leaving the caller to decide how to report it.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="subagentStop"/> is accepted for Factory only. Every other format keeps
+    /// its two containers, so its file bytes never change; a non-empty list for any other
+    /// format is a caller bug and is refused rather than silently dropped.
+    /// </remarks>
     public static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceContent(
         SquadHookBlockFormat format,
         string? existing,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode>? subagentStop = null)
     {
+        RefuseForeignSubagentStop(format, subagentStop);
+        IReadOnlyList<JsonNode> stop = subagentStop ?? [];
+
         JsonObject root = ParseOrMinimal(format, existing);
         List<SquadHookOwnedEntry> owned = [];
 
@@ -371,8 +466,15 @@ public static class SquadHookJsonBlock
         }
         else
         {
+            // Only Factory's SubagentStop container is optional: a file without it gets one only
+            // when there is a stop entry to write, so a Factory file that never had one gains no key.
+            bool hadStopContainer = root.ContainsKey(SubagentStopContainer);
             var containers = OwnedArrays(format, root, create: true);
-            var managed = new[] { preToolUse, postToolUse };
+            // Positional with the containers OwnedArrays returns: create: true yields every
+            // container the format holds, in the order listed in RootContainerNames.
+            IReadOnlyList<JsonNode>[] managed = format == SquadHookBlockFormat.Factory
+                ? [preToolUse, postToolUse, stop]
+                : [preToolUse, postToolUse];
             for (int i = 0; i < containers.Count; i++)
             {
                 (string pointer, JsonArray array) = containers[i];
@@ -391,6 +493,12 @@ public static class SquadHookJsonBlock
                     string entryPointer = $"{pointer}/{array.Count - 1}";
                     owned.Add(new SquadHookOwnedEntry(entryPointer, CanonicalDigest(projected)));
                 }
+            }
+
+            if (format == SquadHookBlockFormat.Factory && stop.Count == 0 && !hadStopContainer
+                && root[SubagentStopContainer] is JsonArray { Count: 0 })
+            {
+                root.Remove(SubagentStopContainer);
             }
 
             if (format == SquadHookBlockFormat.Cursor && !root.ContainsKey("version"))
@@ -434,7 +542,8 @@ public static class SquadHookJsonBlock
 
     private static void CollectOwned(JsonObject group, string prefix, List<SquadHookOwnedEntry> owned)
     {
-        foreach (string container in new[] { "PreToolUse", "PostToolUse" })
+        // Antigravity's group never holds SubagentStop, so this reads it as absent there.
+        foreach (string container in AllContainers)
         {
             if (group[container] is JsonArray array)
             {
@@ -452,20 +561,58 @@ public static class SquadHookJsonBlock
     {
         return format switch
         {
-            SquadHookBlockFormat.Cursor => CursorArrays(root, create),
+            SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude => CursorArrays(root, create),
             SquadHookBlockFormat.Codex => PrefixedArrays(root, "/hooks", create),
-            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(root, create),
+            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(format, root, create),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
     }
 
+    /// <summary>
+    /// The containers a format's root holds, in the order Squad writes them. Devin shares the
+    /// root shape with Factory but holds no SubagentStop, so only Factory gains the third name.
+    /// </summary>
+    private static string[] RootContainerNames(SquadHookBlockFormat format) =>
+        format == SquadHookBlockFormat.Factory ? AllContainers : PreAndPostContainers;
+
     private static List<(string Pointer, JsonArray Array)> CursorArrays(JsonObject root, bool create)
     {
-        JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
-        List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "preToolUse", "postToolUse" })
+        bool hasRootArrays = root.ContainsKey("preToolUse") || root.ContainsKey("PreToolUse")
+            || root.ContainsKey("postToolUse") || root.ContainsKey("PostToolUse");
+        JsonObject hooks;
+        string pointerPrefix;
+        if (root["hooks"] is JsonObject nested)
         {
+            hooks = nested;
+            pointerPrefix = "/hooks/";
+        }
+        else if (hasRootArrays)
+        {
+            hooks = root;
+            pointerPrefix = "/";
+        }
+        else if (create)
+        {
+            hooks = EnsureObject(root, "hooks");
+            pointerPrefix = "/hooks/";
+        }
+        else
+        {
+            hooks = new JsonObject();
+            pointerPrefix = "/hooks/";
+        }
+
+        List<(string Pointer, JsonArray Array)> containers = [];
+        foreach ((string lowerName, string pascalName) in new[] { ("preToolUse", "PreToolUse"), ("postToolUse", "PostToolUse") })
+        {
+            string name = hooks.ContainsKey(pascalName) ? pascalName : lowerName;
             JsonArray? array = hooks[name] as JsonArray;
+            if (array is null && hooks[name == lowerName ? pascalName : lowerName] is JsonArray alternate)
+            {
+                name = name == lowerName ? pascalName : lowerName;
+                array = alternate;
+            }
+
             if (array is null)
             {
                 if (!create)
@@ -482,7 +629,7 @@ public static class SquadHookJsonBlock
                 hooks[name] = array;
             }
 
-            containers.Add(($"/hooks/{name}", array));
+            containers.Add(($"{pointerPrefix}{name}", array));
         }
 
         return containers;
@@ -491,16 +638,18 @@ public static class SquadHookJsonBlock
     private static List<(string Pointer, JsonArray Array)> PrefixedArrays(JsonObject root, string prefix, bool create)
     {
         JsonObject hooks = create ? EnsureObject(root, "hooks") : root["hooks"] as JsonObject ?? new JsonObject();
-        return NamedArrays(hooks, prefix, create);
+        return NamedArrays(hooks, prefix, create, PreAndPostContainers);
     }
 
-    private static List<(string Pointer, JsonArray Array)> RootArrays(JsonObject root, bool create) =>
-        NamedArrays(root, string.Empty, create);
+    private static List<(string Pointer, JsonArray Array)> RootArrays(
+        SquadHookBlockFormat format, JsonObject root, bool create) =>
+        NamedArrays(root, string.Empty, create, RootContainerNames(format));
 
-    private static List<(string Pointer, JsonArray Array)> NamedArrays(JsonObject parent, string prefix, bool create)
+    private static List<(string Pointer, JsonArray Array)> NamedArrays(
+        JsonObject parent, string prefix, bool create, IEnumerable<string> names)
     {
         List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "PreToolUse", "PostToolUse" })
+        foreach (string name in names)
         {
             JsonArray? array = parent[name] as JsonArray;
             if (array is null)
@@ -562,7 +711,7 @@ public static class SquadHookJsonBlock
         format switch
         {
             SquadHookBlockFormat.Cursor => new JsonObject { ["version"] = 1, ["hooks"] = new JsonObject() },
-            SquadHookBlockFormat.Codex => new JsonObject { ["hooks"] = new JsonObject() },
+            SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude => new JsonObject { ["hooks"] = new JsonObject() },
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin or SquadHookBlockFormat.Antigravity => new JsonObject(),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
@@ -579,9 +728,9 @@ public static class SquadHookJsonBlock
             throw new InvalidOperationException("A managed hook entry must be a JSON object.");
         }
 
-        if (format == SquadHookBlockFormat.Cursor)
+        if (format == SquadHookBlockFormat.Cursor && obj["hooks"] is null)
         {
-            var projected = new JsonObject();
+            JsonObject projected = new();
             foreach (string field in new[] { "command", "matcher", "timeout", "failClosed" })
             {
                 if (obj[field] is JsonNode value)
@@ -671,24 +820,60 @@ public static class SquadHookJsonBlock
         return current;
     }
 
-    private static bool HasSignature(JsonNode? node, string harness) =>
-        node is JsonValue value
-        && value.TryGetValue<string>(out string? command)
-        && command is not null
-        // Exact equality: a user hook whose command merely starts with our prefix
-        // (`--harness factory-evil`, `--harness factory --custom-flag`) is not ours,
-        // and splicing or removing it would silently delete the user's entry.
-        && string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal);
+    private static bool HasSignature(JsonNode? node, string harness)
+    {
+        if (node is not JsonValue value || !value.TryGetValue<string>(out string? command) || command is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
+            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        int hookIndex = command.IndexOf("kyber-weave-arbiter hook", StringComparison.Ordinal);
+        if (hookIndex >= 0)
+        {
+            string remainder = command[(hookIndex + "kyber-weave-arbiter hook".Length)..].Trim();
+            if (string.Equals(remainder, "--harness " + harness, StringComparison.Ordinal)
+                || string.Equals(remainder, "--harness " + harness + " --scope global", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",
+            SquadHookBlockFormat.Claude => "claude",
             SquadHookBlockFormat.Codex => "codex",
             SquadHookBlockFormat.Factory => "factory",
             SquadHookBlockFormat.Devin => "devin",
             SquadHookBlockFormat.Antigravity => "antigravity",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
+        };
+
+    /// <summary>
+    /// The shape that owns <paramref name="target"/>'s hooks, or <see langword="null"/> when the
+    /// target keeps no shared hook file. The inverse of <see cref="Harness"/>, kept beside it so the
+    /// two cannot drift apart.
+    /// </summary>
+    private static SquadHookBlockFormat? FormatOwnedBy(SquadTarget target) =>
+        target switch
+        {
+            SquadTarget.Cursor => SquadHookBlockFormat.Cursor,
+            SquadTarget.Claude => SquadHookBlockFormat.Claude,
+            SquadTarget.Codex => SquadHookBlockFormat.Codex,
+            SquadTarget.Factory => SquadHookBlockFormat.Factory,
+            SquadTarget.Devin => SquadHookBlockFormat.Devin,
+            SquadTarget.Antigravity => SquadHookBlockFormat.Antigravity,
+            _ => null,
         };
 
     /// <summary>

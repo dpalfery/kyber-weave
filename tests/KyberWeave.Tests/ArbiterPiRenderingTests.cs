@@ -118,18 +118,14 @@ public sealed class ArbiterPiRenderingTests : IDisposable
     [Theory]
     [InlineData("null")]
     [InlineData("disabled")]
-    [InlineData("global")]
     public async Task RenderAsync_WhenNotRendered_EmitsNoExtension(string mode)
     {
         SquadArbiterWiring? wiring = mode switch
         {
             "disabled" => new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: HookTimeoutSeconds),
-            "global" => new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
             _ => null,
         };
-        SquadDeploymentScope scope = string.Equals(mode, "global", StringComparison.Ordinal)
-            ? SquadDeploymentScope.Global
-            : SquadDeploymentScope.Project;
+        SquadDeploymentScope scope = SquadDeploymentScope.Project;
 
         SquadRendererRegistry registry = new([new PiRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(

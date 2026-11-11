@@ -9,13 +9,8 @@ internal static class ReleaseVersion
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        string trimmed = version.Trim();
-        if (trimmed.StartsWith('v') || trimmed.StartsWith('V'))
-            trimmed = trimmed[1..];
-
-        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
-        if (plus >= 0)
-            trimmed = trimmed[..plus];
+        // Same prefix and build-metadata cut the probe comparison uses.
+        string trimmed = CliAssemblyVersion.Normalize(version);
 
         if (trimmed.Length == 0)
             throw new SelfUpdateException("version is empty after removing a leading 'v'.");

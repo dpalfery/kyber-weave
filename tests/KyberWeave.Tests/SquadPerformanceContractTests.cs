@@ -1,22 +1,48 @@
+using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
 ///     Regression contract tests for Kyber-Squad performance and parallelization invariants across
-///     canonical agent instructions, conductor references, test-dev skills, and test coding standards.
+///     canonical agent instructions, the shared execution skill both entry points load, test-dev
+///     skills, and test coding standards.
 /// </summary>
 public sealed class SquadPerformanceContractTests
 {
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
-    private const string ConductorExecutionPath =
-        "products/kyber-squad/agents/conductor/references/execution-and-review.md";
+    /// <summary>
+    ///     The shared worker execution contract: one canonical skill that the conductor and the
+    ///     bug-crusher workflow both load. It used to be a conductor reference, so the conductor's
+    ///     surfaces below are pinned against the skill wherever the rule belongs to the contract
+    ///     rather than to the conductor's own body.
+    /// </summary>
+    private const string SharedExecutionSkillPath =
+        "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
     private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
     private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
     private const string TestDevSkillPath = "products/kyber-squad/skills/test-dev/SKILL.md";
+
+    /// <summary>
+    ///     The skill a worker loads when it finishes. Report formats — the completion digest and its
+    ///     fields — belong here rather than in each agent body (the rule map's "Report formats" row),
+    ///     so the pins below read this file instead of the per-agent copies.
+    /// </summary>
+    private const string TaskGateSkillPath = "products/kyber-squad/skills/task-gate/SKILL.md";
+
+    /// <summary>
+    ///     The one always-on source of worker text (decision D27): the Discovery order, the plan-read
+    ///     ban, the full-suite ban and the batched-read rule are injected from here into every worker
+    ///     render, so no agent body repeats them.
+    /// </summary>
+    private const string WorkerBaselinePath = "products/kyber-squad/shared/worker-baseline.md";
     private const string TestCodingStandardPath = "docs/standards/test/README.md";
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string OnboardingDocPath = "docs/kyber-squad/onboarding.md";
@@ -45,12 +71,23 @@ public sealed class SquadPerformanceContractTests
     private const string DirectAssemblyRunner =
         "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
 
-    private const string DirectAssemblyDll = "tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
+    /// <summary>
+    ///     Retired. The quiet reporter prints the same one banner line for a passing run and for a
+    ///     filter that matched nothing, so a worker can neither check the total nor fill in its
+    ///     <c>TESTS:</c> digest field from the output.
+    /// </summary>
     private const string QuietReporter = "-reporter quiet";
+
     private const string NoBuildFlag = "--no-build";
 
+    /// <summary>
+    ///     The class filter has to show the namespace: xUnit matches <c>-class</c> against the
+    ///     fully qualified name, so a short class name runs zero tests and still exits 0.
+    /// </summary>
     private const string DirectAssemblyRegex =
-        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+(?:""(?:<[^"">\r\n]+>|[^""\s\r\n]+)""|<[^"">\s\r\n]+>|[^""\s\r\n]+)\s+-reporter\s+quiet";
+        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+""<[Nn]amespace>\.<[^"">\r\n]+>""";
+
+    private const string NeverRunFullSuiteRegex = @"(?i)\bnever run the full test suite\b";
 
     private const string DigestTestCountersRegex =
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
@@ -145,19 +182,53 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyDirectAssemblyTestRunner(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
-        Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        AssertNamesTheHostTestStandardForTheRunner(content, relativePath);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Matches(@"(?i)\bpre-?computed\s+test\s+commands?\b", content);
     }
 
+    /// <summary>
+    ///     Asserts the exact runner is reachable from a portable file, without the portable file
+    ///     naming this repository's own assembly path.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <c>products/kyber-squad/</c> ships to every consumer, so a line naming
+    ///         <c>tests/KyberWeave.Tests/bin/…</c> teaches every downstream repository a fact about
+    ///         this one, and that is what slice 7's D5 forbids. The rule the earlier pin enforced is
+    ///         unchanged — the worker is still told the exact runner, and still told the class must be
+    ///         fully qualified — and only its home moved: the host's test standard carries the
+    ///         concrete path in its <c>## Completion</c> section, and the portable file points there.
+    ///     </para>
+    ///     <para>
+    ///         Both halves are asserted, because either alone is satisfiable by a wrong tree: a pointer
+    ///         with no literal behind it sends the worker nowhere, and a literal with no pointer is
+    ///         never reached.
+    ///     </para>
+    /// </remarks>
+    private static void AssertNamesTheHostTestStandardForTheRunner(string portableContent, string relativePath)
+    {
+        Assert.True(
+            portableContent.Contains("test standard", StringComparison.OrdinalIgnoreCase),
+            $"{relativePath} must name the host's test standard as the home of the exact runner; a "
+            + "portable file cannot carry this repository's own assembly path.");
+        Assert.True(
+            portableContent.Contains("## Completion", StringComparison.Ordinal),
+            $"{relativePath} must point at the standard's '## Completion' section, which is where the "
+            + "inner-loop commands live.");
+
+        string standard = ReadRepoFile(TestCodingStandardPath);
+        Assert.Contains(DirectAssemblyRunner, standard, StringComparison.Ordinal);
+        Assert.Matches(DirectAssemblyRegex, standard);
+    }
+
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyBuildOnceTestMany(string relativePath)
     {
@@ -170,7 +241,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyZeroStashRedProofs(string relativePath)
     {
@@ -184,7 +255,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     public void ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -197,7 +268,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyInlinedTaskPacketContents(string relativePath)
     {
@@ -209,7 +280,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyWorktreeAndArtifactsParallelization(string relativePath)
     {
@@ -222,7 +293,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesPreserveAdversarialRedGreenBoundaryAndBundleSameRoleTasks(string relativePath)
     {
@@ -236,7 +307,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyDiscoveryHeaderPrecedesDigest(string relativePath)
     {
@@ -247,7 +318,7 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(ConductorAgentPath)]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(RequirementsDocPath)]
     public void ConductorAndRequirementsExemptCircuitBreakerEscalationFromSixFieldRejection(string relativePath)
     {
@@ -263,7 +334,7 @@ public sealed class SquadPerformanceContractTests
     [Fact]
     public void ConductorExecutionContractSpecifiesWorktreeCleanupAndConflictHandling()
     {
-        string content = ReadRepoFile(ConductorExecutionPath);
+        string content = ReadRepoFile(SharedExecutionSkillPath);
         Assert.Matches(@"(?i)\bgit\s+(?:cherry-pick|merge)\s+--abort\b", content);
         Assert.Contains("git worktree remove --force", content, StringComparison.Ordinal);
         Assert.Contains("git worktree prune", content, StringComparison.Ordinal);
@@ -276,10 +347,10 @@ public sealed class SquadPerformanceContractTests
     /// <summary>
     /// Conductor is a non-developer orchestrator; its frontmatter description and body must never define
     /// or emit a TASK_GATE digest. The canonical six-field worker completion digest and full 5-state TASK_GATE
-    /// enum are defined in the execution-and-review contract reference.
+    /// enum are defined in the shared execution skill the conductor loads.
     /// </summary>
     [Fact]
-    public void ExecutionAndReviewReference_DeclaresDeterministicTaskGate_AndConductorOffloadsIt()
+    public void SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt()
     {
         string content = ReadRepoFile(ConductorAgentPath);
         int firstMarker = content.IndexOf("---", StringComparison.Ordinal);
@@ -297,7 +368,7 @@ public sealed class SquadPerformanceContractTests
 
         Assert.DoesNotContain("TASK_GATE:", body, StringComparison.Ordinal);
 
-        string executionContent = ReadRepoFile(ConductorExecutionPath);
+        string executionContent = ReadRepoFile(SharedExecutionSkillPath);
         Assert.Matches(ContiguousSixFieldDigestRegex, executionContent);
         Assert.Contains("PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", executionContent,
             StringComparison.Ordinal);
@@ -305,7 +376,7 @@ public sealed class SquadPerformanceContractTests
 
     [Theory]
     [InlineData(ConductorAgentPath)]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     public void ConductorSurfacesScopeSixFieldRejectionToMigratedSpecialistsDuringPhasedRollout(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -314,13 +385,15 @@ public sealed class SquadPerformanceContractTests
             content);
     }
 
-    [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
-    public void WorkerSurfacesSpecifyExplicitSixFieldCompletionDigestSchema(string relativePath)
+    /// <summary>
+    ///     One home for the report format: the skill a worker loads when it finishes carries the six
+    ///     fields, the exact <c>COMMIT:</c> and <c>REMOTE_HEAD:</c> spellings and the contiguous
+    ///     template. Pinning it in each agent body is what let three copies drift apart.
+    /// </summary>
+    [Fact]
+    public void TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema()
     {
-        string content = ReadRepoFile(relativePath);
+        string content = ReadRepoFile(TaskGateSkillPath);
         foreach (string field in RequiredDigestFields) Assert.Contains(field, content, StringComparison.Ordinal);
 
         Assert.Contains("COMMIT: <commit-sha | NONE>", content, StringComparison.Ordinal);
@@ -336,9 +409,8 @@ public sealed class SquadPerformanceContractTests
     public void WorkerSurfacesSpecifyBuildOnceTestManyWithDirectAssemblyRunner(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains(DirectAssemblyDll, content, StringComparison.Ordinal);
-        Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        AssertNamesTheHostTestStandardForTheRunner(content, relativePath);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
     }
 
@@ -460,7 +532,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(TestCodingStandardPath);
         Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
         Assert.Matches(DirectAssemblyRegex, content);
-        Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
+        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
         Assert.True(
             HasBuildOnceReservationClause(content),
@@ -468,7 +540,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
@@ -491,34 +563,130 @@ public sealed class SquadPerformanceContractTests
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
     [InlineData(TestCodingStandardPath)]
-    public void WorkerSurfacesAskTheConductorForOneFullRunOnSharedTestInfrastructure(string relativePath)
+    public void WorkerSurfacesRunATargetedSetOnSharedTestInfrastructure(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
-        Assert.Matches(@"(?i)\bask the conductor for one full run\b", content);
-        Assert.Matches(@"(?i)\binstead of starting your own\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.Matches(@"(?i)\bcross-cutting\b", content);
+        Assert.DoesNotMatch(@"(?i)\bask the conductor for one full run\b", content);
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
-    public void ConductorSurfacesAloneDispatchOneFullRunOnSharedTestInfrastructure(string relativePath)
+    public void ConductorSurfacesNeverDispatchAFullRun(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
-        Assert.Matches(@"(?i)\bconductor alone dispatches one full run\b", content);
-        Assert.Matches(@"(?i)\bto a single worker\b", content);
-        Assert.Matches(@"(?i)\bworkers never start one\b", content);
+        Assert.Matches(@"(?i)\bconductor never dispatches a full run\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.DoesNotMatch(@"(?i)\bconductor alone dispatches one full run\b", content);
     }
 
     [Fact]
-    public void TestStandardBoundsSharedTestInfrastructureByCountAndByRun()
+    public void TestStandardDefinesSharedTestInfrastructureAndGivesNoFullRunRoute()
     {
         string content = ReadRepoFile(TestCodingStandardPath);
         Assert.Matches(@"(?i)\banything referenced by more than one test class\b", content);
         Assert.Matches(@"(?i)`codegraph_explore` on the type shows\b", content);
         Assert.Matches(@"(?i)\btest-project build settings, which every test class depends on\b", content);
-        Assert.Matches(@"(?i)\bat most one full run for the whole run\b", content);
+        Assert.Matches(@"(?i)\breview council's `test` gate\b", content);
+        Assert.Matches(@"(?i)\bno dev agent runs it\b", content);
+        Assert.DoesNotMatch(@"(?i)\bat most one full run\b", content);
+    }
+
+    /// <summary>
+    ///     Only the review council and CI run the full suite. Decision D27 puts that ban in one
+    ///     always-on line injected into every worker's text from the shared baseline, so the ban is
+    ///     asserted where it is written, and no agent body repeats it — text in each agent file is
+    ///     re-sent on every round trip of every worker.
+    /// </summary>
+    [Fact]
+    public void TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten()
+    {
+        Assert.Matches(NeverRunFullSuiteRegex, ReadRepoFile(WorkerBaselinePath));
+
+        string agents = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents");
+        string[] repeating = Directory.GetFiles(agents, "*.md", SearchOption.AllDirectories)
+            .Where(path => Regex.IsMatch(File.ReadAllText(path), NeverRunFullSuiteRegex))
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .ToArray();
+
+        Assert.True(
+            repeating.Length == 0,
+            "The full-suite ban is injected from the shared baseline; these agent bodies repeat it: " +
+            string.Join(", ", repeating));
+    }
+
+    /// <summary>The harnesses that ship; each one renders the bug-crusher surfaces.</summary>
+    public static TheoryData<SquadTarget> ShippedRenderTargets() =>
+        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+
+    /// <summary>
+    ///     The bug-crusher skill is a primary session, so the baseline never reaches it and the ban has
+    ///     to be in its own text.
+    /// </summary>
+    [Fact]
+    public void BugCrusherSkillIsToldNeverToRunTheFullTestSuite()
+    {
+        Assert.Matches(
+            NeverRunFullSuiteRegex,
+            ReadRepoFile("products/kyber-squad/skills/bug-crusher/SKILL.md"));
+    }
+
+    /// <summary>
+    ///     The investigator is a dispatched subagent, so the ban reaches it the way it reaches every
+    ///     worker: from the shared baseline, once per render (decision D27). The evidence that this
+    ///     agent is told never to run the full suite is therefore that render, not a second copy in its
+    ///     body — a body copy is what
+    ///     <see cref="TheSharedBaselineIsTheOnePlaceTheFullSuiteBanIsWritten"/> forbids. The subject is
+    ///     unchanged; only where it is read from moved.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedRenderTargets))]
+    public async Task BugCrusherInvestigatorIsToldNeverToRunTheFullTestSuiteByItsRender(SquadTarget target)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        (string RelativePath, string Content)[] investigatorFiles =
+        [
+            .. result.Files
+                .Where(file => file.RelativePath.Contains("bug-crusher-investigator", StringComparison.Ordinal))
+                .Select(file => (file.RelativePath, Content: Encoding.UTF8.GetString(file.Content.Span)))
+        ];
+
+        Assert.True(
+            investigatorFiles.Length > 0,
+            $"The {target} render carries no file for 'bug-crusher-investigator', so this case would prove nothing.");
+
+        Assert.True(
+            investigatorFiles.Any(file => Regex.IsMatch(file.Content, NeverRunFullSuiteRegex)),
+            $"The {target} render of 'bug-crusher-investigator' carries no 'never run the full test suite' line. " +
+            "It reaches the agent from the shared baseline, which every worker render injects once.");
+    }
+
+    [Theory]
+    [InlineData("products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md")]
+    [InlineData("products/kyber-squad/skills/go-dev/references/gates-and-platforms.md")]
+    [InlineData("products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md")]
+    public void LanguageGateTablesGiveATargetedTestCommand(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.DoesNotMatch(@"(?i)but run it to prove you broke nothing", content);
+        Assert.Matches(NeverRunFullSuiteRegex, content);
+    }
+
+    [Fact]
+    public void KiloReviewLoopGivesNoLocalFullRunRoute()
+    {
+        string content = ReadRepoFile("products/kyber-squad/skills/kilo-review-loop/SKILL.md");
+        Assert.DoesNotMatch(@"(?i)\brun it locally only when\b", content);
+        Assert.Matches(@"(?i)\bdo not run the full suite locally\b", content);
+        Assert.Matches(@"(?i)\btargeted set\b", content);
+        Assert.Matches(@"(?i)\bclasses or files CI reported\b", content);
     }
 
     [Theory]
@@ -536,7 +704,7 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
+    [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     [InlineData(ArchitectureDocPath)]
     [InlineData(CSharpDevAgentPath)]
@@ -658,6 +826,95 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(CodeReviewSkillPath);
         Assert.DoesNotContain("path`.agent_scratchpad", content, StringComparison.Ordinal);
         Assert.DoesNotContain("path.agent_scratchpad", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The conductor holds the docs tools and no shell, so the task file is checked by a tool it
+    /// can call: a file that disagrees with its plan, or one whose digest is stale, has to be
+    /// refused before a worker is dispatched from it.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillRequiresTheTaskFileToBeValidatedBeforeDispatch()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        string? checking = BlockContainingBoth(content, "task file", "validat");
+        Assert.True(
+            checking is not null,
+            $"{SharedExecutionSkillPath} must say the conductor validates the plan's task file before it " +
+            "dispatches from it.");
+    }
+
+    /// <summary>
+    /// The conductor pastes each prompt unchanged and fills two slots and nothing else. A
+    /// conductor that rewrote a prompt would reintroduce the 128 KB of conductor-authored text
+    /// this work replaces, and the plan would no longer describe what the worker was told.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillPastesPromptsUnchangedAndFillsOnlyTheTwoSlots()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        Assert.Contains("{worktree}", content, StringComparison.Ordinal);
+        Assert.Contains("{prior_results}", content, StringComparison.Ordinal);
+
+        string? pasting = BlockContainingBoth(content, "paste", "unchanged");
+        Assert.True(
+            pasting is not null,
+            $"{SharedExecutionSkillPath} must say each prompt is pasted unchanged.");
+
+        string? slots = BlockContainingBoth(content, "{worktree}", "{prior_results}");
+        Assert.True(slots is not null, $"{SharedExecutionSkillPath} must name both slots in one instruction.");
+        Assert.Matches(@"(?i)\b(?:only|nothing else|exclusively)\b", slots);
+    }
+
+    /// <summary>
+    /// Resuming carried nothing because the prompts said "Do not commit", so a mid-run push held
+    /// no record of a finished task. A finished task commits with a <c>Task: &lt;id&gt;</c> line
+    /// and its report, which is what a later run reads to learn where the work stopped.
+    /// </summary>
+    [Fact]
+    public void SharedExecutionSkillTellsWorkersToCommitWithATaskLine()
+    {
+        string content = ReadRepoFile(SharedExecutionSkillPath);
+
+        string? committing = BlockContaining(content, block =>
+            block.Contains("Task:", StringComparison.Ordinal)
+            && Regex.IsMatch(block, @"(?i)\bcommit\w*\b"));
+
+        Assert.True(
+            committing is not null,
+            $"{SharedExecutionSkillPath} must tell a finished task to commit with a 'Task: <id>' line.");
+    }
+
+    /// <summary>The first blank-line separated block that contains every one of <paramref name="needles"/>.</summary>
+    private static string? BlockContainingBoth(string content, string first, string second)
+    {
+        return BlockContaining(
+            content,
+            block => block.Contains(first, StringComparison.OrdinalIgnoreCase)
+                     && block.Contains(second, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The first blank-line separated block satisfying <paramref name="match"/>: a rule is read
+    /// from the paragraph that states it, not from words that happen to sit near each other in a
+    /// long document.
+    /// </summary>
+    private static string? BlockContaining(string content, Func<string, bool> match)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(match);
+
+        foreach (string block in content
+                     .Replace("\r\n", "\n", StringComparison.Ordinal)
+                     .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (match(block))
+                return block;
+        }
+
+        return null;
     }
 
     private static string ReadRepoFile(string relativePath)

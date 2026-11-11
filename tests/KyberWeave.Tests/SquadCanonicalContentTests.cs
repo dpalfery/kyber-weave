@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -14,6 +13,21 @@ public sealed class SquadCanonicalContentTests
     private const string MigrationSchema = "kyber-squad.migration/v1";
     private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
+
+    /// <summary>
+    /// The shared worker execution contract, relative to the canonical product root. It is a canonical
+    /// skill rather than a conductor reference so a fallback target receives it, and so bug-crusher can
+    /// load it without linking out of its own directory.
+    /// </summary>
+    private const string DeliveryExecutionSkillRelativePath = "skills/delivery-execution/SKILL.md";
+
+    /// <summary>
+    ///     The failure-loop rules a developer agent used to carry in its own body. T52 moved them to the
+    ///     one reference the task gate loads after a failed fix (D43), so the pins below read that
+    ///     reference rather than each agent's body, and <c>WorkerRuleSingleHomeTests</c> asserts the
+    ///     bodies no longer carry them.
+    /// </summary>
+    private const string ReworkReferenceRelativePath = "skills/task-gate/references/rework.md";
 
     /// <summary>
     /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
@@ -53,17 +67,95 @@ public sealed class SquadCanonicalContentTests
         @"\b(?:never|must not|do not|does not)\b[^.!?\n]{0,60}\b(?:labels?|names?|mentions?|tags?|announces?|refers?)\b[^.!?\n]{0,30}\bformat\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>The surfaces that own the review run: the council's standing instructions and the skill's procedure.</summary>
+    private static readonly string[] ReviewerSurfacePaths =
+    [
+        "agents/code-reviewer.md",
+        "skills/code-review/SKILL.md"
+    ];
+
     /// <summary>
-    /// The opening of the one bullet that tells an agent it may name a session, verbatim and including
-    /// the Markdown emphasis, so the guard below is read from the instruction it governs.
+    /// The surfaces a plan is authored from. A plan is written before the run, so it must not carry a review command
+    /// that goes stale as the gate list and its flags move.
     /// </summary>
-    private const string SessionTitleBulletLead = "- **Name the session after the work**";
+    private static readonly string[] PlanSurfacePaths =
+    [
+        "agents/architect/references/plan-authoring.md",
+        "agents/conductor/references/plan-path.md"
+    ];
 
-    /// <summary>The condition on naming a session: only a mechanism the harness really exposes.</summary>
-    private const string SessionTitleMechanismGuard = "only where the harness exposes a confirmed way to set it";
+    /// <summary>Wording that says a single gate is checked again, rather than the whole suite being re-run.</summary>
+    private static readonly Regex RecheckWording = new(
+        @"re-?check|re-?run|single gate|one gate|only that gate",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    /// <summary>The second condition: an invented title is never acceptable.</summary>
-    private const string SessionTitleFabricationGuard = "never fabricate a title";
+    /// <summary>
+    /// The <c>--gate</c> option as a whole token. A plain substring search also matches <c>--gates</c>, which is a
+    /// different option on <c>review verdict</c>.
+    /// </summary>
+    private static readonly Regex GateOptionMention = new(
+        @"(?<![\w-])--gate(?![\w-])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Wording that says the review is the last thing to run and runs alone.</summary>
+    private static readonly Regex AloneWording = new(
+        @"\b(alone|last|nothing else)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Wording that says the waiting session takes the seats and comes back to the reviewer.</summary>
+    private static readonly Regex ReinvokeWording = new(
+        @"re-?invok|invoke (it|the reviewer) again|main session",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The opening of the one bullet that tells an agent to set the session title, verbatim and
+    /// including the Markdown emphasis, so the requirement below is read from the instruction it governs.
+    /// </summary>
+    private const string SessionTitleBulletLead = "- **Name the session after the work.**";
+
+    /// <summary>The session-title bullet must tell the agent to set the title. The title is required.</summary>
+    private const string SessionTitleSetInstruction = "Set the session title to name the work being done";
+
+    /// <summary>Once a pull request exists, the session title is that pull request's number and title.</summary>
+    private const string PrTitleSetInstruction =
+        "Once a PR is submitted, set the session title to the PR title prefixed by the Pull Request number";
+
+    /// <summary>The form the pull-request bullet has to show: the number, a space, then the title.</summary>
+    private const string PrTitleExample = "#123 Add the widget";
+
+    /// <summary>A later retitle has to move the session title with it.</summary>
+    private const string PrTitleRetitleInstruction =
+        "When the pull request title changes, update the session title to match";
+
+    /// <summary>
+    /// The architecture matrix's submit sentence. The product bullet words that moment
+    /// differently, so the matrix pin cannot reuse <see cref="PrTitleSetInstruction"/>.
+    /// </summary>
+    private const string SessionTitleMatrixSubmitInstruction = "Once a pull request is submitted";
+
+    /// <summary>
+    /// Factory has no setter. The sentence that tells the agent to set or update a title names that
+    /// limit; a following sentence does not constrain the instruction the agent just read.
+    /// </summary>
+    private const string FactorySessionTitleException = "on every harness except Factory";
+
+    /// <summary>
+    /// How Factory gets a title. A general skip is not this clause, and this clause is not a reason
+    /// to skip the title on any other harness.
+    /// </summary>
+    private const string FactorySessionTitleMechanism =
+        "derives the session title from the conversation's first message and has no setter";
+
+    /// <summary>
+    /// Phrases that tell an agent not to set a session title. The owner removed them: a shipped
+    /// default that carries one is instructing the agent to skip the title.
+    /// </summary>
+    private static readonly string[] SessionTitleHedges =
+    [
+        "never fabricate a title",
+        "leave it alone",
+        "only where the harness exposes a confirmed way to set it"
+    ];
 
     /// <summary>
     /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
@@ -211,6 +303,7 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "csp-security",
         "dal-dev",
+        "delivery-execution",
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
@@ -313,6 +406,48 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// One copy of the worker execution contract, in a canonical skill both entry points load: the corpus
+    /// holds it, the bundle selects it so every target receives it, and the conductor's body and
+    /// bug-crusher's workflow both name it.
+    /// </summary>
+    /// <remarks>
+    /// Bug-crusher used to keep a partial second copy of these rules inside its own workflow, and the two
+    /// drifted the first time one moved. The bodies are read from the loaded corpus rather than the files,
+    /// because the loader's normalized instruction body is what a harness receives: a name that survives
+    /// only in a frontmatter comment never reaches a reader.
+    /// </remarks>
+    [Fact]
+    public void LoadFullProductTreeCarriesTheSharedExecutionSkillBothEntryPointsLoad()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        bool loaded = source.Skills.Any(skill => skill.Name == "delivery-execution");
+        bool selected = source.Bundle.SkillNames.Contains("delivery-execution", StringComparer.Ordinal);
+
+        Assert.True(
+            loaded && selected,
+            $"The corpus must hold '{DeliveryExecutionSkillRelativePath}' and the bundle must select it, or no " +
+            $"target receives it and no entry point can load it. Loaded: {loaded}. Selected: {selected}. " +
+            $"Roster: {string.Join(", ", source.Skills.Select(skill => skill.Name))}.");
+
+        (string Surface, string Body)[] entryPoints =
+        [
+            ("agents/conductor.md", source.Agents.Single(agent => agent.Name == "conductor").InstructionBody),
+            ("skills/bug-crusher/SKILL.md", source.Skills.Single(skill => skill.Name == "bug-crusher").InstructionBody)
+        ];
+        string[] silent =
+        [
+            .. entryPoints
+                .Where(entryPoint => !entryPoint.Body.Contains("delivery-execution", StringComparison.Ordinal))
+                .Select(entryPoint => entryPoint.Surface)
+        ];
+
+        Assert.True(
+            silent.Length == 0,
+            $"Both entry points must name the '{DeliveryExecutionSkillRelativePath}' skill they load. " +
+            $"Silent: {string.Join(", ", silent)}.");
+    }
+
+    /// <summary>
     /// The retired <c>second-brain</c> skill moves to Kyber-Docs. The Squad bundle file and
     /// the loaded bundle roster must not name it, or pack and install keep shipping it.
     /// </summary>
@@ -329,9 +464,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
-    /// its canonical-skill counts, and it must state the count the tree actually holds: 28 once the retired
-    /// <c>response-format</c> skill is gone.
+    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree.
+    /// It states the skills without a hardcoded count: the directories under <c>skills/</c> are the
+    /// inventory, so a skill added later changes no prose.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -339,8 +474,7 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -472,19 +606,81 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// A session title is a harness capability, not a response rule. The shipped default records the one target
-    /// whose title no agent can set, so the default never instructs an agent to claim a capability the harness
-    /// does not expose.
+    /// The owner requires a session title. The shipped default must tell the agent to set one, and
+    /// must not say to leave it alone, to skip a harness that might not expose a setter, or to avoid
+    /// fabricating a title. Factory is the one harness with no setter: each instruction sentence
+    /// names that limit and how Factory derives the title.
     /// </summary>
     [Fact]
-    public void TheShippedDefaultRecordsThatFactoryTitlesAreNotAgentSettable()
+    public void TheShippedDefaultRequiresTheSessionTitleToBeSet()
     {
-        string bullet = SessionTitleBullet(ReadResponseGuidanceDefault()) ?? string.Empty;
+        string guidance = ReadResponseGuidanceDefault();
 
         Assert.True(
-            bullet.Contains("Factory", StringComparison.Ordinal) &&
-            bullet.Contains("no agent can set", StringComparison.Ordinal),
-            "The session-title bullet in the shipped default must record that no agent can set a Factory session title.");
+            RequiresSessionTitle(guidance),
+            "The session-title bullet in the shipped default must tell the agent to set the session title " +
+            $"('{SessionTitleSetInstruction}').");
+        AssertShippedDefaultOmitsSessionTitleHedges(guidance);
+        AssertShippedDefaultStatesTheFactorySessionTitleLimit(guidance);
+    }
+
+    /// <summary>
+    /// "Leave it alone" in some other bullet is not a session-title hedge. The pin reads the
+    /// session-title bullets, so an unrelated use of those words must not fail it.
+    /// </summary>
+    [Fact]
+    public void AnUnrelatedBulletThatSaysLeaveItAloneDoesNotFailTheSessionTitlePin()
+    {
+        string guidance =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction} {FactorySessionTitleException}, " +
+            $"which {FactorySessionTitleMechanism}.\n" +
+            $"- **PR Title.** {PrTitleSetInstruction}: `{PrTitleExample}`. " +
+            $"{PrTitleRetitleInstruction} {FactorySessionTitleException}, which {FactorySessionTitleMechanism}.\n" +
+            "- **Close the note.** When the note is finished, leave it alone.\n";
+
+        Assert.True(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            "An unrelated 'leave it alone' must not fail the session-title pin " +
+            $"(the pin reported '{offending}').");
+    }
+
+    /// <summary>
+    /// A session-title bullet that tells the agent to skip the title in general still fails. An
+    /// unrelated bullet that uses the same words does not make that skip acceptable.
+    /// </summary>
+    [Fact]
+    public void ASessionTitleBulletThatSaysToLeaveTheTitleAloneStillFailsThePin()
+    {
+        string guidance =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction}. Where no agent can set one, leave it alone.\n" +
+            "- **Close the note.** When the note is finished, leave it alone.\n";
+
+        Assert.False(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            "A session-title bullet that says to leave the title alone must fail the pin.");
+        Assert.Equal("leave it alone", offending);
+    }
+
+    /// <summary>
+    /// The architecture matrix states the same rule as the shipped default. The set, submit, and
+    /// retitle sentences each name Factory. Dropping the limit from the submit sentence does not.
+    /// </summary>
+    [Fact]
+    public void TheSessionTitleMatrixStatesHowFactoryGetsItsTitle()
+    {
+        string path = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "docs", "kyber-squad", "architecture.md");
+        string matrix = ParagraphStartingWith(
+            File.ReadAllText(path),
+            "**Session-title matrix (reference).**");
+
+        Assert.True(
+            matrix.Length > 0,
+            "docs/kyber-squad/architecture.md must carry the session-title matrix.");
+        AssertSentenceCarriesTheFactoryLimit(matrix, "name the work being done");
+        AssertSentenceCarriesTheFactoryLimit(matrix, SessionTitleMatrixSubmitInstruction);
+        AssertSentenceCarriesTheFactoryLimit(matrix, PrTitleRetitleInstruction);
+        Assert.Contains("#123 Add the widget", matrix, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -545,9 +741,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The shipped default states the session-title rule itself: name the session after the work,
-    /// and only where the harness exposes a confirmed mechanism, and never fabricate one. The rule
-    /// lives in the default now that the skill that used to carry it is being removed.
+    /// The shipped default states the session-title rule itself: name the session after the work
+    /// by setting the session title. The rule lives in the default now that the skill that used
+    /// to carry it is being removed.
     /// </summary>
     [Fact]
     public void TheShippedDefaultStatesTheSessionTitleRule()
@@ -562,55 +758,73 @@ public sealed class SquadCanonicalContentTests
             bullet.Contains("title", StringComparison.OrdinalIgnoreCase) &&
             bullet.Contains("work", StringComparison.OrdinalIgnoreCase),
             "The session-title bullet must say the title reflects the work.");
-        Assert.True(
-            CarriesSessionTitleGuard(guidance),
-            "The session-title rule in the shipped default must carry both its mechanism and fabrication guards.");
+        Assert.Contains(SessionTitleSetInstruction, bullet, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The deployed default replaces the skill's wording wherever it exists, so it carries the
-    /// session-title guard the matrix states. Without the guard, the default tells an agent to
-    /// name a session on a target that exposes no way to set one.
+    /// The requirement sits on the session-title bullet. A neighbouring bullet that says to set a
+    /// title, or a line that is not the emphasised bullet, does not satisfy it, and a bullet that
+    /// also says to leave the title alone does not either.
     /// </summary>
     [Fact]
-    public void TheShippedDefaultKeepsTheSessionTitleGuard()
+    public void TheSessionTitleRequirementSitsOnTheSessionTitleBullet()
+    {
+        string requiredElsewhere =
+            "- **Set the session title to name the work being done.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} where it helps the reader.\n";
+        string required =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction}\n";
+        string hedged =
+            $"{SessionTitleBulletLead} {SessionTitleSetInstruction} Where no agent can set one, leave it alone.\n";
+
+        Assert.False(
+            RequiresSessionTitle(requiredElsewhere),
+            "An instruction to set the title in another bullet must not satisfy a session-title bullet that omits it.");
+        Assert.True(
+            RequiresSessionTitle(required),
+            "A session-title bullet that tells the agent to set the title must satisfy the pin.");
+        Assert.False(
+            RequiresSessionTitle(hedged),
+            "A session-title bullet that says to leave the title alone must not satisfy the pin.");
+        Assert.False(
+            RequiresSessionTitle($"- Name the session after the work. {SessionTitleSetInstruction}\n"),
+            "A line that is not the emphasised session-title bullet must not satisfy the pin.");
+    }
+
+    /// <summary>
+    /// The pull-request title bullet tells an agent to set the session title after submit, in the
+    /// form <c>#&lt;number&gt; &lt;PR title&gt;</c>, and to move that title when the pull request
+    /// is renamed. A retitle sentence that tells the agent to skip or not to fabricate does not
+    /// satisfy the pin: the owner requires the title to be set.
+    /// </summary>
+    [Fact]
+    public void ThePrTitleBulletSetsTheSessionTitleAndTracksRetitles()
     {
         string guidance = ReadResponseGuidanceDefault();
-        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
 
         Assert.True(
-            bullet.Length > 0,
-            "The shipped default must carry the session-title bullet, " +
-            $"'{SessionTitleBulletLead}', on one line.");
-        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
-        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
+            PrTitleBulletRequiresTheSessionTitle(guidance),
+            "The shipped default must set the session title from the submitted pull request " +
+            $"('{PrTitleSetInstruction}'), show '{PrTitleExample}', and update it when the pull request title changes.");
     }
 
     /// <summary>
-    /// The guard is a condition on the session-title instruction, not a phrase anywhere in the file. A
-    /// default whose session-title bullet drops the condition must fail even when another bullet still
-    /// says "never fabricate", which is what the whole-file search this replaced could not tell apart.
+    /// A hedge on the retitle sentence alone must fail. A whole-bullet search that only looks for
+    /// the retitle phrase would stay green while that sentence tells the agent not to set the title.
     /// </summary>
     [Fact]
-    public void TheSessionTitleGuardMustSitOnTheSessionTitleBullet()
+    public void ARetitleSentenceThatTellsTheAgentNotToSetTheTitleDoesNotSatisfyThePin()
     {
-        string unguarded =
-            "- **Never fabricate a title.** Say what happened instead.\n" +
-            $"{SessionTitleBulletLead} where it helps the reader.\n";
-        string guarded =
-            "- **Never fabricate a title.** Say what happened instead.\n" +
-            $"{SessionTitleBulletLead} {SessionTitleMechanismGuard}, and {SessionTitleFabricationGuard}.\n";
+        string hedged =
+            "- **PR Title.** Once a PR is submitted, set the session title to the PR title " +
+            "prefixed by the Pull Request number: `#<number>` immediately followed by a space and " +
+            "the PR title, as in `#123 Add the widget` when the PR title is `Add the widget` and " +
+            "the PR number is 123. When the pull request title changes, update the session title " +
+            "to match only where the harness exposes a confirmed way to set it, and never fabricate a title.\n";
 
         Assert.False(
-            CarriesSessionTitleGuard(unguarded),
-            "'never fabricate' in another bullet must not satisfy a session-title bullet that omits it.");
-        Assert.True(
-            CarriesSessionTitleGuard(guarded),
-            "A session-title bullet that carries both conditions must satisfy the pin.");
-        Assert.False(
-            CarriesSessionTitleGuard(
-                $"- Name the session after the work {SessionTitleMechanismGuard} and {SessionTitleFabricationGuard}.\n"),
-            "A line that is not the emphasised session-title bullet must not satisfy the pin.");
+            PrTitleBulletRequiresTheSessionTitle(hedged),
+            "A retitle sentence that says to skip the title or not to fabricate one must not satisfy the pin.");
     }
 
     /// <summary>
@@ -922,7 +1136,7 @@ public sealed class SquadCanonicalContentTests
             Path.Combine(ProductRoot, "skills", "dp-code-reviewer", "SKILL.md"),
             Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
             Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md")
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md")
         ];
 
         string[] forbiddenPhrases =
@@ -934,6 +1148,10 @@ public sealed class SquadCanonicalContentTests
             "always-human",
             "max-reviewable-lines"
         ];
+
+        Assert.All(
+            reviewSurfaces,
+            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
 
         foreach (string surface in reviewSurfaces)
         {
@@ -1136,10 +1354,16 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("superseded", contract, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The conductor's iteration circuit-breaker: the failure-cluster key and tally, the two-dispatch
+    /// retry limit, oscillation detection, and the closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary.
+    /// The rules live in the shared execution contract both entry points load, so that skill is the
+    /// surface asserted here rather than the conductor's own body.
+    /// </summary>
     [Fact]
     public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
@@ -1155,29 +1379,31 @@ public sealed class SquadCanonicalContentTests
         AssertClosedCircuitBreakerTriggerSet(contract);
     }
 
-    [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("test-dev")]
-    [InlineData("github-devops")]
-    public void LoadDeveloperAgentsDefineJevCheckpointsAndIterationCircuitBreaker(string agentName)
+    /// <summary>
+    ///     The failure-loop rules — the JEV checkpoints, the retry limit, oscillation detection and the
+    ///     closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary — moved out of each developer agent's body
+    ///     into the one reference the task gate loads after a failed fix. The strings are unchanged;
+    ///     only the home is, which is what T50 pins before T52 removes them.
+    /// </summary>
+    [Fact]
+    public void TheReworkReferenceDefinesJevCheckpointsAndIterationCircuitBreaker()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+        string contract = ReadProductFile(ReworkReferenceRelativePath);
 
-        Assert.Contains("Maximum of 3 incremental", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("ITERATION_CAP_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("THRASH_OSCILLATION_DETECTED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("INVARIANT_CONTRADICTION", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("BLAST_RADIUS_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
-        AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
+        Assert.Contains("Maximum of 3 incremental", contract, StringComparison.Ordinal);
+        Assert.Contains("JEV", contract, StringComparison.Ordinal);
+        Assert.Contains("circuit breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STATUS: ESCALATION", contract, StringComparison.Ordinal);
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", contract, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", contract, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("FAILURE_CLUSTER", contract, StringComparison.Ordinal);
+        Assert.Contains("CONTRADICTORY_INVARIANTS", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS", contract, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(contract);
     }
 
     [Theory]
@@ -1210,12 +1436,13 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// Task sessions are worker-only: the deterministic <c>task-gate</c> is not a session-bearing
-    /// agent, so the conductor records and resumes exactly one session per task.
+    /// agent, so the conductor records and resumes exactly one session per task. The session rules
+    /// live in the shared execution contract, so that skill is the surface asserted here.
     /// </summary>
     [Fact]
     public void ConductorRetainsOnlyWorkerSessionsForTaskRework()
     {
-        string contract = ReadAgentContract("conductor");
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
 
         Assert.Contains("original worker session", contract, StringComparison.Ordinal);
         Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
@@ -1447,6 +1674,35 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// The shipped roster reaches its coding standard through the MCP tool. The developer agents
+    /// are the roles that write code, so their instructions are what decide whether a standard
+    /// arrives for a budget with the sections the task names — or is read whole from the file,
+    /// 21,354 characters of it for the test standard alone against a 12,000-character default.
+    /// </summary>
+    /// <param name="agentName">The canonical developer agent identity.</param>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("go-dev")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("rust-dev")]
+    [InlineData("sql-database-architect")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
+    public void DeveloperAgentBodyRoutesItsCodingStandardThroughTheTool(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("docs_get_coding_standard_for_technology", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The <c>TASK_GATE:</c> digest is a developer exit contract. A non-developer body that emits it
     /// would claim a gate it never ran.
     /// </summary>
@@ -1539,6 +1795,115 @@ public sealed class SquadCanonicalContentTests
         Assert.False(
             planAuthoring.Contains("task-reviewer", StringComparison.Ordinal),
             "The architect plan-authoring reference must not name the retired task-reviewer.");
+    }
+
+    /// <summary>
+    /// The architect writes each worker's prompt, and the conductor pastes it unchanged. The
+    /// authoring contract is therefore the only place a prompt's quality is decided, so it has
+    /// to ask for the three things this programme kept shipping prompts without: a file named
+    /// by path plus symbol rather than a guess at a path, the fully qualified test class the
+    /// filter must match, and the exact command to run. A filter naming a class that does not
+    /// exist runs zero tests and exits success.
+    /// </summary>
+    [Fact]
+    public void PlanAuthoringRequiresPathPlusSymbolTestClassNamesAndExactCommands()
+    {
+        string planAuthoring = ReadProductFile("agents/architect/references/plan-authoring.md");
+
+        Assert.Matches(@"(?i)\bpath\s+(?:plus|and)\s+(?:a\s+)?symbol\b", planAuthoring);
+        Assert.Matches(@"(?i)\bfull(?:y\s+qualified)?\s+test\s+class\s+names?\b", planAuthoring);
+        Assert.Matches(@"(?i)\bexact\s+commands?\b", planAuthoring);
+    }
+
+    /// <summary>
+    /// Changing one assertion took a fresh worker eleven minutes because it had to rebuild the
+    /// context an earlier worker already had. A `session` group is how the architect says that a
+    /// follow-on fix belongs in the session that did the work — never a RED folded into its own
+    /// GREEN, which stays two workers.
+    /// </summary>
+    [Fact]
+    public void PlanAuthoringRequiresASessionGroupForFollowOnWork()
+    {
+        string planAuthoring = ReadProductFile("agents/architect/references/plan-authoring.md");
+
+        Assert.Matches(@"(?i)\bsession\s+group\b", planAuthoring);
+    }
+
+    /// <summary>
+    /// The task file is written at finalization, so the conductor learns it exists from the
+    /// marker that ends the architect's turn. The instruction has to say both halves: save the
+    /// file, and return the path the conductor will validate.
+    /// </summary>
+    [Fact]
+    public void ArchitectFinalizationSavesTheTaskFileAndReturnsItsPath()
+    {
+        string[] surfaces =
+        [
+            "agents/architect.md",
+            "agents/architect/references/plan-authoring.md"
+        ];
+        string[] paragraphs = [.. surfaces.SelectMany(surface => Paragraphs(ReadProductFile(surface)))];
+
+        string? saving = paragraphs.FirstOrDefault(paragraph =>
+            paragraph.Contains(".tasks.json", StringComparison.Ordinal)
+            && Regex.IsMatch(paragraph, @"(?i)\bsav(?:e|es|ed|ing)\b")
+            && Regex.IsMatch(paragraph, @"(?i)\b(?:return|report|hand)s?\b")
+            && Regex.IsMatch(paragraph, @"(?i)\bpath\b"));
+
+        Assert.True(
+            saving is not null,
+            "the architect's finalization text must say it saves <plan>.tasks.json and returns its path, " +
+            "so the conductor can validate the file before dispatching from it. Read: " +
+            string.Join(" / ", surfaces));
+    }
+
+    /// <summary>
+    /// `docs-dev` runs a closed list of commands, and the task file has to be deleted in the same
+    /// commit that archives its plan. Without `git rm` on that list the only role that may archive
+    /// a plan could not remove the file its own contract says it deletes.
+    /// </summary>
+    [Fact]
+    public void DocsDevCommandListIncludesGitRmForTheTaskFile()
+    {
+        string docsDev = ReadProductFile("agents/docs-dev.md");
+
+        int start = docsDev.IndexOf("## Commands you run", StringComparison.Ordinal);
+        Assert.True(start >= 0, "docs-dev must carry a '## Commands you run' section.");
+
+        int end = docsDev.IndexOf("\n## ", start + 1, StringComparison.Ordinal);
+        string commands = end < 0 ? docsDev[start..] : docsDev[start..end];
+
+        Assert.Contains("git rm", commands, StringComparison.Ordinal);
+        Assert.Contains("Run nothing else", commands, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A specification's task file lives in the specification folder
+    /// (<c>&lt;spec-folder&gt;/tasks.json</c>), removed before the folder is moved to the archive,
+    /// so the closeout the owner text describes and the rule that catches a leftover file agree.
+    /// </summary>
+    [Fact]
+    public void ProductOwnerTextFollowsTheSpecificationTaskFileForm()
+    {
+        string ownerBody = Path.Combine(ProductRoot, "agents", "product-owner.md");
+        string ownerSkill = Path.Combine(ProductRoot, "skills", "product-owner");
+
+        Assert.True(File.Exists(ownerBody), $"expected the product-owner body at '{ownerBody}'.");
+        Assert.True(Directory.Exists(ownerSkill), $"expected the product-owner skill at '{ownerSkill}'.");
+
+        string[] surfaces =
+        [
+            ownerBody,
+            .. Directory.EnumerateFiles(ownerSkill, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+        ];
+
+        string? carrier = surfaces.FirstOrDefault(
+            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.json", StringComparison.Ordinal));
+
+        Assert.True(
+            carrier is not null,
+            "the product-owner text must name `<spec-folder>/tasks.json` as the specification form of the " +
+            "tracked task file. Searched: " + string.Join(", ", surfaces));
     }
 
     private static string RelativeSourcePath(string path)
@@ -1636,7 +2001,7 @@ public sealed class SquadCanonicalContentTests
         string[] reviewSurfaces =
         [
             Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"),
             Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
             Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
             Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
@@ -1653,6 +2018,10 @@ public sealed class SquadCanonicalContentTests
             "at least one review"
         ];
 
+        Assert.All(
+            reviewSurfaces,
+            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
+
         string[] offenders = reviewSurfaces
             .SelectMany(path => retiredPhrases
                 .Where(phrase => File.ReadAllText(path).Contains(phrase, StringComparison.Ordinal))
@@ -1663,24 +2032,28 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// Both run-start surfaces carry the read-only doctor step, gated on the docs-enabled condition, with the
-    /// warn-and-continue rule. A later edit that drops any one of the three silently disables the check.
+    /// Both run-start surfaces carry the <c>doctor --ensure</c> step, gated on the docs-enabled condition,
+    /// and state the stop rule instead of warn-and-continue.
     /// </summary>
     /// <remarks>
-    /// The condition is the D14 predicate: the config file and its docs-root. The rule is D15: a failed doctor
-    /// is recorded and the run continues, so a missing index never blocks a fresh clone.
+    /// This is the owner's reversal of "never block a run" (D1, decided 2026-11-07), not a weakening of the
+    /// check: a required tool that cannot be repaired now stops the run before any worker is dispatched,
+    /// because every agent downstream would otherwise work from joins that are silently absent. The
+    /// docs-enabled condition is unchanged, and a repository with no governed docs still skips the step.
     /// </remarks>
     [Theory]
     [InlineData("agents/conductor.md")]
     [InlineData("skills/bug-crusher/SKILL.md")]
-    public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
+    public void RunStartSurfacesStopTheRunWhenTheDocsToolingCannotBeEnsured(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string text =
+            File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave doctor --ensure", text, StringComparison.Ordinal);
         Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
         Assert.Contains("docs-root", text, StringComparison.Ordinal);
-        Assert.Contains("warn and continue", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stop-on-tool-failure", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("warn and continue", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1693,13 +2066,248 @@ public sealed class SquadCanonicalContentTests
         string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
         int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
         int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
-        int doctor = conductor.IndexOf("kyber-weave doctor --check", StringComparison.Ordinal);
+        int doctor = conductor.IndexOf("kyber-weave doctor --ensure", StringComparison.Ordinal);
 
         Assert.True(invariants >= 0, "'agents/conductor.md' must keep its 'Shared lifecycle invariants' section.");
         Assert.True(
             doctor > invariants && doctor < handoffs,
             "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
     }
+
+    // -------------------------------------------------------------------------------------
+    // How the review runs: who owns its command, one gate at a time, alone and last, and
+    // what it does when it cannot start its seats.
+    // -------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The review command comes from the reviewer, not from a plan: every review command the skill names carries
+    /// <c>--base</c>, at least one carries <c>--council</c>, and no plan-authoring surface prescribes a review command.
+    /// </summary>
+    /// <remarks>
+    /// A plan is written before the run, so a command copied into it goes stale the moment the gate list or its flags
+    /// move, and the reviewer then runs a command nobody validated. <c>--base</c> measures the gates against the change
+    /// instead of the whole tree. <c>--council</c> is what admits the full-suite gates, which only the review council
+    /// and CI may run.
+    /// </remarks>
+    [Fact]
+    public void TheReviewSkillNamesItsOwnCommandWithBaseAndCouncilAndNoPlanPrescribesOne()
+    {
+        string[] prescribed = PlanSurfacePaths
+            .SelectMany(path => ReviewCommandLines(ReadProductFile(path)).Select(line => $"{path}: {line}"))
+            .ToArray();
+
+        Assert.True(
+            prescribed.Length == 0,
+            "A plan must not prescribe a review command; the reviewer owns it. Found:" +
+            Environment.NewLine + string.Join(Environment.NewLine, prescribed));
+
+        string[] commands = ReviewCommandLines(ReadProductFile("skills/code-review/SKILL.md"));
+
+        Assert.NotEmpty(commands);
+        Assert.All(commands, command => Assert.Contains("--base", command, StringComparison.Ordinal));
+        Assert.True(
+            commands.Any(command => command.Contains("--council", StringComparison.Ordinal)),
+            "'skills/code-review/SKILL.md' must name the review command with --council for the council's run. " +
+            $"Commands found:{Environment.NewLine}{string.Join(Environment.NewLine, commands)}");
+    }
+
+    /// <summary>
+    /// The reviewer re-checks one gate at a time through <c>--gate</c>, instead of running the whole declared suite
+    /// again to confirm a single fix.
+    /// </summary>
+    /// <remarks>
+    /// Re-running every declared gate pays the whole suite's cost for one answer, which is the cost this slice exists
+    /// to remove. The reviewer's own surfaces must name the option and say what it is for, or the next editor
+    /// re-derives the expensive shape.
+    /// </remarks>
+    [Fact]
+    public void TheReviewerRechecksASingleGateThroughTheGateOption()
+    {
+        string[] mentions = ReviewerSurfacePaths
+            .SelectMany(path => Paragraphs(ReadProductFile(path)).Select(block => $"{path}: {block}"))
+            .Where(block => GateOptionMention.IsMatch(block))
+            .ToArray();
+
+        Assert.True(
+            mentions.Length > 0,
+            "The reviewer's instructions must name 'review gates --gate <id>' for a single-gate re-check. " +
+            $"Read: {string.Join(", ", ReviewerSurfacePaths)}.");
+
+        Assert.True(
+            mentions.Any(RecheckWording.IsMatch),
+            "A paragraph naming --gate must say it re-checks one gate. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", mentions));
+    }
+
+    /// <summary>
+    /// The final council runs alone and last, in the foreground: no docs work and no edits happen in the reviewed tree
+    /// while it runs.
+    /// </summary>
+    /// <remarks>
+    /// A review that shares the tree with concurrent docs work or edits is reviewing something that keeps moving, and
+    /// a finding it raises may be against a line already changed. The reviewed tree is also the tree those other jobs
+    /// write to, so a review that runs in the foreground is what makes its evidence current.
+    /// </remarks>
+    [Fact]
+    public void TheFinalCouncilRunsAloneLastInTheForegroundWithNoDocsWorkOrEdits()
+    {
+        string contract = ReadProductFile(DeliveryExecutionSkillRelativePath);
+        string[] blocks = Paragraphs(contract)
+            .Where(block => block.Contains("foreground", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.True(
+            blocks.Length > 0,
+            $"'{DeliveryExecutionSkillRelativePath}' must state that the review runs last, in the foreground.");
+
+        Assert.True(
+            blocks.Any(block => AloneWording.IsMatch(block)
+                                && block.Contains("docs", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("edit", StringComparison.OrdinalIgnoreCase)),
+            "The paragraph that says the review runs in the foreground must also say that no docs work and no edits " +
+            "happen in the reviewed tree while it runs. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", blocks));
+    }
+
+    /// <summary>
+    /// A reviewer that cannot start its seats stops after its gates with <c>STATUS: COUNCIL_SEATS_NEEDED</c>, listing
+    /// the lenses and the scope, and the waiting session runs the seats and re-invokes it.
+    /// </summary>
+    /// <remarks>
+    /// Harnesses differ in whether a subagent may start another one. Where it may not, silently applying every lens
+    /// in-process hides that the run had less independent judgement than a verdict implies; dropping the council
+    /// hides it entirely. Returning the routing facts lets the session that can start seats do so, and the reviewer
+    /// then judges what they returned.
+    /// </remarks>
+    [Fact]
+    public void ACouncilThatCannotStartItsSeatsStopsAfterTheGatesWithCouncilSeatsNeeded()
+    {
+        string reviewer = ReadProductFile("agents/code-reviewer.md");
+        string[] blocks = Paragraphs(reviewer)
+            .Where(block => block.Contains("STATUS: COUNCIL_SEATS_NEEDED", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            blocks.Length > 0,
+            "'agents/code-reviewer.md' must route a council that cannot start its seats with " +
+            "'STATUS: COUNCIL_SEATS_NEEDED'.");
+
+        Assert.True(
+            blocks.Any(block => block.Contains("lens", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("scope", StringComparison.OrdinalIgnoreCase)
+                                && block.Contains("gate", StringComparison.OrdinalIgnoreCase)
+                                && ReinvokeWording.IsMatch(block)),
+            "The COUNCIL_SEATS_NEEDED paragraph must list the lenses and the scope, say it stops after its gates, and " +
+            "say the session that can start the seats re-invokes the reviewer. Found:" +
+            Environment.NewLine + string.Join($"{Environment.NewLine}---{Environment.NewLine}", blocks));
+    }
+
+    /// <summary>
+    /// Every shipped agent file states the stop rule and the discovery order, so no role is left with the
+    /// old instruction to carry on past a broken tool.
+    /// </summary>
+    /// <remarks>
+    /// A single agent file that still says the run continues is enough to keep the failure alive, because
+    /// that is the file the delegate reads. The discovery order travels with it: in a worktree, or when the
+    /// MCP tool is not among the tools on offer, the shell runs <c>codegraph explore</c>, and a file is read
+    /// directly only when that fails.
+    /// </remarks>
+    [Fact]
+    public void EveryAgentFileStatesTheStopRuleAndTheDiscoveryOrder()
+    {
+        string[] agents = Directory.GetFiles(Path.Combine(ProductRoot, "agents"), "*.md");
+
+        Assert.NotEmpty(agents);
+
+        string[] offenders =
+        [
+            .. agents
+                .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                .Where(file => !file.Text.Contains("codegraph explore", StringComparison.Ordinal))
+                .Select(file => $"{Path.GetFileName(file.Path)}: no 'codegraph explore' discovery order")
+        ];
+
+        Assert.Empty(offenders);
+
+        string[] stillWarn =
+        [
+            .. agents
+                .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                .Where(file => file.Text.Contains("warn and continue", StringComparison.OrdinalIgnoreCase))
+                .Select(file => Path.GetFileName(file.Path))
+        ];
+
+        Assert.Empty(stillWarn);
+    }
+
+    /// <summary>
+    /// A tool failure is routed to the orchestrator and listed among the hard stops in autonomous mode.
+    /// </summary>
+    /// <remarks>
+    /// A required tool that cannot be repaired is the one failure an autonomous run cannot resolve for
+    /// itself: it needs an install the run may not perform. Listing it with the other hard stops is what
+    /// stops the run from continuing to a worker that would answer from absent joins.
+    /// </remarks>
+    [Fact]
+    public void ConductorAutonomyContractListsToolFailureAmongTheHardStops()
+    {
+        string autonomy = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"));
+        int hardStops = autonomy.IndexOf("## Hard stops", StringComparison.Ordinal);
+        int toolFailure = autonomy.IndexOf("STATUS: TOOL_FAILURE", StringComparison.Ordinal);
+
+        Assert.True(hardStops >= 0, "'autonomy.md' must keep its 'Hard stops' section.");
+        Assert.True(
+            toolFailure > hardStops,
+            "'autonomy.md' must list 'STATUS: TOOL_FAILURE' as a hard stop in autonomous mode.");
+    }
+
+    /// <summary>
+    /// The architect compares <c>repo=</c> rather than <c>root=</c>, so a worktree of this repository is not
+    /// mistaken for a foreign one.
+    /// </summary>
+    /// <remarks>
+    /// D25: every docs response now carries <c>repo=</c>. An architect that still compares <c>root=</c>
+    /// abandons a correct corpus as "the wrong repository" whenever it plans from a worktree, which is the
+    /// case the whole slice exists to make work.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/architect.md")]
+    [InlineData("agents/architect/references/plan-authoring.md")]
+    public void ArchitectSurfacesCompareTheRepositoryRatherThanTheRoot(string relativePath)
+    {
+        string text = File.ReadAllText(
+            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("repo=", text, StringComparison.Ordinal);
+        Assert.Contains("worktree", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The run-start step is one command, and every surface that describes it names that command. A
+    /// reference that describes the step without naming the command leaves the agent to reconstruct it
+    /// from prose, which is how the two entry points drifted apart in the first place.
+    /// </summary>
+    /// <param name="relativePath">A run-start surface, relative to the canonical Squad source root.</param>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    [InlineData("agents/conductor/references/intake-path.md")]
+    [InlineData("agents/conductor/references/plan-path.md")]
+    public void RunStartSurfacesNameTheRunStartCommand(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Matches(RunStartCommand, text);
+    }
+
+    /// <summary>
+    /// The <c>run start</c> invocation the run-start surfaces must name, matched tolerantly because the
+    /// prose around it is free to wrap or emphasise the command.
+    /// </summary>
+    private static readonly Regex RunStartCommand = new(
+        @"kyber-weave\s+run\s+start\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
@@ -1724,11 +2332,13 @@ public sealed class SquadCanonicalContentTests
     /// Resolves an MSBuild item path relative to the project directory, expanding the
     /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
     /// </summary>
-    private static string ResolveProjectPath(string projectDirectory, string item) =>
-        Path.Combine(
+    private static string ResolveProjectPath(string projectDirectory, string item)
+    {
+        return Path.Combine(
             projectDirectory,
             item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
                 .Replace('\\', Path.DirectorySeparatorChar));
+    }
 
     private static bool IsVersionedIdentity(string name)
     {
@@ -1836,32 +2446,256 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The session-title bullet of a response-guidance document: the single line that opens with the
-    /// instruction to name the session after the work, or null when the document carries none.
+    /// Reads a canonical product file, asserting its presence first so a moved or missing artifact
+    /// reports the absent path rather than an I/O exception.
     /// </summary>
-    private static string? SessionTitleBullet(string guidance) =>
-        guidance
-            .Split('\n')
-            .Select(line => line.TrimEnd('\r'))
-            .FirstOrDefault(line => line.TrimStart().StartsWith(SessionTitleBulletLead, StringComparison.Ordinal));
+    private static string ReadProductFile(string relativePath)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>The blank-line separated blocks of a document, so an assertion reads a whole instruction.</summary>
+    private static string[] Paragraphs(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    /// <summary>The trimmed lines that name a <c>kyber-weave review gates</c> command.</summary>
+    private static string[] ReviewCommandLines(string text)
+    {
+        return
+        [
+            .. text.Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => line.Contains("kyber-weave review gates", StringComparison.Ordinal))
+        ];
+    }
 
     /// <summary>
-    /// True when the session-title bullet carries both of its conditions. Scoped to that bullet because
-    /// the conditions are what constrain the instruction: a document that says "never fabricate" in
-    /// some other bullet, while its session-title instruction asks for a title unconditionally, has no
-    /// guard where the guard belongs.
+    /// The session-title bullet, including continuation lines, or null when the document carries
+    /// none. Continuation lines belong to the bullet: the requirement is read from the instruction
+    /// it governs, not from a neighbouring bullet.
     /// </summary>
-    private static bool CarriesSessionTitleGuard(string guidance)
+    private static string? SessionTitleBullet(string guidance)
+    {
+        return ListItemStartingWith(guidance, SessionTitleBulletLead);
+    }
+
+    /// <summary>
+    /// True when the session-title bullet tells the agent to set the title and does not tell the
+    /// agent to skip it. Scoped to that bullet so a requirement in some other bullet cannot satisfy
+    /// a session-title instruction that omits it or hedges it.
+    /// </summary>
+    private static bool RequiresSessionTitle(string guidance)
     {
         string? bullet = SessionTitleBullet(guidance);
         return bullet is not null
-               && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
-               && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+               && bullet.Contains(SessionTitleSetInstruction, StringComparison.Ordinal)
+               && !ContainsSessionTitleHedge(bullet);
+    }
+
+    /// <summary>
+    /// The pull-request title list item, including its continuation lines, or null when the
+    /// document has none.
+    /// </summary>
+    private static string? PrTitleBullet(string guidance)
+    {
+        return ListItemStartingWith(guidance, "- **PR Title.**");
+    }
+
+    /// <summary>
+    /// True when the pull-request bullet sets the session title from the submitted pull request,
+    /// shows the <c>#&lt;number&gt; &lt;title&gt;</c> example, and the sentence that tracks a
+    /// retitle does not tell the agent to skip the title.
+    /// </summary>
+    private static bool PrTitleBulletRequiresTheSessionTitle(string guidance)
+    {
+        string? bullet = PrTitleBullet(guidance);
+        if (bullet is null
+            || !bullet.Contains(PrTitleSetInstruction, StringComparison.Ordinal)
+            || !bullet.Contains(PrTitleExample, StringComparison.Ordinal)
+            || ContainsSessionTitleHedge(bullet))
+        {
+            return false;
+        }
+
+        foreach (string sentence in bullet.Split('.',
+                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!sentence.Contains(PrTitleRetitleInstruction, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return !ContainsSessionTitleHedge(sentence);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Fails when a session-title bullet tells an agent not to set a session title. Other bullets
+    /// are out of scope: the same words there are not this instruction.
+    /// </summary>
+    private static void AssertShippedDefaultOmitsSessionTitleHedges(string guidance)
+    {
+        Assert.True(
+            SessionTitleBulletsOmitHedges(guidance, out string? offending),
+            $"The session-title guidance must not tell an agent '{offending}'.");
+    }
+
+    /// <summary>
+    /// True when neither the session-title bullet nor the pull-request bullet carries a general
+    /// skip. A missing bullet is not a hedge; the presence pins cover that.
+    /// </summary>
+    private static bool SessionTitleBulletsOmitHedges(string guidance, out string? offending)
+    {
+        offending = null;
+        foreach (string? bullet in new[] { SessionTitleBullet(guidance), PrTitleBullet(guidance) })
+        {
+            if (bullet is null)
+            {
+                continue;
+            }
+
+            foreach (string hedge in SessionTitleHedges)
+            {
+                if (bullet.Contains(hedge, StringComparison.Ordinal))
+                {
+                    offending = hedge;
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The shipped default's set, submit, and retitle sentences each name Factory and how it
+    /// derives the title. A later sentence does not stand in for that.
+    /// </summary>
+    private static void AssertShippedDefaultStatesTheFactorySessionTitleLimit(string guidance)
+    {
+        AssertSentenceCarriesTheFactoryLimit(
+            SessionTitleBullet(guidance) ?? string.Empty,
+            SessionTitleSetInstruction);
+        AssertSentenceCarriesTheFactoryLimit(
+            PrTitleBullet(guidance) ?? string.Empty,
+            PrTitleSetInstruction);
+        AssertSentenceCarriesTheFactoryLimit(
+            PrTitleBullet(guidance) ?? string.Empty,
+            PrTitleRetitleInstruction);
+    }
+
+    /// <summary>
+    /// The sentence containing <paramref name="instruction"/> also states the Factory limit.
+    /// </summary>
+    private static void AssertSentenceCarriesTheFactoryLimit(string text, string instruction)
+    {
+        string sentence = SentenceContaining(text, instruction) ?? string.Empty;
+        Assert.Contains(instruction, sentence, StringComparison.Ordinal);
+        Assert.Contains(FactorySessionTitleException, sentence, StringComparison.Ordinal);
+        Assert.Contains(FactorySessionTitleMechanism, sentence, StringComparison.Ordinal);
+    }
+
+    /// <summary>The sentence in <paramref name="text"/> that contains <paramref name="instruction"/>.</summary>
+    private static string? SentenceContaining(string text, string instruction)
+    {
+        foreach (string sentence in text.Split('.',
+                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (sentence.Contains(instruction, StringComparison.Ordinal))
+            {
+                return sentence;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The paragraph that opens with <paramref name="lead"/>, or empty when the document has none.
+    /// </summary>
+    private static string ParagraphStartingWith(string text, string lead)
+    {
+        string[] lines = text.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].StartsWith(lead, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            List<string> paragraph = [lines[i].Trim()];
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                if (lines[j].Length == 0)
+                {
+                    break;
+                }
+
+                paragraph.Add(lines[j].Trim());
+            }
+
+            return string.Join(' ', paragraph);
+        }
+
+        return string.Empty;
+    }
+
+    private static bool ContainsSessionTitleHedge(string text)
+    {
+        foreach (string hedge in SessionTitleHedges)
+        {
+            if (text.Contains(hedge, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The list item that opens with <paramref name="lead"/>, including continuation lines, or
+    /// null when the document has none.
+    /// </summary>
+    private static string? ListItemStartingWith(string guidance, string lead)
+    {
+        string[] lines = guidance.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].TrimStart().StartsWith(lead, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            List<string> item = [lines[i].Trim()];
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                if (lines[j].Length == 0 || lines[j].TrimStart().StartsWith("- ", StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                item.Add(lines[j].Trim());
+            }
+
+            return string.Join(' ', item);
+        }
+
+        return null;
     }
 
     /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
-    private static bool RestatesTheShape(string text) =>
-        RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+    private static bool RestatesTheShape(string text)
+    {
+        return RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+    }
 
     /// <summary>
     /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
@@ -1931,10 +2765,12 @@ public sealed class SquadCanonicalContentTests
     /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
     /// order, the case, and the closing full stop all still have to match.
     /// </summary>
-    private static string WithoutEmphasis(string text) =>
-        text.Replace("*", string.Empty, StringComparison.Ordinal)
+    private static string WithoutEmphasis(string text)
+    {
+        return text.Replace("*", string.Empty, StringComparison.Ordinal)
             .Replace("_", string.Empty, StringComparison.Ordinal)
             .Replace("`", string.Empty, StringComparison.Ordinal);
+    }
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {

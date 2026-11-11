@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
@@ -19,16 +20,40 @@ namespace KyberWeave.Core.Doctor;
 ///         first error line, truncated, and the environment is never read or shown.
 ///     </para>
 /// </remarks>
-public static class McpLiveProbe
+public static partial class McpLiveProbe
 {
+    /// <summary>
+    ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens:
+    ///     <c>branch=</c>, <c>repo=</c>, <c>rev=</c>, <c>dirty=</c> and <c>documents=</c>.
+    /// </summary>
+    /// <remarks>
+    ///     The tokens are anchored on the fixed trailing order guaranteed by <c>CorpusProvenance.Line</c>
+    ///     (<c>rev=</c>, <c>dirty=</c>, <c>documents=</c> at end-of-line, preceded by optional <c>branch=</c>
+    ///     and <c>repo=</c>). Parsing from the right prevents root and repository paths containing token-like
+    ///     substrings (such as <c>rev=evil</c> or spaces) from being prematurely truncated.
+    /// </remarks>
+    [GeneratedRegex(@"(?:(?:\s+branch=\S+)?\s+repo=.*?(?:\s+branch=\S+)?|\s+branch=\S+)?\s+rev=\S+\s+dirty=\S+\s+documents=\S+$")]
+    private static partial Regex TrailingMetadataRegex();
     /// <summary>The MCP protocol revision the probe offers. The server answers with the revision it supports.</summary>
     private const string ProtocolVersion = "2024-11-05";
 
     /// <summary>The prefix the server puts on the first line of its provenance block.</summary>
     private const string ProvenancePrefix = "provenance: root=";
 
+    /// <summary>The flag that stops the server refreshing CodeGraph during the probe's tool call.</summary>
+    private const string NoCodeGraphRefreshFlag = "--no-codegraph-refresh";
+
     /// <summary>The longest a child stderr line is allowed into a failure reason.</summary>
     private const int MaxDetailLength = 160;
+
+    /// <summary>The handshake failure a larger budget can actually help.</summary>
+    private const string NoAnswerWithinBudget = "the server did not answer within the MCP budget";
+
+    /// <summary>The rule id the server writes to stderr when the folder has no host configuration.</summary>
+    private const string NoHostConfigurationCode = "KW-MCP-ROOT-001";
+
+    /// <summary>How long to let stderr finish once a server has closed its output.</summary>
+    private static readonly TimeSpan ServerErrorWait = TimeSpan.FromSeconds(1);
 
     /// <summary>Runs the live proof and returns the <c>mcp.*</c> checks that ran.</summary>
     /// <param name="root">The resolved repository root that the server's provenance must name.</param>
@@ -66,9 +91,12 @@ public static class McpLiveProbe
             // working directory. Passing the flag is what makes the probe answer for the repository this
             // run resolved; without it the child inherits doctor's cwd and a healthy target can fail
             // mcp.root, or pass against the wrong checkout.
+            //
+            // --no-codegraph-refresh keeps the promise --check makes. The server refreshes CodeGraph on its
+            // first tool call, so a probe without this flag would make the read-only verb write an index.
             return new StdioSession(
                 options.McpExecutable,
-                ["--repo-root", root],
+                ["--repo-root", root, NoCodeGraphRefreshFlag],
                 options.McpTimeout);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)
@@ -117,23 +145,23 @@ public static class McpLiveProbe
                 "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}"))
         {
             // A server that exited between starting and the first request is a failed handshake, not a crash.
-            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options));
+            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options, root));
             return;
         }
 
         if (!TryRead(session, out string? initializeReply, out string? handshakeFailure))
         {
-            checks.Add(Handshake(false, handshakeFailure!, session, options));
+            checks.Add(Handshake(false, handshakeFailure!, session, options, root));
             return;
         }
 
         if (!TryResult(initializeReply!, out _))
         {
-            checks.Add(Handshake(false, "initialize did not return a result", session, options));
+            checks.Add(Handshake(false, "initialize did not return a result", session, options, root));
             return;
         }
 
-        checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options));
+        checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options, root));
 
         if (!TrySend(session, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
             || !TrySend(
@@ -186,6 +214,13 @@ public static class McpLiveProbe
                 "kyber-weave update");
 
         string served = FirstLine(text[(index + ProvenancePrefix.Length)..]).Trim();
+
+        // The provenance line carries metadata after the root, e.g. `root=<path> rev=<rev> dirty=<...> documents=<n>`.
+        // Strip the metadata while preserving spaces inside the real path, then compare the bare root to the resolved repo.
+        Match metadataMatch = TrailingMetadataRegex().Match(served);
+        if (metadataMatch.Success)
+            served = served[..metadataMatch.Index].Trim();
+
         bool matches = served.Length > 0 && SamePath(served, root);
         return matches
             ? new DoctorCheck("mcp.root", true, "server answers for this repository", null)
@@ -196,13 +231,34 @@ public static class McpLiveProbe
                 "stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check");
     }
 
-    private static DoctorCheck Handshake(bool passed, string reason, StdioSession session, DoctorOptions options)
+    private static DoctorCheck Handshake(
+        bool passed,
+        string reason,
+        StdioSession session,
+        DoctorOptions options,
+        string root)
     {
         if (passed)
             return new DoctorCheck("mcp.handshake", true, reason, null);
 
-        string detail = session.FirstErrorLine is { } line ? $" ({Truncate(line)})" : string.Empty;
-        return new DoctorCheck("mcp.handshake", false, reason + detail, TimeoutFix(options));
+        bool timedOut = string.Equals(reason, NoAnswerWithinBudget, StringComparison.Ordinal);
+        string? serverError = timedOut ? session.FirstErrorLine : session.WaitForFirstErrorLine(ServerErrorWait);
+
+        if (serverError?.StartsWith(NoHostConfigurationCode, StringComparison.Ordinal) == true)
+        {
+            return new DoctorCheck(
+                "mcp.handshake",
+                false,
+                "the docs server refused to start because this folder has no .kyber-weave/kyber-weave.yml. " +
+                "A new worktree only has that file if its base branch has it committed",
+                $"kyber-weave docs init {ShellQuote.Quote(root)}");
+        }
+
+        string detail = serverError is { } line ? $" ({Truncate(line)})" : string.Empty;
+        string fix = timedOut
+            ? TimeoutFix(options)
+            : $"read the server's own error: {ShellQuote.Quote(options.McpExecutable)} --repo-root {ShellQuote.Quote(root)}";
+        return new DoctorCheck("mcp.handshake", false, reason + detail, fix);
     }
 
     /// <summary>
@@ -220,7 +276,7 @@ public static class McpLiveProbe
         catch (TimeoutException)
         {
             line = null;
-            failure = "the server did not answer within the MCP budget";
+            failure = NoAnswerWithinBudget;
             return false;
         }
         catch (EndOfStreamException)

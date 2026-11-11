@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -7,12 +8,18 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Contract for task 1.2 (shipped rules): the 18 rules in the embedded
+/// Contract for task 1.2 (shipped rules): the shipped rules in the embedded
 /// <c>default-rules.yml</c> equal the catalogue, validate with zero errors, and carry
 /// the <c>OWNER-001</c> map, the <c>LENS-001</c> path table and the tuned thresholds.
 /// Also covers <c>KW-ARB-CONFIG-002/-003/-004/-006/-007/-008</c>.
 /// RED: the embedded rules resource and <c>RuleValidator</c> do not exist yet.
 /// </summary>
+/// <remarks>
+/// The catalogue below is ordered, so it pins two things at once: the ids, which are
+/// permanent, and their position in the file, which keeps a new rule out of the middle of
+/// <c>rules:</c> where a reader would take it for a renumbering. A new id is therefore
+/// appended, never inserted.
+/// </remarks>
 public sealed class ArbiterDefaultRulesTests
 {
     private static readonly string[] ExpectedRuleIds =
@@ -35,6 +42,8 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-CLAIM-001",
         "KW-ARB-GATE-CORROBORATED-001",
         "KW-ARB-GATE-001",
+        "KW-ARB-PLANREAD-001",
+        "KW-ARB-GATE-REPORT-001",
     ];
 
     [Fact]
@@ -274,6 +283,114 @@ public sealed class ArbiterDefaultRulesTests
         Assert.Empty(remaining);
     }
 
+    /// <summary>
+    /// <c>doctor</c> stays quiet for <c>jev-1.13-free</c> only when every enabled step-1
+    /// rule names it. A check scoped to one rule id stays green when a later step-1 rule
+    /// omits the free id and <c>KW-ARB-CONFIG-007</c> warns for that rule.
+    /// </summary>
+    [Fact]
+    public void Jev113Free_ProducesNoUntunedModelDiagnostic()
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel("jev-1.13-free")).ToList();
+        Assert.Empty(diagnostics);
+
+        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        {
+            if (!rule.Enabled || rule.Ask is null)
+            {
+                continue;
+            }
+
+            Assert.Contains("jev-1.13-free", rule.Ask.TunedFor ?? []);
+        }
+    }
+
+    /// <summary>
+    /// The measured ids stay quiet in <c>doctor</c> only when every enabled step-1 rule
+    /// names them. The <c>typesafe/</c> ids are OpenRouter's names for the same releases.
+    /// </summary>
+    [Theory]
+    [InlineData("jev-1.14.0")]
+    [InlineData("typesafe/jev-1.14")]
+    [InlineData("typesafe/jev-1.13")]
+    public void MeasuredJevIds_ProduceNoUntunedModelDiagnostic(string model)
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel(model)).ToList();
+        Assert.Empty(diagnostics);
+
+        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        {
+            if (rule.Enabled && rule.Ask is not null)
+            {
+                Assert.Contains(model, rule.Ask.TunedFor ?? []);
+            }
+        }
+    }
+
+    /// <summary>A state too large for the smallest budget still fits a Jev release on either route.</summary>
+    [Theory]
+    [InlineData("jev-1.14.0", false)]
+    [InlineData("typesafe/jev-1.14", false)]
+    [InlineData("typesafe/jev-1.13", false)]
+    [InlineData("typesafe/jev-router", true)]
+    public void StateBudget_GivesJevReleasesTheJevBudget(string model, bool overBudget)
+    {
+        Assert.Equal(overBudget, StateBudget.IsOverBudget(model, 10_000, 100, 10_100, 30_300, 1));
+    }
+
+    /// <summary>
+    /// <c>jev-1.13.0</c> stays a supported pin after the default moves to 1.14.
+    /// </summary>
+    [Fact]
+    public void Jev113_StaysTunedAfterTheDefaultMoves()
+    {
+        Assert.Empty(RuleValidator.CheckModelTuning(WithModel("jev-1.13.0")));
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> is the free id of the shipped <c>jev-1.13.0</c> threshold.
+    /// <c>KW-ARB-CLAIM-001</c> accepts it at the same floor.
+    /// </summary>
+    [Fact]
+    public void Claim001_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-CLAIM-001", 0.9);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> floor on <c>KW-ARB-SCOPE-002</c>.
+    /// </summary>
+    [Fact]
+    public void Scope002_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-SCOPE-002", 0.8);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> floor on <c>KW-ARB-OWNER-002</c>.
+    /// </summary>
+    [Fact]
+    public void Owner002_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        AssertChoiceAcceptsFreeModel("KW-ARB-OWNER-002", 0.8);
+    }
+
+    /// <summary>
+    /// <c>jev-1.13-free</c> shares the shipped <c>jev-1.13.0</c> ceiling on <c>KW-ARB-LENS-001</c>.
+    /// </summary>
+    [Fact]
+    public void Lens001_AcceptsJev113FreeAtTheJev113Threshold()
+    {
+        ArbiterRule lens = Shipped("KW-ARB-LENS-001");
+        Assert.NotNull(lens.Ask);
+        Assert.Equal("noul", lens.Ask.Type);
+        Assert.Null(lens.Ask.ConfidenceAtLeast);
+        Assert.Equal(0.1, lens.Ask.ProbabilityBelow);
+        Assert.Contains("jev-1.13.0", lens.Ask.TunedFor ?? []);
+        Assert.Contains("jev-1.13-free", lens.Ask.TunedFor ?? []);
+        AssertNoUntunedWarning("KW-ARB-LENS-001");
+    }
+
     private static string FirstMapOwner(string path)
     {
         foreach (ArbiterFileKindMapEntry entry in ArbiterConfig.ProductDefaults.OwnerFileKindMap)
@@ -287,6 +404,33 @@ public sealed class ArbiterDefaultRulesTests
 
     private static ArbiterRule Shipped(string id) =>
         ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);
+
+    private static ArbiterConfig WithModel(string model) =>
+        ArbiterConfig.ProductDefaults with
+        {
+            Provider = new ArbiterProviderConfig(
+                ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", model, 3000),
+        };
+
+    private static void AssertChoiceAcceptsFreeModel(string ruleId, double confidenceAtLeast)
+    {
+        ArbiterRule rule = Shipped(ruleId);
+        Assert.NotNull(rule.Ask);
+        Assert.Equal("choice", rule.Ask.Type);
+        Assert.Equal(confidenceAtLeast, rule.Ask.ConfidenceAtLeast);
+        Assert.Null(rule.Ask.ProbabilityBelow);
+        Assert.Contains("jev-1.13.0", rule.Ask.TunedFor ?? []);
+        Assert.Contains("jev-1.13-free", rule.Ask.TunedFor ?? []);
+        AssertNoUntunedWarning(ruleId);
+    }
+
+    private static void AssertNoUntunedWarning(string ruleId)
+    {
+        List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel("jev-1.13-free")).ToList();
+        Assert.DoesNotContain(
+            diagnostics,
+            diagnostic => diagnostic.Code == RuleValidator.UntunedModel && diagnostic.Subject == ruleId);
+    }
 
     private static ArbiterConfig ReplaceRule(ArbiterRule replacement) =>
         ArbiterConfig.ProductDefaults with

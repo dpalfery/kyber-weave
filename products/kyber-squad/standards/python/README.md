@@ -132,12 +132,19 @@ Test authorship follows `<test-coding-standard>`. This standard requires that th
 be testable: dependency injection, mockable interfaces, no global state. Test
 authorship belongs to `test-dev`.
 
-## Commands
+## Completion
 
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
-ruff check . && ruff format --check .
+ruff check . && ruff format --check .   # lint, then the format check
 mypy --strict
-pytest
+python -m build                          # the build: a wheel and sdist from pyproject.toml
+pytest <path>::<test_name>               # the tests covering your change
 ```
+
+Ruff is the formatter, and `ruff format --check` reports a file it would rewrite without writing
+it. `python -m build` is the build — it proves the package metadata and the module layout resolve
+from `pyproject.toml` alone, which an editable install does not. The `pytest` line is the test command,
+filtered to the tests covering your change; the unfiltered run is the gate the review council and CI run,
+and a dev agent never runs it.

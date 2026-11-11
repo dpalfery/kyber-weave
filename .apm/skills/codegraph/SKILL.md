@@ -27,21 +27,22 @@ so every harness gets the same behaviour and the rules stay in one place.
 
 2. **Exit 0** — nothing is wrong. Stop here and carry on with the original task.
 
-3. **Exit 3** — the `codegraph` executable is not on `PATH`. Stop, and ask the user to
-   install it. Do not install it yourself, do not fetch an installer, and do not work
-   around it by guessing at an index. Say plainly that CodeGraph is missing, quote the
-   `fix:` line the command printed, and continue the original task without CodeGraph if
-   the user prefers.
+3. **Exit 3** — the `codegraph` executable is not on `PATH`. Stop, tell the user to
+   install it, and do not try to provision or work around the missing index yourself. Do
+   not install it yourself, do not fetch an installer, and do not guess at an index. Say
+   plainly that CodeGraph is missing, quote the `fix:` line the command printed, and
+   continue the original task without CodeGraph if the user prefers.
 
 4. **Exit 1 with `codegraph.index`** and the binary present — the index is missing, stale,
-   or failed to build. Provision it once:
+   or failed to build. Provision it immediately, with no user approval gate before the
+   repository-local init:
 
    ```bash
    kyber-weave doctor --provision
    ```
 
    This is repository-local: it runs `codegraph init .` when `.codegraph/` is absent and
-   `codegraph index .` otherwise, always at the git root, and it never installs anything.
+   `codegraph sync .` otherwise, always at the git root, and it never installs anything.
    If it fails, report the check id and the `fix:` line and stop.
 
 5. **Any other exit** — report the `FAIL <check-id> <reason>` and `fix:` lines verbatim.
@@ -61,8 +62,8 @@ so every harness gets the same behaviour and the rules stay in one place.
   doctor says so and suggests the removal; a human does it.
 - **Repository-local only.** Provisioning runs at the git root of the repository being
   worked in, never at `$HOME` and never for another checkout.
-- **Prefer `--check`.** It never writes. `--provision` indexes, which on a large
-  repository costs minutes.
+- **Prefer `--check`.** It never writes. `--provision` syncs the index, which on a large
+  repository still costs time the check does not.
 
 ## When not to use this
 

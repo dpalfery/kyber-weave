@@ -95,6 +95,33 @@ public sealed class ArbiterClassificationTests
         Assert.Equal(2, block.LineCount);
     }
 
+    [Theory]
+    [InlineData("PLAN_FILE: /abs\nPLAN_FILE: docs/plans/plan.md\n\nwork", "PLAN_FILE")]
+    [InlineData("TASK: bad value\nTASK: T1\n\nwork", "TASK")]
+    public void HeaderGrammar_InvalidThenValidSightingLeavesFactAbsent(string prompt, string name)
+    {
+        HeaderBlock block = HeaderBlock.Parse(prompt);
+
+        Assert.DoesNotContain(name, block.Headers.Keys);
+        Assert.Contains(name, block.RejectedNames);
+    }
+
+    [Theory]
+    [InlineData("PLAN_FILE: /tmp/evil/docs/plans/x.md\n\nINTAKE: docs/todo/item.md")]
+    [InlineData("TASK: bad value\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: true\nKYBER-ARBITER: true\n\nWrite the plan.")]
+    [InlineData("KYBER-ARBITER: false\n\nWrite the plan.")]
+    public void Classification_RejectedHeaderOnProjectWideHarnessStaysGated(string prompt)
+    {
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: "architect", harness: "factory"),
+            "architect",
+            prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
+        Assert.Equal("conductor", plan.Caller);
+    }
+
     [Fact]
     public void HeaderGrammar_MalformedValuesLeaveFactAbsent()
     {
@@ -185,12 +212,53 @@ public sealed class ArbiterClassificationTests
     [Fact]
     public void CallerInference_PlannerTargetMeansConductor()
     {
+        string prompt = Marked("INTAKE: docs/todo/item.md");
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
-            Dispatch("INTAKE: docs/todo/item.md", target: "architect"),
+            Dispatch(prompt, target: "architect"),
             "architect",
-            "INTAKE: docs/todo/item.md");
+            prompt);
 
         Assert.Equal("conductor", plan.Caller);
+    }
+
+    [Theory]
+    [InlineData("factory")]
+    [InlineData("antigravity")]
+    public void Classification_UnmarkedPlannerTargetOnProjectWideHarnessPasses(string harness)
+    {
+        const string Prompt = "Plan the upgrade.";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: harness),
+            "architect",
+            Prompt);
+
+        Assert.Null(plan.Trigger);
+        Assert.Null(plan.Caller);
+    }
+
+    [Fact]
+    public void Classification_UnmarkedPlannerTargetOnTrustedHarnessStaysGated()
+    {
+        const string Prompt = "Plan the upgrade.";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: "claude"),
+            "architect",
+            Prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
+        Assert.Equal("conductor", plan.Caller);
+    }
+
+    [Fact]
+    public void Classification_UnmarkedPlanFileHeaderStillInfersConductor()
+    {
+        const string Prompt = "PLAN_FILE: docs/plans/plan.md\n\nwork";
+        TriggerClassification plan = TriggerClassifier.ClassifySingle(
+            Dispatch(Prompt, target: "architect", harness: "factory"),
+            "architect",
+            Prompt);
+
+        Assert.Equal("delegate.planner", plan.Trigger);
     }
 
     [Fact]
@@ -440,5 +508,32 @@ public sealed class ArbiterClassificationTests
 
         Assert.Null(plan.Caller);
         Assert.DoesNotContain("PLAN_FILE", plan.Headers.Keys);
+    }
+
+    /// <summary>
+    /// A <c>RUN-START: true</c> dispatch is an investigate, never a delegate.
+    /// </summary>
+    /// <remarks>
+    /// The marker exists because the conductor may have no shell: it hands the run-start step to a
+    /// worker instead of running the tool itself. That worker gets no <c>PLAN_FILE</c>, and
+    /// <c>KW-ARB-PLAN-001</c> escalates a <c>delegate</c> carrying no plan, so classifying this
+    /// dispatch as <c>delegate</c> would refuse the very route the marker was created for. Classifying
+    /// it as <c>investigate</c> keeps the roster check and <c>KW-ARB-READONLY-001</c> doing their work
+    /// over it.
+    /// </remarks>
+    [Fact]
+    public void Classification_RunStartMarkerIsInvestigateNotDelegate()
+    {
+        // csharp-dev is an implementation-class target, so conductor-to-implementation is otherwise
+        // the textbook delegate row. Only the marker separates the two.
+        string prompt = Marked("RUN-START: true\n\nRun the run-start step and report the facts.");
+
+        TriggerClassification runStart = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: "csharp-dev", harness: "antigravity", harnessCaller: "conductor"),
+            "csharp-dev",
+            prompt);
+
+        Assert.NotEqual("delegate", runStart.Trigger);
+        Assert.Equal("investigate", runStart.Trigger);
     }
 }

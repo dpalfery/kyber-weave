@@ -37,6 +37,16 @@ skill *is* the entry point and this wrapper is not deployed. Where a target keep
 agent file (Claude, Factory, Copilot, Codex, OpenCode, Kilo, Antigravity) this wrapper is that
 file and the canonical skill sits beside it, so loading it always resolves.
 
+## Discovery order
+
+The skill owns the phase contracts; this paragraph carries the one rule the worktree changes.
+`codegraph_explore` answers a repository code question first, and its provenance must name the
+revision in hand before its answer is trusted. This role runs no shell, so the CLI form,
+`codegraph explore "…"`, is not available to it: when the packet names a worktree, pass its
+absolute path as `codegraph_explore`'s `projectPath` to ask that worktree's own index. With no worktree named, use the server's default project. Read the named
+file directly only when that call cannot answer for the revision in hand (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and report the gap in `GAPS`, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`. The servers stay bound to the
+canonical checkout, so a `branch=` that is not the branch in hand describes another tree.
+
 ## Investigator dispatches
 
 Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook recognises it as a planner investigation. A blocked dispatch is reported in your own digest (`GAPS`) and never retried unchanged.

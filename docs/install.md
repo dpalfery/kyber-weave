@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 ---
 
 # Installing Kyber-Weave
@@ -165,8 +165,11 @@ Kyber-Weave release tag it shipped in. The two version lines are independent.
 The Arbiter has its own floor on the same pattern: `kyber-weave-arbiter-<rid>` assets first
 appear in **0.1.7-rc.17**. Releases before that publish none, so the script installs the CLI
 and MCP alone when it is not met. `kyber-weave-arbiter --version` prints
-`kyber-weave-arbiter <semver>`; `squad doctor` and `arbiter doctor` probe it. See
-[distribution](distribution.md#per-asset-version-floors) for the shared mechanism.
+`kyber-weave-arbiter <semver>`; `squad doctor` and `arbiter doctor` probe it. The Arbiter
+install command defaults to global scope, records the target in `arbiter.global.targets` in
+`~/.kyber-weave/kyber-weave.yml`, and keeps project scope as the opt-in path with
+`--project` and `--path` (project only). See [distribution](distribution.md#per-asset-version-floors)
+for the shared mechanism.
 
 ## The KyberDash tray
 
@@ -505,8 +508,10 @@ kyberdash menubar --update
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
 sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
 arbiter and reports an absent one rather than creating it. After replacing binaries, update
-also re-renders the arbiter hooks/scripts for each registered project with `arbiter.enabled`
-(reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render.
+also re-renders the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml` and for each registered project with `arbiter.enabled`
+(reusing the Squad update path); `--no-arbiter` or an absent arbiter skips the re-render. The re-render
+runs in the new release after the swap, so it writes the hook source that release ships, not the source of
+the release you updated from.
 `--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
 logged. To add it later, re-run `install.sh`. Updating to a release below the version floor
@@ -515,6 +520,18 @@ leaves `kyberdash` alone for the same reason the install skips it.
 `--release-candidate` matches `install.sh --prerelease`: it reads the GitHub Releases
 list (not `/releases/latest`) and takes the newest non-draft tag. Do not combine it with
 a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc.1`).
+
+**If an update ends with an error after the binaries were installed.** The message begins with
+`kyber-weave <version> is installed, but ...`, which means the binaries are already updated and only the
+final steps did not finish. Run `kyber-weave update <version>` with the version you are on (for example
+`kyber-weave update 0.1.8-rc.21`) to finish them. That pinned run takes the "already on" path and finishes the
+post-update steps. It re-renders the hooks when the KyberDash steps succeed, because a failed engine step ends
+the run before the hook refresh. Do not use bare `kyber-weave update` for this: it resolves the latest stable
+release, not the build you run, so on a pre-release build it can install an older stable release that predates
+`--finish-update`. A hook warning `warning: arbiter hooks were not refreshed: ...` exits 0 and says the same
+thing. If you updated from a build older than this change, its own updater can show
+`Could not load file or assembly` once. The binaries are installed; run `kyber-weave update <version>` with
+that same version once more.
 
 Global `kyber-weave --version` still prints the running binary; pinning is a positional
 argument so the two do not collide.
@@ -567,6 +584,19 @@ nineteen tools are renamed to say what they do. Nothing about a launch changed, 
 still starts a server — it starts one the repository no longer declares. The recommended release
 is a **minor** tag: the automatic version bump is patch-only, and a patch tag would understate
 what an operator has to do.
+
+#### Which MCP server answers which question
+
+Documentation lookup tools and KyberDash analytics are **different servers**. Do not wire one
+when you mean the other.
+
+| Client key | Launch | Answers |
+|---|---|---|
+| `kw-docs` | `kyber-weave-mcp --repo-root <repo>` | Governed documentation for a repository — [DocGraph MCP runbook](docgraph/mcp-runbook.md) |
+| `kw-dash` | `kyberdash mcp` | Read-only KyberDash analytics against a **running** engine — [KyberDash MCP setup](dash/mcp.md) |
+| `kw-arbiter` | `kyber-weave-arbiter serve` | Arbiter gates when enabled — [Kyber Arbiter](kyber-arbiter/README.md) |
+
+Prerequisite for `kw-dash`: run `kyberdash web --no-open` before `kyberdash mcp` can attach.
 
 | Old server key | New server key | Executable (unchanged) |
 |---|---|---|
@@ -636,14 +666,14 @@ sequence did (`docs init`, hand-edit `arbiter.enabled: true`, `squad install --t
 kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"
 ```
 
-It ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets
-`arbiter.enabled: true` non-destructively, renders the target through the existing Squad
-install pipeline, applies the provider (`--provider ""` means `none`), stores the key in the
-OS credential store, verifies, and prints the target's trust step. `--target` is required and
-validated against the Squad target roster; `--global` is rejected; a second run is an
-idempotent no-op. `--arbiter-key` is visible in argv and shell history — `--key-stdin` and
-`TYPESAFE_API_KEY` stay the safer paths. See the [Kyber Arbiter runbook](kyber-arbiter/runbook.md#setup-doctor-audit)
-and [ADR 0053](adr/0053-kyber-arbiter-three-step-decision-gates.md).
+It defaults to global scope, writes `~/.kyber-weave/kyber-weave.yml` (reusing the `docs init`
+scaffold), records the target in `arbiter.global.targets`, sets `arbiter.enabled: true`
+non-destructively, renders the target through the existing Squad install pipeline, applies the
+provider (`--provider ""` means `none`), stores the key in the OS credential store,
+verifies, and prints the target's trust step. `--project` opts into repository scope, `--path`
+is valid only with it, `--global --project` exits `2` with `KW-ARB-INSTALL-001`, and a second
+run is an idempotent no-op. `--arbiter-key` is visible in argv and shell history —
+`--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. See the [Kyber Arbiter runbook](kyber-arbiter/runbook.md#setup-doctor-audit) and [ADR 0053](adr/0053-kyber-arbiter-three-step-decision-gates.md).
 
 Without the Arbiter, scaffold the repository directly:
 

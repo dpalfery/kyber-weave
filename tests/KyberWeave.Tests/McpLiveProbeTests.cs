@@ -1,5 +1,7 @@
 using Xunit;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -129,6 +131,149 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// A folder with no host configuration makes the server refuse to start. The doctor names the missing file and the
+    /// command that adds it: raising the timeout, which it used to suggest, can never help a server that refused.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_NoHostConfiguration_NamesTheMissingFileAndTheCommandThatAddsIt()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string stub = DoctorHarness.WriteStub(
+            _stubs.Path,
+            "echo 'KW-MCP-ROOT-001: No Kyber-Weave host configuration was found for MCP root' >&2\nexit 1");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(stub),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains(".kyber-weave/kyber-weave.yml", handshake.Reason, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs init", handshake.Fix, StringComparison.Ordinal);
+        Assert.Contains(Root, handshake.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A server that exits before answering did not run out of time, so the remedy is to read its own error. Only a
+    /// server that really used up the budget is told to raise it.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ServerThatExitsBeforeAnswering_IsNotToldToRaiseTheTimeout()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string stub = DoctorHarness.WriteStub(_stubs.Path, "echo 'something else broke' >&2\nexit 1");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(stub),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains("something else broke", handshake.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-mcp", handshake.Fix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>.codegraph/</c> folder that was never initialised, such as one holding only a committed <c>.gitignore</c>,
+    /// is set up with <c>codegraph init</c> rather than failing the run.
+    /// </summary>
+    [Theory]
+    [InlineData(DoctorMode.Ensure)]
+    [InlineData(DoctorMode.Provision)]
+    public void FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root)
+                : DoctorHarness.Ok("1.5.0"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            mode,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        Assert.True(DoctorHarness.CheckNamed(report, "codegraph.index").Passed);
+        Assert.Single(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("index", StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// A <c>.codegraph/</c> folder that was never initialised makes <c>sync</c> and <c>index</c> both refuse. The fix the
+    /// doctor prints must be the one that works, <c>codegraph init .</c>, not the command that just failed.
+    /// </summary>
+    [Fact]
+    public void Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments =>
+            {
+                if (arguments.Contains("--version", StringComparer.Ordinal))
+                    return DoctorHarness.Ok("1.5.0");
+                return arguments.Contains("init", StringComparer.Ordinal)
+                    ? new ProcessResult(1, string.Empty, "disk full")
+                    : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root);
+            });
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Ensure,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
+        Assert.False(index.Passed);
+        Assert.Contains("not set up", index.Reason, StringComparison.Ordinal);
+        Assert.Contains("CodeGraph not initialized", index.Reason, StringComparison.Ordinal);
+        Assert.Equal("codegraph init .", index.Fix);
+    }
+
+    /// <summary>
+    /// Another message that merely contains "not initialized" is an ordinary failure. Running <c>init</c> for it would
+    /// hide the real error behind advice about a folder that is fine.
+    /// </summary>
+    [Fact]
+    public void Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal)
+                ? new ProcessResult(1, string.Empty, "telemetry not initialized, sync failed")
+                : DoctorHarness.Ok("1.5.0"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Provision,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
+            executor,
+            _ => null);
+
+        Assert.Equal("codegraph sync .", DoctorHarness.CheckNamed(report, "codegraph.index").Fix);
+        Assert.DoesNotContain(
+            executor.CallsTo("codegraph"),
+            call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
+    }
+
+    /// <summary>
     /// A server whose <c>docs_answer_question_from_repo_documentation</c> returns an error result fails <c>mcp.docs_explore</c> with exit 1. Process
     /// liveness is not enough: <c>docs_get_source_repository_and_revision</c> alone would pass here, which is why D8 chose <c>docs_answer_question_from_repo_documentation</c>.
     /// </summary>
@@ -167,6 +312,83 @@ public sealed class McpLiveProbeTests : IDisposable
 
         Assert.Equal(1, report.ExitCode);
         Assert.False(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
+    /// The real corpus provenance line includes metadata after the root path, and the root still has to match exactly.
+    /// Paths with spaces are legal and must not be truncated before comparison.
+    /// </summary>
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    public void McpLiveProbe_ProvenanceRootWithMetadata_PassesWhenRootMatches(string dirty)
+    {
+        string root = Path.Combine(_root.Path, "repo with spaces");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                ProvenanceCall(root, dirty))),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.True(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
+    /// When the server reports a different repository in the same metadata format, the doctor still fails the root check.
+    /// </summary>
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    public void McpLiveProbe_ProvenanceRootWithMetadata_MismatchFails(string dirty)
+    {
+        string root = Path.Combine(_root.Path, "repo with spaces");
+        string wrongRoot = Path.Combine(_root.Path, "other repo with spaces");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                ProvenanceCall(wrongRoot, dirty))),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
+    /// Older servers that emit only the bare root remain accepted for backward compatibility.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_BareProvenanceRoot_IsStillAccepted()
+    {
+        string root = Path.Combine(_root.Path, "bare repo");
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(
+                _stubs.Path,
+                DoctorHarness.InitializeReply,
+                call)),
+            DoctorHarness.Executor(root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.True(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
     }
 
     /// <summary>
@@ -335,14 +557,16 @@ public sealed class McpLiveProbeTests : IDisposable
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
-                DoctorHarness.WriteStub(_stubs.Path, "exit 0"),
+                DoctorHarness.WriteStub(
+                    _stubs.Path,
+                    $"read _initialize\nprintf '%s\\n' '{DoctorHarness.InitializeReply}'\nread _initialized\nread _call\nexit 0"),
                 TimeSpan.FromSeconds(2_000_000_000)),
             DoctorHarness.Executor(Root),
             _ => null);
 
-        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
-        Assert.False(handshake.Passed);
-        string fix = handshake.Fix ?? string.Empty;
+        DoctorCheck docsExplore = DoctorHarness.CheckNamed(report, "mcp.docs_explore");
+        Assert.False(docsExplore.Passed);
+        string fix = docsExplore.Fix ?? string.Empty;
         int marker = fix.IndexOf("--mcp-timeout ", StringComparison.Ordinal);
         Assert.True(marker >= 0, $"The remedy '{fix}' does not name a timeout to raise.");
         string suggested = fix[(marker + "--mcp-timeout ".Length)..].Trim();
@@ -350,4 +574,132 @@ public sealed class McpLiveProbeTests : IDisposable
             int.TryParse(suggested, out int seconds) && seconds > 0,
             $"The remedy suggested '{suggested}', which is not a timeout --mcp-timeout accepts.");
     }
+
+    /// <summary>
+    /// The probe starts the server with its CodeGraph refresh disabled, so <c>doctor --check</c> keeps
+    /// the promise its own description makes.
+    /// </summary>
+    /// <remarks>
+    /// D23: <c>--check</c> says it "never runs init or index", but the probe makes a real docs call, and
+    /// the server now refreshes CodeGraph on its first tool call. Without the flag the read-only verb
+    /// would write an index, and every read-only caller — run start, CI, a reviewer — would inherit a
+    /// write it was told would not happen.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_StartsTheServerWithCodeGraphRefreshDisabled()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string argvPath = Path.Combine(_stubs.Path, "argv.txt");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        Assert.Contains("--no-codegraph-refresh", File.ReadAllLines(argvPath));
+    }
+
+    /// <summary>
+    /// A provenance line carrying the branch and repository fields still passes <c>mcp.root</c> when the
+    /// root is this checkout.
+    /// </summary>
+    /// <remarks>
+    /// D24: the header gained <c>branch=</c> and <c>repo=</c>. The probe compares the served root to the
+    /// resolved one after stripping the metadata that follows it, so a metadata field it does not know
+    /// becomes part of the path it compares — and a healthy server answering for this very repository
+    /// fails the check. That is the failure this case prevents: the added fields must not turn a correct
+    /// server into a "wrong repository" diagnosis.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_ProvenanceWithBranchAndRepoMetadata_StillPassesMcpRoot()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string served = "provenance: root=" + Root
+            + " branch=main repo=" + Path.Combine(Root, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// A provenance line carrying a repository path with spaces in repo= still passes mcp.root.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ProvenanceWithSpacedRootAndRepo_StillPassesMcpRoot()
+    {
+        string spacedRoot = Path.Combine(Root, "repo with spaces");
+        Directory.CreateDirectory(Path.Combine(spacedRoot, ".codegraph"));
+        string served = "provenance: root=" + spacedRoot
+            + " branch=main repo=" + Path.Combine(spacedRoot, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            spacedRoot,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(spacedRoot),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// A repository path containing token-like substrings like "rev=evil" in root and repo
+    /// is not truncated by the metadata stripper.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_ProvenancePathContainingTokenSubstrings_StillPassesMcpRoot()
+    {
+        string evilRoot = Path.Combine(Root, "my rev=evil");
+        Directory.CreateDirectory(Path.Combine(evilRoot, ".codegraph"));
+        string served = "provenance: root=" + evilRoot
+            + " branch=main repo=" + Path.Combine(evilRoot, ".git")
+            + " rev=abc123 dirty=no documents=7";
+        string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\""
+            + served
+            + "\"}]}}";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            evilRoot,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(evilRoot),
+            _ => null);
+
+        Assert.True(
+            DoctorHarness.CheckNamed(report, "mcp.root").Passed,
+            $"A server answering '{served}' names this repository's root, so mcp.root must pass. "
+            + $"It reported: {DoctorHarness.CheckNamed(report, "mcp.root").Reason}");
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    private static string ProvenanceCall(string root, string dirty, string rev = "abc123", int documents = 7) =>
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + " rev=" + rev + " dirty=" + dirty + " documents=" + documents + "\"}]}}";
 }

@@ -277,7 +277,12 @@ public sealed class InFlightLedger
     /// in-flight paths a scope rule checks the dispatch against.
     /// </summary>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
-    public IReadOnlyList<string> InFlightPaths(string? excludeEventId = null)
+    /// <param name="session">When set, only dispatches from this session count.</param>
+    /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    public IReadOnlyList<string> InFlightPaths(
+        string? excludeEventId = null,
+        string? session = null,
+        IReadOnlySet<string>? notDispatched = null)
     {
         IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
         HashSet<string> paired = events
@@ -288,6 +293,8 @@ public sealed class InFlightLedger
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
+                && notDispatched?.Contains(e.Id) != true
+                && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
                 && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
@@ -326,26 +333,26 @@ public sealed class InFlightLedger
     }
 
     /// <summary>
-    /// The completed tasks: a returned <c>task-reviewer</c> output whose
+    /// The completed tasks: a returned worker output whose
     /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, or an
     /// attestation <c>&lt;task&gt;=complete</c> (D31).
     /// </summary>
-    public IReadOnlyList<string> CompletedTasks() =>
-        [.. ReadAll()
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post)
-            .SelectMany(CompletedTasksOf)
+    /// <param name="planFile">When set, only returns for this plan count.</param>
+    public IReadOnlyList<string> CompletedTasks(string? planFile = null) =>
+        [.. ReturnsFor(planFile)
+            .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
 
     /// <summary>
     /// The tasks with RED evidence: a returned <c>test-dev</c> output whose
-    /// <c>RED_EVIDENCE:</c> value is anything but <c>none</c>, or an
+    /// <c>RED_EVIDENCE:</c> value states evidence, or an
     /// attestation <c>&lt;task&gt;=red</c> (D31).
     /// </summary>
-    public IReadOnlyList<string> RedEvidenceTasks() =>
-        [.. ReadAll()
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post)
-            .SelectMany(RedEvidenceTasksOf)
+    /// <param name="planFile">When set, only returns for this plan count.</param>
+    public IReadOnlyList<string> RedEvidenceTasks(string? planFile = null) =>
+        [.. ReturnsFor(planFile)
+            .SelectMany(item => RedEvidenceTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
 
@@ -358,10 +365,48 @@ public sealed class InFlightLedger
             ? otherPre.At <= end
             : otherPre.At <= end && start <= otherPost.At;
 
-    private static IEnumerable<string> CompletedTasksOf(ArbiterLedgerEvent e)
+    /// <summary>
+    /// Each post event with the task it answers. A specialist's headers are stripped
+    /// before it runs, so its post event names no task and the paired pre event supplies it.
+    /// </summary>
+    private List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(string? planFile)
+    {
+        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
+        Dictionary<string, ArbiterLedgerEvent> pres = events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Pre)
+            .GroupBy(e => e.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        List<(ArbiterLedgerEvent Post, string? Task)> returns = [];
+        foreach (ArbiterLedgerEvent post in events.Where(e => e.Phase == ArbiterLedgerPhases.Post))
+        {
+            ArbiterLedgerHeaders? headers = post.Headers;
+            if (headers is null && post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre))
+            {
+                headers = pre.Headers;
+            }
+
+            if (planFile is null || (headers?.PlanFile is { } named && SamePlan(named, planFile)))
+            {
+                returns.Add((post, headers?.Task));
+            }
+        }
+
+        return returns;
+    }
+
+    private static bool SamePlan(string left, string right) =>
+        string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
+
+    private static string NormalizePlan(string path)
+    {
+        string normalized = path.Trim().Replace('\\', '/');
+        return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
+    }
+
+    private static IEnumerable<string> CompletedTasksOf(ArbiterLedgerEvent e, string? task)
     {
         List<string> tasks = [];
-        string? task = e.Headers?.Task;
         if (task is not null && string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal))
         {
             tasks.Add(task);
@@ -371,14 +416,13 @@ public sealed class InFlightLedger
         return tasks;
     }
 
-    private static IEnumerable<string> RedEvidenceTasksOf(ArbiterLedgerEvent e)
+    private static IEnumerable<string> RedEvidenceTasksOf(ArbiterLedgerEvent e, string? task)
     {
         List<string> tasks = [];
-        string? task = e.Headers?.Task;
         string? red = e.Returns?.RedEvidence;
         if (task is not null
             && red is not null
-            && !string.Equals(red.Trim(), "none", StringComparison.Ordinal))
+            && !NoRedEvidence.IsStatedBy(red))
         {
             tasks.Add(task);
         }

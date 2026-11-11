@@ -6,11 +6,16 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
+  - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 code-refs:
+  - CodeGraphFreshness
+  - CodeGraphProvisioner
+  - CorpusProvenance
   - DocsTools
   - DrainingStreamServerTransport
   - HarnessMcpCatalog
@@ -25,13 +30,19 @@ code-refs:
   - McpWiringInspector
   - McpWiringReceipt
   - McpWiringRepairer
+  - RepositoryDoctor
 ---
 
 # Running the DocGraph MCP server
 
 `kyber-weave-mcp` serves [the documentation graph](architecture.md) to an agent over stdio
 MCP. It is the delivery surface for the whole feature: everything else produces the corpus,
-this hands it to a model.
+this hands it to a model. Clients register it as **`kw-docs`**.
+
+**KyberDash MCP (`kw-dash`)** is a different server: `kyberdash mcp` exposes read-only
+analytics against a running KyberDash engine. What it is, how it differs from `kw-docs`, and
+how to set it up in every harness are documented on [KyberDash MCP
+(`kw-dash`)](../dash/mcp.md), not on this page.
 
 ## Why it is a separate binary
 
@@ -162,8 +173,8 @@ So there are two grants, made by two owners, and only one of them is your config
 Both have to hold for a dispatched droid to reach the corpus. Wire the file first, then confirm
 the droid names the server — and compare the provenance line rather than trusting the answer, as
 with every other client: call `docs_get_source_repository_and_revision`, which takes no
-arguments, and check that its
-`root=` equals `git rev-parse --show-toplevel`.
+arguments, and check that its `repo=` equals `git rev-parse --git-common-dir` in the repository
+you meant.
 
 **CodeGraph, and the boundary that follows from it.** The same file can launch the CodeGraph
 server:
@@ -195,8 +206,10 @@ and do not read a green droid file as evidence that a droid can resolve symbols.
 rather than passing, so `docs_detect_drift_between_documents_and_code` called from any client
 needs that index to exist. In this
 repository, `codegraph init .` at the repository root is pre-authorized by the root
-[`AGENTS.md`](../../AGENTS.md); record `git status --short` before and after, because
-initialization can rewrite the marked CodeGraph block there.
+[`AGENTS.md`](../../AGENTS.md). Prefer `kyber-weave doctor --ensure .` over the raw verb: it
+restores any tracked file the initialization rewrote — including the marked CodeGraph block —
+and never touches a file that was already dirty, which is the before-and-after check made
+mechanical.
 
 ### Cursor
 
@@ -278,9 +291,9 @@ still leaves it alone.
 
 **Your half:** the server entry in `kilo.jsonc`'s `mcp` key under the key `kw-docs`, launched as
 `kyber-weave-mcp --repo-root .`. An agent file cannot add a server and `squad install` writes no
-harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the root
+harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the repository
 rather than assuming it — call `docs_get_source_repository_and_revision` (it takes no arguments)
-and confirm its `root=` equals `git rev-parse --show-toplevel` in the repository you meant.
+and confirm its `repo=` equals `git rev-parse --git-common-dir` in the repository you meant.
 
 Do not hand-add a permission key to a rendered agent file: install and update own those bytes.
 
@@ -340,7 +353,7 @@ the per-agent entry — keep the workspace file pointing at the same root.
 **Your half, beyond the agents:** the workspace `.agents/mcp_config.json` above has to name the
 server, and that client's own policy patterns decide whether a call is approved. Then compare the
 provenance rather than trusting the answer: call `docs_get_source_repository_and_revision` and
-check that its `root=` equals `git rev-parse --show-toplevel`.
+check that its `repo=` equals `git rev-parse --git-common-dir`.
 
 ### Pi
 
@@ -401,7 +414,7 @@ and answers a call. The spelling is not a probe — it was established by execut
 published naming code over the roster and corroborated by a live MCP `tools/list`, where the
 adapter's own `doctor` reported `kyber-weave: ok, 8 tools` — the report was read before the
 rename and names the key as it then stood. Then compare provenance as everywhere else: call
-`docs_get_source_repository_and_revision`, whose `root=` must equal `git rev-parse --show-toplevel`.
+`docs_get_source_repository_and_revision`, whose `repo=` must equal `git rev-parse --git-common-dir`.
 
 ### Warp
 
@@ -1098,11 +1111,15 @@ Every docs tool response — hits, misses, and empty or error prose alike — le
 exactly one provenance line:
 
 ```text
-provenance: root=/absolute/repo/root rev=1a2b3c4 dirty=no documents=72
+provenance: root=/absolute/repo/root branch=feature/x repo=/absolute/repo/.git rev=1a2b3c4 dirty=no documents=72
 ```
 
 - `root` — the absolute repository root the server is bound to, normalised with
   `Path.GetFullPath`.
+- `branch` — the branch this checkout is on, read from the checkout's `HEAD`. A detached
+  `HEAD` reports `detached`; a `HEAD` that cannot be read reports `unavailable`.
+- `repo` — the git directory every worktree of this repository shares: `.git` itself in a
+  normal checkout, and the common directory a linked worktree's `commondir` file names.
 - `rev` — the short HEAD SHA, or the literal `unavailable` when Git cannot be read.
 - `dirty` — `yes` or `no` when `git status` succeeds, otherwise `unknown`. Untracked files
   are ignored.
@@ -1111,12 +1128,17 @@ provenance: root=/absolute/repo/root rev=1a2b3c4 dirty=no documents=72
 Git identity is read lazily and cached until the corpus is rebuilt, so the header does not
 shell out on every call. A missing Git, a directory that is not a repository, or a failed
 command are all success paths: the line still renders with `rev=unavailable` and
-`dirty=unknown` rather than inventing a SHA or omitting the root.
+`dirty=unknown` rather than inventing a SHA or omitting the root. `branch=` and `repo=` cost
+no child process at all — both are read from the checkout's own metadata files.
 
 The line is emitted whole and any character budget is taken from the body, so the one tell
 that a same-named server answered from another checkout is never the part truncated away.
-Compare `root=` to `git rev-parse --show-toplevel` before trusting an answer: a mismatch
-means the server is bound to a different repository, not this checkout.
+
+**Compare `repo=`, not `root=`.** A `root=` that differs from your own working tree is
+**another worktree of this repository** when `repo=` matches: same repository, different
+checkout, so an answer about code may describe a different branch. Only a different `repo=`
+means the server is bound to a different repository. `branch=` names the branch the answer
+came from, which is what decides whether a code answer is about your branch.
 
 ## The tools
 
@@ -1229,7 +1251,41 @@ review`). Omitted, the whole standard comes back in document order under budget.
 the sections that answer it are chosen by the same rarity-weighted section ranking
 [`Excerpt`](retrieval.md#excerpt-budgeting-docs_get_coding_standard_for_technology) uses inside
 one standard.
-A topic no section clears returns no prose — it does not fall back to the whole standard.
+
+**A topic matches on its words.** Vectorising a topic produces its individual words plus one
+fused compound per adjacent pair — `error handling` becomes `error`, `handling` and
+`errorhandling` — and rarity weighting then multiplies each term by its inverse document
+frequency, so the fused pair, which almost no document states, dominates the query. A
+synthesised compound that no candidate section states is therefore dropped from the topic
+vector before scoring: a bridge to a compound nobody writes bridges to nothing, while
+question scaffolding and corpus-ubiquitous terms are already removed by rarity weighting;
+informative words the caller wrote stay in the query whether or not a section states them.
+
+Measured on this corpus against the 0.02 section floor the ranking uses, the fused pair was
+what held the tool's own documented example one ten-thousandth below the floor:
+
+| Call | Section that answers it | Before: fused pair kept | After: synthesised compound dropped |
+|---|---|---|---|
+| `csharp` + `error handling` | Errors and diagnostics | 0.0199 — a miss | 0.0239 — returned |
+| `rust` + `error handling` | Errors | 0.0828 | 0.0996 |
+| `typescript` + `error handling` | Async work, resources, and errors | 0.0575 | 0.0692 |
+| `test` + `start processes` (the compound IS stated) | Tests that start processes | 0.0764 | 0.0764 — unchanged |
+| `csharp` + `mocking time` (nothing answers) | — | 0.0092 — a miss | 0.0093 — still a miss |
+
+Dropping **every** term no section states was measured and rejected. Removing that mass
+rescales the scores that remain, and it turned `csharp` with `mocking time` — a topic nothing
+in the standard answers — from a correct miss into a confident wrong answer. The rule is
+therefore narrower than "keep only stated terms": a compound the vectorizer synthesised goes,
+an informative word the caller wrote stays.
+
+**A topic that no section clears still returns the standard.** The reply states the topic in
+one line — `no section matches the topic '<topic>', so the standard follows without it.` — and
+then returns the standard's sections in document order inside the same `charBudget`, with the
+budget marker below when the cut bit. The fallback is the tool's decision, not the index's:
+`DocumentIndex.CodingStandards` still returns no prose for a topic nothing answers, so a
+caller of the index itself sees a genuine miss. The tool turns that miss into the prose the
+caller came for, because withholding it made the miss expensive exactly for the callers with
+no shell to go and read the file with.
 
 `charBudget` is total characters of prose across the standards returned, clamped to
 1000–120000 and defaulting to 12000. One technology can be answered by more than one
@@ -1237,10 +1293,19 @@ standard — a README and an appendix beside it — and they share that one budg
 path so the same request answers the same way twice.
 
 The provenance line is emitted whole and the budget applies to the body, so what did not fit
-is named instead of silently dropped: `[omitted for space, ask again with a larger
-charBudget: …]` when the budget was what bit, and `[also in this document, not matching this
-topic: …]` when the section was dropped for irrelevance and no larger budget will bring it
-back.
+is named instead of silently dropped, and the reply says which of the two kinds of omission it
+was — only one of them is recoverable:
+
+- `[omitted for space, ask again with a larger charBudget: …]` when the budget was what bit,
+  followed by a second line, `[this cut is expected: the document is longer than the
+  charBudget, so what did not fit is left out rather than missing]`, so a reader never reads
+  a size cut as a gap in the answer and opens the file to find out what is missing.
+- `[also in this document, not matching this topic: …]` when the section was dropped for
+  irrelevance and no larger budget will bring it back. This marker never suggests one.
+
+A budget cut is normal rather than a defect — this repository's standards are longer than the
+12,000-character default — so the expected-cut line is stated beside the marker, not deduced
+by the caller from two numbers.
 
 The response reads, in order:
 
@@ -1302,12 +1367,12 @@ Four replies are not a standard at all:
   block followed by nothing: `no sections: this standard's body carries no ## headings, so
   there is nothing to excerpt from it.`
 - A standard that **has** headings but none of them matching the caller's `topic` is the other
-  case, and must not be read as the one above. It reports
-  `no section matches the topic '<topic>'` and then names the headings the standard does carry,
-  with the relevance marker a partially returned excerpt uses —
-  `[also in this document, not matching this topic: <headings>]`. The body does carry sections,
-  so this reply never claims otherwise, and no prose comes back: the topic selected nothing, and
-  a larger `charBudget` cannot fit a section the topic did not select.
+  case, and must not be read as the one above. It states the miss in one line —
+  `no section matches the topic '<topic>', so the standard follows without it.` — and then
+  returns the standard's sections in document order under the same `charBudget`, carrying the
+  omission marker above when the budget cut something. The body does carry sections, so this
+  reply never claims otherwise, and the prose is the point: a caller that receives no prose
+  opens the file, which is the cost this tool exists to prevent.
 
 ### `docs_find_documents_citing_code_symbol(symbol)`
 
@@ -1348,7 +1413,7 @@ called unless the local cache is safely ignored.
 Runs the same schema conformance gate as [`kyber-weave docs validate`](governance.md) against
 the corpus the server already bound at startup. There is **no repository-path argument**: the
 root is `DocumentIndexHost.RepositoryRoot` for this process, disclosed by the provenance line
-on every response. Compare that `root=` to `git rev-parse --show-toplevel` before trusting a
+on every response. Compare that `repo=` to `git rev-parse --git-common-dir` before trusting a
 pass or fail.
 
 `mergeReady` maps to the CLI's `--merge-ready`. Default `false` is the **planning gate** —
@@ -1399,10 +1464,13 @@ pass`.
 
 Reports the provenance of the corpus this server is answering from, with no query and no
 arguments. This is the cheap session-start check: call it once before trusting any other
-docs tool, and compare its `root=` to `git rev-parse --show-toplevel`. It returns exactly
+docs tool, and compare its `repo=` to `git rev-parse --git-common-dir` — a different `root=`
+with the same `repo=` is another worktree of this repository, and a different `repo=` is the
+wrong repository. It returns exactly
 the provenance line above — nothing else — so an empty corpus is not a failure: the line
 still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
-read.
+read. It is also the one tool that always answers: under the stop rule every other tool can
+return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
 
 ## Reading a code join
 
@@ -1423,12 +1491,55 @@ The index reloads on demand. Document mtimes and file count drive a corpus rebui
 `.codegraph/codegraph.db` mtime and length drive a joins-only rebuild. No restart is needed
 after editing documentation or after the CodeGraph daemon rewrites its index.
 
+## The server refreshes CodeGraph, and its tools fail when it cannot
+
+The server keeps the CodeGraph index its own answers depend on reasonably fresh, so an agent
+with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools.md)):
+
+- **On the first tool call, then at most once every 60 seconds.** The interval is a constant in
+  `CodeGraphFreshness`, not a setting. The refresh runs `sync` on an existing index and `init`
+  when `.codegraph/` is absent, under a 30-second bound.
+- **Busy lock means the answer goes ahead.** If another process holds the index lock — a
+  worker's `doctor --ensure`, the CodeGraph daemon — the response carries one note line above
+  its body saying the index is being refreshed by another process, and it answers from the
+  index as it stands. Contention is never reported as a failure.
+- **A missing binary or a failed `sync` fails the tools.** Under the default stop rule the
+  response is `STATUS: TOOL_FAILURE`, then `tool:`, `reason:` and `fix:` lines, and nothing
+  else — a caller reading a degraded answer cannot tell it from a complete one. With
+  `stop-on-tool-failure: false` the same detail arrives as a `warning:` line above the answer,
+  and the answer still comes from the documents on disk.
+- **One exception, deliberately.** `docs_get_source_repository_and_revision` always answers, so
+  a failure can be diagnosed; and
+  `docs_detect_drift_between_documents_and_code` still answers **with** the failure, because
+  its verdict is the CodeGraph-failure report the caller asked for. The other six tools return
+  the failure block.
+- **Nothing reaches stdout.** The refresh runs through the process runner, which captures both
+  streams: stdout stays JSON-RPC.
+- **Only where the repository declares the server.** The refresh and the failure apply only
+  when `codegraph` is one of the `mcp.required-servers` in `.kyber-weave/kyber-weave.yml`.
+  A repository that never declared it takes no index lock, reports no failure and no warning,
+  and answers exactly as it did before the refresh existed — which is what keeps a host that
+  wants nothing to do with CodeGraph working.
+- **Settings are read at each refresh**, so a change to `stop-on-tool-failure` or to the
+  declaration takes effect without restarting the server.
+- **The schedule is opt-in at the tools level too.** A `DocsTools` built without an explicit
+  refresh schedule answers from the documents on disk and consults no CodeGraph at all: the
+  schedule is a gate as much as a refresh, and a caller that passes nothing is asking a
+  document question rather than asking to be told the index is unusable. A CI runner has no
+  index to satisfy such a gate, so a test that builds the tools directly would otherwise lose
+  every answer. Keeping an index fresh is a decision the process makes once, at the
+  composition roots, which pass the schedule explicitly.
+- **`--no-codegraph-refresh` turns it off.** `kyber-weave doctor --check` starts the server with
+  that flag, because `--check` promises it never runs `init`, `sync` or `index`, and its live
+  probe makes a real docs call.
+
 ## The live check: `doctor --check`
 
 `kyber-weave doctor` checks the two pieces a repository needs before its agents can use docs
 tooling: a CodeGraph index, which [`docs drift`](governance.md) needs, and a docs MCP server that
-answers for this checkout. It is the same core that `docs init --provision` calls, and that the
-conductor and bug-crusher run-start step invoke through the CLI. The verb's flags and exit codes are in the
+answers for this checkout. It is the same core that `docs init --provision` calls, and the
+conductor and bug-crusher run-start step invokes it in its `--ensure` mode through the CLI. The
+verb's flags and exit codes are in the
 [command surface](../cli-command-surface.md#doctor--repository-documentation-tooling).
 
 ### What the check proves
@@ -1467,9 +1578,11 @@ so a server that stops answering is killed rather than left behind. The rule and
 |---|---|---|
 | `repository.root` | The path is not in a git repository, git cannot run, or the root is `$HOME` | `run kyber-weave doctor from inside a git repository`, or `cd into a repository and run kyber-weave doctor` |
 | `codegraph.binary` | `codegraph` is not on `PATH`, or `codegraph --version` does not finish | `install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check` |
-| `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
+| `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init`, `sync` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
+| `codegraph.restore` | `--ensure` only, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
+| `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
-| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | `kyber-weave doctor --check --mcp-timeout <2 x current>` |
+| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | Used up the budget: `kyber-weave doctor --check --mcp-timeout <2 x current>`. Refused because the folder has no `.kyber-weave/kyber-weave.yml`: `kyber-weave docs init "<root>"`, or commit that file to the base branch so new worktrees get it. Any other early exit: run the server directly to read its own error |
 | `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
 
@@ -1488,7 +1601,7 @@ The reason is short and never carries the child's environment. A child's stderr 
 its first non-empty line, truncated to 160 characters. A fix line is a command an agent can run as
 written, except `codegraph.binary`, which asks the user to act first (see the next section).
 
-`--json` writes one object instead, with `root`, `mode` (`check` or `provision`), `exitCode`, and a
+`--json` writes one object instead, with `root`, `mode` (`check`, `provision` or `ensure`), `exitCode`, and a
 `checks` array of `{ id, passed, reason, fix }`. The non-interactive hint is suppressed in that mode, so
 stdout stays valid JSON.
 
@@ -1500,6 +1613,35 @@ on `PATH`, then to re-run `kyber-weave doctor --check`. This repository has no a
 command or package source, so the fix line names none, and this runbook gives none. Exit `3` means
 the decision to install belongs to a person.
 
+### The worker's first command: `doctor --ensure`
+
+```bash
+kyber-weave doctor --ensure .
+```
+
+`--ensure` is the one command a worker runs before it starts work, in the tree it will work
+in — the canonical checkout, or the worktree when the task runs in one. It leaves the tooling
+usable rather than only reporting on it ([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+
+1. `codegraph sync` when `.codegraph/` exists, `codegraph init .` when it does not.
+2. **Restore any tracked file the preparation just rewrote** — and never a file that was
+   already dirty before the run. The set of dirty tracked files is recorded before the index
+   work starts, so a rewind can only undo what the index itself wrote; reverting the
+   operator's own work would be unrecoverable data loss disguised as housekeeping. Reports
+   `codegraph.restore` when it restored something.
+3. **One `codegraph explore README` call**, proving the index answers rather than only exists.
+4. **One docs-server call**, proving the MCP server answers for this checkout.
+5. **One repair and one retry.** A failed step runs `codegraph index .` once and retries once.
+   One repair covers the transient damage this exists for; a loop would turn a genuinely broken
+   CodeGraph into a slow hang instead of a stop.
+
+Exit codes are the `doctor` contract below plus one behaviour: `--ensure` **reads
+`stop-on-tool-failure` itself** and applies it, so no agent judges a degraded result. Under the
+default the run's failures are failures and the exit is `1`; under
+`stop-on-tool-failure: false` the same checks are reported as warnings and the exit is `0`,
+except a missing binary, which stays `3` because installing it is the user's decision either
+way. `--check` never applies the setting: a caller that asked for a verdict gets a verdict.
+
 ### Provisioning rules
 
 Provisioning is the `--provision` mode. A bare run provisions only in an interactive terminal with
@@ -1507,15 +1649,21 @@ Provisioning is the `--provision` mode. A bare run provisions only in an interac
 
 - **Repository-local only.** The root is `git rev-parse --show-toplevel` of the given path. A run
   never provisions `$HOME`, and it never provisions another checkout.
-- **Init when absent, index otherwise.** When `.codegraph/` is absent, the run executes
-  `codegraph init .`. When it exists, the run executes `codegraph index .`. Both run with the root as
-  the working directory.
+- **Init when absent, sync otherwise.** When `.codegraph/` is absent, the run executes
+  `codegraph init .`. When it exists, the run executes `codegraph sync .`, which brings an
+  existing index up to date; both run with the root as the working directory. `codegraph index .`
+  is the **repair** step, never the routine one: it rebuilds the whole index for no new
+  information, and `--ensure` is the only mode that runs it, once, after a failed step. A
+  `.codegraph/` folder that was never initialised, such as one holding only a committed
+  `.gitignore`, makes `sync` refuse, so the run executes `codegraph init .` instead and reports
+  that command's result.
 - **Bounded.** Each child is bounded by `--index-timeout` (default 600 seconds). When the bound is
   reached, the child's process tree is killed and the check fails as `codegraph.index`.
 - **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
   write-probe inside that directory, used to test writability. A directory that is corrupt, not
-  writable, or owned by another user fails with `remove .codegraph and run kyber-weave doctor`. A
-  person makes the removal.
+  writable, or owned by another user fails with `git clean -fdx -- .codegraph and run kyber-weave
+  doctor`. That removes only untracked and ignored files, so a committed `.codegraph/.gitignore`
+  survives. A person makes the removal.
 - **Never install the binary.** See [Nothing installs CodeGraph](#nothing-installs-codegraph).
 - **Lock file in the OS temp directory.** Concurrent provisioning runs for one repository are
   serialised by a lock file named `kyber-weave-codegraph-<hash>.lock` in the OS temporary directory,
@@ -1546,17 +1694,38 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
   Never symlink `.codegraph/` into a worktree; background file watchers and concurrent writes can
   corrupt the canonical database or trigger cross-process lock contention. Worktrees must fail closed
   if a `.codegraph` symbolic link or reparse point is detected.
-- **Conditional worktree indexing**: Ephemeral worktrees share the canonical CodeGraph index by default.
-  Conditional worktree indexing runs `codegraph init .` inside the worktree only when a task's
-  acceptance criteria explicitly require indexing newly added branch symbols.
-- **Targeted doctor check**: In a worktree without its own `.codegraph/`, running `kyber-weave doctor --check .`
-  reports failure on `codegraph.index` with a hint to run `kyber-weave doctor --provision`, which would trigger an
-  unneeded full re-index if executed, hence `--check <canonical-root>` is required. The worktree setup
-  protocol runs the targeted check:
-  ```bash
-  kyber-weave doctor --check <canonical-root>
-  ```
-  This asserts the health and responsiveness of the canonical index and MCP servers before worker tasks dispatch.
+- **A worktree does not share the canonical checkout's index.** Every new worktree indexes itself
+  with `kyber-weave doctor --ensure`, at about 8 seconds and about 223 MB on disk until cleanup
+  removes it. This replaces the earlier rule that a worktree indexed itself only when a task's
+  acceptance criteria asked for it: the shared index was measured returning the wrong code — a
+  `codegraph explore "StoredDeploymentIdentity"` found a method added on the worktree's branch in
+  0.37 s from the worktree, and did not find it from the canonical checkout, whose index belonged
+  to another branch. A guarantee that the index answers for the tree the worker is in costs disk,
+  not correctness.
+- **Work in the canonical checkout when you can.** Branching in place on a clean, idle checkout keeps
+  the server, the architect and the workers on one revision. A worktree is for a dirty or busy
+  checkout and for parallel workers. The run-start command that does this automatically arrives with
+  the run-start surface and is not in this repository yet; until it ships, branching in place is the
+  operator's choice.
+
+### The worktree limitation, per role
+
+The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on
+another branch can get answers about the wrong code. `branch=` in the provenance line is what
+makes that visible. This is the rule for each role
+([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+
+| Role | Code questions | Docs and standards | If the check fails |
+|---|---|---|---|
+| Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
+| `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
+| `review-lens`, `review-triage` (no shell) | The packet carries `.agent_scratchpad/<task-id>/review-diff.patch` and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
+| `architect` (shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, `codegraph explore "…"` from the worktree's shell against its own index (`kyber-weave doctor --ensure` creates it), counted as a CLI discovery call. | The server cannot see a plan written into a worktree, so the architect writes to `<WORKTREE>/docs/plans/…` and runs `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` there. Where a harness gives it no shell it returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree" and is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
+
+**A session started inside a worktree is already correct**, because `--repo-root .` resolves
+there; in supervised mode, restart inside the worktree instead of fighting the binding.
+**A worktree created after the server starts is outside its reach**: the server refreshes the
+index of the root it is bound to, and nothing else.
 
 ## Troubleshooting
 
@@ -1564,7 +1733,7 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
+| A Factory Task-dispatched droid lists no MCP tools | `squad install` and `squad update` print `factory-mcp-not-configured` when no Factory config file defines a server the droids are allowed. Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kw-docs` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
 | A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kw-docs` server in the ZCode MCP configuration, or the install does not pass |
 | A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kw-docs`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kw_docs_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
 | An Antigravity agent lists no MCP tools | Check the agent file's `mcpServers` entry and the workspace `.agents/mcp_config.json`, then the client's `mcp(server/*)` policy patterns — MCP tools default to Ask there. Adding an MCP tool name to `tools:` does not help and makes the executor construction fail with `unknown component` on stderr. See [Antigravity](#antigravity) |
@@ -1577,7 +1746,9 @@ and `codegraph` must follow the **worktree MCP canonical binding** protocol:
 | `docs_look_up_glossary_term_definition` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
 | `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
-| Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: root=` line to `git rev-parse --show-toplevel`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root` |
+| Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: repo=` line to `git rev-parse --git-common-dir`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root`. A matching `repo=` with a different `root=` is another worktree of your own repository, not a foreign one |
+| A tool answers `STATUS: TOOL_FAILURE`, or carries a `warning: codegraph is unavailable` line | The repository declares `codegraph` under `mcp.required-servers` and the server could not read the index: the `fix:` line names the repair, usually `kyber-weave doctor --ensure .`. Under the default stop rule the tool refuses to answer with joins missing; `stop-on-tool-failure: false` turns the same detail into the warning. See [the refresh rules](#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot) |
+| A tool carries `note: codegraph refresh skipped` | Another process holds the index lock and is refreshing it — a worker's `doctor --ensure`, or the CodeGraph daemon. Not a failure: the answer comes from the index as it stands, and the next call after the 60-second interval refreshes it |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related

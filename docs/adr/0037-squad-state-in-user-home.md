@@ -1,6 +1,6 @@
 ---
 id: adr/0037-squad-state-in-user-home
-title: Squad Lock and Receipt State Moves to the User Home, with a Registry and a Global Anchor
+title: User-Scoped Kyber-Weave State Lives in the Home Directory, with a Registry and a Global Anchor
 doc-type: adr
 status: current
 owner: dpalfery
@@ -11,7 +11,7 @@ code-refs:
   - SquadStateMigration
 ---
 
-# ADR 0037: Squad Lock and Receipt State Moves to the User Home, with a Registry and a Global Anchor
+# ADR 0037: User-Scoped Kyber-Weave State Lives in the Home Directory, with a Registry and a Global Anchor
 
 ## Status
 
@@ -19,6 +19,14 @@ Accepted, 2026-10-14. Amends [ADR 0024](0024-squad-global-receipt-layout-marker.
 receipts are no longer byte-identical to receipts written before, because `targetRoot` now
 records the canonical physical root instead of `"."`. Every other decision of ADR 0024 stands,
 including the v2 global layout marker and legacy single-root recovery.
+
+## User scope is the default scope
+
+User scope is the default for feature state that is private to the developer and not a project
+checkout. The home-level state root is `~/.kyber-weave/`; it hosts user-level configuration at
+`~/.kyber-weave/kyber-weave.yml` for all features, not just Squad. Project state remains a
+selective opt-in, and `--project` is the explicit choice when a feature's data should live beside a
+repository rather than in the user's state directory.
 
 ## Context
 

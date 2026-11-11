@@ -100,6 +100,70 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
+  # The branch and title carry the harness that wrote the change (decision D42). This is its own
+  # job so a name that cannot pass fails in seconds, before the build spends a runner on it.
+  #
+  # It reads the title, branch and author from the API rather than the event payload because
+  # pr-naming-recheck.yml re-runs this job when a title is edited, and a re-run replays the
+  # original payload: only the API shows the corrected title. That workflow finds this job by the
+  # `name:` below, the API's only stable identifier for it, so renaming it means editing
+  # .github/workflows/pr-naming-recheck.yml in the same change.
+  #
+  # Any other event skips the job, which is safe here: on a push to main and on the schedule there
+  # is no pull request to name, and `ci-summary` — the only required check — still needs this job,
+  # so a pull request can never look green without having run it.
+  pr-naming:
+    name: Pull request name
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reading the pull request through the API. Nothing here writes.
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The title is attacker-controlled text. It arrives in the step outputs and reaches the
+      # script through env:, never interpolated into run:, so a hostile title cannot reach the shell.
+      - name: Read the title, branch and author
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          payload="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_URL}/repos/${REPOSITORY}/pulls/${PR_NUMBER}")"
+          # A delimiter line rather than a one-line output, because a title is free text.
+          {
+            echo "title<<PR_NAME_FIELD"
+            jq -r '.title' <<<"${payload}"
+            echo "PR_NAME_FIELD"
+            echo "branch<<PR_NAME_FIELD"
+            jq -r '.head.ref' <<<"${payload}"
+            echo "PR_NAME_FIELD"
+            echo "author=$(jq -r '.user.login' <<<"${payload}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the naming rule
+        env:
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+          PR_BRANCH: ${{ steps.pr.outputs.branch }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-pr-name.sh \
+            --title "${PR_TITLE}" \
+            --branch "${PR_BRANCH}" \
+            --author "${PR_AUTHOR}"
+
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
@@ -111,7 +175,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -237,7 +301,7 @@ jobs:
           key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -304,7 +368,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -328,7 +392,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -406,7 +470,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -456,9 +520,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Intentional github/codeql-action v4 pin (v4.39.1)
+      # Intentional github/codeql-action v4 pin (v4.39.2)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -467,7 +531,7 @@ jobs:
 
       - name: Setup .NET
         if: matrix.language == 'csharp'
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -478,9 +542,9 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
-      # Intentional github/codeql-action v4 pin (v4.39.1)
+      # Intentional github/codeql-action v4 pin (v4.39.2)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -540,7 +604,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         if: always() && hashFiles('trivy.sarif') != ''
         with:
           sarif_file: trivy.sarif
@@ -596,7 +660,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         if: always() && hashFiles('semgrep.sarif') != ''
         with:
           sarif_file: semgrep.sarif
@@ -626,7 +690,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         if: always() && hashFiles('results.sarif') != ''
         with:
           sarif_file: results.sarif
@@ -647,7 +711,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -692,7 +756,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-authoring, legacy category)
         if: always()
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-authoring.sarif
           category: kyber-weave-skills
@@ -705,7 +769,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-integrity-review)
         if: always()
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-integrity-review.sarif
           category: kyber-weave-skills-_apm_skills_kyber-docs-integrity-review
@@ -713,7 +777,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-docs-onboarding-and-assessment)
         if: always()
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-onboarding-and-assessment.sarif
           category: kyber-weave-skills-_apm_skills_kyber-docs-onboarding-and-assessment
@@ -725,7 +789,7 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-weave-cli)
         if: always()
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
           category: kyber-weave-skills-_apm_skills_kyber-weave-cli
@@ -1121,6 +1185,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - changes
+      - pr-naming
       - build-test
       - trivy
       - semgrep
@@ -1144,6 +1209,7 @@ jobs:
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
           echo "| Detect changed areas | ${{ needs.changes.result }} |" >> results.md
+          echo "| Pull request name | ${{ needs.pr-naming.result }} |" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
           echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
@@ -1163,6 +1229,7 @@ jobs:
           FAILED=false
           for result in \
             "${{ needs.changes.result }}" \
+            "${{ needs.pr-naming.result }}" \
             "${{ needs.build-test.result }}" \
             "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \

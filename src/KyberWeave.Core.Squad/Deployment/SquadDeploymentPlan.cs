@@ -734,13 +734,16 @@ public sealed class SquadDeploymentPlan
         SquadReceiptLayout retainedLayout = scope == SquadDeploymentScope.Global
             ? ClassifyGlobalLayout(retained)
             : receipt.Layout;
-        // The schema follows the same rule as the writer: a project receipt that still owns
-        // a block stays on v3, while one whose blocks are all gone drops back to v1 so it
-        // serializes byte-identical to every block-less receipt. Global receipts never own
-        // blocks, so their schema carries over untouched.
-        string retainedSchema = scope == SquadDeploymentScope.Global
-            ? receipt.Schema
-            : retainedBlocks.Count > 0 ? SquadStateStore.ReceiptSchemaV3 : SquadStateStore.ReceiptSchemaV1;
+        // The schema follows the same rule as the writer: a receipt that still owns
+        // a block stays on v3, while one whose blocks are all gone drops back to the
+        // block-less schema for its scope (v1 at project scope, v2 at global scope)
+        // so it serializes byte-identical to every block-less receipt. A global receipt
+        // that keeps at least one block stays on v3.
+        string retainedSchema = retainedBlocks.Count > 0
+            ? SquadStateStore.ReceiptSchemaV3
+            : scope == SquadDeploymentScope.Global
+                ? SquadStateStore.ReceiptSchemaV2
+                : SquadStateStore.ReceiptSchemaV1;
         SquadReceipt retainedReceipt = receipt with
         {
             Files = retained,
@@ -969,9 +972,10 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadOwnedBlock>? ownedBlocks = null)
     {
         IReadOnlyList<SquadOwnedBlock> blocks = ownedBlocks ?? [];
-        // The in-memory schema follows the writer: a project receipt that owns a block reads
-        // v3, everything else keeps today's value (v1 — Global upgrades to v2 at write time).
-        string schema = blocks.Count > 0 && scope == SquadDeploymentScope.Project
+        // The in-memory schema follows the writer: a receipt that owns a block reads v3,
+        // regardless of whether the scope is project or global; everything else keeps the
+        // pre-block schema (v1, with Global upgrading to v2 at write time).
+        string schema = blocks.Count > 0 && scope != SquadDeploymentScope.Instance
             ? SquadStateStore.ReceiptSchemaV3
             : SquadStateStore.ReceiptSchemaV1;
         return new SquadReceipt(
@@ -997,20 +1001,21 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Blocks are a project-scope ownership kind: the v3 receipt that records them exists for
-    /// project scope only. A block arriving with any other scope is a renderer contract
-    /// violation, refused loudly rather than silently dropped.
+    /// Blocks are a shared-file ownership kind rather than a project-only one: they are valid for
+    /// both project and global scope, while instance scope is still rejected. This keeps the
+    /// project contract unchanged while allowing a global install to own hook blocks and home-owned
+    /// files under the home-level state directory.
     /// </summary>
     private static void RequireProjectScopeForBlocks(
         SquadDeploymentScope scope,
         bool hasBlocks,
         string operation)
     {
-        if (scope != SquadDeploymentScope.Project && hasBlocks)
+        if (scope == SquadDeploymentScope.Instance && hasBlocks)
         {
             throw new SquadDeploymentConflictException(
                 $"Squad hook blocks cannot be {operation} under '{scope}' scope: " +
-                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project scope only.");
+                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project and global scope only.");
         }
     }
 
@@ -1058,7 +1063,7 @@ public sealed class SquadDeploymentPlan
 
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             bool existsAsFile = File.Exists(fullPath);
             string spliced;
@@ -1067,7 +1072,7 @@ public sealed class SquadDeploymentPlan
             {
                 byte[] currentBytes = File.ReadAllBytes(fullPath);
                 string currentText = DecodeBlockText(relativePath, currentBytes);
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post);
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Exact(
                     relativePath,
                     block.Target,
@@ -1080,7 +1085,7 @@ public sealed class SquadDeploymentPlan
                 if (Directory.Exists(fullPath))
                     throw UnmanagedCollision(relativePath);
 
-                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post);
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
             }
@@ -1146,7 +1151,7 @@ public sealed class SquadDeploymentPlan
             renderedIdentities.Add(identity);
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
-            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
             {
@@ -1158,7 +1163,7 @@ public sealed class SquadDeploymentPlan
                     byte[] currentBytes = File.ReadAllBytes(fullPath);
                     string currentText = DecodeBlockText(relativePath, currentBytes);
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, currentText, pre, post);
+                        block.Format, relativePath, currentText, pre, post, subagentStop);
                     preconditions.Add(SquadFilePrecondition.Exact(
                         relativePath,
                         block.Target,
@@ -1174,7 +1179,7 @@ public sealed class SquadDeploymentPlan
                 else
                 {
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                        block.Format, relativePath, null, pre, post);
+                        block.Format, relativePath, null, pre, post, subagentStop);
                     preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                     mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                     nextBlocks.Add(new SquadOwnedBlock(
@@ -1197,7 +1202,7 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
             {
                 (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
-                    block.Format, relativePath, null, pre, post);
+                    block.Format, relativePath, null, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
                 nextBlocks.Add(new SquadOwnedBlock(
@@ -1220,7 +1225,7 @@ public sealed class SquadDeploymentPlan
             }
 
             (string rewritten, IReadOnlyList<SquadHookOwnedEntry> rewrittenOwned) = SpliceBlockContent(
-                block.Format, relativePath, currentJson, pre, post);
+                block.Format, relativePath, currentJson, pre, post, subagentStop);
             preconditions.Add(SquadFilePrecondition.Exact(
                 relativePath,
                 block.Target,
@@ -1347,22 +1352,15 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
-    /// path, so removal never depends on a render that may no longer exist.
+    /// Resolves the hook-file shape for a receipt-owned block, reading the receipt the way
+    /// status and doctor do: the recorded target decides the shape first, and the per-format
+    /// portable path is only the fallback for a target that owns no shared hook file.
     /// </summary>
     private static SquadHookBlockFormat FormatForTarget(SquadOwnedBlock owned)
     {
         ArgumentNullException.ThrowIfNull(owned);
-        foreach (SquadHookBlockFormat format in Enum.GetValues<SquadHookBlockFormat>())
-        {
-            if (string.Equals(
-                    SquadHookJsonBlock.RelativePath(format),
-                    owned.RelativePath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return format;
-            }
-        }
+        if (SquadHookJsonBlock.TryResolveFormat(owned, out SquadHookBlockFormat format))
+            return format;
 
         throw new SquadDeploymentConflictException(
             $"Squad receipt block '{owned.RelativePath}' is not a known shared hook file. " +
@@ -1385,16 +1383,17 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Splits a rendered block's entries into the pre and post hook containers by their
-    /// logical container name. Anything else is a renderer bug, refused before it can
-    /// silently land in the wrong container.
+    /// Splits a rendered block's entries into the pre, post and (Factory only) SubagentStop hook
+    /// containers by their logical container name. Anything else is a renderer bug, refused
+    /// before it can silently land in the wrong container.
     /// </summary>
-    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) SplitBlockEntries(
+    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post, IReadOnlyList<JsonNode> SubagentStop) SplitBlockEntries(
         SquadRenderedBlock block)
     {
         ArgumentNullException.ThrowIfNull(block.Entries);
         List<JsonNode> pre = [];
         List<JsonNode> post = [];
+        List<JsonNode> subagentStop = [];
         foreach (SquadRenderedBlockEntry entry in block.Entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
@@ -1406,18 +1405,76 @@ public sealed class SquadDeploymentPlan
             }
 
             if (string.Equals(entry.Container, "PreToolUse", StringComparison.OrdinalIgnoreCase))
-                pre.Add(entry.Entry);
-            else if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
-                post.Add(entry.Entry);
-            else
             {
-                throw new SquadDeploymentConflictException(
-                    $"Rendered Squad block '{block.RelativePath}' names unknown hook container " +
-                    $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
+                pre.Add(entry.Entry);
+                continue;
             }
+
+            if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
+            {
+                post.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "SubagentStop", StringComparison.OrdinalIgnoreCase))
+            {
+                // Only Factory's hook file has this container; a renderer that names it for any
+                // other shape would otherwise write a key that harness never reads.
+                if (block.Format != SquadHookBlockFormat.Factory)
+                {
+                    throw new SquadDeploymentConflictException(
+                        $"Rendered Squad block '{block.RelativePath}' names SubagentStop, which only " +
+                        "the Factory hook file holds. Fix the upstream render before deploying it.");
+                }
+
+                subagentStop.Add(entry.Entry);
+                continue;
+            }
+
+            if (string.Equals(entry.Container, "kyber-arbiter", StringComparison.OrdinalIgnoreCase))
+            {
+                if (entry.Entry is not JsonObject group)
+                {
+                    throw new SquadDeploymentConflictException(
+                        $"Rendered Antigravity block '{block.RelativePath}' names the managed " +
+                        "group container but carries a non-object payload. Fix the upstream render before deploying it.");
+                }
+
+                foreach ((string container, List<JsonNode> destination) in new[]
+                         {
+                             ("PreToolUse", pre),
+                             ("PostToolUse", post),
+                         })
+                {
+                    JsonNode? payload = group[container];
+                    if (payload is JsonArray array)
+                    {
+                        foreach (JsonNode? node in array)
+                        {
+                            if (node is not null)
+                            {
+                                destination.Add(node);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (payload is not null)
+                    {
+                        destination.Add(payload);
+                    }
+                }
+
+                continue;
+            }
+
+            throw new SquadDeploymentConflictException(
+                $"Rendered Squad block '{block.RelativePath}' names unknown hook container " +
+                $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
         }
 
-        return (pre, post);
+        return (pre, post, subagentStop);
     }
 
     private static IReadOnlyList<SquadHookDrift> FindBlockDrift(
@@ -1489,11 +1546,12 @@ public sealed class SquadDeploymentPlan
         string relativePath,
         string? existingJson,
         IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse)
+        IReadOnlyList<JsonNode> postToolUse,
+        IReadOnlyList<JsonNode> subagentStop)
     {
         try
         {
-            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse);
+            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse, subagentStop);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {

@@ -5,7 +5,7 @@ description: "Provides docs-dev closeout for finished plans and specs by harvest
 invocation: subagent
 model-profile: fast
 capability-profile: documentation
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -34,13 +34,14 @@ You do **not** own:
 - CI/CD pipelines or DevOps configuration
 - Database schemas or migrations
 
-Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, do not open files under the directories named by **<plan-index>** and **<specification-index>**; if the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, the baseline's plan-read rule covers it.
 
 ## Commands you run
 
-The only processes you run are these four command classes:
+The only processes you run are these five command classes:
 - `git mv` of the plan or spec you close out: a plan file moves to `<docs-root>/archive/plans/`, and a specification directory moves to `<docs-root>/archive/specs/`. Archive only the artifact named by the packet, and only after its closeout steps are complete.
-- `kyber-weave docs validate . --merge-ready` (or `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` where the host's AGENTS.md declares that form). Run it after every corpus edit and every archival move.
+- `git rm` of that artifact's task file — `<plan>.tasks.json` beside a plan, or `<spec-folder>/tasks.json` in a specification folder — in the same commit that archives the artifact, so the file never reaches the main branch. Nothing durable is lost: the archived plan keeps its decisions, tasks and test contract.
+- `kyber-weave docs validate . --merge-ready`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate . --merge-ready`). Run it after every corpus edit and every archival move.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - Run the targeted tests that pin documentation, named by the packet.
 
@@ -65,8 +66,8 @@ When assigned a plan closeout:
 4. Establish and record explicit waivers where an item is not migrated:
    - **ADR waiver**: State `no ADR — ADR waiver: <reason>` when a decision refines existing architecture, applies established patterns, or represents implementation detail that does not warrant a new ADR.
    - **Documentation waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
-5. Update canonical documentation to describe the verified behavior, then update the plan index with the implementation reference, canonical doc destinations, and archive date. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
-6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` with `git mv`, only when the verification, closeout mapping table, and documentation updates are complete.
+5. Update canonical documentation to describe the verified behavior, then remove the plan's row from the plan index and add one line for it at the top of the table in `<docs-root>/archive/plans/README.md` (newest first) with the canonical doc destinations and archive date; evidence belongs in the plan's completion summary, not in that row. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
+6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` with `git mv`, only when the verification, closeout mapping table, and documentation updates are complete. Remove its `<plan>.tasks.json` with `git rm` in that same commit, so the file is gone from the branch that archives the plan.
 7. If any criterion, durable decision harvest, or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
 
 8. Harvest the plan's Design harvest declared at authoring time: every Design harvest requirement-group at its declared scale migrates into canonical documentation alongside the decisions. Record the documentation-impact of each migrated item.
@@ -98,8 +99,10 @@ When assigned a specification closeout:
    archive date, the outcome, and the canonical documents that now carry its content.
    Naming the replacing documentation is the point of the entry. Mark the specification
    artifact `Status: Archived` only after steps 2 to 4 are complete.
-5. Move the whole `<docs-root>/specs/{feature-name}/` directory to `<docs-root>/archive/specs/` with
-   `git mv` and set the status to `Archived`, only after steps 2 to 4 are complete.
+5. Remove the specification's `<spec-folder>/tasks.json` with `git rm`, then move the whole
+   `<docs-root>/specs/{feature-name}/` directory to `<docs-root>/archive/specs/` with
+   `git mv` and set the status to `Archived`, only after steps 2 to 4 are complete. The task file
+   goes first, so the archived folder never carries one.
 6. Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Migrating content
    moves code references between documents, and an unresolved reference is a broken join.
 7. If any precondition or documentation update is unresolved, do not archive. Leave the
@@ -124,7 +127,7 @@ Keep a run record of what was reviewed and the verdict reached. Route each recom
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.

@@ -67,6 +67,18 @@ consistently:
 2. <url>
 ```
 
+# Discovery order
+
+A question about this repository's code goes to `codegraph_explore` first, and one about its
+documentation to `docs_answer_question_from_repo_documentation`. This role runs no shell and
+edits nothing, so the CLI form, `codegraph explore "…"`, is not available to it: when the request
+names a worktree, pass its absolute path as `codegraph_explore`'s `projectPath` to ask that
+worktree's own index. With no worktree named, use the server's default project. Read the named
+file directly only when that call cannot answer for the revision in hand (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and say so under
+`Caveats`, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`. The `kw-docs` and `codegraph` servers
+stay bound to the canonical checkout, so an answer whose provenance `branch=` is not the branch in
+hand describes another tree.
+
 # Guardrails
 
 - Read-only: no file edits, no shell commands, no git operations, no package

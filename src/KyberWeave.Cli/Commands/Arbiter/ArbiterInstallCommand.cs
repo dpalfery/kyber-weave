@@ -5,8 +5,10 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -70,11 +72,26 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (settings.Global)
+        if (settings.Project && settings.Global)
         {
-            WriteError(
-                "--global is not supported for 'arbiter install': " +
-                "the install is project-scoped and never writes to the home tree.");
+            AnsiConsole.MarkupLine(
+                "[red]kyber-weave arbiter: error: --global and --project are mutually exclusive. " +
+                $"[bold]{RuleValidator.InstallScopeConflict}[/] is the permanent rule id for this scope conflict.[/]");
+            return 2;
+        }
+
+        if (settings.Global && !settings.Project)
+        {
+            // The install defaults to global scope, so an explicit --global is accepted as a
+            // redundant alias for the default home-scoped behavior. The conflict remains hard
+            // when the user tries to combine it with an explicit project install.
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
+        {
+            AnsiConsole.MarkupLine(
+                "[red]kyber-weave arbiter: error: --path is only valid with --project. " +
+                "Use --project to target a project root, or omit --path for the default global scope.[/]");
             return 2;
         }
 
@@ -98,7 +115,12 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
 
         string kindName = providerKind == ArbiterProviderKind.Systemone ? "systemone" : "none";
-        string root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path);
+        bool isProjectScope = settings.Project;
+        string root = isProjectScope
+            ? Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
+                ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
+                : settings.PathOption)
+            : Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
 
         if (!string.IsNullOrWhiteSpace(settings.ArbiterKey))
         {
@@ -107,7 +129,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 $"prefer --key-stdin or {Markup.Escape(ArbiterKeyResolver.EnvVarName)}.");
         }
 
-        string endpoint = ResolveEndpoint(root, settings.Config);
+        string endpoint = ResolveEndpoint(root, settings.Config, isProjectScope);
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
         bool needsKey = providerKind == ArbiterProviderKind.Systemone
                         && !IsLoopbackEndpoint(endpoint);
@@ -146,7 +168,8 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                               && !string.IsNullOrEmpty(keyToStore)
                               && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
 
-        if (!settings.DryRun
+        if (isProjectScope
+            && !settings.DryRun
             && string.IsNullOrWhiteSpace(settings.Config)
             && FindConfigPath(root) is null)
         {
@@ -164,33 +187,87 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             }
         }
 
-        string configPath = ResolveConfigPath(root, settings.Config);
-        string? existingText = ReadConfigText(configPath);
-        if (existingText is null)
-            return 1;
-
+        SquadDeploymentScope scope = isProjectScope ? SquadDeploymentScope.Project : SquadDeploymentScope.Global;
+        string configPath;
+        string? existingText;
         string desiredText;
-        try
+        bool configChanged;
+
+        if (isProjectScope)
         {
-            desiredText = HostConfigYaml.WithArbiterProviderKind(
-                HostConfigYaml.WithArbiterEnabled(existingText),
-                kindName);
+            configPath = ResolveConfigPath(root, settings.Config);
+            existingText = ReadConfigText(configPath);
+            if (existingText is null)
+                return 1;
+
+            try
+            {
+                desiredText = HostConfigYaml.WithArbiterProviderKind(
+                    HostConfigYaml.WithArbiterEnabled(existingText),
+                    kindName);
+            }
+            catch (InvalidDataException ex)
+            {
+                WriteError(ex.Message);
+                return 1;
+            }
+
+            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
         }
-        catch (InvalidDataException ex)
+        else
         {
-            WriteError(ex.Message);
-            return 1;
+            configPath = UserHostConfig.GetPath(root);
+            if (settings.DryRun && File.Exists(configPath))
+            {
+                existingText = File.ReadAllText(configPath);
+            }
+            else if (!settings.DryRun && File.Exists(configPath))
+            {
+                existingText = File.ReadAllText(configPath);
+            }
+            else if (settings.DryRun)
+            {
+                existingText = string.Empty;
+            }
+            else
+            {
+                existingText = UserHostConfig.EnsureUserConfig(root);
+            }
+
+            List<string> globalTargets = UserHostConfig.ReadGlobalTargets(root).ToList();
+            if (!globalTargets.Any(token => string.Equals(token, targetToken, StringComparison.OrdinalIgnoreCase)))
+            {
+                globalTargets.Add(targetToken);
+            }
+
+            try
+            {
+                desiredText = HostConfigYaml.WithArbiterGlobalTargets(
+                    HostConfigYaml.WithArbiterProviderKind(
+                        HostConfigYaml.WithArbiterEnabled(existingText),
+                        kindName),
+                    globalTargets);
+            }
+            catch (InvalidDataException ex)
+            {
+                WriteError(ex.Message);
+                return 1;
+            }
+
+            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
         }
 
-        bool configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
-
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadUserPaths resolvedUserPaths = _userPaths ?? new SquadCommandComposition.CliSquadUserPaths(
+            ArbiterCommandComposition.HomeDirectory(),
+            string.IsNullOrWhiteSpace(ArbiterCommandComposition.GetEnvironmentVariable("APPDATA"))
+                ? Path.Combine(ArbiterCommandComposition.HomeDirectory(), ".config")
+                : ArbiterCommandComposition.GetEnvironmentVariable("APPDATA")!);
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(resolvedUserPaths, _environmentReader);
 
         SquadReceipt? existingReceipt;
         try
         {
-            existingReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            existingReceipt = stateStore.ReadReceipt(root, scope);
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or InvalidDataException
@@ -214,7 +291,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
 
         if (!settings.DryRun && !SquadTargetRootConfirmation.Confirm(
                 root,
-                SquadDeploymentScope.Project,
+                scope,
                 "install",
                 _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
@@ -253,7 +330,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
         else
         {
-            configLoad = KyberWeaveConfigLoader.TryLoad(root, settings.Config);
+            configLoad = isProjectScope
+                ? KyberWeaveConfigLoader.TryLoad(root, settings.Config)
+                : KyberWeaveConfigLoader.TryLoadUserConfig(root, settings.Config);
         }
 
         if (!configLoad.Success || configLoad.Config is null)
@@ -267,18 +346,45 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         SquadArbiterWiring wiring =
             SquadCommandComposition.ResolveArbiterWiring(configLoad.Config.Arbiter);
 
-        SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
-        SquadInstallRequest request = new(
-            root,
-            SquadDeploymentScope.Project,
-            [target],
-            DryRun: settings.DryRun,
-            Arbiter: wiring);
 
+        SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
         SquadLifecycleResult result;
         try
         {
-            result = lifecycle.InstallAsync(request, cancellationToken).GetAwaiter().GetResult();
+            if (existingReceipt is not null)
+            {
+                HashSet<string> existingTargetTokens = existingReceipt.Files
+                    .Select(f => f.Target)
+                    .Concat(existingReceipt.Blocks.Select(b => b.Target))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToHashSet(StringComparer.Ordinal);
+                List<SquadTarget> combinedTargets = [target];
+                foreach (string token in existingTargetTokens)
+                {
+                    if (SquadTargetCatalog.TryResolve(token, out SquadTarget existingTarget) && !combinedTargets.Contains(existingTarget))
+                    {
+                        combinedTargets.Add(existingTarget);
+                    }
+                }
+
+                SquadUpdateRequest updateRequest = new(
+                    root,
+                    scope,
+                    combinedTargets,
+                    DryRun: settings.DryRun,
+                    Arbiter: wiring);
+                result = lifecycle.UpdateAsync(updateRequest, cancellationToken).GetAwaiter().GetResult();
+            }
+            else
+            {
+                SquadInstallRequest request = new(
+                    root,
+                    scope,
+                    [target],
+                    DryRun: settings.DryRun,
+                    Arbiter: wiring);
+                result = lifecycle.InstallAsync(request, cancellationToken).GetAwaiter().GetResult();
+            }
         }
         catch (SquadDeploymentConflictException ex)
         {
@@ -312,17 +418,28 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             SquadCommandComposition.WriteLine(
                 $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(root)}[/].");
         }
-        else
+        else if (isProjectScope)
         {
             SquadCommandComposition.WriteLine(
                 $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(targetToken)}[/]' " +
                 $"in '[bold]{Markup.Escape(root)}[/]'.[/]");
         }
+        else
+        {
+            SquadCommandComposition.WriteLine(
+                $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(targetToken)}[/]' " +
+                $"in the global user-home scope '[bold]{Markup.Escape(root)}[/]'.[/]");
+        }
 
         SquadInstallCommand.WriteArbiterTrustSteps([target], wiring);
         SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
 
-        if (!settings.DryRun && !Verify(root, settings.Config, endpoint, needsKey))
+        if (!isProjectScope)
+        {
+            WriteGlobalScopeTable(root);
+        }
+
+        if (!settings.DryRun && !Verify(root, settings.Config, endpoint, needsKey, isProjectScope))
             return 1;
 
         return 0;
@@ -332,6 +449,44 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     public int Execute(CommandContext context, ArbiterInstallSettings settings)
     {
         return Execute(context, settings, CancellationToken.None);
+    }
+
+    private static void WriteGlobalScopeTable(string home)
+    {
+        IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        AnsiConsole.MarkupLine("[bold]D13 global hook table[/]");
+        AnsiConsole.MarkupLine("[bold]target[/] | [bold]tier[/] | [bold]path[/] | [bold]reason[/] | [bold]trust[/]");
+
+        SquadGlobalRoots roots = new(_ => null, home);
+        foreach (string token in targets.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+            {
+                AnsiConsole.MarkupLine(
+                    $"  {Markup.Escape(token)} | {Markup.Escape("enforced-global")} | {Markup.Escape(home)} | {Markup.Escape("enforced-global")} | {Markup.Escape("not a known harness")} ");
+                continue;
+            }
+
+            string path = roots.ResolveGlobalRoot(target);
+            IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations([target], SquadDeploymentScope.Global);
+            string reason = records.Count > 0 ? (records[0].Details ?? "enforced-global") : "enforced-global";
+            string trust = ArbiterHookWiring.TrustSteps.TryGetValue(target, out string? text)
+                ? text
+                : "No trust gate is required for this harness.";
+
+            AnsiConsole.MarkupLine(
+                $"  {Markup.Escape(token)} | {Markup.Escape(reason)} | {Markup.Escape(path)} | {Markup.Escape(reason)} | {Markup.Escape(trust)}");
+        }
     }
 
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind)
@@ -398,9 +553,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return _environmentReader ?? Environment.GetEnvironmentVariable;
     }
 
-    private string ResolveEndpoint(string root, string? configOption)
+    private string ResolveEndpoint(string root, string? configOption, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, configOption);
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
         if (loaded.Success
             && loaded.Config is not null
             && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
@@ -553,9 +710,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static bool Verify(string root, string? configOption, string endpoint, bool needsKey)
+    private static bool Verify(string root, string? configOption, string endpoint, bool needsKey, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root, configOption);
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
         if (!loaded.Success || loaded.Config is null || !loaded.Config.Arbiter.Enabled)
         {
             WriteError(
@@ -630,8 +789,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     {
         ISquadReleaseSource releaseSource = _releaseSource ?? ResolveReleaseSource();
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots =
-            SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        ISquadGlobalRootResolver globalRoots = new SquadGlobalRoots(
+            _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
+            ArbiterCommandComposition.HomeDirectory());
         return new SquadLifecycleService(
             releaseSource,
             renderer,

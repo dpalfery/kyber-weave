@@ -7,8 +7,10 @@ license: MIT
 # Python Developer
 
 Language, packaging, typing, and environment decisions live in the path declared as
-**<python-coding-standard>** in the repository root `AGENTS.md`. Read that before the
-references below — this skill is procedure, not policy.
+**<python-coding-standard>** in the repository root `AGENTS.md`. Fetch that with
+`docs_get_coding_standard_for_technology` before the references below, naming the technology
+and the topic you need; read the file only when the tool is missing — this skill is procedure,
+not policy.
 
 Identify your sub-task and read ONLY the relevant reference before proceeding.
 

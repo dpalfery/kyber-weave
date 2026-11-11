@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -8,7 +9,7 @@ namespace KyberWeave.Core.Arbiter.Rules;
 
 /// <summary>
 /// Validates Arbiter rules and configuration against the permanent
-/// <c>KW-ARB-CONFIG-001</c> to <c>-010</c> diagnostics. Every id is permanent.
+/// <c>KW-ARB-CONFIG-001</c> to <c>-011</c> diagnostics. Every id is permanent.
 /// </summary>
 /// <remarks>
 /// Hints use the <see cref="Text.StringDistance.Nearest"/> nearest-match rule over
@@ -48,6 +49,12 @@ public static class RuleValidator
 
     /// <summary>A non-loopback endpoint uses <c>http</c>. The key is never sent over plain HTTP.</summary>
     public const string PlainHttpEndpoint = "KW-ARB-CONFIG-010";
+
+    /// <summary><c>arbiter.global</c> appears in a project-level config; it is valid only in the user config.</summary>
+    public const string UserGlobalTargetsForbidden = "KW-ARB-CONFIG-011";
+
+    /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
+    public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 
     /// <summary>
     /// Validates the effective configuration: facts (<c>-002</c>), lenses (<c>-003</c>),
@@ -258,7 +265,7 @@ public static class RuleValidator
     internal static bool TryGetStateBudget(string model, out int budget)
     {
         ArgumentNullException.ThrowIfNull(model);
-        if (model.StartsWith("jev-", StringComparison.Ordinal))
+        if (StateBudget.IsJevModel(model))
         {
             budget = 32_000;
             return true;

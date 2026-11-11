@@ -14,6 +14,7 @@ review:
     # rust, tauri: test (.)
     - id: rust-test
       run: ['cargo', 'test', '--manifest-path', 'Cargo.toml']
+      full-suite: true
   task-gates:
     rust-dev:
       # rust, tauri: format (.)

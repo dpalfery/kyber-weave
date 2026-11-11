@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 ---
 
 # CLI command surface
@@ -84,15 +84,43 @@ kyberdash --version
 
 `kyber-weave update` replaces the running Release binaries — the CLI, the sibling
 `kyber-weave-mcp`, an installed `kyber-weave-arbiter`, the installed `kyberdash`, and an installed KyberDash tray — after
-SHA-256 verification. It delegates the tray step to `kyberdash menubar --update`. It does not
-wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. After replacing
-binaries it re-renders the arbiter hooks/scripts for each registered project with
-`arbiter.enabled` (reusing the Squad update path; `--no-arbiter` or an absent arbiter skips
-it). After the binaries
-commit, it reconciles KyberDash in one run: `kyberdash engine ensure --if-running`, the tray
-relaunch when needed, then `kyberdash kyber capture plugin install --harness opencode --preserve
---if-installed` and `kyberdash kyber capture plugin install --harness factory --preserve
---if-installed`. The reconciliation also runs when the release is unchanged ("already on").
+SHA-256 verification. It does not wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs.
+The updating process swaps the binaries and then does nothing else: it starts the installed
+kyber-weave as `kyber-weave update <version> --finish-update` and relays that process's exit code.
+The finishing process runs everything after the swap, so the steps below run in the new release.
+When the version is already installed ("already on"), nothing is swapped, and the updating process runs the
+same steps itself.
+Its wait is 15 minutes, and the process tree is killed on expiry. See
+[distribution](distribution.md#the-self-update-sequence) for the full sequence.
+
+`--finish-update` is a hidden option. Only the updater passes it, with the owner's `--no-kyberdash`,
+`--no-menubar`, `--no-arbiter` and `--no-restart` forwarded. A person does not run it. It refuses, before
+any work, in three cases:
+
+- no version named: `usage: kyber-weave update <version> --finish-update. Name the version the update installed.`
+- a version other than the one running: `--finish-update finishes the update to the version that runs it. This kyber-weave is <current>, but <version> was asked for.`
+- combined with `--release-candidate`: `--finish-update cannot be combined with --release-candidate. It finishes one named version.`
+
+It downloads nothing and commits nothing. On success it prints no outcome line; the updating process
+prints the single line `updated kyber-weave <version> → <path>`.
+
+The finishing process runs the KyberDash steps as a changed release. It runs
+`kyberdash engine ensure --if-running`, relaunches the tray when needed, then runs `kyberdash kyber
+capture plugin install --harness opencode --preserve --if-installed` and `kyberdash kyber capture
+plugin install --harness factory --preserve --if-installed`. These steps also run when the release is
+unchanged ("already on"). It then re-renders the arbiter hooks/scripts for global targets registered
+under `arbiter.global.targets` and each registered project with `arbiter.enabled`, using the Squad
+update path and this release's hook source. `--no-arbiter` or an absent arbiter skips that.
+A failed refresh is a warning with exit 0: `warning: arbiter hooks were not refreshed: <cause>. The
+binaries are already updated; run kyber-weave update <version> to retry.`
+
+A failure after the install exits 1 with `kyber-weave <version> is installed, but the last steps did not
+finish: <cause>. Run kyber-weave update <version> to finish them.` When the finishing process exits
+non-zero, the message reads `kyber-weave <version> is installed, but the post-update steps did not finish:
+the new kyber-weave exited <code>, and its output above says why. The binaries are already updated. Run
+kyber-weave update <version> to finish them.` A pinned older release that does not know `--finish-update`
+fails the hand-off, and the retry it names is `kyber-weave update <version>`.
+
 When the plugin file changed, it prints a line saying to restart OpenCode if new OpenCode sessions do not
 appear. See [Updating](install.md#updating).
 
@@ -119,6 +147,18 @@ initialization walkthrough is in
 kyber-weave docs init .                       # scaffold config, catalog, ontology; deploy the skill
 kyber-weave docs init . --docs-root docs --target agent-skills
 ```
+
+Then answer the onboarding question once, so `run start` stops asking it. The skill walks each
+declared technology's default gates and `## Completion` text and records what you accept or change;
+the verb below records only the answer.
+
+```bash
+kyber-weave docs onboarding done      # the skill was applied
+kyber-weave docs onboarding declined  # this repository chose not to onboard
+```
+
+The setting, its two values and what the stop is for are in
+[Configuration § Onboarding](configuration.md#onboarding).
 
 KyberDash shares one settings store across the CLI, the web dashboard, and the tray; read and
 write it with `kyberdash dash settings`. The values are `folder_import.scheduled`,
@@ -175,6 +215,15 @@ kyberdash dash settings show
 kyberdash dash settings set jobs.refresh_cadence_minutes 30
 ```
 
+**Start a run on its branch** ([`run start`](#run--run-start),
+[Run controls](configuration.md#run-controls)):
+
+```bash
+kyber-weave run start --harness claude --type fix --slug arbiter-global-block-identity
+kyber-weave run start --harness claude --type fix --slug arbiter-global-block-identity --json
+kyber-weave run start --harness claude --type feat --slug new-gate --resume <branch>
+```
+
 The sections that document these sequences in full are
 [Canonical flows](#canonical-flows), [`kyber-weave` reference](#kyber-weave-reference),
 [`kyberdash` reference](#kyberdash-reference), [Exit codes](#exit-codes), and
@@ -182,8 +231,9 @@ The sections that document these sequences in full are
 
 ## `kyber-weave` reference
 
-The CLI is a Spectre.Console.Cli application with seven branches — `skill`, `agent`, `docs`,
-`squad`, `arbiter`, `utilities`, and `review` — plus a top-level `update` verb. Unknown options are a
+The CLI is a Spectre.Console.Cli application with eight branches — `skill`, `agent`, `docs`,
+`squad`, `run`, `arbiter`, `utilities`, and `review` — plus the top-level `update` and `doctor`
+verbs. Unknown options are a
 hard error: strict parsing is on, so a mistyped flag fails rather than being silently
 dropped.
 
@@ -239,6 +289,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 | [`docs mcp-wire`](docgraph/mcp-runbook.md#docs-mcp-wire) | `-t\|--target <TARGETS>` (comma list of harness slugs: `factory`, `claude-code`, `cursor`, `vscode`, `opencode`), `--dry-run` | Write the declared `mcp.required-servers` entries into the named harnesses' repository-scope configuration. A declared command that names a path is resolved against the repository under inspection, not the working directory. No `--target` previews and writes nothing; `--dry-run` prints the per-file change — file, harness, and the servers it would add — and writes nothing including the receipt. A named target already holding every declared server is reported as `nothing to write` at exit 0. A configuration that is a symbolic link, one this process may not inspect, and a run whose receipt cannot be persisted are refused rather than followed or half-written. |
 | [`docs mcp-unwire`](docgraph/mcp-runbook.md#docs-mcp-unwire) | `-t\|--target <TARGETS>` | Restore the files a receipt records as `inserted` and delete the ones it records as `created`. No `--target` lists the recorded files and removes nothing. Refuses when the file changed since the write, when it is a symbolic link, and when it may not be read. A record for a write that never landed is recognised from the bytes on disk and dropped instead of being refused or restored. |
 | [`docs mcp-migrate`](docgraph/mcp-runbook.md#docs-mcp-migrate) | `-t\|--target <TARGETS>` (harness slugs, plus `declaration` for a host with no harness files), `--dry-run` | Rename a proven old MCP server key to its new name — `kyber-weave` to `kw-docs`, `kyberdash` to `kw-dash`, `kyber-weave-arbiter` to `kw-arbiter` — in the named harnesses' repository-scope configuration, and migrate the host declaration's `mcp:` section with them. No `--target` previews every old key found with its proof result and the writable targets that would take it, and writes nothing. A key is renamed only where the entry also proves the launch: `argv[0]`'s file name equals the shipped binary, with the next argument `serve` for the arbiter and `mcp` for the dash. An unproven entry is reported with the manual edit and never touched; Codex, ZCode, and the Copilot repository settings are reported with the snippet and never written. `--dry-run` prints the same report and writes nothing, not even the receipt. |
+| [`docs onboarding`](configuration.md#onboarding) | `<done\|declined>` (required), `[path]` | Record that this repository has answered the onboarding question, in `.kyber-weave/kyber-weave.yml`, and re-splice the Config Reg block in `AGENTS.md` that publishes it. The value is written in place, so the operator's comments and every other key survive; the block is re-spliced because an answer no agent instruction file carries is one no run can honour. `done` means the onboarding skill was applied; `declined` means the repository chose not to onboard, and it ends the question exactly as `done` does. Exit `0` recorded (an existing identical answer is a no-op at `0`), `2` an answer that is not one of the two — nothing is written, the refusal names both — `1` an operational failure: no configuration to edit, or a file that could not be read or written. |
 | [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs drift`](docgraph/governance.md#entity-drift--docs-drift) | validate flags + `--docs-root` | Resolve documented symbols against the CodeGraph index (`KW-DOC-DRIFT-*`). |
 | [`docs export-graph`](docgraph/architecture.md) | validate flags + `--docs-root`, `-o\|--out <DIR>` (default `./build/doc-graph`) | Export the documentation graph as `nodes.jsonl` and `edges.jsonl`. |
@@ -264,10 +315,125 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 | [`squad status`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Verify deployed files and report drift against the receipt. |
 | [`squad doctor`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Diagnose prerequisites, toolchain availability, and deployment health. |
 | [`squad pack`](kyber-squad/onboarding.md#packaging-squad-pack) | `-f\|--format <FORMAT>` (`apm` \| `plugins` \| `all`; default `all`), `-o\|--out <DIR>`, `-v\|--version` | Package agents and skills into distribution archives. |
+| [`squad copilot-prompt install`](kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in) | `--flavour <stable\|insiders>`, `--dry-run`, `--yes` | Opt in to replacing Copilot's top-level system prompt in VS Code. Writes the prompt to `~/.kyber-weave/copilot/system-prompt.yaml` and one `*` entry in each build's user `settings.json`. Machine-wide: affects every Copilot chat on the machine. `--flavour` narrows to one build; `--dry-run` reports and writes nothing; `--yes` skips the confirmation. |
+| [`squad copilot-prompt uninstall`](kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in) | `--flavour <stable\|insiders>`, `--dry-run`, `--yes` | Remove only the `*` entry that names this prompt file, then delete the prompt file. A foreign `*` entry is left in place and refuses the run. |
+| [`squad copilot-prompt status`](kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in) | `--flavour <stable\|insiders>` | Report whether the prompt file is installed and whether each build's `*` entry points at it. Read-only. |
 | [`squad preset use`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `<name>`, `-t\|--target <TARGETS>`, `-g\|--global`, `--dry-run` | Apply a model preset to target harnesses, recording the selection. |
 | [`squad preset clear`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `-t\|--target <TARGETS>`, `-g\|--global` | Revert target harnesses to bundled model profiles. |
 | [`squad preset list`](kyber-squad/model-profiles.md#apply-switch-and-revert) | — | List available presets and their active deployments. |
 | [`squad preset show`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `<name>`, `--target <TARGET>` | Inspect resolved models for a preset and target harness. |
+
+### `run` — run start
+
+Owned by [Run start: fetch and branch first](kyber-squad/architecture.md#run-start-fetch-and-branch-first),
+with the settings it reads in [Configuration § Onboarding](configuration.md#onboarding) and
+[§ Run controls](configuration.md#run-controls).
+
+| Verb | Flags | What it does |
+|---|---|---|
+| [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
+
+```bash
+kyber-weave run start --harness <token> --type <type> --slug <slug> \
+  [--resume <branch-or-pr>] [--failing-version <version>] [--json]
+```
+
+**What it does, in order.**
+
+1. Names the branch from the three arguments, refusing input it cannot act on before it touches git
+   (exit `2`).
+2. Requires the current directory to be inside a git repository.
+3. Loads the repository's configuration; a configuration failure is exit `1`, with the diagnostics
+   printed the way every other command prints them.
+4. **Stops if the onboarding question is unanswered** (exit `1`). A repository whose configuration
+   sets no `onboarding:` value has never been asked which technologies, gates and standards it
+   wants, so the run names the `kyber-docs-onboarding-and-assessment` skill and
+   [`docs onboarding`](configuration.md#onboarding), and creates no branch. This is the first check
+   after the configuration, ahead of the tool checks and the fetch, because the gates the run will
+   be held to are exactly what onboarding chooses; an autonomous run stops here too, asking nothing
+   and writing nothing. See [Configuration § Onboarding](configuration.md#onboarding).
+5. Requires the `codegraph` binary to resolve on `PATH`; absent is exit `3`, whose remedy is an
+   install rather than a repair.
+6. Fetches with `git fetch origin --prune`.
+7. Resolves the base: `run.base-branch` when set, `origin/HEAD` otherwise. **`main` is never
+   assumed**, so a repository whose default branch is `develop` is compared against `develop`.
+8. Refuses `--resume` naming neither a local branch nor `origin/<branch>` (exit `2`).
+9. Reads the versions and the divergence *before* switching anything, so the report describes the
+   checkout as the operator left it. `--failing-version` is what makes "the defect is not the
+   commit you are looking at" visible.
+10. Creates the branch with `--no-track`, in the checkout when it is clean and carries no other
+    worktree, and in a worktree of its own otherwise.
+
+**The branch and title shapes.** Both name the harness, because the diff does not:
+
+| Part | Shape | Example |
+|---|---|---|
+| Branch | `[<owner>.<agent>.]<harness>/<type>/<slug>` | `claude/fix/arbiter-global-block-identity` |
+| Title | `<type>(<scope>): <summary> [<harness>]` | `fix(arbiter): qualify the global block identity [claude]` |
+
+`<type>` is a conventional-commit type (`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
+`refactor`, `revert`, `style`, `test`). `<slug>` is lowercase hyphen-separated words. `<harness>`
+is one of the thirteen catalogue tokens — `codex`, `cursor`, `claude`, `copilot`, `opencode`,
+`kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`, `commandcode` — or `manual` for
+work named after no harness. The branch and title shapes deliberately share one vocabulary with
+`scripts/check-pr-name.sh`, which CI runs as the `pr-naming` job:
+a branch the check rejects is a branch whose pull request cannot reach the default branch, so
+creating one only moves the discovery to the end of the work.
+
+**Where the branch lands.** A clean checkout with no other worktree attached is branched in place.
+A dirty one, or one a second worktree already shares, gets a worktree at
+`<repository parent>/<repo name>.worktrees/<UTC timestamp>-<branch with / replaced by ->` — for
+example `…/kyber-weave.worktrees/20261110T150612Z-claude-fix-arbiter-global-block-identity` — so the
+operator's edits stay on the branch they were made for, and no branch moves under another worker.
+The timestamp (`yyyyMMddTHHmmssZ`) keeps a repeat run off an earlier folder and sorts by time; two
+runs in one second take a `-2` suffix. Only the folder is stamped, never the branch. A resumed branch
+keeps its own branch and is never renamed. When it needs a worktree, the run continues in the one
+already holding the branch, and otherwise creates a new timestamped folder. A clean checkout with no
+other worktree resumes in place. If the holding folder was deleted by hand, the run clears git's
+stale entry with `git worktree prune` first.
+
+**`--json` keys.** One object on stdout, for a caller that dispatches the step and reads its result:
+
+| Key | Meaning |
+|---|---|
+| `base` | The base branch as reported, e.g. `develop` (resolved through `origin/HEAD` when unset). |
+| `baseRef` | The ref the branch was created from, e.g. `origin/develop`. |
+| `branch` | The branch now in place — the resumed one when `--resume` was given. |
+| `worktree` | The worktree path, or `null` when it branched in place. |
+| `location` | `in-place` or `worktree`. |
+| `revision` | The commit the base resolved to, or `null` when it did not resolve. |
+| `resumed` | Whether this run continued an existing branch. |
+| `versions.failing` | `--failing-version` as given, or `null`. |
+| `versions.head` | The nearest tag at `HEAD`, else its abbreviated commit. |
+| `versions.base` | The nearest tag at the base ref, else its abbreviated commit. |
+| `serverAlignment.remote` | The remote name every run starts from: `origin`. |
+| `serverAlignment.host` | The host `origin` names, or `null` for a remote that is a local path. |
+| `serverAlignment.remoteUrl` | What `git remote get-url origin` returned, or `null`. |
+| `serverAlignment.head` | The commit of the compared ref — `HEAD`, or the resumed branch. |
+| `serverAlignment.ahead` | Commits on the compared ref that the base lacks, or `null` when git cannot compare. |
+| `serverAlignment.behind` | Commits on the base the compared ref lacks, or `null` when git cannot compare. |
+| `serverAlignment.aligned` | Whether both counts are zero. |
+
+**Exit codes.**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Ready: the branch, or the resumed branch, is in place. |
+| `1` | A tool failure while `stop-on-tool-failure` is on — the fetch, the base, or the branch creation. With the setting off, a failed fetch only warns and the run continues from the base this checkout last fetched. |
+| `2` | Refused input: an unknown harness token, a type that is not conventional, a slug that is not lowercase hyphen-separated words, a new branch whose name already exists locally or on `origin` (continue it with `--resume`, or choose another slug), a `--resume` naming neither a local nor an `origin` branch, or a `--resume` naming a pull request number. |
+| `3` | The `codegraph` binary is not on `PATH`. Its remedy is an install, so it is not reported as a failure (exit `1`). |
+
+**Known limit.** `--resume` accepts a local branch or `origin/<branch>`. A numeric pull request
+reference is **refused with exit `2`**, not resolved: no pull request is fetched or looked up.
+Pass the branch the pull request already owns.
+
+**The no-shell route.** A harness that gives the conductor no shell cannot run the command, so the
+conductor dispatches `github-devops` with the exact command and a `RUN-START: true` marker. The
+marker exists because `KW-ARB-PLAN-001` escalates a `delegate` dispatch carrying no `PLAN_FILE`,
+which would refuse the very route the marker exists for: the Arbiter's `TriggerClassifier`
+classifies `RUN-START: true` as `investigate`, never `delegate`, so the roster check and
+`KW-ARB-READONLY-001` still apply to the dispatch. See
+[the three-step decision gates](adr/0053-kyber-arbiter-three-step-decision-gates.md).
 
 ### `arbiter` — Kyber Arbiter decision gates
 
@@ -277,8 +443,8 @@ Owned by the [Kyber Arbiter runbook](kyber-arbiter/runbook.md), with the engine 
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`arbiter install`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--provider <KIND>` (`none` \| `systemone`; empty resolves to `none`), `--arbiter-key <KEY>`, `--key-stdin`, `--dry-run`, `--yes`, `-g\|--global` (rejected) | One-command install: ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets `arbiter.enabled: true` non-destructively, renders the target through the existing Squad install pipeline, applies the provider, stores the key in the OS credential store, verifies, and prints the target's trust step. `--target` is validated through `SquadTargetCatalog`; `--global` is rejected (exit `2`). `--arbiter-key` prints an argv/shell-history warning; `--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. Idempotent: a second run is a no-op (exit `0`). |
-| [`arbiter uninstall`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--remove-key` | Remove only Squad-owned arbiter files/blocks for the target (owned plugin/extension files, owned hook blocks). `--remove-key` also deletes the stored key; without it the key is untouched. |
+| [`arbiter install`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `--provider <KIND>` (`none` \| `systemone`; empty resolves to `none`), `--arbiter-key <KEY>`, `--key-stdin`, `--dry-run`, `--yes`, `-g\|--global`, `--project`, `--path <PATH>` (project only) | One-command install: defaults to global scope (`~/.kyber-weave/kyber-weave.yml` and `arbiter.global.targets`). It sets `arbiter.enabled: true` non-destructively, renders the target through the existing Squad install pipeline, applies the provider, stores the key in the OS credential store, verifies, and prints the target's trust step. `--project` opts into repo scope, `--path` is valid only with it, and `--global --project` exits `2` with `KW-ARB-INSTALL-001`. `--arbiter-key` prints an argv/shell-history warning; `--key-stdin` and `TYPESAFE_API_KEY` stay the safer paths. Idempotent: a second run is a no-op (exit `0`). At global scope one `--target` per run, and the run merges that target into the global receipt the earlier runs wrote: `--target cursor`, then `--target codex`, then `--target factory` leaves three owned blocks in one receipt, in any order, each exit `0`, because a global block is claimed by target and path (several formats record the same bare `hooks.json`). A genuine duplicate — the same target claiming one path twice — still exits `1`. |
+| [`arbiter uninstall`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--target <TARGET>` (required), `-g\|--global`, `--project`, `--path <PATH>` (project only), `--remove-key` | Remove only Squad-owned arbiter files/blocks for the target (owned plugin/extension files, owned hook blocks). Defaults to user/global scope (removes only global-receipt-owned files/blocks and target from `arbiter.global.targets`); `--project` opts into repo scope (`--path` valid only with it). At global scope it removes that target's block from the receipt and leaves every other target's block and files in place, deleting the receipt only when it owns nothing any more. `--remove-key` deletes the stored key and warns when another scope still shares the key. |
 | [`arbiter setup`](kyber-arbiter/runbook.md#setup-doctor-audit) | provider choice; `--key-stdin` | Choose provider (`none`, TypeSafe cloud, local Ollama); stores the key in the OS credential store. |
 | [`arbiter status`](kyber-arbiter/runbook.md#setup-doctor-audit) | — | Show provider, model, endpoint origin, whether a key resolves — never the value. |
 | [`arbiter doctor`](kyber-arbiter/runbook.md#setup-doctor-audit) | — | Warn on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries. |
@@ -301,14 +467,15 @@ Owned by the [Kyber Utilities adoption and activation guide](kyber-utilities/onb
 
 ### `review` — the deterministic review half
 
-Owned by the [Review council overview](code-review/README.md#four-commands), with the
+Owned by the [Review council overview](code-review/README.md#the-review-commands), with the
 verdict engine under [Review council architecture](code-review/architecture.md#how-the-verdict-is-computed).
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`review gates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
+| [`review gates`](code-review/README.md#the-review-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--gate <ID>` (repeatable), `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix`, `--council` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped; with `--gate`, run only the gates named); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
-| [`review duplicates`](code-review/README.md#four-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
+| [`review duplicates`](code-review/README.md#the-review-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
+| [`review suppressions`](code-review/architecture.md#the-suppression-gate) | `-f\|--format`, `--no-info`, `-c\|--config`, `--base <REF>` | Fail a change that adds a warning suppression without a `reason:` on the same or the immediately preceding added line. History is never re-litigated; an unreadable change fails rather than passing. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes from findings and gates. |
 
 `review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
@@ -316,8 +483,17 @@ declared for that agent under `review.task-gates` and runs them against the file
 changed, instead of running the repository-wide `review.gates`:
 
 - `--all` runs all declared repository gates for the current OS unconditionally without
-  include path filtering. Combining `--all` with `--agent`, `--base`, or `--paths` is a
-  client-input error (exit `2`, `KW-REVIEW-028`).
+  include path filtering. Combining `--all` with `--agent`, `--base`, `--paths` or `--gate`
+  is a client-input error (exit `2`, `KW-REVIEW-028`). Under `--all` a full-suite gate
+  refused for lack of `--council` ends the run at once: no gate starts and the command
+  exits `1`.
+- `--gate <ID>` runs only the gates named, by the id the host declares under `review.gates`.
+  It repeats. The named list replaces the declared one before include matching, applicability,
+  the full-suite admission rule and the report all read it, so a full-suite gate named without
+  `--council` is refused exactly as it would be anywhere else. An id that names no declared
+  gate is refused (`KW-REVIEW-028`, exit `1`) rather than reported as zero gates, which a
+  reader could take as a pass. Exclusive with `--all` and with `--agent` (both exit `2`);
+  combines with `--paths`, `--base` and `--council`.
 - `--paths <PATH>` names a changed file, relative to the repository root, and repeats for
   several. Without `--agent` the paths are the council gates' changed set; with `--agent`
   they are the agent's changed files. Without it the changed set is the diff against
@@ -331,10 +507,21 @@ changed, instead of running the repository-wide `review.gates`:
   decides the result. Requires `--agent`.
 - `--task` and `--fix` given without `--agent` are a client-input error (exit `2`).
   `--paths` and `--base` scope the council gates too and are accepted without `--agent`.
-- Two tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
-  becomes one argument per changed file the gate's `include` matches, and `{task}`, which may
-  sit inside an argument. Neither reaches a shell, and the program (the first element) is always
-  a literal, never a token.
+- `--council` declares the run to be the review council or CI, the only callers that may run gates marked
+  `full-suite: true` (`test`, `ts-test`, `cargo-test`). Without it, when stdin is not a terminal, each
+  full-suite gate is not run: it is reported as a refused blocking failure (`KW-REVIEW-033`, severity Error, "a gate never started")
+  that names `kyber-weave review gates . --agent <name> --paths <files>` and
+  `scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'`. A refusal means "not run here", not a code
+  finding. The other gates still run, unless the run is `--all` (see above), and `--agent` task-gate runs
+  are unaffected. The command exits `1`.
+  A pre-push self-review run never passes `--council`; CI runs the refused gates.
+- Three tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
+  becomes one argument per changed file the gate's `include` matches; `{task}`, which may sit
+  inside an argument; and `{tests}`, which becomes the fully qualified test classes covering the
+  change, resolved from `review.test-map` first and the `<Stem>Tests` naming convention second. A
+  change no class covers skips the gate with `KW-REVIEW-026` rather than running a filter over
+  nothing. None reaches a shell, and the program (the first element) is always a literal, never a
+  token.
 
 ### `update` — replace the Release binaries
 
@@ -342,7 +529,7 @@ Owned by [Updating](install.md#updating).
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for registered projects with `arbiter.enabled` (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. |
+| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-arbiter`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and an installed `kyber-weave-arbiter`, KyberDash and tray) from a GitHub Release, then hand the post-swap steps to the new binary: restart the KyberDash engine and tray, upgrade an installed OpenCode or Factory capture plugin, and re-render the arbiter hooks/scripts for global targets registered under `arbiter.global.targets` and registered projects with `arbiter.enabled`, using the new release's hook source (`--no-arbiter` or an absent arbiter skips the re-render). `--no-restart` skips the engine and tray restart. A hidden `--finish-update` option, passed only by the updater, runs those steps in the finishing process; it refuses a version other than its own, `--release-candidate`, and a missing version, and the failure messages and the pinned retry `kyber-weave update <version>` are in [Update](#update). |
 
 ### `doctor` — repository documentation tooling
 
@@ -354,14 +541,22 @@ and is unrelated.
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision the CodeGraph index when asked. `--check` and `--provision` are mutually exclusive (exit `2`). |
+| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision` and `--ensure` are mutually exclusive (exit `2`). |
 
 Mode rule:
 
 - `--check` is always read-only. It detects the `codegraph` binary and the index and runs the
-  MCP proof. It never runs `codegraph init` or `codegraph index`.
+  MCP proof. It never runs `codegraph init`, `codegraph sync` or `codegraph index`.
 - `--provision` always provisions: `codegraph init .` when `.codegraph/` is absent,
-  `codegraph index .` otherwise, both at the git root.
+  `codegraph sync .` otherwise, both at the git root.
+- `--ensure` is the one command a worker runs first, in the tree it will work in. It runs
+  `sync` (or `init`), restores any tracked file that preparation rewrote — never a file that was
+  already dirty — proves the index with one `codegraph explore` call and the docs server with one
+  call, and repairs **once** with `codegraph index .` and retries once when a step fails. It
+  reads `stop-on-tool-failure` itself: under the default a failed check exits `1`; under
+  `stop-on-tool-failure: false` the same checks are reported as warnings and the exit is `0`,
+  except a missing binary, which stays `3`. Its steps and check ids are in the
+  [MCP runbook](docgraph/mcp-runbook.md#the-workers-first-command-doctor---ensure).
 - A bare run provisions only when stdin is a terminal and `CI` is unset. Otherwise it behaves
   as `--check` and prints `provisioning skipped: non-interactive; rerun with --provision`. The
   hint is suppressed with `--json`, so stdout stays valid JSON.
@@ -370,10 +565,10 @@ Exit codes for `doctor` (the `kyber-weave` binary):
 
 | Exit | Meaning |
 |---|---|
-| `0` | Every check passed. |
-| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. |
-| `2` | A client-input error: `--check` with `--provision`, a non-positive timeout, a path that is not inside a git repository, or a root that is the home directory. |
-| `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed. |
+| `0` | Every check passed, or `--ensure` ran with `stop-on-tool-failure: false` and only reported failures. |
+| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, the `--ensure` explore proof still failed after its one repair, or the MCP server did not start, handshake, answer `docs_answer_question_from_repo_documentation` (check id `mcp.docs_explore`, which predates the rename), or answer for this repository. |
+| `2` | A client-input error: two modes at once, a non-positive timeout, a path that is not usable or not inside a git repository, or a root that is the home directory. |
+| `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed, in any mode. |
 
 The failure output contract, the check ids, and the provisioning rules are in the
 [MCP runbook](docgraph/mcp-runbook.md#the-live-check-doctor---check).
@@ -456,15 +651,30 @@ risk. The three rules below mirror the contract in
 | `docs mcp-migrate` | `0` for a preview, a completed migration, or nothing to do; `1` when any named target was refused — a target slug the catalog does not know, a configuration that is a symbolic link, one this process may not inspect, a malformed or foreign document, an old and a new entry whose launches differ, or a receipt that could not be persisted. A refusal writes zero bytes to that file and the other named targets still proceed. `--dry-run` exits what the real run would have exited |
 | `review verdict` | `0` approve, `1` request-changes |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
-| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). |
+| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, `--paths` or `--gate` is a client-input error (`KW-REVIEW-028`, exit `2`). `--gate` naming no declared gate, or combining with `--agent`, is a client-input error (`KW-REVIEW-028`); an unknown id exits `1`, a bad combination exits `2`. A full-suite gate refused for lack of `--council` (`KW-REVIEW-033`, a gate that never started) is a blocking failure: exit `1`. Under `--all` that refusal ends the run with no gate started; in a scoped run the other gates still run. A gate whose `requires-paths` entry is absent is also `KW-REVIEW-033`, exitCode `-1`: exit `1` when blocking. |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
+| [`review suppressions`](code-review/architecture.md#the-suppression-gate) | `0` when every suppression the change added states a reason, or the change adds none; `1` when one does not (`KW-REVIEW-036`) or the change against `--base` could not be read (`KW-REVIEW-037`), because an unreadable change is no evidence either way; `2` for a `--base` ref or a path refused before anything was read (`KW-REVIEW-028`) |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
-| `arbiter install`, `arbiter uninstall` | `2` for a client-input error (missing or unknown `--target`, `--global` on install, a keyed provider with no key — `KW-ARB-KEY-001`, an invalid `--provider`, a declined confirmation), `1` for an operational failure (unreadable/unwritable config or state, failed Squad render, failed verification); `0` for success or an idempotent no-op |
+| `squad copilot-prompt install`, `squad copilot-prompt uninstall` | `2` for a client-input error (`--flavour` that is not `stable` or `insiders`, no `--yes` with no terminal attached, or no home directory); `1` for a refusal (a foreign `*` entry, a settings file that cannot be read, is not readable JSON or cannot be spliced, or, for `install`, no VS Code user data found) or a failed write, with no file changed by a refusal; `0` otherwise, including a declined confirmation and a `--dry-run` |
+| `squad copilot-prompt status` | `2` for a `--flavour` that is not `stable` or `insiders`, or with no home directory; `1` when a settings file cannot be read or is not JSON; else `0` |
+| `arbiter install`, `arbiter uninstall` | `2` for a client-input error (missing or unknown `--target`, combining `--global` and `--project` or `--path` without `--project` — `KW-ARB-INSTALL-001`, a keyed provider with no key — `KW-ARB-KEY-001`, an invalid `--provider`, a declined confirmation), `1` for an operational failure (unreadable/unwritable config or state, failed Squad render, failed verification, a receipt that refuses a block claim such as one target claiming one path twice); `0` for success or an idempotent no-op. The codes are the same at both scopes, and at global scope a second block-bearing target is neither a client-input error nor a duplicate: its block is claimed by target beside path, so each target installs and uninstalls on its own (`0`) |
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
+| [`run start`](#run--run-start) | `0` the branch is in place; `1` a configuration failure, an unanswered onboarding setting, or a tool failure while `stop-on-tool-failure` is on; `2` refused input (harness token, type, slug, or a `--resume` naming no local or `origin` branch); `3` the `codegraph` prerequisite is missing. Initial argument validation runs before the configuration is loaded, configuration before the onboarding check, and onboarding before the binary is probed, so initial bad input (`2`) outranks configuration and onboarding (`1`), which outrank missing codegraph (`3`); `--resume` validation runs after fetch on the branch resolution path. |
+| `docs onboarding` | `0` the answer is recorded (an answer already holding that value is a no-op at `0`); `2` an answer that is neither `done` nor `declined`, with nothing written; `1` no configuration to edit, or a file that could not be read or written |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
+
+### Repository scripts
+
+The two test-running scripts in `scripts/` share one full-suite refusal. Exit `89` means the
+command is a full test-suite run and the caller is not the council or CI: `scripts/proc-guard.sh run`
+(no `--council` and stdin not a terminal) and `scripts/fast-loop.sh --full`, `--scoped` or `--regenerate`
+(stdin not a terminal). Both exit `89` before any build or process starts, and print the targeted
+alternatives. `proc-guard.sh run` takes `--council` on its command line only; no environment variable lifts
+the refusal. `scripts/proc-guard.sh classify -- <argv>` prints `full` or `partial` for a command and starts
+nothing, so you can check a command before running it; shell strings such as `bash -c` are not parsed and count as `partial`. The launcher list, the per-tool full-run rules and the remaining limits are in the [test standard, limits of the guard](standards/test/README.md#limits-of-the-guard). `scripts/fast-loop.sh --class` and `--method` are unchanged.
 
 ### `kyberdash`
 

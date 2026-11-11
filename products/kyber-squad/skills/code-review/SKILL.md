@@ -31,6 +31,15 @@ under the paths declared as **<plan-index>** and **<specification-index>** in th
 What falls out of this and governs everything after it is **which lenses can possibly apply**;
 a change touching only Markdown does not need a database-migration lens spun up to tell you so.
 
+**Review the tree the change is in.** When the change lives in a git worktree, every command and
+every reading happens there: the gates below run in it, and so do the two documentation gates,
+`kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Code questions go to
+`codegraph explore "…"` in that worktree's own shell, because a worktree does not share the
+canonical checkout's CodeGraph index. The `kw-docs` and `codegraph` MCP servers stay bound to the
+canonical checkout on purpose, so an MCP answer describes that checkout unless its provenance
+`branch=` is the branch under review; treat it as evidence about another tree when it is not. A
+review run in a worktree that reads the canonical checkout's index reviews code nobody changed.
+
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
 ground rules and the sections that match the changed technologies are the host's own standard
@@ -44,12 +53,18 @@ declared, the report says so in one line rather than reviewing without notice.
 
 They are independent. Neither waits on the other.
 
-**Gates.** Two commands, and they are the only things this skill executes:
+**Gates.** Two commands, and they are the only things this skill executes. This section is the only place the review command is written down: the reviewer derives its command from here, and no plan, index entry or task packet restates it, because a copy goes stale the moment the gate list or one of its flags moves.
 
 ```bash
 kyber-weave review gates . --base <ref> --out artifacts/gates.json
+kyber-weave review gates . --base <ref> --out artifacts/gates.json --council
+kyber-weave review gates . --base <ref> --gate <gate-id> --out artifacts/gates.json --council
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
+
+The end-of-run council (`code-reviewer`) runs the second form: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds it.
+
+The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
 Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
 denied write tool on the reviewer does not block the run. If the files cannot be persisted,
@@ -246,6 +261,7 @@ Procedure above and the host's declared gates.
    request description. A verdict computed before a fix is void. List any major-or-worse
    finding still open by id in the pull request description. Minor/Info findings never
    block. Required CI decides readiness; the verdict does not gate the push or the ready step.
+   Run the gates command without `--council`. The CLI refuses the full-suite gates, and each refusal is a blocking failure that names the targeted alternatives; report those as "not run here, CI runs them", and do not count a refusal as a code finding in the verdict.
 3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.

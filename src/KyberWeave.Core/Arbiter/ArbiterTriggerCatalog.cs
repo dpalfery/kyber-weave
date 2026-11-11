@@ -19,6 +19,7 @@ public static class ArbiterTriggerCatalog
         "delegation.target-profile",
         "delegation.prompt",
         "delegation.paths",
+        "delegation.planning-paths",
         "delegation.plan-file",
         "delegation.task",
         "plan.exists",
@@ -48,6 +49,7 @@ public static class ArbiterTriggerCatalog
         "delegation.prompt",
         "delegation.markers",
         "delegation.plan-file",
+        "delegation.plan-file-rejected",
         "config.planning-dirs",
     };
 
@@ -58,7 +60,7 @@ public static class ArbiterTriggerCatalog
             ["delegate"] = DelegateFacts,
             ["delegate.returned"] = Union(
                 DelegateFacts,
-                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths"]),
+                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths", "gate.report.agrees"]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(
                 DelegatePlannerFacts,
@@ -84,6 +86,7 @@ public static class ArbiterTriggerCatalog
                 "lens.name",
                 "lens.applicability",
                 "review.changed-paths",
+                "review.base-ref",
                 "review.diff-summary",
             },
             ["lens.returned"] = new HashSet<string>(StringComparer.Ordinal)
@@ -110,6 +113,7 @@ public static class ArbiterTriggerCatalog
                 "gate.id",
                 "gate.applies-when.paths",
                 "review.changed-paths",
+                "review.base-ref",
             },
         };
 

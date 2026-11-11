@@ -29,7 +29,8 @@ test-results/
 
 # APM deploy target. Skills are authored in .apm/skills/ and `apm install` copies
 # them here, so this is generated output — including skills from other packages.
-.agents/
+.agents/*
+!.agents/hooks.json
 apm_modules/
 # Cursor MCP secrets (keep .cursor/mcp.json tracked)
 .cursor/**/*.env

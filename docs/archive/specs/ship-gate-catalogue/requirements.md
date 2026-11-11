@@ -297,7 +297,7 @@ section among the things `docs init` writes, with the opt-out and the re-run rul
 which step writes it.
 10.4. [`docs/ci-pipelines/workflows-runbook.md`](../../../ci-pipelines/workflows-runbook.md) SHALL
 describe the review-gate workflow.
-10.5. [`docs/todo/task-gate-config-review.md`](../../../todo/task-gate-config-review.md) SHALL be
+10.5. [`docs/todo/task-gate-config-review.md`](../../todo/task-gate-config-review.md) SHALL be
 updated to say whether the catalogue's .NET agent mapping (6.1) answers its first question.
 
 ## Non-goals
@@ -377,4 +377,4 @@ ADR waiver: refines existing architecture.
 | H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
 | H8 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
 | H9 | [Install](../../../install.md), [DocGraph onboarding](../../../docgraph/onboarding.md) |
-| H10 | [Task-gate config review](../../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |
+| H10 | [Task-gate config review](../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |

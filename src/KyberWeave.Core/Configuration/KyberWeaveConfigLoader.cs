@@ -16,6 +16,9 @@ public static class KyberWeaveConfigLoader
     /// <summary>Stable rule code for a non-fatal problem in <c>kyber-weave.yml</c>, such as an unknown key.</summary>
     public const string ConfigWarningCode = "KW-CONFIG-002";
 
+    /// <summary>The repository setting a run reads to decide whether a broken tool stops it.</summary>
+    private const string StopOnToolFailureKey = "stop-on-tool-failure";
+
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
     /// <c>working-directory</c> is refused; use <see cref="Load(string, string?)"/> for that.
@@ -24,7 +27,63 @@ public static class KyberWeaveConfigLoader
     {
         ArgumentNullException.ThrowIfNull(yaml);
         KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
-        return FromDocument(document, yaml, repositoryRoot: null);
+        return FromDocument(document, yaml, null);
+    }
+
+    /// <summary>
+    /// Loads the per-user host config file under <c>~/.kyber-weave/kyber-weave.yml</c>, where
+    /// <c>arbiter.global.targets</c> is valid and must not be rejected as a project-scope error.
+    /// </summary>
+    public static KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        string root = Path.GetFullPath(homeDirectory);
+        string? path = ResolveUserConfigPath(root, configPath);
+        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !File.Exists(path)))
+        {
+            throw new FileNotFoundException(
+                $"Kyber-Weave config file not found: {path}",
+                path);
+        }
+
+        if (path is null || !File.Exists(path))
+            return KyberWeaveConfig.ProductDefaults;
+
+        string yaml = File.ReadAllText(path);
+        return LoadUserConfigYaml(yaml);
+    }
+
+    public static KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        string root = Path.GetFullPath(homeDirectory);
+        string? path = ResolveUserConfigPath(root, configPath);
+        if (path is null)
+            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+
+        if (!string.IsNullOrWhiteSpace(configPath) && !File.Exists(path))
+        {
+            return KyberWeaveConfigLoadResult.Fail(
+                $"Kyber-Weave config file not found: {path}",
+                path);
+        }
+
+        if (!File.Exists(path))
+            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
+
+        try
+        {
+            string yaml = File.ReadAllText(path);
+            return KyberWeaveConfigLoadResult.Ok(LoadUserConfigYaml(yaml), path);
+        }
+        catch (YamlException ex)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
+        }
     }
 
     public static KyberWeaveConfig Load(string repoRoot, string? configPath = null)
@@ -77,7 +136,7 @@ public static class KyberWeaveConfigLoader
     /// through the legacy root path would not overwrite that file, but would shadow it,
     /// which loses the operator's settings just as thoroughly.
     /// </remarks>
-    internal static string? FindConfigPath(string repoRoot)
+    public static string? FindConfigPath(string repoRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
 
@@ -111,6 +170,49 @@ public static class KyberWeaveConfigLoader
         return explicitPath;
     }
 
+    private static string? ResolveUserConfigPath(string homeDirectory, string? configPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configPath))
+        {
+            return Path.IsPathRooted(configPath)
+                ? configPath
+                : Path.Combine(homeDirectory, configPath);
+        }
+
+        return UserHostConfig.GetPath(homeDirectory);
+    }
+
+    private static KyberWeaveConfig LoadUserConfigYaml(string yaml)
+    {
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
+        OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
+        return new KyberWeaveConfig
+        {
+            Ontology = ontology,
+            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness),
+            DocsAnalysis = DocsAnalysisConfigLoader.Merge(
+                DocsAnalysisConfig.ProductDefaults,
+                document.DocsAnalysis,
+                ontology),
+            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
+            ConfigReg = ConfigRegConfigLoader.Merge(
+                ConfigRegConfig.ProductDefaults,
+                document.ConfigReg,
+                document.Autonomy,
+                document.Run,
+                document.StopOnToolFailure,
+                document.Onboarding),
+            Review = ReviewConfigLoader.Merge(
+                ReviewConfig.ProductDefaults,
+                document.Review,
+                null,
+                ReviewConfigLoader.UnknownKeyWarnings(yaml)),
+            Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
+        };
+    }
+
     /// <summary>
     /// Reads a config file. Its repository root is the parent of the <c>.kyber-weave/</c> directory that
     /// holds it; a legacy root-level file, or one outside such a directory, uses its own directory.
@@ -138,14 +240,45 @@ public static class KyberWeaveConfigLoader
                 document.DocsAnalysis,
                 ontology),
             Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
-            ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg, document.Autonomy),
+            ConfigReg = ConfigRegConfigLoader.Merge(
+                ConfigRegConfig.ProductDefaults,
+                document.ConfigReg,
+                document.Autonomy,
+                document.Run,
+                document.StopOnToolFailure,
+                document.Onboarding),
             Review = ReviewConfigLoader.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
                 repositoryRoot,
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
-            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp)
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
         };
+    }
+
+    /// <summary>
+    /// Reads the top-level <c>stop-on-tool-failure</c> setting. Absent means stop.
+    /// </summary>
+    /// <remarks>
+    /// The value is parsed here rather than bound as a <see cref="bool"/> on the YAML document, because a
+    /// binding failure reports the type it wanted — an operator who wrote <c>stop-on-tool-failure: strict</c>
+    /// is told to fix a type they cannot see. This is the same treatment <c>autonomy:</c> gets: the setting
+    /// is named, the two values it accepts are named, and the absent case is spelled out.
+    /// </remarks>
+    /// <exception cref="YamlException">The value is present and is neither <c>true</c> nor <c>false</c>.</exception>
+    private static bool ParseStopOnToolFailure(string? value)
+    {
+        if (value is null)
+            return true;
+
+        if (bool.TryParse(value, out bool stops))
+            return stops;
+
+        throw new YamlException(
+            $"{StopOnToolFailureKey} '{value}' is not a boolean. Use 'true' to stop a run when a " +
+            "required tool cannot be repaired, or 'false' to warn and carry on, or remove the key; " +
+            "a run treats an absent setting as 'true'.");
     }
 }

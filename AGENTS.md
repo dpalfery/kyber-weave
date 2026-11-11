@@ -31,62 +31,54 @@ you do write.
 
 ### The inner loop
 
-While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It inspects
-modified files and routes to targeted checks for .NET, KyberDash, the tray crate, and
-governed docs. Use `--scoped` for declared gates limited to changed files, or `--full` for
-all gates unscoped (`review gates . --all`). It is **not** evidence and must never be cited
-as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)).
+**No dev agent runs the full test suite**, in or out of a Kyber-Squad run, and a cross-cutting change is no exception:
+run a targeted set instead. The council's `test` gate and CI run the full suite. To reproduce a CI failure, run the classes or files CI reported.
+A dev agent's full run is refused by the guard (best-effort; limits in the test standard): `scripts/proc-guard.sh run` exits 89 on an unfiltered
+`dotnet test`, `npm --prefix dash run test` or `cargo test`, and names the targeted alternative. The
+council and CI pass `--council`; a person at a terminal is not refused.
 
-**Targeted tests only in the inner loop and before push.** Run the tests that cover the files
-you changed, plus build/lint of the touched projects; the full suite is CI's job, and CI is the
-gate before Ready / Kilo review. Map changed files to tests:
+Inside a Squad run, your task packet names the test command and your agent rules say when to
+run it. Otherwise, run `scripts/fast-loop.sh` while iterating: it inspects modified files and
+routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. `--help` lists
+its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
+**not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 
-- .NET: `scripts/fast-loop.sh --class <Area>*` (builds first), or build then filter:
-  `dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release` followed by
-  `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"`.
-  Check the summary reports a non-zero total: a mistyped filter matches nothing and exits 0.
-- Repository policy (scripts, workflows, gate configuration, docs prose, source scans): the
-  same commands against `tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj`.
-  `fast-loop.sh` runs it whenever a change is more than C# under `src/` or `tests/KyberWeave.Tests/`,
-  and runs its two source scans (spawn sites, upstream names) on every .NET loop.
-- KyberDash: `npm --prefix dash run test:related -- <files>`, with paths relative to `dash/`
-  (e.g. `src/foo.ts`, not `dash/src/foo.ts`); a repo-root path matches nothing and passes with
-  zero tests. Check the run reports a non-zero test count.
-- Tray UI: `npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>`.
-- Tray crate: `cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
-  The crate is one small test target, so this runs it whole, as `fast-loop.sh` does for any
-  change under `dash/tray/src-tauri/`. To narrow while iterating, add a quoted name filter
-  (`cargo test 'tray_menu'`) and check the result line shows a non-zero `passed` count.
-- Governed docs: `docs validate . --merge-ready` and `docs drift .`.
+Run the tests that cover your change, plus build/lint of the touched projects, and check each
+run reports a non-zero test count. The commands for each area:
 
-Run `--full` locally only when the change touches cross-cutting code (`src/KyberWeave.Core`
-shared types, `.kyber-weave/kyber-weave.yml`, `Directory.Build.props`, `global.json`, CI
-workflows, migrations/schemas) or to reproduce a CI failure.
+- .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#completion)
+- Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
+  [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
+- KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
+- Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 
 **Every local test, gate and e2e command runs through the process watchdog.** From the
 repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
 command's process tree at an absolute cap (exit 86) and fails a run that leaves children
 behind (exit 87). The caps change only by flag (`--max-node`, `--max-tree`), never by environment
-variable. `fast-loop.sh` already wraps its test and gate calls. A run of the full .NET suite adds
-`--slot dotnet-test`, so overlapping full runs on one machine queue (exit 88 if the wait runs out)
-instead of piling onto its cores; the `test` gate already does, and partial runs, builds and format
-checks never take a slot. Playwright runs only with
+variable. `fast-loop.sh` already wraps its test and gate calls. The `test` gate takes `--slot dotnet-test`, so
+overlapping full runs on one machine queue (exit 88 if the wait runs out) instead of piling onto its
+cores; partial runs, builds and format checks never take a slot. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely) and
 [ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).
 
 ### Before opening a PR
 
-Run the declared gate suite scoped to changed files (the default). Add `--all` only for the
-cross-cutting changes or CI reproduction listed above; otherwise CI runs the full suite:
+Run the build and the targeted tests above, the `task-gate` skill if you are a dev agent, and the
+docs gates:
 
 ```bash
-dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
-# Cross-cutting changes or CI reproduction only, instead of the line above:
-# dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
+
+`review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
+so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
+Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
+are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, exit `1`) that means "not run
+here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
+runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
 
 Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
 `dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
@@ -111,20 +103,28 @@ MCP tool names may be namespace-qualified by the active harness.
 before text search; name a file or symbol when you need line-numbered source.
 <!-- CODEGRAPH_END -->
 
-If `.codegraph/` is missing, this repository authorizes `codegraph init .` at the root
-(repository-local only; installing CodeGraph is the user's decision). Before init, record
-`git status --short` and both staged (`git diff --cached`) and unstaged (`git diff`)
-tracked diffs; afterwards undo only tracked edits init introduced. Blocked or unusable
-init → report under GAPS and fall back;
+In a worktree, or when the tool is not listed, run `codegraph explore "…"` from that
+worktree's shell; read files directly only if it fails. A worktree indexes ITSELF with
+`kyber-weave doctor --ensure .` and never shares the main checkout's index.
+
+If `.codegraph/` is missing or stale and a docs drift / codegraph tool needs it, this
+repository authorizes `codegraph init .` at the root immediately
+(repository-local only; installing CodeGraph is the user's decision). Do not ask for user
+approval before that provisioning step. Before init, record `git status --short` and both
+staged (`git diff --cached`) and unstaged (`git diff`) tracked diffs; afterwards undo only
+tracked edits init introduced. Blocked or unusable init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
 Before `docs/` greps, use Kyber-Weave MCP `docs_answer_question_from_repo_documentation`;
 before contract changes, `docs_find_documents_citing_code_symbol`; for taxonomy,
 `docs_look_up_glossary_term_definition` and `docs_find_duplicates_conflicts_ambiguous_terms`.
 No CLI equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
-current guidance. The server's configuration key is `kw-docs`. Confirm each response's
-`provenance:` `root=` matches `git rev-parse --show-toplevel`
-(`docs_get_source_repository_and_revision`); a mismatch means the wrong repository.
+current guidance. The server's configuration key is `kw-docs`. Every answer leads with a
+`provenance:` line carrying `root=`, `branch=`, `repo=`, `rev=`, `dirty=` and `documents=N`
+(`docs_get_source_repository_and_revision`). Compare `repo=`, the repository's common git
+directory, not `root=`: a `root=` that is not your own working tree's root is another worktree
+of this repository, and only a different `repo=` means the wrong repository. `branch=` names the
+branch the answer came from.
 
 ## Non-negotiables
 
@@ -200,6 +200,7 @@ references that belong to this repository.
 - **<rust-coding-standard>**: `docs/standards/rust/README.md`
 - **<tauri-coding-standard>**: `docs/standards/tauri/README.md`
 - **<go-coding-standard>**: `docs/standards/go/README.md`
+- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`
@@ -207,6 +208,7 @@ references that belong to this repository.
 - **<rules-index>**: `docs/rules/README.md`
 - **<reference-index>**: `docs/reference/README.md`
 - **<review-guidance>**: `REVIEW.md`
+- **<onboarding>**: `done`
 - **<autonomy>**: `autonomous`
 
 Skills and other portable instruction files SHALL reference these paths by the

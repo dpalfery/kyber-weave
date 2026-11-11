@@ -27,7 +27,6 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         "plan-path.md",
         "spec-path.md",
         "intake-path.md",
-        "execution-and-review.md",
         "autonomy.md"
     ];
 
@@ -88,7 +87,8 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             StringComparison.Ordinal);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithMatchingArbiterProbe();
         SquadDoctorCommand command = new(
             executor,
             install.UserPaths,

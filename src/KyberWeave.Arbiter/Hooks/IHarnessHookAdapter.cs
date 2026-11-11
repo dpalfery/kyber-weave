@@ -13,6 +13,13 @@ public enum HookOutcomeKind
     /// also carries the stripped input; elsewhere it writes nothing.</summary>
     Allow,
 
+    /// <summary>
+    /// Allow with <c>Reason</c> surfaced as a visible note: a hook or decision-model
+    /// failure writes to the log and lets the dispatch continue loudly instead of
+    /// blocking. Every adapter renders the note where its harness shows text.
+    /// </summary>
+    AllowWithNote,
+
     /// <summary>Allow with an explicit rewritten input document.</summary>
     AllowWithRewrite,
 
@@ -28,7 +35,7 @@ public enum HookOutcomeKind
 
 /// <summary>One decision from the hook decision engine.</summary>
 /// <param name="Kind">The kind of decision.</param>
-/// <param name="Reason">The block reason (envelope or note), for deny and post outcomes.</param>
+/// <param name="Reason">The block reason (envelope or note), for deny, post, and allow-with-note outcomes.</param>
 /// <param name="RewrittenInputJson">The complete rewritten input, for allow-with-rewrite.</param>
 public sealed record HookOutcome(
     HookOutcomeKind Kind,
@@ -44,11 +51,19 @@ public sealed record HookOutcome(
 /// <c>harness.observes-returns</c> always carries a value: true for every harness
 /// except the adapters that declare otherwise. Never null-by-absence — a missing
 /// fact must not silently disable an enforced rule.</param>
+public enum HookScope
+{
+    Project,
+    Global,
+}
+
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
     TextWriter Log,
-    bool ObservesReturns = true);
+    bool ObservesReturns = true,
+    string? HomeDirectory = null,
+    HookScope Scope = HookScope.Project);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry

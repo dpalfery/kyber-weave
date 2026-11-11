@@ -2,6 +2,8 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -27,10 +29,17 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
+        CommandHelpers.WriteUnfolded(() => Inspect(settings, report));
+
+        CommandHelpers.Finish(report, settings, "arbiter status", "Rule");
+        return report.HasErrors ? 1 : 0;
+    }
+
+    private static void Inspect(ArbiterSettings settings, DiagnosticReport report)
+    {
         if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))
         {
-            CommandHelpers.Finish(report, settings, "arbiter status", "Rule");
-            return 1;
+            return;
         }
 
         ArbiterProviderConfig provider = config.Arbiter.Provider;
@@ -38,6 +47,8 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         bool remote = provider.Kind != ArbiterProviderKind.None
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
         string? key = remote ? ArbiterCommandComposition.TryResolveKey(config, provider.Endpoint) : null;
+        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(ArbiterCommandComposition.HomeDirectory());
+        bool projectEnabled = config.Arbiter.Enabled;
 
         AnsiConsole.MarkupLine("[bold]Arbiter status[/]");
         AnsiConsole.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
@@ -63,13 +74,89 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
             AnsiConsole.MarkupLine("  Key: [green]found.[/]");
         }
 
-        CommandHelpers.Finish(report, settings, "arbiter status", "Rule");
-        return report.HasErrors ? 1 : 0;
+        WriteGlobalScope(globalTargets);
+        WriteProjectScope(projectEnabled, globalTargets.Count > 0);
+
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
+
+    private static void WriteGlobalScope(IReadOnlyList<string> targets)
+    {
+        AnsiConsole.MarkupLine("[bold]GLOBAL scope[/]");
+        if (targets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [grey]no global targets configured.[/]");
+            return;
+        }
+
+        foreach (string token in targets)
+        {
+            string reason = GlobalReason(token);
+            string label = TargetDisplayName(token);
+            AnsiConsole.MarkupLine($"  {Markup.Escape(label)}: {Markup.Escape(reason)}");
+        }
+    }
+
+    private static void WriteProjectScope(bool enabled, bool projectOverridesGlobal)
+    {
+        AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
+        if (enabled)
+        {
+            AnsiConsole.MarkupLine("  project overrides global");
+            AnsiConsole.MarkupLine("  arbiter.enabled: true");
+            return;
+        }
+
+        if (projectOverridesGlobal)
+        {
+            AnsiConsole.MarkupLine("  project does not override global");
+            return;
+        }
+
+        AnsiConsole.MarkupLine("  no project override");
+    }
+
+    private static string GlobalReason(string token)
+    {
+        if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+        {
+            return "enforced-global";
+        }
+
+        IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [target],
+            SquadDeploymentScope.Global);
+        return records.Count == 0 ? "enforced-global" : (records[0].Details ?? "enforced-global");
+    }
+
+    private static string TargetDisplayName(string token)
+    {
+        if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+        {
+            return token;
+        }
+
+        return target switch
+        {
+            SquadTarget.Claude => "Claude",
+            SquadTarget.Codex => "Codex",
+            SquadTarget.Copilot => "Copilot",
+            SquadTarget.Cursor => "Cursor",
+            SquadTarget.OpenCode => "OpenCode",
+            SquadTarget.Pi => "Pi",
+            SquadTarget.Warp => "Warp",
+            SquadTarget.ZCode => "ZCode",
+            SquadTarget.Kilo => "Kilo",
+            SquadTarget.Antigravity => "Antigravity",
+            SquadTarget.Factory => "Factory",
+            SquadTarget.Devin => "Devin",
+            SquadTarget.CommandCode => "CommandCode",
+            _ => token,
+        };
+    }
 
     private static string KindName(ArbiterProviderKind kind) =>
         kind == ArbiterProviderKind.Systemone ? "systemone" : "none";

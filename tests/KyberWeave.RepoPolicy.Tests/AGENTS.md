@@ -16,3 +16,10 @@ fixtures.
 - It runs as the `test-policy` gate, its own CI step, and in `scripts/fast-loop.sh` whenever a
   change is more than C# under `src/` or `tests/KyberWeave.Tests/`. The two tests that read
   source text run on every .NET loop; they are named in `POLICY_SOURCE_SCANS` in that script.
+- To run one class, build once and filter, through the watchdog from the repository root. A filter
+  that matches nothing exits 8 ("Zero tests ran").
+
+  ```bash
+  scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
+  scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+  ```

@@ -77,14 +77,21 @@ write SQL.
 - Down() is a host decision: implementing it is optional, and a production correction is
   always a forward migration, per **<sql-coding-standard>**.
 
-## Commands
+## Completion
 
 ```bash
-dotnet build -c Release
-dotnet test
+dotnet build -c Release                                 # the build
+dotnet test --filter "FullyQualifiedName~<TestClass>"   # the tests covering your change
+dotnet format --verify-no-changes                       # the formatter check
 fluentmigrator migrate
 fluentmigrator rollback
 ```
+
+`dotnet build` is the build gate: it compiles the migration assembly, so a mistake fails at the
+compiler rather than in review. The `dotnet test`
+line is filtered to the classes covering your change; the unfiltered run is the gate the review
+council and CI run, and a dev agent never runs it. `dotnet format --verify-no-changes` is the
+format check and prints nothing when the tree is formatted.
 
 `fluentmigrator rollback` only runs where the host has implemented `Down()` for the migration
 being rolled back. Where `Down()` is not implemented, correct forward with a new migration

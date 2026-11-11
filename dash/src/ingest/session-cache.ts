@@ -313,6 +313,9 @@ export const PROVIDER_PARSE_VERSIONS: Record<string, string> = {
   // hold costUSD: undefined and get re-priced from tokens on every read.
   'cline-cli': 'reported-cost-v1',
   codewhale: 'aggregate-session-v1-est-cost',
+  // droid-completeness-v1: forces one re-parse so cached Droid sessions pick up the
+  // MiniMax M3.1 Flash rate, active durations and session titles.
+  droid: 'droid-completeness-v1',
   // Bump when the Codex parser changes attribution so unchanged, already-cached
   // session files re-parse (session-cache.json serves them without invoking the
   // provider parser otherwise). Covers native mcp_tool_call_end (#513) and

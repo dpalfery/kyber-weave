@@ -10,9 +10,10 @@ ontology:
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
 
-  # This repository writes C#, TypeScript, and the tests that pin them. The list creates
-  # docs/standards/<technology>/, publishes <technology-coding-standard> in the registry,
-  # and legalizes the technology value in that standard's frontmatter.
+  # This repository writes C#, TypeScript, the tests that pin them, and the GitHub Actions
+  # workflows under .github/workflows/. The list creates docs/standards/<technology>/,
+  # publishes <technology-coding-standard> in the registry, and legalizes the technology
+  # value in that standard's frontmatter.
   technologies:
     - csharp
     - test
@@ -20,6 +21,11 @@ ontology:
     - rust
     - tauri
     - go
+    - github-actions
+
+# This repository has answered the onboarding step, so `run start` does not stop to offer it.
+# An absent value is the unanswered state, which stops every start until someone records one.
+onboarding: done
 
 # The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
 # cites their output as evidence rather than restating a claim that they passed.
@@ -71,8 +77,10 @@ review:
     # hung one, so that budget is the wait plus the 900 seconds the run itself always had.
     - id: test
       include: *net-test-paths
-      run: [scripts/proc-guard.sh, run, --slot, dotnet-test, --slot-wait, "900", --, dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      run: [scripts/proc-guard.sh, run, --council, --slot, dotnet-test, --slot-wait, "900", --, dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       timeout-seconds: 1800
+      # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
+      full-suite: true
       blocking: true
     # The repository-policy tests (tests/KyberWeave.RepoPolicy.Tests): scripts, workflows, this
     # file, docs and source scans. A gate of their own so `test` coverage stays a measure of
@@ -216,9 +224,15 @@ review:
     # only: the gate bodies are dash/package.json scripts whose names are
     # fixed (`typecheck`, `test`, `lint`, `check:reachable`), so a script
     # rename is a gate-name collision that surfaces on the very next review.
+    #
+    # Each declares dash/node_modules in requires-paths. Without it a
+    # contributor on a fresh clone is handed module-not-found output from a
+    # tool that never had what it needed; with it the gate does not start and
+    # the review names the install that unblocks it.
     - id: ts-typecheck
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -236,7 +250,10 @@ review:
     # coverage.cobertura.xml only.
     - id: ts-test
       include: ["dash/**"]
-      run: [scripts/proc-guard.sh, run, --, npm, run, --prefix, dash, test, --, --coverage]
+      run: [scripts/proc-guard.sh, run, --council, --, npm, run, --prefix, dash, test, --, --coverage]
+      requires-paths: ["dash/node_modules"]
+      # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
+      full-suite: true
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -248,6 +265,7 @@ review:
     - id: ts-lint
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -256,6 +274,7 @@ review:
     - id: ts-reachable
       include: ["dash/**"]
       run: [npm, run, --prefix, dash, "check:reachable"]
+      requires-paths: ["dash/node_modules"]
       blocking: true
       applies-when:
         paths: ["dash/**"]
@@ -277,6 +296,8 @@ review:
       include: *cargo-paths
       run: [cargo, test, --manifest-path, dash/tray/src-tauri/Cargo.toml]
       timeout-seconds: 1800
+      # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
+      full-suite: true
       blocking: true
 
   # Developer task gates. `kyber-weave review gates . --agent <name> --paths ... --task <slug>`
@@ -294,6 +315,26 @@ review:
   # cargo-fmt, cargo-clippy, and dotnet-build are of that kind. Another worker's concurrent edit
   # can therefore fail one of them on a file this task never touched. The task-gate skill re-runs
   # such a failure once after the other change settles, before it counts as rework.
+  # Which test classes cover which source paths, for the `{tests}` token the task gates below
+  # expand. A declared entry is read before the `<Stem>Tests` name convention: an operator who maps
+  # a source area knows which classes exercise it, and a file name does not. Every name is checked
+  # against the tree before it is used, and a change nothing covers skips the gate with
+  # KW-REVIEW-026 rather than running a filter that matches nothing and exits 0.
+  test-map:
+    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+    "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
+      - KyberWeave.Tests.ReviewTaskGatesConfigTests
+      - KyberWeave.Tests.ReviewGateKeysConfigTests
+    "src/KyberWeave.Core/Review/SuppressionScan.cs":
+      - KyberWeave.Tests.ReviewSuppressionsCommandTests
+    "src/KyberWeave.Core/Review/TestClassMapping.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+    "src/KyberWeave.Core/Arbiter/Facts/GateReportFacts.cs":
+      - KyberWeave.Tests.Arbiter.ArbiterGateReportRuleTests
+    "src/KyberWeave.Core.Squad/Deployment/SquadWorkerBaselineInjector.cs":
+      - KyberWeave.Tests.SquadWorkerBaselineInjectionTests
+
   task-gates:
     # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
     # is the form `--fix` applies first; the verify form then decides, so a fix that does not
@@ -318,26 +359,75 @@ review:
         # nothing and exits 0.
         include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
         run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
+      - &suppressions
+        id: suppressions
+        include: *net-paths
+        # No {changed}: the command reads the change against its base itself, so naming the changed
+        # files would scan them twice and still miss a suppression added to an unlisted file.
+        run: [kyber-weave, review, suppressions, "."]
+      - &dotnet-tests
+        id: tests
+        # The classes this change covers, resolved by `review gates` from `review.test-map` and the
+        # `<Stem>Tests` name convention. Declared after `dotnet-build` because `--no-build` reuses the
+        # artifacts directory that gate writes, so these classes run against the binaries it produced.
+        # A change no class covers skips this gate with KW-REVIEW-026: a filter that matches nothing
+        # exits 0, and would afterwards read as tests that ran and passed.
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+    # Every .NET authoring role carries the suppression gate, not only csharp-dev: a `#pragma`
+    # or a SuppressMessage is the same defect wherever it is written.
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
     maui-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
     pulumi-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
-    sql-database-architect:
-      - *fmt-whitespace
-      - *fmt-style
-      - *dotnet-build
+      - *suppressions
+    # The three file kinds no language gate selects. A task that edits only a workflow, a shell
+    # script, or this file used to select zero gates and report NONE_APPLICABLE — a valid result
+    # that is no evidence anything ran. `include` alone decides selection, so these are defined
+    # once here, at the first role that needs them, and referenced elsewhere by alias.
     github-devops:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - &workflow-lint
+        id: workflow-lint
+        include: [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
+        # actionlint is the build for a workflow: it parses the file against the schema GitHub
+        # uses and fails on an expression or a runner that cannot resolve.
+        run: [actionlint, "{changed}"]
+      - &shellcheck
+        id: shellcheck
+        include: ["scripts/*.sh", "scripts/**/*.sh", "dash/scripts/*.sh", "dash/scripts/**/*.sh"]
+        run: [shellcheck, "{changed}"]
+      - &review-config
+        id: review-config
+        include: [".kyber-weave/kyber-weave.yml"]
+        # The loader is the check: a config this command cannot render is one no gate or run reads.
+        run: [kyber-weave, review, catalogue, "."]
+
+    sql-database-architect:
+      - *fmt-whitespace
+      - *fmt-style
+      - *dotnet-build
+      - *suppressions
+      # The migration and schema edits this role makes are frequently the ones a `dotnet build`
+      # never touches: a `.sql` file that is not a compiled resource still reaches production.
+      - &sql-format
+        id: sql-format
+        include: ["**/*.sql"]
+        run: [sqlfluff, lint, "{changed}"]
+      - *review-config
 
     # TypeScript and the tray UI. The dash include lists directories instead of `dash/**`,
     # because the tray is a separate project under dash/tray with its own gates below, and an
@@ -392,10 +482,22 @@ review:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
+      - *suppressions
+      - *dotnet-tests
       - *dash-typecheck
       - *dash-lint
       - *cargo-fmt
       - *cargo-clippy
+      # test-dev reads a failed workflow run, so it carries the workflow and shell checks too.
+      - *workflow-lint
+      - *shellcheck
+
+    # Config-only edits are docs-dev's work, and until this entry existed docs-dev ran zero gates
+    # and reported KW-REVIEW-027 — "no task gates are declared for this agent". The review config
+    # is the one artifact a docs-dev change is most likely to break silently, because breaking it
+    # turns every other gate off rather than failing one.
+    docs-dev:
+      - *review-config
 
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —
@@ -428,9 +530,14 @@ mcp:
       provenance: first-party
       level: required
     # A third-party server is declared the same way; its binary is never installed by
-    # Kyber-Weave. Uncomment when the repository's instructions require it:
-    # codegraph:
-    #   command: [codegraph, serve, --mcp]
-    #   provenance: third-party
-    #   level: recommended
-    #   install: codegraph init .   # printed verbatim when the binary is absent
+    # Kyber-Weave. Declared here because this repository's instructions require it.
+    codegraph:
+      command: [codegraph, serve, --mcp]
+      provenance: third-party
+      level: recommended
+      install: codegraph init .   # printed verbatim when the binary is absent
+
+arbiter:
+  enabled: true
+  provider:
+    kind: none

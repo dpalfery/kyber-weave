@@ -19,8 +19,8 @@ This repository has no Go code today. There is no `go.mod`, no `*.go` file, and 
 the repository's gate configuration. This standard applies when Go is introduced. It states the
 language-level rules that change must follow, and it does not describe any Go code that exists.
 
-The change that introduces the first Go file must also add the Go gates: `gofmt`, `go vet`, and
-`go test`, declared as `review.task-gates` entries for `go-dev` and `test-dev` in
+The change that introduces the first Go file must also add the Go gates: `gofmt`, `go vet`,
+`go build` and `go test`, declared as `review.task-gates` entries for `go-dev` and `test-dev` in
 [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) (plus `review.gates` for
 the council run) and in the root `AGENTS.md` loop commands, and run before that change is reported done. Until then, no Go change has a
 mechanical gate behind it, and a reviewer must say so rather than report it clean.
@@ -95,13 +95,19 @@ the tools do not check are below.
 Test authorship follows the [test coding standard](../test/README.md) and belongs to `test-dev`.
 Go tests are `_test.go` files beside the code they exercise, run by `go test`.
 
-## Gates
+## Completion
 
 No Go gate exists today. When Go is introduced, its change adds these gates, and this section is
 updated to name them exactly:
 
 ```bash
-gofmt -l .        # must print nothing
+gofmt -l .        # the format check: must print nothing
 go vet ./...
+go build ./...    # the build
 go test -race ./...
 ```
+
+`gofmt` is the formatter, and `-l` lists the files it would rewrite, so an empty list is the pass.
+`go build ./...` is the build — it compiles every package, which `go vet` alone does not. The
+`go test` line is the gate the review council and CI run. A dev agent never runs the full
+suite; it runs the tests covering its change (`go test -race -run '<TestName>' ./<package>`).

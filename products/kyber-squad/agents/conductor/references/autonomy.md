@@ -1,6 +1,6 @@
 # Autonomy
 
-`autonomy` is `supervised` or `autonomous`. It decides who answers the gates the other contracts define. Supervised behaviour is unchanged: every gate in the plan, spec, intake, and execution contracts is relayed to the user exactly as written there.
+`autonomy` is `supervised` or `autonomous`. It decides who answers the gates the other contracts define. Supervised behaviour is unchanged: every gate in the plan, spec and intake paths, and in the `delivery-execution` skill, is relayed to the user exactly as written there.
 
 ## Resolution
 
@@ -57,7 +57,8 @@ These stay human in autonomous mode:
 
 - a hard-block escalation with `RECOMMENDED: none`;
 - merge, publish, delete, or spend (committing to a feature branch, pushing it, and opening a draft pull request are allowed, as above);
-- an unresolvable `STATUS: BLOCKED` or write error (`PLAN_WRITE_ERROR`, `SPEC_WRITE_ERROR`), such as missing credentials or access.
+- an unresolvable `STATUS: BLOCKED` or write error (`PLAN_WRITE_ERROR`, `SPEC_WRITE_ERROR`), such as missing credentials or access;
+- a tool that cannot repair itself: `STATUS: TOOL_FAILURE`, which is what the run-start `kyber-weave doctor --ensure` returns under `stop-on-tool-failure`, and what a docs or CodeGraph tool answers with when it cannot read the index its joins come from. The run stops before the next worker is dispatched, because the remedy is an install the run may not perform and every worker after it would answer from joins that are silently absent. A repository that sets `stop-on-tool-failure: false` gets a warning line instead, and the run continues. A read-only run never stops on it. This is not a circuit-breaker: no rework clears it.
 
 ## Circuit-breakers are non-fatal
 
@@ -75,5 +76,7 @@ Add to the completion report:
 
 - every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
 - the count of auto-approved gates;
-- every open circuit-breaker finding (and any run-start doctor exit 3 item), listed as pending human review;
+- every open circuit-breaker finding, listed as pending human review;
 - the draft pull request link and its CI state (ready, or what it is waiting for).
+
+A run-start `doctor --ensure` failure is not a final-report item: under `stop-on-tool-failure` it ends the run with `STATUS: TOOL_FAILURE` before any delivery, and a repository that sets the setting to `false` carries its warning line in the run record.

@@ -60,8 +60,6 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public sealed class CursorRenderer : SquadHarnessRenderer
 {
-    private const string ArbiterCommand = "kyber-weave-arbiter hook --harness cursor";
-
     private static readonly string[] GovernedCapabilities =
     [
         "filesystem.read",
@@ -125,7 +123,7 @@ public sealed class CursorRenderer : SquadHarnessRenderer
     {
         if (context.EnabledArbiter is { } arbiter)
         {
-            context.Blocks.Add(BuildArbiterBlock(arbiter.HookTimeoutSeconds));
+            context.Blocks.Add(BuildArbiterBlock(arbiter.HookTimeoutSeconds, context.Scope));
         }
     }
 
@@ -153,19 +151,19 @@ public sealed class CursorRenderer : SquadHarnessRenderer
             SquadYamlEmitter.Default.Compose(frontmatter, agent.InstructionBody));
     }
 
-    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds, SquadDeploymentScope scope) =>
         new(
             "cursor",
-            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
+            scope == SquadDeploymentScope.Global ? "hooks.json" : SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
             SquadHookBlockFormat.Cursor,
             [
-                new SquadRenderedBlockEntry("preToolUse", ArbiterHookEntry(timeoutSeconds)),
-                new SquadRenderedBlockEntry("postToolUse", ArbiterHookEntry(timeoutSeconds)),
+                new SquadRenderedBlockEntry("preToolUse", ArbiterHookEntry(timeoutSeconds, scope)),
+                new SquadRenderedBlockEntry("postToolUse", ArbiterHookEntry(timeoutSeconds, scope)),
             ]);
 
-    private static JsonObject ArbiterHookEntry(int timeoutSeconds) => new()
+    private static JsonObject ArbiterHookEntry(int timeoutSeconds, SquadDeploymentScope scope) => new()
     {
-        ["command"] = ArbiterCommand,
+        ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Cursor, scope),
         ["matcher"] = "Task",
         ["timeout"] = timeoutSeconds,
         ["failClosed"] = true,

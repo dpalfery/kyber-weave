@@ -1,4 +1,4 @@
-# The 18 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 20 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -53,7 +53,7 @@ rules:
         adds-work: The delegation asks for work the task does not describe.
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { within-task: allow, adds-work: escalate, unrelated: escalate }
 
   - id: KW-ARB-READY-001
@@ -105,7 +105,7 @@ rules:
         target: The choice equals delegation.target.
         other: Another specialist owns this task.
       confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-OWNER-001=no-mapping
     effects: { target: allow, other: escalate }
 
@@ -159,23 +159,27 @@ rules:
   - id: KW-ARB-PLANNER-001
     trigger: delegate.planner
     question: Is this a recognised planner invocation?
-    answers: [recognised, malformed]
+    answers: [recognised, malformed, plan-file-invalid, plan-file-outside-planning-dirs]
     decide:
+      - when: { fact: delegation.plan-file-rejected, exists: true }
+        answer: plan-file-invalid
       - when: { fact: delegation.markers, exists: false }
         answer: malformed
       - when: { fact: delegation.plan-file, exists: false }
-        answer: malformed
+        answer: recognised
       - when: { fact: delegation.plan-file, matches: config.planning-dirs }
         answer: recognised
       - when: { fact: delegation.plan-file, exists: true }
-        answer: malformed
-    effects: { recognised: allow, malformed: escalate }
+        answer: plan-file-outside-planning-dirs
+    effects: { recognised: allow, malformed: escalate, plan-file-invalid: escalate, plan-file-outside-planning-dirs: escalate }
 
   - id: KW-ARB-PLANNER-DIFF-001
     trigger: delegate.planner.returned
     question: Did the planner write only inside the plan, spec and todo directories?
     answers: [inside, outside]
     decide:
+      - when: { fact: git.changed-paths.since-dispatch, count: 0 }
+        answer: inside
       - when: { fact: git.changed-paths.since-dispatch, subset-of: config.planning-dirs }
         answer: inside
       - when: { fact: git.changed-paths.since-dispatch, exists: true }
@@ -199,10 +203,15 @@ rules:
     trigger: lens.spawn
     question: Does the lens apply to this change?
     answers: [applies, not-applicable]
+    # A Markdown-only change has no code for these two lenses to judge, which is what
+    # their Applicability text says. The set has to be positively Markdown-only to skip:
+    # an empty or unreadable set satisfies subset-of vacuously, and on a committed tree
+    # the set was empty, so both lenses vanished exactly when per-task commits made a
+    # clean tree the normal case. The non-empty clause makes the skip need evidence.
     decide:
-      - when: { all: [{ fact: lens.name, equals: correctness }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+      - when: { all: [{ fact: lens.name, equals: correctness }, { not: { fact: review.changed-paths, count: 0 } }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
         answer: not-applicable
-      - when: { all: [{ fact: lens.name, equals: test-adequacy }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+      - when: { all: [{ fact: lens.name, equals: test-adequacy }, { not: { fact: review.changed-paths, count: 0 } }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
         answer: not-applicable
     ask:
       type: noul
@@ -210,7 +219,7 @@ rules:
       question: Does the lens apply to this change?
       instructions-from: "lens:"
       probability-below: 0.1
-      tuned-for: [jev-1.13.0]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { applies: allow, not-applicable: skip }
 
   - id: KW-ARB-QUOTE-001
@@ -245,7 +254,7 @@ rules:
         contradicts: The quoted code contradicts the finding's claim.
         says_nothing: The quoted code says nothing about the finding's claim.
       confidence-at-least: 0.9
-      tuned-for: [jev-1.13.0]
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { supports: verify, contradicts: allow, says_nothing: allow }
 
   - id: KW-ARB-GATE-CORROBORATED-001
@@ -264,6 +273,50 @@ rules:
       - when: { fact: review.changed-paths, exists: true }
         answer: not-applicable
     effects: { applies: applies, not-applicable: not-applicable }
+
+  # The read guard is advisory wherever a harness has hooks, so on a harness whose
+  # dispatch hook fires this rule is the enforcement the guard cannot be. The fact it
+  # reads is the dispatch body with the routing header already removed, because
+  # PLAN_FILE names the plan by design and a rule reading the raw prompt would escalate
+  # every dispatch in a run. Closeout is the one dispatch that must read the plan, so a
+  # documentation-profile target is exempt. Where no dispatch hook runs, no rule runs:
+  # that is an install property, and no predicate here can state it.
+  - id: KW-ARB-PLANREAD-001
+    trigger: delegate
+    question: Does the dispatch send the worker into a plan, specification or todo path?
+    answers: [names-plan, no-plan, closeout]
+    decide:
+      - when: { fact: delegation.target-profile, equals: documentation }
+        answer: closeout
+      - when: { fact: delegation.planning-paths, count: 0 }
+        answer: no-plan
+      - when: { fact: delegation.planning-paths, exists: true }
+        answer: names-plan
+    effects: { names-plan: escalate, no-plan: allow, closeout: allow }
+
+  # A dispatch claims what the worker will do; the digest that comes back carries a
+  # `TASK_GATE:` line claiming a gate run happened. That line is the worker's own word,
+  # so the rule checks it against the report file the line names rather than reading the
+  # claim. Joining the claimed status to the report's gates is a two-fact comparison the
+  # closed predicate set cannot express, so GateReportFacts makes it and answers the fact:
+  # true when the report corroborates the claim, false when it contradicts it, absent
+  # when the line, the path or the file is missing. Both failures escalate, because a
+  # dispatch whose evidence cannot be found is exactly the case this rule exists for;
+  # the two answers stay apart so the envelope says which one happened. Where a harness
+  # cannot observe returns the post-dispatch hook never fires and the rule cannot run;
+  # the end-of-run gates catch that case instead.
+  - id: KW-ARB-GATE-REPORT-001
+    trigger: delegate.returned
+    question: Does the returned digest's TASK_GATE line agree with the gate report it names?
+    answers: [verified, disagrees, missing]
+    decide:
+      - when: { fact: gate.report.agrees, exists: false }
+        answer: missing
+      - when: { fact: gate.report.agrees, equals: true }
+        answer: verified
+      - when: { fact: gate.report.agrees, exists: true }
+        answer: disagrees
+    effects: { verified: allow, disagrees: escalate, missing: escalate }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

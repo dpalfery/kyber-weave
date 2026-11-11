@@ -195,9 +195,9 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// </summary>
     /// <remarks>
     /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
-    /// it should carry rather than reading as a whole-file miss. The format is resolved from
-    /// the recorded relative path the same way uninstall resolves it, so reporting never
-    /// depends on a render that may no longer exist.
+    /// it should carry rather than reading as a whole-file miss. Both the file's path and its
+    /// shape are read from the receipt, so reporting never depends on a render that may no
+    /// longer exist and never needs a scope of its own to say where a global block lives.
     /// </remarks>
     private static void ReportOwnedBlock(
         SquadOwnedBlock block,
@@ -216,8 +216,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         string fullPath;
         try
         {
-            // Blocks exist on project scope only, but resolve through the same
-            // receipt-aware helper as owned files so a future scope never drifts apart.
+            // Blocks resolve through the same receipt-aware helper as owned files, so a
+            // global block lands beneath its target's own root.
             fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
                 receipt,
                 targetRoot,
@@ -231,7 +231,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return;
         }
 
-        if (!TryResolveBlockFormat(block, out SquadHookBlockFormat format))
+        if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
         {
             AnsiConsole.MarkupLine($"  [red]invalid[/] {fileLabel} (unknown shared hook file)");
             hasIssues = true;
@@ -306,28 +306,6 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             hasMissing = true;
         }
-    }
-
-    /// <summary>
-    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
-    /// path, so reporting never depends on a render that may no longer exist.
-    /// </summary>
-    private static bool TryResolveBlockFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
-    {
-        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
-        {
-            if (string.Equals(
-                    SquadHookJsonBlock.RelativePath(candidate),
-                    block.RelativePath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                format = candidate;
-                return true;
-            }
-        }
-
-        format = default;
-        return false;
     }
 
     /// <summary>

@@ -501,7 +501,20 @@ public sealed class AnalysisPersistenceTests
             () => StartSqliteLock(
                 persistence.DatabasePath,
                 probeTimeoutSeconds: 0,
-                beforeProbe: process => process.StandardInput.Dispose()));
+                beforeProbe: process =>
+                {
+                    // Closing the child's standard input is what makes sqlite exit, so waiting for
+                    // it here pins the state the fixture's cleanup block observes: input closed and
+                    // child gone. Without the wait, whether the child had exited by the time cleanup
+                    // ran was a race — this test failed on one machine and passed on another.
+                    process.StandardInput.Dispose();
+                    Assert.True(
+                        process.WaitForExit(30_000),
+                        "sqlite lock fixture child did not exit after its standard input was closed.");
+                    Assert.True(
+                        process.HasExited,
+                        "sqlite lock fixture child must have exited before the fixture's cleanup block runs.");
+                }));
 
         Assert.IsType<TimeoutException>(exception.InnerExceptions[0]);
         Assert.Contains(exception.InnerExceptions.Skip(1), inner => inner is IOException or InvalidOperationException);
@@ -719,11 +732,25 @@ public sealed class AnalysisPersistenceTests
             {
                 try
                 {
-                    process.StandardInput.WriteLine("ROLLBACK;");
-                    process.StandardInput.Close();
-                    if (!process.HasExited)
+                    // The fixture owes the child a ROLLBACK, and it can issue that write only while
+                    // the child's standard input is open. Closed input leaves the rollback unissued
+                    // and the immediate transaction in an unknown state, so that is a cleanup failure
+                    // the caller must see. A child that exited with its input still open took the
+                    // transaction with it: nothing to roll back, nothing to report.
+                    if (!IsStandardInputOpen(process))
                     {
-                        process.WaitForExit(5_000);
+                        cleanupFailures.Add(new IOException(
+                            "sqlite lock fixture could not issue ROLLBACK; the child's standard input was already closed, "
+                            + "so whether the immediate transaction was released is unknown."));
+                    }
+                    else if (!process.HasExited)
+                    {
+                        process.StandardInput.WriteLine("ROLLBACK;");
+                        process.StandardInput.Close();
+                        if (!process.HasExited)
+                        {
+                            process.WaitForExit(5_000);
+                        }
                     }
                 }
                 catch (Exception ex) when (ex is IOException or InvalidOperationException)
@@ -764,6 +791,67 @@ public sealed class AnalysisPersistenceTests
 
             throw;
         }
+    }
+
+    /// <summary>
+    ///     Whether the child's standard input is still open, which decides whether the fixture can
+    ///     still issue the <c>ROLLBACK;</c> it owes the child.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="StreamWriter"/> exposes no disposal state, and the pipe behind
+    ///     <see cref="StreamWriter.BaseStream"/> keeps reporting <c>CanWrite</c> after the writer is
+    ///     disposed, so neither answers the question. A flush is what does: it returns when the
+    ///     writer is open and throws <see cref="ObjectDisposedException"/> once a caller has disposed
+    ///     it. The buffer is empty here because the acquire path flushed every write, so the probe
+    ///     sends the child nothing.
+    /// </remarks>
+    private static bool IsStandardInputOpen(Process process)
+    {
+        try
+        {
+            process.StandardInput.Flush();
+            return true;
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or IOException)
+        {
+            return false;
+        }
+    }
+
+    [Fact]
+    public void IsStandardInputOpen_WhenDisposed_ReturnsFalse()
+    {
+        ProcessStartInfo startInfo = new("git", ["version"])
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        using Process process = Process.Start(startInfo)!;
+        process.StandardInput.Dispose();
+
+        Assert.False(IsStandardInputOpen(process));
+        Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
+    }
+
+    [Fact]
+    public void IsStandardInputOpen_WhenPipeBroken_ReturnsFalse()
+    {
+        ProcessStartInfo startInfo = new("git", ["version"])
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        using Process process = Process.Start(startInfo)!;
+        _ = process.StandardOutput.ReadToEnd();
+        Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
+
+        // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
+        process.StandardInput.AutoFlush = false;
+        process.StandardInput.Write(' ');
+
+        Assert.False(IsStandardInputOpen(process));
     }
 
     private static string QuerySqlite(string databasePath, string input)

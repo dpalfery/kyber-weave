@@ -35,4 +35,7 @@ dotnet watch
 dotnet test
 ```
 
+The `dotnet test` line is the gate the review council and CI run. For your own run, filter to the
+tests covering your change: `dotnet test --filter "FullyQualifiedName~<TestClass>"`.
+
 Migrations are owned by `dal-dev`. See **<data-access-layer-coding-standard>**.

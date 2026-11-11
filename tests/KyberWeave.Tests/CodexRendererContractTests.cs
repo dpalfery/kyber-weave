@@ -55,7 +55,7 @@ public sealed class CodexRendererContractTests : IDisposable
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".codex/agents/{agent.Name}.toml");
             ParsedTomlAgent parsed = ParseCodexAgentToml(Encoding.UTF8.GetString(file.Content.Span), agent.Name);
             Assert.Equal(agent.Name, parsed.Name);
-            Assert.Equal(agent.Description, parsed.Description);
+            Assert.Equal(TestSquadCorpus.ExpectedRenderText(SquadTarget.Codex, agent.Description), parsed.Description);
 
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             string? expectedModel = modelProfile.HarnessModels.TryGetValue("codex", out string? codexModel)
@@ -63,14 +63,18 @@ public sealed class CodexRendererContractTests : IDisposable
                 : modelProfile.Default == "inherit" ? null : modelProfile.Default;
             Assert.Equal(expectedModel, parsed.Model);
 
-            Assert.Equal(Normalized(agent.InstructionBody), parsed.DeveloperInstructions);
+            Assert.Equal(
+                Normalized(TestSquadCorpus.ExpectedBodyText(SquadTarget.Codex, agent)),
+                parsed.DeveloperInstructions);
         }
 
         // The other primary agents are shared identities whose canonical skill is the entry point.
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadDeploymentFile entryPoint = Assert.Single(result.Files, f => f.RelativePath == $".codex/skills/{conductor.Name}/SKILL.md");
         (_, string entryPointBody) = SplitFrontmatter(Encoding.UTF8.GetString(entryPoint.Content.Span), conductor.Name);
-        Assert.Equal(Normalized(conductor.InstructionBody), entryPointBody);
+        Assert.Equal(
+            Normalized(TestSquadCorpus.ExpectedRenderText(SquadTarget.Codex, conductor.InstructionBody)),
+            entryPointBody);
         Assert.All(conductor.Resources, resource => Assert.Contains(
             result.Files,
             f => f.RelativePath == $".codex/skills/{conductor.Name}/{resource.RelativePath}"));
@@ -103,7 +107,9 @@ public sealed class CodexRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string expectedAgentBody = TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Codex, primaryAgent.InstructionBody)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         if (!expectedAgentBody.EndsWith('\n'))
         {
             expectedAgentBody += "\n";

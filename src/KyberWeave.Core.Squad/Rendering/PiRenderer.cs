@@ -162,7 +162,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <strong>Arbiter extension (Req 6.2, 22.2, 25.1):</strong> When the render request carries an
 /// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>
 /// scope, the renderer emits the owned file <c>.pi/extensions/kyber-arbiter.ts</c> from
-/// <see cref="RenderArbiterExtension(int)"/> for harness token <c>pi</c>. Nothing is rendered
+/// <see cref="RenderArbiterExtension(int, SquadDeploymentScope)"/> for harness token <c>pi</c>. Nothing is rendered
 /// when the wiring is null or disabled, or the scope is Global (Req 22.2), so a render
 /// without Arbiter is byte-identical to before the field existed.
 /// </para>
@@ -285,15 +285,21 @@ public sealed class PiRenderer : SquadHarnessRenderer
         context.EmitCanonicalSkills(skill =>
             context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
 
-    /// <summary>The owned extension shim, only for an enabled wiring at project scope (Req 22.2).</summary>
+    /// <summary>The owned extension shim, only for an enabled wiring.</summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context)
     {
-        if (context.EnabledArbiter is { } arbiter)
+        if (context.EnabledArbiter is not { } arbiter)
         {
-            context.Files.Add(context.CreateFile(
-                ArbiterExtensionFileRelativePath,
-                RenderArbiterExtension(arbiter.HookTimeoutSeconds)));
+            return;
         }
+
+        string relativePath = context.Scope == SquadDeploymentScope.Global
+            ? "extensions/kyber-arbiter.ts"
+            : ArbiterExtensionFileRelativePath;
+
+        context.Files.Add(context.CreateFile(
+            relativePath,
+            RenderArbiterExtension(arbiter.HookTimeoutSeconds, context.Scope)));
     }
 
     private static SquadDeploymentFile RenderSubagentAgent(
@@ -384,9 +390,16 @@ public sealed class PiRenderer : SquadHarnessRenderer
     /// or a non-zero status blocks, so the call fails closed rather than passing through.
     /// </para>
     /// </remarks>
-    private static string RenderArbiterExtension(int timeoutSeconds)
+    public static string RenderArbiterExtension(int timeoutSeconds, SquadDeploymentScope scope)
     {
         long timeoutMs = Math.Clamp((long)timeoutSeconds * 1000, 0, int.MaxValue);
+        string scopeSuffix = scope == SquadDeploymentScope.Global ? ", \"--scope\", \"global\"" : string.Empty;
+        string commandLine = scope == SquadDeploymentScope.Global
+            ? ArbiterHookWiring.HookCommandLine("pi", scope)
+            : string.Empty;
+        string globalCommandLineStatement = scope == SquadDeploymentScope.Global
+            ? $"const commandLine = {System.Text.Json.JsonSerializer.Serialize(commandLine)};\n"
+            : string.Empty;
 
         return $$"""
             import { spawnSync } from "node:child_process";
@@ -423,9 +436,9 @@ public sealed class PiRenderer : SquadHarnessRenderer
               return decision;
             }
 
-            function runArbiterHook(envelope: unknown): ArbiterDecision {
+            {{globalCommandLineStatement}}function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
-                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"], {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"{{scopeSuffix}}], {
                   input: JSON.stringify(envelope),
                   encoding: "utf8",
                   timeout: {{timeoutMs}},

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-09
 ---
 
 # Rule reference
@@ -47,6 +47,29 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
+
+### Plan task files — `docs validate` and the docs MCP validate tool
+
+A plan's task file is the tracked file the architect writes at finalization so the conductor can
+dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. (The merge-time rule
+`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
+authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
+that cannot be acted on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not
+behind a flag, because the orchestrator has the docs tools and no shell.
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-TASKS-001` | Error | The file is not the JSON this build reads, or declares a schema version it does not read |
+| `KW-DOC-TASKS-002` | Error | The file's plan, tasks, files or dependencies disagree with the plan's |
+| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does |
+| `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
+| `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
+| `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
+
+`KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
+removes the file, and the walk looks under the archive too, so a specification folder that carried
+its `tasks.json` into the archive is caught rather than kept as dead weight.
 
 ### Drift — `docs drift`
 
@@ -205,9 +228,9 @@ failed gate.
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 | `KW-REVIEW-026` | Info | A gate does not apply to this change: no changed path matched its `applies-when.paths` or `include`, or its `os` does not match the host, so it was not executed |
 | `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
-| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}`, `{task}` or `{tests}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
-| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, or its working directory does not exist. Error when blocking, warning otherwise. |
+| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 
 ### Duplicates — `review duplicates`
@@ -217,6 +240,17 @@ failed gate.
 | `KW-REVIEW-030` | Warning | No CodeGraph index was read, so duplicate detection did not run |
 | `KW-REVIEW-031` | Warning | A set of symbols shares one normalized body |
 | `KW-REVIEW-032` | Warning | The CodeGraph index disagrees with the working tree, so its clusters are stale |
+
+### Suppressions — `review suppressions`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-036` | Error | A warning suppression the change added states no reason. The file, line and form are named, and `reason: <why>` on the same or the immediately preceding added line clears it |
+| `KW-REVIEW-037` | Error | The change against the base ref could not be read, so no line was scanned. A failure rather than a pass, because a gate that cannot see the change has no evidence either way |
+| `KW-REVIEW-028` | Error | The `--base` ref or the path was refused before anything was read (client-input error, exit `2`) |
+
+Only added lines are judged, so a committed suppression is never re-litigated. A suppression on a
+context line clears nothing, and an empty change passes.
 
 ## Arbiter — [Kyber Arbiter](../kyber-arbiter/architecture.md)
 
@@ -235,11 +269,13 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task |
 | `KW-ARB-MODE-001` | `delegate` | 0 | RED evidence exists before an implementation dispatch in test-first mode |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to` |
+| `KW-ARB-PLANREAD-001` | `delegate` | 0 | Prompt names no planning path once the routing header is removed; a documentation-profile target is exempt |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Delegation changed only its task's files |
-| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Recognised planner invocation |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | The digest's `TASK_GATE` line agrees with the gate report it names: `verified` needs a `PASS` claim the report corroborates, `disagrees` and `missing` escalate |
+| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Planner invocation, with four answers: `recognised` (a `PLAN_FILE` under a planning directory, or a marker that needs no `PLAN_FILE`); `malformed` (no recognised marker); `plan-file-invalid` (a `PLAN_FILE` the header rejected: absolute, a `..` segment, repeated, or with a space, tab or backslash; checked before any marker); `plan-file-outside-planning-dirs` (a valid `PLAN_FILE` outside the plan, spec and todo directories) |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |
-| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change |
+| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Finding excerpt present at its `file:line` |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Excerpt inside a changed hunk |
 | `KW-ARB-CLAIM-001` | `refute.spawn` | 1 | Quoted code supports the finding's claim |
@@ -260,6 +296,8 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-CONFIG-008` | Error | Effect not allowed for the rule's trigger family, or a remapped `undecidable` |
 | `KW-ARB-CONFIG-009` | Error | User override holds a key other than `provider` |
 | `KW-ARB-CONFIG-010` | Error | Non-loopback endpoint uses `http` |
+| `KW-ARB-CONFIG-011` | Error | `arbiter.global` is declared in a project config; user-level `arbiter.global.targets` is the only valid global schema |
+| `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
 | `KW-ARB-LOG-001` | Warning | `artifacts/arbiter/` is not ignored by git |
 | `KW-ARB-BIN-001` | Warning | `kyber-weave-arbiter` missing from `PATH`, or version differs from the CLI's |

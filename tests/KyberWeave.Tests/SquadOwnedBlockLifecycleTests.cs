@@ -20,6 +20,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockLifecycleTests
 {
+    /// <summary>
+    /// The bare global hook path four of the five formats write beneath their own root; only the
+    /// target tells them apart, which is the subject of the global cases below.
+    /// </summary>
+    private const string GlobalHooksPath = "hooks.json";
+
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
@@ -246,11 +252,23 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Single(receipt.Blocks);
 
         Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(RemoveJsonProperty(valid, "blocks")));
-        Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(AddJsonProperty(valid, "layout", "per-target-roots")));
-        Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(valid.Replace(
-            "\"scope\": \"project\"",
-            "\"scope\": \"global\"",
-            StringComparison.Ordinal)));
+
+        SquadReceipt withLayoutReceipt = store.DeserializeReceipt(AddJsonProperty(valid, "layout", "per-target-roots"));
+        Assert.Equal(SquadDeploymentScope.Project, withLayoutReceipt.Scope);
+        Assert.Equal(SquadReceiptLayout.PerTargetRoots, withLayoutReceipt.Layout);
+        Assert.Single(withLayoutReceipt.Blocks);
+
+        string globalScopeJson = AddJsonProperty(
+            valid.Replace(
+                "\"scope\": \"project\"",
+                "\"scope\": \"global\"",
+                StringComparison.Ordinal),
+            "layout",
+            "per-target-roots");
+        SquadReceipt globalScopeReceipt = store.DeserializeReceipt(globalScopeJson);
+        Assert.Equal(SquadDeploymentScope.Global, globalScopeReceipt.Scope);
+        Assert.Equal(SquadReceiptLayout.PerTargetRoots, globalScopeReceipt.Layout);
+        Assert.Single(globalScopeReceipt.Blocks);
     }
 
     [Fact]
@@ -447,6 +465,239 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
     }
 
+    /// <summary>
+    /// The retained-schema rule the uninstall plan applies: a receipt that still owns a
+    /// block stays on v3, while one whose blocks are all gone drops to the block-less
+    /// schema for its scope (v2 at global scope, v1 at project scope). Blocks are uninstalled
+    /// through FormatForTarget; conflicted hook files retain their block on v3, while cleanly
+    /// removed blocks transition a v3 receipt to v2.
+    /// </summary>
+    [Fact]
+    public void UninstallGlobalRetainedSchemaFollowsTheWriterRule()
+    {
+        using TempDirectory fixtureCorrupted = new TempDirectory();
+        GlobalBlockDeployment installedCorrupted = InstallGlobalBlocks(
+            fixtureCorrupted, SquadTarget.Cursor, SquadTarget.Codex);
+        SquadReceipt twoBlocks = Assert.IsType<SquadReceipt>(
+            installedCorrupted.Store.ReadReceipt(installedCorrupted.Home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", twoBlocks.Schema);
+        Assert.Equal(2, twoBlocks.Blocks.Count);
+
+        // Corrupt both hook files so RemoveBlockContent throws SquadDeploymentConflictException,
+        // exercising FormatForTarget during uninstall while retaining both blocks.
+        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Cursor), "{ unclosed json");
+        File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Codex), "{ unclosed json");
+
+        SquadDeploymentPlan keepBoth = SquadDeploymentPlan.CreateUninstall(
+            installedCorrupted.Home,
+            SquadDeploymentScope.Global,
+            twoBlocks,
+            installedCorrupted.Roots);
+
+        using TempDirectory fixtureClean = new TempDirectory();
+        GlobalBlockDeployment installedClean = InstallGlobalBlocks(
+            fixtureClean, SquadTarget.Cursor, SquadTarget.Codex);
+        SquadReceipt cleanReceipt = Assert.IsType<SquadReceipt>(
+            installedClean.Store.ReadReceipt(installedClean.Home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", cleanReceipt.Schema);
+        Assert.Equal(2, cleanReceipt.Blocks.Count);
+
+        SquadDeploymentPlan keepNone = SquadDeploymentPlan.CreateUninstall(
+            installedClean.Home,
+            SquadDeploymentScope.Global,
+            cleanReceipt,
+            installedClean.Roots);
+
+        Assert.Equal(2, keepBoth.Receipt.Blocks.Count);
+        Assert.Equal("kyber-squad.receipt/v3", keepBoth.Receipt.Schema);
+        Assert.Empty(keepNone.Receipt.Blocks);
+        Assert.Equal("kyber-squad.receipt/v2", keepNone.Receipt.Schema);
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Global scope: each block lives beneath its own target's root, and the receipt says so
+    // ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A global update rewrites every block it owns, each in its own target's hook file, and the
+    /// receipt it writes records the entries it just wrote — so a later status finds neither block
+    /// drifting. Before a global block's identity was qualified by its target, a receipt holding
+    /// two <c>hooks.json</c> blocks could not exist to be updated.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalRewritesEveryBlockWithoutDrift()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture, SquadTarget.Cursor, SquadTarget.Codex);
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
+
+        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+            installed.Home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            previous,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddHours(1)),
+            globalRoots: installed.Roots,
+            blocks:
+            [
+                GlobalHooksBlock(SquadTarget.Cursor, "cursor-two"),
+                GlobalHooksBlock(SquadTarget.Codex, "codex-two"),
+            ]);
+
+        Assert.Empty(update.BlockDrifts);
+        new SquadTransaction(installed.Store).Execute(update);
+
+        SquadReceipt after = Assert.IsType<SquadReceipt>(
+            installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
+        Assert.Equal(["cursor", "codex"], after.Blocks.Select(block => block.Target).ToArray());
+        Assert.All(after.Blocks, block => Assert.Equal(GlobalHooksPath, block.RelativePath));
+        AssertNoDrift(after, installed.Roots);
+
+        string cursorHookFile = File.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Cursor));
+        Assert.Contains("probe-cursor-two", cursorHookFile, StringComparison.Ordinal);
+        Assert.DoesNotContain("probe-cursor-one", cursorHookFile, StringComparison.Ordinal);
+        Assert.Contains(
+            "probe-codex-two",
+            File.ReadAllText(GlobalHookFile(installed.Roots, SquadTarget.Codex)),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A global receipt the shipped 0.1.8-rc.20 binary wrote keeps both of its blocks through an
+    /// update. rc.20 could only ever record one block per home, because writing the second is what
+    /// the defect refused; the fixture merges two genuine one-block receipts, and an update must
+    /// neither refuse it nor quietly drop one of them.
+    /// </summary>
+    [Fact]
+    public void UpdateFromAnRc20GlobalReceiptKeepsBothBlocks()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        FakeSquadUserPaths userPaths = new(fixture.Path);
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
+        SquadStateStore store = new(userPaths);
+        string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, Rc20GlobalReceiptJson());
+
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal(["cursor", "codex"], previous.Blocks.Select(block => block.Target).ToArray());
+
+        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+            home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            previous,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddHours(1)),
+            globalRoots: globalRoots,
+            blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
+
+        new SquadTransaction(store).Execute(update);
+
+        SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal("kyber-squad.receipt/v3", after.Schema);
+        Assert.Equal(SquadDeploymentScope.Global, after.Scope);
+        Assert.Equal(["cursor", "codex"], after.Blocks.Select(block => block.Target).ToArray());
+        Assert.All(after.Blocks, block => Assert.Equal(GlobalHooksPath, block.RelativePath));
+        AssertNoDrift(after, globalRoots);
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Duplicate refusals (D6): a receipt is an ownership record, never a list
+    // ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Qualifying a global block's identity by its target widens which blocks may share a receipt;
+    /// it does not make a duplicate legal. The same target claiming the same path twice is still
+    /// refused, because there is exactly one physical file it could name.
+    /// </summary>
+    [Fact]
+    public void ReceiptRefusesOneTargetClaimingOnePathTwiceAtGlobalScope()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string valid = store.SerializeReceipt(GlobalTwoBlockReceipt());
+
+        InvalidDataException refused = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(DuplicateBlockForTarget(valid, "cursor", "cursor")));
+
+        Assert.Contains(
+            "Squad receipt block path 'hooks.json' for target 'cursor' is not a unique portable deployment path.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The project-scope counterpart: at one deployment root the path alone is a block's identity,
+    /// so one target claiming it twice is refused there too.
+    /// </summary>
+    [Fact]
+    public void ReceiptRefusesOneTargetClaimingOnePathTwiceAtProjectScope()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
+
+        InvalidDataException refused = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(DuplicateBlockForTarget(valid, "cursor", "cursor")));
+
+        Assert.Contains(
+            "Squad receipt block path '.cursor/hooks.json' for target 'cursor' is not a unique portable deployment path.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two targets claiming one path at project scope name one physical file, so the receipt is
+    /// refused. This is the guarantee the target qualification must not erode: it applies to global
+    /// scope alone, where each target writes beneath its own root.
+    /// </summary>
+    [Fact]
+    public void ReceiptRefusesTwoTargetsClaimingOnePathAtProjectScope()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
+
+        InvalidDataException refused = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(DuplicateBlockForTarget(valid, "cursor", "codex")));
+
+        Assert.Contains(
+            "Squad receipt block path '.cursor/hooks.json' for target 'codex' is not a unique portable deployment path.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// One block owns one entry per container. Two entries claiming the same container would record
+    /// two digests for one slot, so the receipt is refused rather than leaving a reader to guess
+    /// which one is live.
+    /// </summary>
+    [Fact]
+    public void ReceiptRefusesOneBlockClaimingTheSameContainerTwice()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string valid = store.SerializeReceipt(ProjectCursorBlockReceipt());
+
+        InvalidDataException refused = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(DuplicateFirstEntry(valid)));
+
+        Assert.Contains(
+            "Squad receipt block '.cursor/hooks.json' contains duplicate entry '/hooks/preToolUse/0'.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
     // ----------------------------------------------------------------------------------
     // Lifecycle: the service carries blocks from the render result into the plan
     // ----------------------------------------------------------------------------------
@@ -520,6 +771,192 @@ public sealed class SquadOwnedBlockLifecycleTests
                     ["timeout"] = 5,
                 }),
         };
+
+    /// <summary>
+    /// One global block. The marker rides the matcher, never the command: the command is the
+    /// ownership signature, so a marker inside it would make the entry unowned and a rewrite would
+    /// append beside it instead of replacing it.
+    /// </summary>
+    private static SquadRenderedBlock GlobalHooksBlock(SquadTarget target, string marker = "one")
+    {
+        string token = SquadTargetCatalog.GetToken(target);
+        string command = $"kyber-weave-arbiter hook --harness {token} --scope global";
+        string matcher = $"probe-{marker}";
+        return target switch
+        {
+            SquadTarget.Cursor => new SquadRenderedBlock(
+                token,
+                GlobalHooksPath,
+                SquadHookBlockFormat.Cursor,
+                [
+                    new SquadRenderedBlockEntry("preToolUse", CursorEntry(command, matcher)),
+                    new SquadRenderedBlockEntry("postToolUse", CursorEntry(command, matcher)),
+                ]),
+            SquadTarget.Codex => new SquadRenderedBlock(
+                token,
+                GlobalHooksPath,
+                SquadHookBlockFormat.Codex,
+                [
+                    new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(command, matcher)),
+                    new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(command, matcher)),
+                ]),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(target),
+                target,
+                "Only the targets whose global hook file is named hooks.json are built here."),
+        };
+    }
+
+    /// <summary>
+    /// A home holding one global receipt with a cursor and a codex block, installed through the same
+    /// plan and transaction an install uses. Each block is written beneath its own target's root,
+    /// which is why both record the bare path <c>hooks.json</c>.
+    /// </summary>
+    private static GlobalBlockDeployment InstallGlobalBlocks(
+        TempDirectory fixture,
+        params SquadTarget[] targets)
+    {
+        FakeSquadUserPaths userPaths = new(fixture.Path);
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots roots = new(_ => null, home);
+        SquadStateStore store = new(userPaths);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            home,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            globalRoots: roots,
+            blocks: [.. targets.Select(target => GlobalHooksBlock(target))]);
+        new SquadTransaction(store).Execute(plan);
+        return new GlobalBlockDeployment(store, roots, home);
+    }
+
+    private static string GlobalHookFile(SquadGlobalRoots roots, SquadTarget target) =>
+        Path.Combine(roots.ResolveGlobalRoot(target), GlobalHooksPath);
+
+    /// <summary>
+    /// Asserts the receipt and the files agree: every recorded entry digest still matches the node
+    /// at its container, in every block's own file. This is the same rule status and doctor apply,
+    /// so "no drift" here means the same thing it means to the operator.
+    /// </summary>
+    private static void AssertNoDrift(SquadReceipt receipt, SquadGlobalRoots roots)
+    {
+        Assert.NotEmpty(receipt.Blocks);
+        foreach (SquadOwnedBlock block in receipt.Blocks)
+        {
+            Assert.True(
+                SquadTargetCatalog.TryResolve(block.Target, out SquadTarget target),
+                $"The receipt records block target '{block.Target}', which is not a canonical Squad target.");
+
+            SquadHookBlockFormat format = target switch
+            {
+                SquadTarget.Cursor => SquadHookBlockFormat.Cursor,
+                SquadTarget.Codex => SquadHookBlockFormat.Codex,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(receipt),
+                    target,
+                    "Only cursor and codex blocks are built here."),
+            };
+
+            Dictionary<string, string> expected = block.Entries
+                .ToDictionary(entry => entry.Container, entry => entry.Sha256, StringComparer.Ordinal);
+            IReadOnlyList<SquadHookDrift> drifts = SquadHookJsonBlock.FindDrift(
+                format,
+                File.ReadAllText(GlobalHookFile(roots, target)),
+                expected);
+
+            Assert.True(
+                drifts.Count == 0,
+                $"The {block.Target} block at '{block.RelativePath}' drifted: "
+                + string.Join("; ", drifts.Select(drift => $"{drift.Location} {drift.Reason}")));
+        }
+    }
+
+    /// <summary>Two global blocks whose recorded paths are both <c>hooks.json</c>.</summary>
+    private static SquadReceipt GlobalTwoBlockReceipt() =>
+        new("kyber-squad.receipt/v3", SquadDeploymentScope.Global, ".", InstalledAt, [], [])
+        {
+            Blocks =
+            [
+                new SquadOwnedBlock(
+                    GlobalHooksPath,
+                    "cursor",
+                    true,
+                    [new SquadOwnedBlockEntry("/hooks/preToolUse/0", Digest("cursor-entry"))]),
+                new SquadOwnedBlock(
+                    GlobalHooksPath,
+                    "codex",
+                    true,
+                    [new SquadOwnedBlockEntry("/hooks/PreToolUse/0", Digest("codex-entry"))]),
+            ],
+        };
+
+    /// <summary>One project block with two owned containers, so one of them can be claimed twice.</summary>
+    private static SquadReceipt ProjectCursorBlockReceipt() =>
+        new("kyber-squad.receipt/v3", SquadDeploymentScope.Project, ".", InstalledAt, [], [])
+        {
+            Blocks =
+            [
+                new SquadOwnedBlock(
+                    ".cursor/hooks.json",
+                    "cursor",
+                    true,
+                    [
+                        new SquadOwnedBlockEntry("/hooks/preToolUse/0", Digest("cursor-entry")),
+                        new SquadOwnedBlockEntry("/hooks/postToolUse/0", Digest("cursor-entry")),
+                    ]),
+            ],
+        };
+
+    /// <summary>
+    /// Copies one block and gives the copy <paramref name="target"/>. Hand-editing the JSON rather
+    /// than the model is the point: the refusal lives in the reader, so the receipt has to reach it
+    /// as bytes a corrupt or hand-written file could produce.
+    /// </summary>
+    private static string DuplicateBlockForTarget(string json, string sourceTarget, string target)
+    {
+        JsonObject root = Assert.IsType<JsonObject>(JsonNode.Parse(json));
+        JsonArray blocks = Assert.IsType<JsonArray>(root["blocks"]);
+        JsonObject source = Assert.IsType<JsonObject>(blocks.Single(
+            node => string.Equals(
+                node!["target"]!.GetValue<string>(),
+                sourceTarget,
+                StringComparison.Ordinal)));
+        JsonObject duplicate = Assert.IsType<JsonObject>(source.DeepClone());
+        duplicate["target"] = target;
+        blocks.Add(duplicate);
+        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
+    /// <summary>Copies the first entry of the first block, so that block claims one container twice.</summary>
+    private static string DuplicateFirstEntry(string json)
+    {
+        JsonObject root = Assert.IsType<JsonObject>(JsonNode.Parse(json));
+        JsonObject block = Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(root["blocks"])[0]);
+        JsonArray entries = Assert.IsType<JsonArray>(block["entries"]);
+        entries.Add(entries[0]!.DeepClone());
+        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
+    /// <summary>
+    /// The two-block global receipt 0.1.8-rc.20's own bytes describe, assembled per the recipe in
+    /// <see cref="SquadGlobalBlockReceiptTests"/>. Nothing here is invented: it is the shipped
+    /// shape, which is what makes it evidence that an upgrade keeps its state.
+    /// </summary>
+    private static string Rc20GlobalReceiptJson() =>
+        File.ReadAllText(
+            Path.Combine(
+                KyberWeaveTestPaths.ToolRoot,
+                "tests",
+                "KyberWeave.Tests",
+                "Fixtures",
+                "squad-rc20-global",
+                "two-blocks.receipt.json"),
+            Encoding.UTF8);
 
     private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {
@@ -626,6 +1063,15 @@ public sealed class SquadOwnedBlockLifecycleTests
             return Task.FromResult(new SquadRenderResult(true, [], [], [], [], Blocks: [block]));
         }
     }
+
+    /// <summary>
+    /// An isolated home with a global deployment in it: the store that holds its receipt, the
+    /// resolver that finds each target's root, and the home that anchors its state.
+    /// </summary>
+    private sealed record GlobalBlockDeployment(
+        SquadStateStore Store,
+        SquadGlobalRoots Roots,
+        string Home);
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {

@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/azure-reader.agent.md
 sources:
   .github/agents/azure-reader.agent.md: f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
-final-body-sha256: 0e53ac073b459ab1137546d6f9b791588bf16ff86109c94f8632c43036c372f3
+final-body-sha256: d2c8eb43886c75ea9b46a8017404bc10d695403ef8d8a9e31bdbdf6740f5d9d0
 ---
 # azure-reader migration
 

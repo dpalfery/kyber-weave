@@ -5,7 +5,7 @@ description: "Implements .NET/C# backend code: ASP.NET Core controllers, service
 invocation: subagent
 model-profile: fast
 capability-profile: worker
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -37,7 +37,7 @@ You do **not** own:
 - CI/CD — that is `github-devops`
 - Client UI — that is `react-dev` / `maui-dev`
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
 
 ### Role boundaries and task bundling
 
@@ -55,40 +55,33 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ## Workflow
 
-1. Read the path declared as **<csharp-coding-standard>** before writing any C#.
+1. Fetch **<csharp-coding-standard>** before writing any C# through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `csharp-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 to resolve library ids and fetch current docs for libraries you are configuring — do not wait to be asked. Use the standard for which libraries this repository actually takes.
 4. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 5. Hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
-6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
-   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or subsystem failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If not green after 3 iterations, halt immediately and trip the circuit breaker.
-   - **JEV Checkpoint 1 (Blast Radius Guardrail):** Verify that all modified and proposed files are strictly within authorized task scope. If resolving a failure requires expanding blast radius into out-of-scope files or unrelated components, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
-   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing Failure Cluster A causes Failure Cluster B to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for B regresses A (A→B→A) or a failure signature repeats.
-   - **JEV Checkpoint 3 (Invariant Contradiction):** If a failing test fixture asserts legacy internal implementation details or requirements that contradict the task's approved design invariant, do not twist production code to satisfy invalid invariants. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
-7. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build.
+6. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build.
 
    - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. In a shared checkout, pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` (or `.agent_scratchpad/<task-id>/task-gate.json`) when invoking `kyber-weave review gates . --agent <agent>` for per-task review-gate isolation so concurrent workers never overwrite one another's reports. Cite the artifact path you used in the explanatory message body accompanying the completion digest (outside the rigid 6-field completion digest schema, preserving the rigid 6-field completion digest schema). A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Worktree output isolation:** Executing inside isolated git worktrees inherently isolates build output directories.
      Which rule applies depends on where you run:
      - In a shared checkout (a), follow the isolation bullet above: pass `--artifacts-path <per-task dir>` on every dotnet invocation.
-     - In your own isolated git worktree (b) without that flag, `bin/` and `obj/` are already private, so `--artifacts-path` may be omitted, and the direct assembly test runner reads `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll` inside that worktree.
-     - Whenever `--artifacts-path <dir>` is passed (c), including inside a worktree, (c) overrides (b): for a `-c Release` build the direct assembly test runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase in that path) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`.
-   - **Build once, test many with direct assembly runner.** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly with quiet output:
-     `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
-     At task end run only the test classes your task touched, never the full suite: workers finish together and concurrent full runs overload the machine. Those are the classes the task packet's runner command names, plus any other test class that references a symbol you changed (`codegraph_explore` on the changed symbol lists what depends on it). If no class covers your change, run none and report `TESTS: total=0` with the reason in the message body: zero tests run is not zero failures. If your change reaches shared test infrastructure and you cannot name its classes, ask the conductor for one full run in the message body instead of starting your own. The final council runs the full suite once per run, on the integrated head. Build once before iterating and reuse that build.
+     - In your own isolated git worktree (b) without that flag, `bin/` and `obj/` are already private, so `--artifacts-path` may be omitted, and the direct assembly test runner finds the test assembly at the path the host's test standard gives, inside that worktree.
+     - Whenever `--artifacts-path <dir>` is passed (c), including inside a worktree, (c) overrides (b): for a `-c Release` build the direct assembly test runner reads `<dir>/bin/<test-project>/release/<test-assembly>.dll` (the configuration segment is lowercase in that path) instead of the path the build would otherwise produce.
+   - **Build once, test many with direct assembly runner.** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly:
+     `dotnet <path-to-test-assembly>.dll -class "<Namespace>.<TestClass>"` — the exact assembly path and target framework come from the host's test standard, in its `## Completion` section.
+     `-class` matches the fully qualified name: a short class name runs zero tests and exits 0, so read the total and treat zero as nothing verified. At task end run only the test classes your task touched. Those are the classes the task packet's runner command names, plus any other test class that references a symbol you changed (`codegraph_explore` on the changed symbol lists what depends on it). If no class covers your change, run none and report `TESTS: total=0` with the reason in the message body: zero tests run is not zero failures. If your change reaches shared test infrastructure or another cross-cutting surface, run a targeted set (the classes that reference what changed) and name in the message body what you did not run; the review council and CI cover it. The final council runs the full suite once per run, on the integrated head. Build once before iterating and reuse that build.
    - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **.agent_scratchpad** where the repository declares one, and cite that baseline diagnostics path in the explanatory message body accompanying the completion digest (outside the rigid 6-field completion digest schema, preserving the rigid 6-field completion digest schema). Without a baseline you cannot prove anything is pre-existing.
-   - **Fix deterministically before you sweep.** After the last edit and before re-collecting diagnostics, run the `resharper-clt` deterministic fix pass — `dotnet format` (apply), `dotnet format analyzers` (apply), then `dotnet jb cleanupcode` — each scoped with `--include` to the files you changed. This erases the mechanical findings outright: predefined type keywords, `var` where the standard forbids it, redundant qualifiers, unused usings, formatting. It is idempotent, so a re-run after rework is safe. What survives is the part that needs your judgement, and it is the only part worth a reviewer's pass.
    - **Sweep again after the last edit — over your files only.** Re-collect diagnostics for the complete contents of every file you edited or created: whole file, not only the changed methods or symbols. **Do not sweep workspace-wide.** Other workers are editing the same projects while you run, so a workspace-wide pass reads their half-finished state — it attributes their in-flight diagnostics to you, and the file-ownership rule then sends you to fix findings that are not yours and that move under you while you fix them. Workspace-wide analysis belongs to the end-of-run council, which runs against a quiescent tree.
    - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer warnings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
    - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
-   - **Do not run ReSharper InspectCode.** It is no longer part of this gate. A solution-wide load, run twice by every worker, was both the dominant cost of the gate and its largest remaining source of contention. InspectCode now runs **once per run**, as the `inspectcode` review gate the host declares, and the `static-analysis-triage` lens attributes its findings to the accumulated diff. What you owe this gate is the deterministic fix pass above, which erases most of what InspectCode would otherwise report. Anything it does raise against your files returns to you as a rework item.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
 ## Discovery order
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
@@ -101,30 +94,10 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Never author test files, data-access code, migrations, or CI workflows.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
-- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
+- Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Completion digest
 
-Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest:
-
-```text
-STATUS: PASS | FAIL | ESCALATION
-FILES: <comma-separated-paths>
-TESTS: total=N failed=N passed=N
-COMMIT: <commit-sha | NONE>
-REMOTE_HEAD: <remote-head-sha | UNPUSHED>
-TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=csharp-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
-```
-
-If the iteration circuit breaker trips, return instead:
-
-```text
-STATUS: ESCALATION
-CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>
-FAILURE_CLUSTER: <failing fixture names or subsystem cluster>
-CONTRADICTORY_INVARIANTS: <invariant A vs invariant B, or none>
-BLAST_RADIUS: <files touched / attempted vs authorized scope>
-RECOMMENDED_ACTION: <test fixture modernization | scope renegotiation | architect re-planning>
-```
+Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest. Its template and fields are in the **Completion digest** section of the `task-gate` skill, which is where the report format is written once. If the failure loop trips, return the escalation in `skills/task-gate/references/rework.md` instead.

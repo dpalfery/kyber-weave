@@ -15,7 +15,7 @@ names a command, run that one; the table below is the shape it usually takes.
 | Lint | `staticcheck ./...` or `golangci-lint run` — whichever the standard names | Exit 0 |
 | Build | `go build ./...` | Exit 0 |
 | Modules | `go mod tidy -diff` (Go 1.23+) or `go mod tidy` then `git diff --exit-code go.mod go.sum` | No diff |
-| Test | `go test -race ./...` | Exit 0 — authored by `test-dev`, but run it to prove you broke nothing |
+| Test | `go test -race -run '<TestName>' ./<package>` | Exit 0 with a non-zero test count — authored by `test-dev`; run the tests covering your change to prove you broke nothing, and never run the full test suite: the review council and CI run it |
 
 Fix the cause of a finding. A `//lint:ignore` or `//nolint` directive names the check and says
 why on the same line.
@@ -27,7 +27,7 @@ be present (Xcode command-line tools; `build-essential`). If `CGO_ENABLED=0` is 
 release builds, still run tests with cgo on so the race detector works.
 
 **Windows** — `-race` also needs cgo, which means a GCC-compatible compiler (MinGW-w64 via
-MSYS2 or the standard's choice) on `PATH`. Without one, run `go test ./...` and report in the
+MSYS2 or the standard's choice) on `PATH`. Without one, drop `-race` from the targeted run and report in the
 completion digest that the race detector did not run. Watch for:
 
 - Paths — use `path/filepath`, not `path`, for file-system paths; `filepath.Join`, never `+ "/"`.

@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-09
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -18,13 +18,27 @@ host. For what it is and why, see the [architecture](architecture.md).
 
 ## Hooks
 
-The one-command install is `kyber-weave arbiter install --target <t>`: it ensures
-`.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), sets `arbiter.enabled:
-true` non-destructively, renders the target through the existing Squad install pipeline when
-the project's `arbiter.enabled` is true, applies the provider, stores the key in the OS
-credential store, verifies, and prints the target's trust step. `--provider ""` means `none`.
-A second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
-when the project's `arbiter.enabled` is true. Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
+The one-command install defaults to global scope: `kyber-weave arbiter install --target <t>`
+ensures `~/.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold), records the
+installed target in `arbiter.global.targets`, sets `arbiter.enabled: true` non-destructively,
+renders the target in the user scope through the existing Squad install pipeline, applies the
+provider, stores the key in the OS credential store, verifies, and prints the target's trust
+step. `--project` opts into a repository root instead, `--path` is valid only with it, and
+`--global --project` exits `2` with `KW-ARB-INSTALL-001`. `--provider ""` means `none`. A
+second run is an idempotent no-op. `squad install` / `squad update` render the same hooks
+when the project's `arbiter.enabled` is true. `kyber-weave update` re-renders the same hooks after it swaps the
+binaries. That refresh runs in the new release, in the finishing process the updater starts, so it renders the hook
+source of the release being installed, not the templates of the release you updated from. A corrupt project registry
+still refreshes the global hooks. A failed refresh does not fail the update: it prints `warning: arbiter hooks were
+not refreshed: <cause>. The binaries are already updated; run kyber-weave update <version> to retry.` and exits 0,
+where the cause is `the project registry could not be read: <message>` when the registry could not be read, `a program
+component could not be loaded (<assembly>): <message>` for a failed assembly load, or otherwise the exception message.
+A global hook resolves the project config first:
+when that project enables Arbiter it logs `deferred-to-project`, writes no ledger entry, and
+lets the project configuration decide. Otherwise the user-level config is used and the
+per-root ledger lives under `~/.kyber-weave/arbiter/projects/<root-key>/`.
+
+Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code (per-agent
 `.agent.md` hooks), Copilot CLI (`.github/hooks/kyber-arbiter.json`), and OpenCode (the
 plugin shim). Phase 2 adds Pi (the `.pi/extensions/kyber-arbiter.ts` shim), Codex (the
 owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the shared
@@ -32,8 +46,8 @@ owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the
 Antigravity (the owned `kyber-arbiter` group in `.agents/hooks.json`), Factory (the owned
 block in `.factory/hooks.json`, dropped while the user's hooks live in
 `.factory/settings.json` — see fail-closed behaviour below), and Devin (the owned block
-in `.devin/hooks.v1.json`). Warp and ZCode render no hooks: they are fallback-only — see
-the MCP fallback below. The hook binary is invoked as:
+in `.devin/hooks.v1.json`). Warp and ZCode render no hooks at project scope: they are
+fallback-only — see the MCP fallback below. The hook binary is invoked as:
 
 ```bash
 kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor|kilo|antigravity|factory|devin> [--caller <agent>]
@@ -48,13 +62,38 @@ It reads the harness event on stdin and writes only the harness's decision docum
 stdout — logging goes to stderr. The exit code is 0.
 
 `arbiter uninstall --target <t>` removes only Squad-owned arbiter files/blocks for that
-target (owned plugin/extension files, owned hook blocks); `--remove-key` also deletes the
-stored key, and without it the key is untouched.
+target (owned plugin/extension files, owned hook blocks); it defaults to user/global scope
+and removes the target from `arbiter.global.targets` in `~/.kyber-weave/kyber-weave.yml`.
+Use `--project` to uninstall from a repository scope instead. `--remove-key` deletes the
+stored key and warns when another scope still shares the key; without it the key is untouched.
+
+Global scope carries several block-bearing targets in one receipt, in any order: `cursor`,
+`codex`, `factory`, `antigravity` and `devin` each record a block there, and a global install
+merges the requested target into the receipt the earlier installs wrote instead of replacing
+them, so `arbiter install --target cursor`, then `--target codex`, then `--target factory`
+leaves three blocks in `~/.kyber-weave/squad/global/squad.receipt.json` and each command
+exits `0`. Each block's recorded path is relative to that target's own global root, so
+several targets legitimately record the same file name; the receipt tells them apart by
+target, exactly as it separates its owned files. Every verb reads that recorded path back
+rather than recomputing it from a format constant: `squad status --global` and `squad doctor`
+list each block with its target label and report drift per owned entry; a repeat
+`arbiter install` for any target runs the update path over every target the receipt owns and
+rewrites each block it still finds intact; and `arbiter uninstall --target <t>` removes only
+that target's block, leaves the others in place, and deletes the receipt only when it owns no
+file and no block any more. See the
+[Squad block identity](../kyber-squad/architecture.md#owned-blocks-in-shared-hook-files)
+rules for why the target is part of a block's identity there.
 
 The Kilo plugin shim resolves and verifies the repo root from its own plugin location
 (walking up to the nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds that root
 into both the spawn `cwd` and the envelope `cwd`, and blocks clearly when no root resolves —
 never spawning with a possibly-wrong cwd.
+
+## The Copilot conductor guard
+
+When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
+
+A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
 
 ## Trust steps
 
@@ -68,7 +107,8 @@ observed — so grant trust at install time:
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
 | Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
-| ZCode | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for ZCode, so register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — in ZCode's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
+| ZCode | ZCode requires `hooks.enabled: true` in `~/.zcode/cli/config.json`. Squad never flips this setting; when absent or false, it is reported as `hooks-disabled-by-harness`. At project scope, ZCode ignores project hooks and uses the MCP fallback. |
+| CommandCode | CommandCode block-on-dispatch unconfirmed; register `kyber-weave-arbiter serve --repo-root <root>` through MCP configuration. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 `arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
@@ -78,7 +118,9 @@ observed — so grant trust at install time:
 Any internal hook error blocks the dispatch with an explicit reason carrying
 `KW-ARB-HOOK-001` — never a silent pass. On conductor triggers the block carries an
 escalation envelope for architect; the conductor dispatches architect with it and never
-retries the blocked dispatch unchanged. Timeouts are bounded by `provider.timeout-ms` plus
+retries the blocked dispatch unchanged. The exception is a refused planner dispatch
+(`KW-ARB-PLANNER-001`): its envelope names a corrected dispatch, and the conductor re-issues
+that planner dispatch instead of sending it to architect. Timeouts are bounded by `provider.timeout-ms` plus
 the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry.
 
@@ -88,7 +130,7 @@ targets deliver outcomes only as context, and Antigravity and Devin deliver none
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy) lists the records.
 Antigravity cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED
 check answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
-check still runs.
+check finds nothing there, since no dispatch ever closes.
 Devin's dispatch target and prompt are read from `tool_input.profile` and
 `tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those
 argument names rest on the undocumented fact F12. A `run_subagent` dispatch missing either
@@ -97,12 +139,13 @@ target is absent: a Squad dispatch whose profile the harness did not send is sti
 If Devin renames the arguments, every dispatch goes unmarked until the adapter is updated.
 `arbiter doctor` prints one informational line for each of copilot-cli, codex and cursor.
 
-## The MCP fallback (Warp and ZCode)
+## The MCP fallback (Warp, CommandCode, and project-scope ZCode)
 
-Warp documents no hooks, and project-level hooks are not executed in ZCode's current
-version, so the marker fallback is advisory there and the MCP fallback is the enforcement
-surface. Squad writes no MCP configuration for either, so declare the server yourself in
-the harness's own MCP configuration under the key `kw-arbiter`, launched as:
+Warp documents no hooks, CommandCode block-on-dispatch is unconfirmed (`dispatch-unconfirmed`),
+and project-level hooks are not executed in ZCode's current version, so the marker fallback is
+advisory there and the MCP fallback is the enforcement surface. Squad writes no MCP configuration
+for them, so declare the server yourself in the harness's own MCP configuration under the key
+`kw-arbiter`, launched as:
 
 ```bash
 kyber-weave-arbiter serve --repo-root <root>
@@ -129,22 +172,52 @@ fan-out. On Squad-rendered fallback targets the tools are granted through the
 `decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
 the conductor and code-reviewer.
 
+## Reading a planner refusal
+
+A planner refusal is the Arbiter stopping a dispatch to a planner, such as `architect`,
+because the `PLAN_FILE:` or marker it carried was not acceptable. The envelope's `ANSWER`
+line names the cause, `CALLER` shows the caller the Arbiter resolved, and `NEXT` says what
+to do. The conductor re-issues the planner dispatch with the correction; it does not send
+the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answers:
+
+- **`malformed`**: the prompt has no recognised marker. Re-issue the dispatch with one, such
+  as `INTAKE:`, `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, or a `FEATURE:` and
+  `PHASE:` pair. `FINALIZE` only counts with a `PLAN_FILE:` alongside it.
+- **`plan-file-invalid`**: the `PLAN_FILE:` was sent but rejected, so it is treated as a
+  refusal even when the body has a valid marker. The usual cause is an absolute path,
+  such as a worktree path. Re-issue with the plan's repository-relative path: `/`
+  separators, no leading `/`, no `..`, no backslash, no space and no tab.
+- **`plan-file-outside-planning-dirs`**: the path is valid but is not under the plan, spec
+  or todo directories. Re-issue with a `PLAN_FILE:` under one of those directories.
+- **`recognised`** is the pass answer, not a refusal. It is the answer a corrected dispatch
+  gets: a planning-directory `PLAN_FILE:`, or a marker that needs no `PLAN_FILE:`.
+
+`REPEAT` counts earlier refusals from the same session when the dispatch has no
+`PLAN_FILE:`, because there is no plan to key on. A refusal that is the first in its session
+reads `REPEAT: 1`, whatever other sessions have done. On a harness that sends no session
+id, such as Copilot, these refusals always read `REPEAT: 1`. A `REPEAT` of 2 or more means the same
+kind of refusal came back in this session, so fix the cause rather than resending the
+dispatch unchanged.
+
 ## Setup, doctor, audit
 
 The one-command install replaces the old multi-step sequence. The key is never shown and
 never stored in a file:
 
 ```bash
-kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"  # one command: config, hooks, provider, key, verify, trust step
-kyber-weave arbiter install --target kilo --provider "" --key-stdin  # safer: key on stdin, never argv
-kyber-weave arbiter uninstall --target kilo  # remove only Squad-owned files/blocks; add --remove-key to delete the stored key
+kyber-weave arbiter install --target kilo --provider "" --arbiter-key "<key>"  # default global scope: config, hooks, provider, key, verify, trust step
+kyber-weave arbiter install --project --path . --target kilo --provider "" --key-stdin  # repo-scope opt-in; --path valid only with --project
+kyber-weave arbiter uninstall --target kilo  # default global scope: removes only Squad-owned files/blocks; add --project for repo scope; --remove-key to delete stored key
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
-kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value
-kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI, Codex and Cursor post-dispatch advisory limitations
+kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value; reports by scope
+kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes post-dispatch advisory limitations
 ```
 
 `--target` is required and validated against the Squad target roster; `--provider ""` means
-`none`; `--global` is rejected; a second install is an idempotent no-op. `--arbiter-key` is
+`none`; the install and uninstall commands default to user/global scope and `--project` is the opt-in for a
+repository install. `--path` is valid only with `--project`, and `--global --project` exits
+`2` with `KW-ARB-INSTALL-001`. `--dry-run` plans and prints the target's physical files without
+writing anything at either scope. A bare install inside a repository that already has a project install prints a migration notice: `Installed at user scope; use --project to manage this repository's install.` A second install is an idempotent no-op. `--arbiter-key` is
 visible in argv and shell history (a one-line warning says so); `--key-stdin` and
 `TYPESAFE_API_KEY` stay the safer paths. A keyed provider with no resolving key surfaces
 `KW-ARB-KEY-001`. Exit `2` for client-input errors, `1` for operational failures, `0` for

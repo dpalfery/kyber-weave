@@ -5,9 +5,10 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-10
 status: current
 decided-by:
+  - adr/0067-copilot-system-prompt-override-is-machine-wide
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
@@ -21,6 +22,7 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -33,7 +35,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**28 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+the canonical skills, plus the Kyber-Weave skills it ships beside them, with transactional
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
@@ -286,8 +288,10 @@ capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](..
 entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
 omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
 list exists to prevent. App-level configuration is the other half of the same wiring and it is
-yours, not Squad's: Squad writes no Factory settings file, does not create, adopt, or check
-`.factory/mcp.json` or `~/.factory/mcp.json`, and `squad doctor` verifies neither. A droid needs
+yours, not Squad's: Squad writes no Factory settings file and does not create or adopt
+`.factory/mcp.json` or `~/.factory/mcp.json`. `squad install` and `squad update` read those files
+and print a `factory-mcp-not-configured` warning when a server the droids are allowed has no
+definition there; `squad doctor` verifies neither. A droid needs
 both halves — Squad's whitelist names a server, and your file launches it — so wire the file
 first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
 carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
@@ -455,11 +459,12 @@ servers keep the original non-orchestrator rule. The predicate itself lives once
 `CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
 agreeing with the others.
 
-**Where the key comes from.** Every server name in this section is one value from
-`McpServerNames` in `src/KyberWeave.Core/Configuration/`, which holds the three keys
-`Docs` (`kw-docs`), `Dash` (`kw-dash`), and `Arbiter` (`kw-arbiter`) and nothing else — no
-executable and no tool name. The renderers and the Arbiter's `ArbiterServer` constant read it,
-so a key cannot drift between a grant and the toolchain roster. **The Squad roster is
+**Where the key comes from.** Every key in this section is declared once. The first-party names are
+the three values of `McpServerNames` — `Docs` (`kw-docs`), `Dash` (`kw-dash`), `Arbiter`
+(`kw-arbiter`) — and the code graph is `McpConfig.CodeGraphServer` (`codegraph`) in Core, re-exported
+as `CapabilityDegradations.CodeGraphMcpServer` so the renderers and the docs server cannot disagree
+about which declared server is the code graph. No executable and no tool name lives in either place:
+tool names come from `toolchain.yml`'s `required-mcp-tools` roster. **The Squad roster is
 `kw-docs` and `kw-arbiter`: `kw-dash` is not in `toolchain.yml`, in `products/kyber-squad/mcp.json`,
 or in any agent grant**, because the KyberDash MCP surface belongs to KyberDash and Squad
 neither deploys nor checks it.
@@ -470,6 +475,18 @@ rendered `allowed-tools`, Pi's take no `tools` or `extensions`. So the orchestra
 whatever its session already has, and that is a structural boundary rather than a narrower grant.
 The parity guard pins both targets by name, so a change to either shows up as a failing assertion
 instead of a quiet discrepancy.
+
+**The code graph reaches every specialist the partition entitles.** `codegraph` is granted through
+the orchestrator-excluded half of the same predicate,
+`GrantsOrchestratorExcludedMcpServers`, so every agent outside the pure orchestrator profile gets it
+and `conductor` does not; `context7` is **not** widened. The form follows each target's vehicle: the
+`mcp__codegraph__*` wildcard on Claude, the enumerated `mcp__codegraph__explore` name from the
+roster on ZCode, Devin's subagent path and Command Code, and the server key `codegraph_*: allow` on
+OpenCode and Kilo. Both halves are one grant per target, and `SquadCodeGraphGrantContractTests` pins
+the set. **Pi is unchanged**: it grants only `kw-docs`, because its grant vehicle is a per-server
+adapter overlay and the namespace mapping for a second server is a separate decision. Before this
+grant existed, a Command Code, OpenCode or Kilo subagent had no index tool at all and every code
+question degraded to grep.
 
 **Why the orchestrator is included.** One `kw-docs` tool is
 `docs_get_coding_standard_for_technology`, which hands an agent the coding standard it must
@@ -827,13 +844,88 @@ It reports these:
 
 ---
 
+## Copilot system prompt override (opt-in)
+
+By default GitHub Copilot's chat in VS Code uses its own top-level system prompt. This optional
+step replaces that prompt with Kyber-Weave's prompt. The prompt sends work to the conductor only in
+repositories that have `.kyber-weave/kyber-weave.yml`, and it acts as a general coding assistant
+everywhere else.
+
+**The effect is machine-wide.** VS Code reads the setting only from your user settings, and one
+background process serves every window. Once on, every Copilot chat on this machine uses the prompt,
+including chats in repositories that do not use Kyber-Weave. The setting is labelled experimental in
+VS Code. The limits are in the [runbook](copilot-prompt-runbook.md#known-limits).
+
+```bash
+# Preview: writes nothing
+kyber-weave squad copilot-prompt install --dry-run
+
+# Turn on for every VS Code build found (stable and Insiders)
+kyber-weave squad copilot-prompt install
+
+# Turn on for one build only, without the confirmation prompt
+kyber-weave squad copilot-prompt install --flavour insiders --yes
+
+# Check which builds point at the prompt
+kyber-weave squad copilot-prompt status
+
+# Turn off and remove the prompt file
+kyber-weave squad copilot-prompt uninstall --yes
+```
+
+- `install` writes the prompt to `~/.kyber-weave/copilot/system-prompt.yaml` and adds one `*` entry
+  to `chat.agentHost.copilot.modelCapabilityOverrides` in each build's `User/settings.json`. Other
+  entries and comments in that file are kept.
+- `install` asks you to confirm and names each settings file. With no terminal attached, pass `--yes`,
+  or it exits `2`.
+- `install` refuses a file that already has a `*` entry from somewhere else. It changes nothing and
+  exits `1`. Remove that entry by hand, then run `install` again.
+- `uninstall` removes only the entry that names this prompt file, then deletes the prompt file. It
+  leaves an empty `"chat.agentHost.copilot.modelCapabilityOverrides": {}` object in `settings.json`,
+  which is harmless.
+- `status` takes `--flavour` only. `--dry-run` and `--yes` have no effect on it.
+- Restart VS Code after `install` or `uninstall`. Chats already open keep the prompt they started with.
+- `kyber-weave update` refreshes the prompt file, but only if it is already installed. It never
+  installs it.
+
+Turning it on is not a project setting. Do not add it to a project's `.vscode/settings.json`:
+VS Code ignores that key there.
+
+**Using the conductor.** In a repository with `.kyber-weave/kyber-weave.yml`, the prompt asks the
+model to ask you to switch to the `conductor` agent in the agent picker for non-trivial work, rather
+than starting the conductor itself. The conductor is an agent you select, not a skill. The agent-scoped
+deny hook from PR 576, recorded as "The Copilot conductor holds tools a hook denies it", guards it
+beside the prompt.
+
+### Check that it is live
+
+Run `kyber-weave doctor`. When the override is on, it adds `copilot.prompt.*` checks. The newest
+AgentHost log must show `mode=replace`. Doctor explains each failure and the fix. The runbook covers
+each check and the silent fallback in [Copilot system-prompt override runbook](copilot-prompt-runbook.md).
+
+### Retest after each VS Code update
+
+VS Code may change or remove this setting in any release. After every VS Code update:
+
+1. Restart VS Code and send one chat message.
+2. Run `kyber-weave doctor`. The `.log` check must pass with `mode=replace`.
+3. If the check fails or the setting is gone, run `kyber-weave squad copilot-prompt uninstall --yes`
+   so no stale entry is left behind, and report it.
+
+A live check on VS Code Insiders 1.146.0 passed: a signed-in chat reported the Kyber-Weave identity,
+loaded a skill, ran a shell command and found deferred tools, and the host log showed `mode=replace`
+in every session. The full results are in the [runbook](copilot-prompt-runbook.md#live-verification-status).
+HydraFusion Cascade was not observed, so its coverage is an open limit.
+
+---
+
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kyber-docs-authoring`,
 `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
 `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
-release. The six follow the Squad lifecycle at the same scope and on the same targets as the Squad
+release. They follow the Squad lifecycle at the same scope and on the same targets as the Squad
 skills:
 
 - **Global scope.** `kyber-weave squad install --global` writes them into each selected harness's
@@ -1068,25 +1160,33 @@ The `SquadInstanceCatalog` defines the redirection mechanism and support status 
 
 ## Arbiter hooks
 
-`kyber-weave arbiter install --target <t>` is the one-command path: it ensures
-`.kyber-weave/kyber-weave.yml`, sets `arbiter.enabled: true` non-destructively, and renders
-[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks alongside the agents through
-the existing Squad install pipeline, then applies the provider, stores the key, verifies, and
-prints the trust step. `squad install` and `squad update` render the same hooks when the
-project's `arbiter.enabled` is true. `--provider ""` means `none`; a second install is an
-idempotent no-op.
-Ten targets are hooked: `claude`, `copilot`, `opencode`, `pi`, `codex`, `cursor`, `kilo`,
-`antigravity`, `factory`, and `devin`. `warp` and `zcode` render no hooks — they are
-fallback-only, and any global-scope install (which has no project configuration to read)
-renders no hooks either — and record `arbiter-not-enforced` in the receipt.
+`kyber-weave arbiter install --target <t>` is the one-command path: by default it writes in
+user/global scope, updates `~/.kyber-weave/kyber-weave.yml`, records the target in
+`arbiter.global.targets`, sets `arbiter.enabled: true` non-destructively, and renders
+[Kyber Arbiter](../kyber-arbiter/runbook.md) decision-gate hooks through the existing Squad
+install pipeline. Use `--project` to opt into repository scope and `--path <PATH>` only with
+that flag. `squad install` and `squad update` render the same hooks when the project's
+`arbiter.enabled` is true. `--provider ""` means `none`; a second install is an idempotent
+no-op. The runtime `--scope global` hook resolves the project config first; when the project
+has `arbiter.enabled: true` it logs `deferred-to-project`, writes no ledger entry, and lets the
+project decision win.
+
+Ten targets are hooked in user/global scope: `claude`, `copilot`, `opencode`, `pi`, `codex`,
+`cursor`, `kilo`, `antigravity`, `factory`, and `devin`. `commandcode` operates under degraded
+trust (`dispatch-unconfirmed`). `warp` and `zcode` render no hooks by default and are classed as
+fallback-only (register `kw-arbiter` via `kyber-weave-arbiter serve` in MCP settings; ZCode is
+fallback-only at both project and global scope because hooks are not rendered without manual
+harness flag enablement `hooks.enabled: true` in `~/.zcode/cli/config.json`).
 
 | Target | What is rendered |
 |---|---|
-| `kilo` | The owned plugin shim `.kilo/plugin/kyber-arbiter.ts`. The shim resolves and verifies the repo root from its own plugin location (nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds it into the spawn and envelope `cwd`, and blocks clearly when none resolves. |
-| `antigravity` | Squad's owned top-level group `kyber-arbiter` in `.agents/hooks.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, and returns are unobservable — completion checks answer `returns-unobservable` and allow. Each rendered agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
-| `factory` | An owned block in `.factory/hooks.json` — unless `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, in which case the block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded: Factory reads that `settings.json` key only while `hooks.json` is absent, and rendering the file would silently disable the user's hooks. The fix, printed with the record: move the user's hooks into `.factory/hooks.json`, then run `squad update`. |
-| `devin` | An owned block in `.devin/hooks.v1.json`. Post-dispatch outcomes are logged and reported by `audit`, never delivered, so each dispatcher agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
-| `warp`, `zcode` | No hooks. Register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in the harness's own MCP configuration — Squad writes no MCP configuration for either — and until then only the advisory marker fallback enforces there. |
+| `kilo` | The owned plugin shim `.kilo/plugin/kyber-arbiter.ts` (project) or `~/.config/kilo/plugin/kyber-arbiter.ts` (global). The shim resolves and verifies the repo root from its own plugin location (nearest `.kyber-weave/kyber-weave.yml`, fallback `.git`), binds it into the spawn and envelope `cwd`, and blocks clearly when none resolves. |
+| `antigravity` | Squad's owned top-level group `kyber-arbiter` in `.agents/hooks.json` (project) or `~/.gemini/config/hooks.json` (global). Post-dispatch outcomes are logged and reported by `audit`, never delivered, and returns are unobservable — completion checks answer `returns-unobservable` and allow. Each rendered agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
+| `factory` | An owned block in `.factory/hooks.json` (project) or `~/.factory/hooks.json` (global) — unless `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, in which case the block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded: Factory reads that `settings.json` key only while `hooks.json` is absent, and rendering the file would silently disable the user's hooks. The fix, printed with the record: move the user's hooks into `.factory/hooks.json`, then run `squad update`. |
+| `devin` | An owned block in `.devin/hooks.v1.json` (project) or `~/.config/devin/config.json` (global). Post-dispatch outcomes are logged and reported by `audit`, never delivered, so each dispatcher agent carries an `arbiter-not-enforced` (`no-post-dispatch-feedback`) record. |
+| `zcode` | Classed as fallback-only (degraded with fallback): hooks are not rendered at project or global scope without manual harness flag enablement (`hooks.enabled: true` in `~/.zcode/cli/config.json`). Register `kw-arbiter` via `kyber-weave-arbiter serve --repo-root <root>` in MCP configuration. |
+| `commandcode` | Operates under degraded trust (`dispatch-unconfirmed`); register `kw-arbiter` MCP server (`kyber-weave-arbiter serve --repo-root <root>`) as next step. |
+| `warp` | No hooks: MCP fallback only. Register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in Warp's configuration (`~/.warp/.mcp.json`). Squad writes no MCP configuration for Warp, so until registered only the advisory marker fallback enforces there. |
 
 On `codex`, `cursor`, `antigravity`, `factory`, and `devin` the hooks live in a file the
 user also owns — or, on Antigravity, beside groups the user owns. Squad splices its own
@@ -1094,8 +1194,8 @@ marked entries into those files
 ([ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
 entry's location and digest in `kyber-squad.receipt/v3`; the user's entries are left in
 place. A hand edit inside Squad's entries is reported by `squad status` and `squad doctor`
-as drift, naming the file and the container. On `pi` and `kilo` the hook is an owned
-extension/plugin file; the Pi file needs project trust to load (see below).
+as drift, naming the file and the container. On `pi`, `kilo`, and `opencode` the hook is an owned
+extension/plugin file (ADR 0026 amendment); the Pi file needs project trust to load (see below).
 
 A hook that never runs enforces nothing, so grant the trust gate at install time — `arbiter
 install`, `squad install`, and `squad update` print the applicable step:
@@ -1104,17 +1204,19 @@ install`, `squad install`, and `squad update` print the applicable step:
 |---|---|
 | Claude | Accept the workspace trust dialog. `claude -p` sessions never count and stay unenforced. |
 | Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
-| Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
+| Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. Global hook (`~/.codex/hooks.json`) requires a one-time user trust review. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
-| Warp, ZCode | No hooks to trust. Setup instead: register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
-| Cursor, Copilot CLI, OpenCode | No documented trust gate. |
+| ZCode | Ensure `hooks.enabled: true` is set in `~/.zcode/cli/config.json`. Reported as `hooks-disabled-by-harness` when missing or false; otherwise uses MCP fallback `kyber-weave-arbiter serve`. |
+| CommandCode | Degraded trust (`dispatch-unconfirmed`). Register `kw-arbiter` MCP server (`kyber-weave-arbiter serve --repo-root <root>`) in MCP configuration. |
+| Warp | No hooks to trust. Setup instead: register the `kw-arbiter` server — `kyber-weave-arbiter serve --repo-root <root>` — as an MCP server in that harness's own MCP configuration — Squad writes no MCP configuration for either — or only the advisory marker fallback enforces there. |
+| Cursor, Copilot CLI, OpenCode, Kilo | No documented trust gate. Kilo supports `KILO_PURE=1` to disable external plugins. |
 
 Configure the provider and key per user with `kyber-weave arbiter install --target <t>
 --provider <kind> (--arbiter-key <key> | --key-stdin)` — or `kyber-weave arbiter setup` for
 the provider/key step alone — and diagnose
 the whole installation — including the `kyber-weave-arbiter --version` probe — with
 `kyber-weave arbiter doctor` and `kyber-weave squad doctor`. `arbiter uninstall --target <t>`
-removes only Squad-owned arbiter files/blocks; add `--remove-key` to delete the stored key.
+removes only Squad-owned arbiter files/blocks in global scope by default (or project scope with `--project`); add `--remove-key` to delete the stored key.
 
 ---
 
@@ -1211,11 +1313,44 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
 and standardized completion digests to minimize token consumption and eliminate validation churn:
 
+### One execution contract, two entry points
+
+The rules below live in the canonical `delivery-execution` skill, not in an agent body and not in
+a conductor reference. `conductor` loads it for plan- and spec-backed work; the `bug-crusher`
+workflow loads the same skill when one escalated defect becomes a plan. A canonical skill is
+emitted for every target, where a conductor-only reference is not, so the one-defect path on a
+narrower harness obeys the same queue, exit gate, breaker and council instead of a paraphrase.
+Neither entry point restates the rules; if you are editing one of them, the contract change
+belongs in the skill.
+
+**What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
+`architect` (planning the escalated defect), `test-dev` (establishing RED), `code-reviewer` (the
+finished fix), and the twelve developer agents a task routes to, alongside the investigator,
+`docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
+is the architect's own delegation and the owner is the human, so `research-agent`,
+`product-owner` and `azure-reader` stay off the roster. The roster is what scopes the
+`root-fixer` capability profile's `delegate` grant.
+
+**Bug-crusher does not write the plan.** `architect` owns every write to a plan artifact,
+including its status line and its index row. The bug-crusher session asks for the write and
+relays the result; recording a decision in the plan, or advancing its status, is one re-invocation
+of `architect` with the gate id, not an edit by the orchestrating session.
+
 ### Inlined task packets (zero plan context hunting)
 
-Conductor task packets are self-contained. Rather than pointing workers to large plan or
-specification documents under `<plan-index>` or `<specification-index>` (which workers are
-forbidden from reading), the conductor inlines five essential items directly into each dispatch packet:
+Conductor task packets are self-contained, and the conductor no longer writes them. `architect` saves
+one prompt per task in the plan's tracked task file at finalization — `docs/plans/<plan>.tasks.json`
+beside a plan, `<spec-folder>/tasks.json` inside a specification — and commits it with the plan, so
+a push carries it to whichever machine resumes the run
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
+the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:
+`{worktree}`, and `{prior_results}` with the earlier workers' reports as they were written. Nothing
+else is edited, added or re-derived, because a prompt the conductor rewrites is a prompt nobody
+validated.
+
+Rather than pointing workers to large plan or specification documents under `<plan-index>` or
+`<specification-index>` (which workers are forbidden from reading), each prompt carries five
+essential items:
 
 1. **Objective and strict boundary**: Explicit statement of what to change and what must not be touched.
 2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
@@ -1223,19 +1358,42 @@ forbidden from reading), the conductor inlines five essential items directly int
 4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
 5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
 
+`docs validate` and the docs MCP validate tool check the file before a run relies on it: it must
+agree with its plan (`KW-DOC-TASKS-002`), carry a digest that still describes the plan (`-003`), hold
+a command and acceptance criteria in every prompt (`-004`), and send no worker into a plan
+(`-005`). A Ready plan with no task file warns (`-006`), and `docs validate --merge-ready` fails when
+a file is left behind (`KW-DOC-LIFECYCLE-005`) — which is why closeout removes it with `git rm` in
+the commit that archives the plan. The plan stays the authority: it is what the owner approved, and
+the Arbiter reads its tasks.
+
+**The `session` group keeps related work in one worker session.** Each task's `session` value is the
+architect's decision, not the conductor's. Tasks that share one continue a single worker session
+where the harness allows continuation, so a follow-up fix does not pay to rediscover context a
+previous worker already had. **RED and GREEN never share a group**: the adversarial split between
+test authorship and implementation is the reason those are two dispatches, and bundling them removes
+the independence the split exists for. The architect may merge two RED tasks into one group when the
+later one needs no earlier GREEN.
+
+**Each finished task commits with `Task: <id>` and its report in the commit body**, and the branch
+is pushed after each integrated task, so `kyber-weave run start --resume <branch>` lists what is done
+and what each worker found. That is also the reason a worker prompt may not say "do not commit": a
+mid-run push that carries nothing leaves a resumed run with nothing to read.
+
 ### Fast assembly runner invocation
 
 Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
 ```
 
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
 against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
 on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
 runs are reserved strictly for the final council review, which runs it once per run, on the
-integrated head. A worker's task end runs only the test classes its task touched. A task with no
+integrated head, and for CI. No worker runs the full suite, and the conductor never dispatches
+a full run, even for a cross-cutting change: the worker runs a targeted set and names what it
+did not run. A worker's task end runs only the test classes its task touched. A task with no
 covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
 
 ### Standardized 6-field completion digest
@@ -1254,18 +1412,62 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
 Standardizing this schema eliminates rejection rework caused by formatting variations.
 
+### What every dispatched worker carries
+
+Every worker a run dispatches arrives already holding four rules, injected into its rendered body from
+one file, `products/kyber-squad/shared/worker-baseline.md`: discover before you read, do not open a
+plan or specification, never run the full test suite, and batch independent reads into one round trip.
+`SquadWorkerBaselineInjector` applies the block in the render pipeline, so it sits in the worker's own
+instructions on every turn with no load step and nothing for an operator to switch on.
+
+What that means in practice:
+
+- **One file to read, and one file to change.** The baseline is repository content, not a home-owned
+  override: there is no per-user equivalent to `response-guidance.md`. A host that wants a different
+  worker rule edits the canonical file and re-renders, rather than editing a copy that the next update
+  would overwrite.
+- **Entry points do not receive it.** `conductor`, `bug-crusher` and the other primary agents run in a
+  session whose own instructions already carry their rules, and the plan-read rule would contradict a
+  conductor whose job is to read the plan. The block reaches dispatched workers only.
+- **A project-specific rule still goes in the packet or the standard.** Injection keeps the always-on
+  rules in one place; it does not make the baseline the home for anything specific to one task or one
+  host repository.
+- **A deployed worker shows the block exactly once.** A file carrying it twice, or a worker carrying
+  none, is a rendering defect rather than a source one: re-run `squad update` against the current
+  release and confirm the block appears once in the rendered body.
+- **It is not a size saving on its own.** The same four rules still reach the worker; what changes is
+  that one copy serves every body, so the duplication cannot drift or regrow. The rules and the check
+  that holds each one are in [the worker rule map](worker-rule-map.md), and the harness behaviours the
+  block depends on, with what this tree can and cannot establish, are in
+  [the capability matrix](requirements.md#harness-behaviour-the-product-relies-on).
+
 ### Worktree MCP setup and canonical binding
 
 When conductor executes concurrent tasks in isolated git worktrees, MCP configuration binds to the canonical repository root rather than ephemeral worktree paths:
 
 1. **Argument splicing**: Worktree MCP setup splices `--repo-root` and `--path` arguments to absolute canonical paths so tools inspect canonical governance and symbols.
 2. **Symlink guard (fail closed)**: Worktrees must never create symbolic links or reparse points to `.codegraph/` (background watchers would mutate the canonical database from worktree state). Worktree setup fails closed if a `.codegraph` symlink is detected.
-3. **Canonical doctor check**: Worktree initialization executes:
+3. **A worktree indexes itself**:
    ```bash
-   kyber-weave doctor --check <canonical-root>
+   kyber-weave doctor --ensure .
    ```
-   This verifies canonical index presence and MCP server responsiveness before dispatching worker tasks, avoiding false-positive index failures against empty worktrees.
-4. **Conditional worktree indexing**: Ephemeral worktrees share the canonical index by default. A local `codegraph init .` is run in the worktree only when a task's acceptance criteria explicitly require indexing newly added branch symbols.
+   Run it in the worktree, as its first command. A worktree does not share the canonical checkout's index: it builds its own, at about 8 seconds and about 223 MB until cleanup removes it. A shared index was measured answering for another branch — a method added on the worktree's branch was found from the worktree and not from the canonical checkout — so the guarantee that the index describes the tree the worker is in is worth the disk.
+4. **Work in the canonical checkout when you can.** Branching in place on a clean, idle checkout keeps the docs server, the architect and the workers on one revision. A worktree is for a dirty or busy checkout and for parallel workers, and it costs an index per tree. The run-start command that does this automatically arrives with the run-start surface and is not in this repository yet; until it ships, branching in place is the operator's choice.
+
+#### The worktree limitation, per role
+
+The MCP servers stay bound to the canonical checkout on purpose, so a worker in a worktree on another branch can be answered about the wrong code. Every docs response carries `branch=` and `repo=` in its provenance line, and `repo=` is the git directory every worktree of the repository shares — a different `root=` with the same `repo=` is another worktree of your repository, not a foreign one ([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
+
+| Role | Code questions | Docs and standards | If the check fails |
+|---|---|---|---|
+| Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
+| `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
+| `review-lens`, `review-triage` (no shell) | The packet carries `.agent_scratchpad/<task-id>/review-diff.patch` and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
+| `architect` (shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, `codegraph explore "…"` from the worktree's shell against its own index (`kyber-weave doctor --ensure` creates it), counted as a CLI discovery call. | The server cannot see a plan written into a worktree, so the architect writes to `<WORKTREE>/docs/plans/…` and runs `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` there. Where a harness gives it no shell it returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree" and is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
+
+A session started inside a worktree is already correct, because `--repo-root .` resolves there. A
+worktree created *after* the docs server started is outside the server's reach: the refresh covers
+the root the server is bound to, and nothing else.
 
 ---
 
@@ -1389,10 +1591,7 @@ repository that never set the flag never publishes the property, so nothing to u
 ```bash
 # Build APM distribution zip
 kyber-weave squad pack --format apm --out ./artifacts
-
-# Build Agent Plugins v1 zip (skills + MCP only)
 kyber-weave squad pack --format plugins --out ./artifacts
-
 # Build both distribution artifacts
 kyber-weave squad pack --format all --out ./artifacts
 ```
@@ -1411,13 +1610,13 @@ gap, not introduced here: a symbolic link inside `products/kyber-squad/` that po
 is still packed when no loaded file references it. See the
 [architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
 
-Both archive formats recurse through each skill directory. They contain all 28 canonical `SKILL.md`
-files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
-`.apm/skills/` and their three resource files: 34 skills and 125 skill-tree files in each archive.
+Both archive formats recurse through each skill directory. They contain all canonical `SKILL.md`
+files plus their retained supplemental resources, together with the Kyber-Weave skills from
+`.apm/skills/` and their resource files, in each archive.
 Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 149 files on Copilot today — with authored relative links resolving inside
+beside its principal — 150 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

@@ -5,9 +5,11 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-10
 status: current
 decided-by:
+  - adr/0067-copilot-system-prompt-override-is-machine-wide
+  - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
@@ -26,6 +28,8 @@ decided-by:
   - adr/0049-kyber-squad-ships-the-kyber-weave-skills
   - adr/0050-universal-kyber-weave-mcp-grant
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
+  - adr/0061-code-editing-runs-stop-on-unusable-tools
+  - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
 sections:
   "#":
     keywords:
@@ -101,7 +105,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
         Agents["agents/*.md (24 Agents)"]
-        Skills["skills/*/SKILL.md (28 Skills)"]
+        Skills["skills/*/SKILL.md (Squad canonical skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
     end
@@ -191,16 +195,17 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
-  identities under `products/kyber-squad/skills/`. The canonical tree separately retains 88
-  supplemental files, giving 116 recursive skill-tree files; `SquadPacker` carries that complete
-  recursive tree into both package formats.
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the top-level `SKILL.md`
+  identities under `products/kyber-squad/skills/`. The canonical tree separately retains
+  supplemental files beside them; `SquadPacker` carries that complete recursive tree into both
+  package formats. No count is stated here: the directories on disk are the inventory, so a
+  skill added later changes no prose.
 - **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
-  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
-  skills, 91 supplemental resources, and 125 skill-tree files. `SquadCompanionSkills` is the one type
+  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds the
+  Squad skills and the Kyber-Weave skills with their resources. `SquadCompanionSkills` is the one type
   both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
-  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
-  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
+  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The
+  companion skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` lists only the
   Squad skills.
 - **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
   `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
@@ -244,27 +249,31 @@ entitlement rule in §8, so which servers an agent can call is a rendering contr
 lattice decision — and a grant that reaches past a profile's own decision is recorded as an
 accepted widening where it is made, not folded into the taxonomy.
 
-### Architect documentation gates through MCP
+### Architect shell and documentation gates
 
-The shared `architect` capability profile holds `process.execute: deny` on every target — not
-`allow`. `Deny` withholds the shell with no prompt; it is the narrowest execute setting in the
-lattice above. That grant is not how the architect satisfies its `PLAN_READY` documentation checks.
+The shared `architect` capability profile holds `process.execute: allow` on every target
+(changed 2026-11-09; it was `deny`). The shell exists because the MCP servers stay bound to the
+canonical checkout and cannot see a plan written into a run's worktree. In the worktree the
+architect runs `kyber-weave docs validate . --merge-ready`, `kyber-weave docs drift .` and
+`codegraph explore "…"` itself, and reads `git` state. It is not permission to implement:
+`filesystem.write` stays instruction-scoped to the plan, spec and todo directories, the agent
+body enumerates the only commands it may run and forbids edits to code, tests, configuration and
+pipelines, and the Arbiter still classifies the role as planning-only.
 
-After plan writes, the architect obtains **schema conformance** and **entity drift** by
-calling the read-only MCP tools `docs_validate_governed_document_schema` and
-`docs_detect_drift_between_documents_and_code` on the `kw-docs` documentation server
-bound to this checkout ([MCP runbook](../docgraph/mcp-runbook.md)). The
-tools run the same gates as `kyber-weave docs validate` and `kyber-weave docs drift` against
-the server's resolved root; they are not a shell grant, a new capability in the lattice, an
-argv allow-list, or a Cursor read-only exception. Any client of that server may call them;
-using them does not widen `process.execute`.
+This is an accepted widening with residual risk. The lattice has no command or path scoping, so
+with `filesystem.write` and `network.read` allowed beside it, nothing but the agent body stops
+the shell from building, installing, fetching or writing outside the plan, spec and todo
+directories. The compensating controls are the body's command list, the Arbiter classification,
+and code review of the resulting diff; none is enforced by the lattice.
 
-While the plan remains in the active plans folder, the architect leaves `mergeReady` false on
-`docs_validate_governed_document_schema` so open-work rules such as `KW-DOC-LIFECYCLE-003` do not fire. It compares
-the provenance `root=` to this checkout before trusting a pass. Target-scoped profiles such
-as `architect-devin` and `architect-copilot` are unchanged: Devin still resolves
-`architect-devin` for file creation on that target, and Copilot still resolves
-`architect-copilot` where the shared profile withholds execution without granting a shell.
+In the canonical checkout the architect may equally call the read-only MCP tools
+`docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` on the
+`kw-docs` server ([MCP runbook](../docgraph/mcp-runbook.md)); they run the same gates against the
+server's resolved root. It leaves
+`mergeReady` false while the plan is in the active plans folder so open-work rules such as
+`KW-DOC-LIFECYCLE-003` do not fire. It trusts a pass only when the response `rev=` and `branch=` equal the packet's `RUN_BASE` and `RUN_BRANCH`; `repo=` (the git directory) must equal the architect's own `git rev-parse --git-common-dir`, which rejects another repository such as a fork; it cannot tell worktrees apart, which is why `rev=` and `branch=` are checked too. With no shell the comparison cannot run and only conductor-supplied `DOCS_CHECKS` are accepted. With a shell and a missing or mismatched result it runs the CLI gates in the checkout holding the plan. If the runtime withholds the shell anyway, the architect returns
+`STATUS: BLOCKED` ("server root differs: run the docs checks in the worktree") and the conductor
+runs the CLI gates. `architect-devin` and `architect-copilot` now match the shared profile.
 
 ---
 
@@ -435,8 +444,10 @@ flowchart LR
 - **Factory MCP wiring splits between Squad and the operator, and the split is a standing rule.**
   Squad owns the **droid whitelist**: the per-droid `mcpServers` value rendered into each droid
   file Squad writes, and nothing more. Squad owns **no Factory settings file** — it does not
-  create, write, adopt, or check `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
-  (global scope), and it invents no Factory server names for an operator to have to match. Those
+  create, write, or adopt `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
+  (global scope), and it invents no Factory server names for an operator to have to match.
+  `squad install` and `squad update` only read those files, and print
+  `factory-mcp-not-configured` when a server the droids are allowed has no definition. Those
   files are user-owned, and the operator owns the app-level configuration in them. This is the
   same boundary the task-gate bullet above draws: Squad renders the artifacts it owns and
   documents the operator's half rather than writing it. The operator's half
@@ -504,13 +515,16 @@ root. The in-repo copies of earlier releases are read by migration and retained 
 - **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
 - **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
 - **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
-- **Blocks in shared hook files (`kyber-squad.receipt/v3`)**: a project-scope receipt
-  that owns entries inside a shared hook file serializes as `kyber-squad.receipt/v3` —
-  the v1 project field set plus `blocks`, each with `relativePath`, `target`,
-  `createdFile`, and `entries` of `container` (an RFC 6901 JSON pointer to the entry)
-  and `sha256` (over the entry's compact JSON). A v3 receipt is written only at
-  project scope and only when a block exists; receipts without blocks stay byte-identical
-  v1 or v2. An older CLI refuses a v3 receipt with exit code 1. See
+- **Blocks in shared hook files (`kyber-squad.receipt/v3`)**: a receipt that owns entries
+  inside a shared hook file serializes as `kyber-squad.receipt/v3`, each block carrying
+  `relativePath`, `target`, `createdFile`, and `entries` of `container` (an RFC 6901 JSON
+  pointer to the entry) and `sha256` (over the entry's compact JSON). This replaces the
+  earlier "a project-scope receipt" and "written only at project scope": a block receipt is
+  written at project **and** global scope. A project v3 receipt is the v1 field set plus
+  `blocks`; a global v3 receipt is the v2 field set — `scope: global` with its required
+  `layout` — plus `blocks` and, when it owns any, `homeFiles`. Instance scope never owns a
+  block, and a receipt without blocks stays byte-identical v1 or v2. An older CLI refuses a
+  v3 receipt with exit code 1. See
   [owned blocks](#owned-blocks-in-shared-hook-files) below and
   [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md).
 
@@ -528,11 +542,17 @@ document, and an existing user file at a block path is not an unmanaged collisio
 |---|---|---|---|---|
 | `cursor` | `.cursor/hooks.json` | `/hooks/preToolUse`, `/hooks/postToolUse` (a new file starts `{"version":1,"hooks":{}}`) | its `command` starts with `kyber-weave-arbiter hook --harness cursor` | `command`, `matcher`, `timeout`, `failClosed` |
 | `codex` | `.codex/hooks.json` | `/hooks/PreToolUse`, `/hooks/PostToolUse` | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness codex` — a group mixing Squad and user hooks stays user content | `matcher`, `hooks:[{type, command, timeout}]` |
-| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse` — the matcher groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
+| `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group, Factory only) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `devin` | `.devin/hooks.v1.json` | `/PreToolUse`, `/PostToolUse` — the whole file is the hooks object in the Claude Code format | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness devin` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 
-All five blocks render when the Arbiter is enabled at project scope: the Cursor and Codex
+All five blocks render when the Arbiter is enabled, at project scope and at global scope —
+this replaces the earlier "at project scope" alone. The table gives the project-scope path;
+at global scope the file sits directly beneath the harness's global root, so Antigravity's
+group lands in `~/.gemini/config/hooks.json`, the only file it reads globally, never in
+`.agents/hooks.json` there. An install made before that fix recorded the group at
+`.agents/hooks.json` under the global root; `arbiter uninstall --target antigravity`
+removes it, and a reinstall writes the right file. The Cursor and Codex
 blocks landed in Phase 2, and the Factory, Devin, and Antigravity shapes in Phase 3. Pi's
 owned extension file is a whole owned file, not a block. Only documented fields are
 written, never a sentinel key, and shared-file hook commands carry no `--caller` because
@@ -545,6 +565,25 @@ writes. On `factory` the lifecycle first runs the shadowing check: when
 block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded
 instead, because Factory reads that `hooks` key only while `hooks.json` is absent and
 rendering the file would silently disable the user's hooks.
+
+**Scope-aware block identity.** A block's recorded path is relative to the root it deploys
+beneath, so the same format names a different path at each scope: project scope keeps the
+target's project directory (`.cursor/hooks.json`), and global scope keeps only what is left
+beneath that target's own global root — `cursor`, `codex` and `factory` each record
+`hooks.json`, and `devin` records `hooks.v1.json`. Several targets therefore record one
+identical relative path at global scope, and the path alone cannot tell them apart. The
+receipt validator derives every stored block's deployment identity from one private helper
+that the stored-file loop calls too: the portable path alone under `project` and `instance`
+scope, where every target writes beneath one deployment root and two targets claiming one
+path would claim one physical file; and target plus path under `global` scope, where the
+target is the only thing that separates the files. One helper for both loops is what keeps a
+stored file and a stored block from ever disagreeing about which physical file a claim names.
+The duplicate refusals are unchanged: one target claiming a path twice is refused at every
+scope, two targets claiming one path is refused at project and instance scope, and one block
+claiming the same container twice is refused. A global receipt therefore owns blocks exactly
+as a project receipt does, and `status`, `doctor`, `update` and uninstall read a block's path
+from the receipt instead of recomputing it from a per-format constant, so the recorded claim
+and the file they inspect are the same one.
 
 A hand-edited or missing owned entry is drift, reported by `squad status` and
 `squad doctor` naming the file and the container. `squad update` rewrites the block
@@ -1054,7 +1093,8 @@ and validates.
   the `mcp` proxy entry working while the enumerable per-tool names resolve to nothing. A primary
   agent lowers to `.pi/skills/<name>/SKILL.md`, whose frontmatter carries no `tools` or
   `extensions`, so `conductor` cannot hold the grant on that form and its record says so.
-  `KiloRenderer` emits `permission: {kw-docs_*: allow}` for every entitled agent. Kilo's
+  `KiloRenderer` emits `permission: {kw-docs_*: allow}` for every entitled agent, and
+  `permission: {bash: allow}` for every agent whose profile allows `process.execute`, since Kilo's default asks first. Kilo's
   permission map is an **approval** lattice, not a visibility allow-list: `allow` runs a call
   without the ask prompt and hides nothing, and only a `deny` whose pattern is `*` removes a tool
   from the model. MCP tools are keyed `{server}_{tool}` with the server name sanitized only
@@ -1165,7 +1205,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 149 files — 24 agents, 29 skills, plus projected
+  the principal. A fresh Copilot render is 150 files — 24 agents, 29 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -1178,8 +1218,8 @@ and validates.
   five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 88 skill resources (116 files under
-  `products/kyber-squad/skills/`, 28 of them `SKILL.md`) and resolve the retained references. The
+  recursive package formats retain every skill resource under
+  `products/kyber-squad/skills/` beside each `SKILL.md`, and resolve the retained references. The
   `response-format` skill is retired (see [response preferences](#response-preferences-injected-at-deploy)). Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -1269,6 +1309,25 @@ report a leftover key they can prove is the old spelling of one of these three �
 `KW-MCP-WIRE-008`, an Info finding. Neither finding changes the verb's exit code. The remedy for
 `KW-MCP-WIRE-007` is `kyber-weave docs mcp-migrate`, which rewrites the key in the client
 configuration rather than requiring a hand edit.
+
+### The harness token is substituted once, in the render pipeline
+
+Canonical `conductor`, `bug-crusher` and `create-pull-request` text that has to name the harness
+running it writes `{{harness}}`. `SquadHarnessRenderer.SubstituteHarnessToken` replaces it once per
+render with the target's catalogue token, over every surface a harness's prose travels on: each
+agent's description, instruction body and resources, and each skill's description, instruction body
+and resources. The substitution sits in the shared pipeline rather than in each renderer, because a
+per-renderer replacement leaves an agent file carrying the token while its skill projection still
+carries the braces.
+
+**Nothing at run time works the harness out from its surroundings.** The folder a run happens to be
+in has been the wrong answer (a Command Code run inside a `Devin` checkout), and so has an
+environment variable (`OPENCODE_CONFIG` set in a Claude session). So the canonical text asks the
+question and the catalogue answers it at render time, and the token is the same one
+[`run start`](../cli-command-surface.md#run--run-start) takes as `--harness` and the `pr-naming`
+check accepts in a branch or a title — `SquadTargetCatalog.GetToken`, so Antigravity's `agy` is
+written `antigravity`. A text with no placeholder comes back as the same string instance, so a
+corpus that has not adopted it renders byte for byte as it did before.
 
 ### Render Source Loading and Preloaded Seams
 
@@ -1394,16 +1453,58 @@ adherence is therefore probabilistic. What keeps it checkable is the ordered sha
 line, a bounded bottom line, and an explicit decisions section are structure a reviewer can see is
 present or absent. A deterministic prose-format gate is deferred future work, not a delivered claim.
 
-**Session-title matrix (reference).** The shipped default carries a conditional session-title rule.
-On `factory` a title is not agent-settable: it derives from the conversation's first message, and no
-agent-facing mechanism to set one was found. On every other target the rule is to set the title to
-reflect the work only where that target exposes a confirmed mechanism, and never to fabricate one. A
-target that cannot set a title, or whose mechanism is unconfirmed, is treated as infeasible rather
-than guessed at.
+**Session-title matrix (reference).** The shipped default requires a session title. The agent sets
+the session title to name the work being done on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. Once a pull request is
+submitted, the agent sets the session title to the pull request number, a space, and the pull
+request title, as in `#123 Add the widget`, on every harness except Factory, which derives the
+session title from the conversation's first message and has no setter. When the pull request
+title changes, update the session title to match on every harness except Factory, which derives
+the session title from the conversation's first message and has no setter.
 
 **No ADR — ADR waiver:** this reverses a skill-carrier choice inside the existing renderer and
 receipt architecture. It adds no boundary, schema, or dependency.
 
+### The shared worker baseline, injected once per dispatched worker
+
+Four rules apply to every worker on every task, whatever its role: discover before you read, do not
+open a plan or specification, never run the full test suite, and batch independent reads into one round
+trip. They used to be paraphrased in every agent body and in several skills, so each worker paid for
+them again on every round trip and two copies could drift. They now live in one file,
+`products/kyber-squad/shared/worker-baseline.md`, and `SquadWorkerBaselineInjector` appends that block
+to every dispatched worker's body exactly once.
+
+**What the block carries.** The Discovery order (`codegraph_explore` first, then the `kw-docs` tools,
+a direct read only for what an index does not cover, with that file and the reason named in the
+report); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
+insufficient packet returns a blocker); the full-suite ban (run the classes the task names, because the
+review council and CI run the full suite on the integrated head); and the batched-reads line. The four
+rules and the check that holds each one are tabulated in [the worker rule map](worker-rule-map.md).
+
+**Where it is injected, and where it is not.** The block is applied in the render pipeline beside the
+`{{harness}}` substitution — the one step all thirteen harnesses share — so it reaches agent files and
+lowered role skills alike with no second per-target path list. Only a dispatched worker
+(`SquadInvocation.Subagent`) carries it. An entry point does not: `conductor`, `bug-crusher` and the
+other primary agents run in a session whose own instructions and skills already carry their rules, and
+a worker-level ban an entry point can never be dispatched under is text it would pay for and never act
+on. A baseline file with no block, more than one block, or an empty one fails the render rather than
+shipping, and a body that already carries a block has it replaced in place so the count holds however
+the source was edited. A tree that carries no baseline file at all renders byte for byte as before and
+is caught by the canonical suite rather than by the renderer, so a test fixture may render without one
+and the shipped corpus still cannot go quiet.
+
+**One source, not one copy per audience.** The block is read from the source directory rather than
+embedded in the binary, so the shipped text and this repository's text cannot differ. The rendered
+body's digest is deliberately untouched by the injection, so a migration report still describes the
+authored body a host migrated from. A standard template keeps its own test-runner line: a standard
+ships into a host repository, is read on its own, and has no Squad render around it, so that line is
+the host's copy of the rule rather than a duplicate of this one.
+
+**What this buys, and what it does not.** A rule in one file cannot drift between six agent bodies, and
+a worker's render no longer restates one. It does not by itself reduce what a worker reads per round
+trip — the same four rules still arrive, once — and that limit is recorded rather than claimed: the
+harness behaviours the block depends on, and which of them this tree can establish, are in
+[the capability matrix](requirements.md#harness-behaviour-the-product-relies-on).
 
 ---
 
@@ -1411,10 +1512,18 @@ receipt architecture. It adds no boundary, schema, or dependency.
 
 The deployment engine in §1–§8 ships canonical agent bodies. Those bodies include a
 two-level iteration circuit-breaker that stops thrashing test-fix loops during delivery.
-The contract lives in `conductor`, `csharp-dev`, `test-dev`, and `github-devops`. No ADR
-records it: the caps, tripwires, and escalation key constrain those four instruction
-bodies, not the C# render or transaction engine, and they remain cheap to revise in the
-agent specs. The durable product claim is here.
+The contract itself lives in one place, the `delivery-execution` skill: the ready queue,
+session continuity, test-first and standard mode, the developer exit gate, the breaker, the
+findings drain and the final council. Both entry points load it — `conductor` for plan- and
+spec-backed work, and the `bug-crusher` workflow for a single escalated defect — and neither
+restates it, so a harness that can reach a canonical skill runs only the governed dispatch — while a half-updated deployment can still silently lose the link, as the live-verification todo records.
+It is a skill rather than a conductor reference because a canonical skill is emitted for every
+target where a conductor-only reference is not, and a portable file may not link out of its own
+directory ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The
+developer bodies keep their own exit obligations — the field lists a digest owes — and no ADR
+records the caps: the tripwires and escalation key constrain instruction bodies, not the C#
+render or transaction engine, and they remain cheap to revise in the skill. The durable
+product claim is here.
 
 ```mermaid
 flowchart TD
@@ -1468,6 +1577,16 @@ failed approaches, evidence, findings, and retry tallies. It replaces a session 
 when continuation is unsupported, the session cannot be recovered, or its context is
 unreliable. A busy owner waits in the queue. Unrelated tasks use separate sessions,
 and retained sessions stay available until task gates and run-level findings settle.
+
+**The architect declares the session group, not the conductor.** Each task in a plan's task file
+carries a `session` group, and tasks sharing one continue a single worker session where the harness
+allows it; the conductor does not invent one at dispatch. **RED and GREEN never share a group**,
+because the adversarial split is the reason the two are separate dispatches at all, and the
+separation is what decides whether a task is bundled. A follow-up fix and a later same-role task on
+one change do share a group: changing one assertion took a fresh worker 11 minutes, because the
+fresh worker re-derived context the previous one already had. The architect may therefore merge two
+RED tasks into one group when the later one needs no earlier GREEN, and never merges a RED with its
+GREEN.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned
@@ -1557,12 +1676,15 @@ execution throughput, conductor does not serialize all task execution or test ru
   banned because concurrent writes and background watchers rewrite canonical database state from
   worktree checkouts. Setup fails closed if a `.codegraph` symlink or reparse point is detected.
 - **Subagent MCP exposure across renderers**: Subagents deployed into worktrees inherit MCP server bindings
-  appropriate to their capability profiles. CodeGraph MCP access is granted to non-orchestrator specialists
-  (such as `architect`, `csharp-dev`, and `research-agent`) that require semantic symbol navigation, while
-  strictly withheld from pure orchestrators like `conductor` per [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md).
-- **Conditional worktree indexing**: Ephemeral worktrees reuse the canonical CodeGraph index. `codegraph init .`
-  is executed in a worktree only when a task's explicit acceptance criteria require indexing newly added branch
-  symbols.
+  appropriate to their capability profiles. The code graph is granted to every agent the shared
+  `GrantsOrchestratorExcludedMcpServers` predicate entitles and strictly withheld from pure orchestrators
+  like `conductor`, per [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) as amended; `context7`
+  is not widened. The names come from the toolchain roster, never from a list inside a renderer.
+- **A worktree keeps its own index**: Ephemeral worktrees do not share the canonical CodeGraph index. A
+  new worktree indexes itself with `kyber-weave doctor --ensure`, which is how a worker in that tree gets
+  answers about the code it is editing; the MCP servers stay bound to the canonical checkout, so a worker
+  with a shell asks its own index through `codegraph explore` rather than through the MCP tool. A shared
+  index was measured answering for another branch.
 - **Serialized branch-head integration**: Only final integration and branch-head mutations are
   serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
   recording shared index and review gate state, and running `git push` execute sequentially at the
@@ -1589,12 +1711,74 @@ Quality and verification rigor depend on objective, adversarial test authorship:
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
-`products/kyber-squad/agents/conductor/references/execution-and-review.md`,
+`products/kyber-squad/agents/conductor/references/{plan-path,spec-path,intake-path,autonomy}.md`,
+`products/kyber-squad/skills/delivery-execution/SKILL.md` (the worker execution contract both
+`conductor` and `bug-crusher` load),
 `products/kyber-squad/agents/csharp-dev.md`,
 `products/kyber-squad/agents/test-dev.md`, and
 `products/kyber-squad/agents/github-devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
+
+### The tracked task file and the paste-and-fill dispatch
+
+The conductor no longer derives its own prompts from the plan. The architect writes one prompt per
+task into a tracked task file at finalization — `docs/plans/<plan>.tasks.json` beside a plan,
+`<spec-folder>/tasks.json` inside a specification — and commits it with the plan
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
+rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
+what makes resuming a run somewhere else possible at all.
+
+- **What a prompt carries.** Files as path plus symbol, full test class names, the exact commands
+  to run, the acceptance criteria, and the standards to fetch. Line numbers are hints at most,
+  because an earlier task on the same file moves them. The measured run's prompts carried none of
+  this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
+  could not name the class that proved its change and reported a green suite it never ran.
+- **Two slots, and nothing else.** The conductor pastes each prompt **unchanged** and fills only
+  `{worktree}` and `{prior_results}`, pasting earlier worker reports as they were written. No plan
+  can know either: the second GREEN prompt in that run needed a cause an earlier worker had found.
+- **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
+  and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
+  items from it. Only the conductor stops reading it — 68 KB in the measured run.
+- **The duplication is checked, not trusted.** A file that disagrees with its plan, a stale digest, a
+  prompt with no command or acceptance criteria, and a prompt that sends a worker into a plan each
+  fail validation; a Ready plan with no file warns. The ids are `KW-DOC-TASKS-001` to `-006`, and
+  `KW-DOC-LIFECYCLE-005` fails the merge when a file is left behind
+  ([rule reference](../ci-pipelines/rule-reference.md)). The check runs in `docs validate` and in the
+  docs MCP validate tool, because the orchestrator holds the docs tools and no shell.
+- **The execution digest covers the execution, not the prose.** It hashes the parsed tasks (id,
+  title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
+  development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
+  edit is. Stale means the conductor refuses the file until the architect regenerates it.
+- **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
+  `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
+  task, so `run start --resume` can read the completed tasks and their results from the commits
+  rather than re-investigating the run. Before this, worker prompts said "Do not commit", so a
+  mid-run push carried nothing and a resumed run opened with an architect pass to assess progress
+  (225 seconds and 64 tool calls in the measured run).
+- **The session group is the architect's.** See [task session continuity](#task-session-continuity)
+  above: tasks sharing a `session` group continue one worker session, and RED and GREEN never do.
+
+```mermaid
+flowchart TD
+    Architect["architect at finalization\nwrites plan + tasks.json"]
+    Validate["conductor validates the file\nthrough the docs tools"]
+    Paste["conductor pastes each prompt\nfills {worktree} and {prior_results}"]
+    Worker["worker dispatches, commits\nTask: id + report"]
+    Resume["run start --resume\nreads the Task: lines"]
+    Archive["docs-dev archives the plan\nand removes the file with git rm"]
+
+    Architect --> Validate
+    Validate --> Paste
+    Paste --> Worker
+    Worker --> Resume
+    Worker --> Archive
+```
+
+The file has a shelf life of exactly one plan. `docs-dev` removes it with `git rm` in the same commit
+that archives the plan, so it never reaches `main` — this repository squash merges, and nothing
+durable is lost because the archived plan keeps the decisions, tasks and test contract. A file left
+behind fails `docs validate --merge-ready`.
 
 ## 10. Plan and specification lifecycle: documentation impact, design harvest, every-change review, closeout
 
@@ -1632,7 +1816,7 @@ component's existing docs. The bar is high confidence with human approval before
 anything is written; the review never adds ontology vocabulary (the best existing home
 wins when nothing fits) and files a todo only if the owner accepts it.
 
-The execution-and-review contract records the run record, the `DOCS_REVIEW` rows, the Q2
+The `delivery-execution` skill records the run record, the `DOCS_REVIEW` rows, the Q2
 `CLOSEOUT_COMPLETE` marker, and carries the outcome in the PR description. Autonomous
 delivery requires `DOCS_REVIEW` rows and, for plan/spec-backed work, `CLOSEOUT_COMPLETE`
 evidence, and the draft PR carries both. The one-defect path is not exempt: `bug-crusher`
@@ -1651,7 +1835,9 @@ Documentation waiver) and gains the harvest: every `Design harvest` requirement-
 its declared scale migrates into canonical documentation alongside the decisions, each
 item recorded with its documentation-impact, impact-components, last-reviewed date, and
 a status-archived row; the artifact header reads `Status: Archived` only when the
-mapping is complete. Specification closeout migrates durable architecture, behavior,
+mapping is complete. Plan closeout also removes the plan's task file with `git rm` in that same
+commit, so the file never reaches `main`; a file left behind fails `docs validate --merge-ready` as
+`KW-DOC-LIFECYCLE-005`. Specification closeout migrates durable architecture, behavior,
 operations, configuration, interfaces, and consequential decisions — including the
 declared `Design harvest` — into the component's detailed documentation, runbooks,
 references, ADRs, and catalog entries, then moves the specification to the archive
@@ -1659,6 +1845,63 @@ register and runs the documentation validation and drift checks. The closeout di
 reports `MAPPED:`, `IMPACT:`, and `DOCS_REVIEW:` rows; a plan or specification closeout
 ends in `STATUS: CLOSEOUT_COMPLETE`, or `STATUS: BLOCKED` naming what stopped the
 archive.
+
+### Run start: fetch and branch first
+
+A run does not investigate, plan, or write a file until it is on the branch its work belongs on.
+`kyber-weave run start` is that step, and both entry points `conductor` and `bug-crusher` run it
+before anything else. The verb's flags, `--json` keys and exit codes are in
+[`run start`](../cli-command-surface.md#run--run-start); the settings it reads are in
+[Onboarding](../configuration.md#onboarding) and [Run controls](../configuration.md#run-controls).
+What follows is why it is shaped that way
+([ADR 0060](../adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name.md)).
+
+- **Fetch first, then branch from the remote base.** The step runs `git fetch origin --prune` and
+  starts the branch from `run.base-branch` when the repository set it, and from `origin/HEAD`
+  otherwise. `main` is never assumed, because a repository whose default branch is `develop`, or
+  whose operator named a release branch, would otherwise be compared against a branch that may not
+  exist while the answer looks authoritative. Checking out `main` and pulling is not the same
+  thing: it moves the operator's checkout, and it assumes the base's name.
+- **The harness is in the name.** The branch is `[<owner>.<agent>.]<harness>/<type>/<slug>` and the
+  pull request title is `<type>(<scope>): <summary> [<harness>]`. Nothing else in a change records
+  which harness wrote it — the diff does not — and the two shapes share one vocabulary with the
+  `pr-naming` check, so a branch this command creates is a branch whose pull request can merge.
+- **The checkout is taken only when it is free.** A clean checkout with no second worktree is
+  branched in place; a dirty one, or one another worktree shares, gets a worktree beside the
+  repository. Switching branches under uncommitted work either fails or carries those edits onto a
+  branch they were not made for, and taking a shared checkout moves the branch under whoever else
+  is standing in it.
+- **A tool that fails stops the run, unless the repository says otherwise.** `stop-on-tool-failure`
+  is `true` when absent, and the default lives in code rather than in instruction text because
+  absence is the common case and a run cannot rely on an agent having read a rule. With it off, a
+  failed fetch only warns and the run continues from the base the checkout last fetched.
+- **Reported, not assumed.** The versions the operator is working between — the failing build,
+  `HEAD`, and the base — and the divergence from the server are read *before* anything is switched,
+  because that is the state the defect was observed in. The run record carries them, and every later
+  dispatch of the run works in the location the step printed.
+- **The conductor runs it or dispatches it, never skips it.** Where the harness gives the conductor
+  a shell it runs the command itself. Where it gives none, it dispatches `github-devops` with the
+  exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
+  that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
+  `TriggerClassifier` classifies the marker as `investigate` and the roster check and
+  `KW-ARB-READONLY-001` still apply to the dispatch.
+- **The onboarding answer is checked first after configuration loads, ahead of tool checks and fetch.** A configured repository whose
+  configuration carries no `onboarding:` value has never chosen the technologies, gates and
+  standards the run will be held to, so the run stops there — before the CodeGraph probe and before
+  the fetch — creates no branch, and names the `kyber-docs-onboarding-and-assessment` skill and the
+  `docs onboarding` verb. Putting it first is the point: a failing fetch reported first would send
+  the operator to repair a remote that was never what stood in the way. An autonomous run stops
+  here too, asking nothing and writing nothing, because a run that wrote `declined` on the
+  operator's behalf would record a decision nobody made. A repository with no configuration is
+  never stopped: nothing there has opted into being configured. `RunStartPlanner.NeedsOnboarding`
+  holds the rule, `RunStartCommand` applies it, and the setting is in
+  [Configuration § Onboarding](../configuration.md#onboarding).
+
+Its prerequisites are checked in the order that decides the exit code: branch naming and arguments
+must be valid (bad input is exit `2`, outranking prerequisite failures), the repository's
+configuration must load (a failure is exit `1`), the onboarding answer must be recorded (unset is
+also exit `1`), and the `codegraph` binary must resolve on `PATH`
+(absent is exit `3`, whose remedy is an install rather than a repair).
 
 ### Delivery: draft first, ready on CI
 
@@ -1686,30 +1929,64 @@ elsewhere keeps working.
 
 ### Run-start documentation check
 
+This check is the documentation half of a run's start; the branch half is
+[run start](#run-start-fetch-and-branch-first) above.
+
 `conductor` (under **Shared lifecycle invariants**) and `bug-crusher` (step 0 of **Workflow**)
-both run a read-only documentation check before they do anything else. The check is an
-invariant of the squad, not a convenience:
+both run a tooling check before they do anything else. The check is an invariant of the squad,
+not a convenience, and **a failure stops the run**
+([ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md)):
 
 - **Predicate.** The step runs only when the repository has governed docs: `.kyber-weave/kyber-weave.yml`
   exists at the git root, and the docs root it declares exists as a directory. A repository without
   governed docs skips the step entirely.
-- **Read-only.** It runs `kyber-weave doctor --check`, which never runs `codegraph init` or
-  `codegraph index`. A run never pays for an index build at start.
-- **Warn and continue.** A failed check is one line in the run record and never a stop. The one
-  provisioning action is `kyber-weave doctor --provision`, run once, and only on exit `1` with
-  `codegraph.index` while the binary is present. Repository-local `codegraph init .` is already
-  authorised by the root `AGENTS.md`.
+- **One command, in the tree the workers will use.** `kyber-weave doctor --ensure` — the canonical
+  checkout, or the worktree when the task runs in one. It syncs the index or initialises it,
+  restores any tracked file the initialisation rewrote, proves the index with one `codegraph explore`
+  call and the docs server with one call, and repairs once with `codegraph index` before retrying
+  once. It replaces the old `--check`-then-`--provision` pair.
+- **A failure stops the run, before any worker is dispatched.** Under the default the agent reports
+  `STATUS: TOOL_FAILURE` with the doctor's `fix:` line and dispatches nothing, in supervised mode and
+  under `autonomy: autonomous` alike. `autonomy: autonomous` stops rather than parking the item for
+  human review, because a run with no code search produces findings nobody can trust.
+- **The setting is read, not judged.** `stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml`
+  decides it, and the doctor reads that setting itself, so no agent interprets a degraded result:
+  **absent means stop**, `false` means the tool's failure is reported and the run continues. A value
+  that is not a boolean is a configuration error naming the setting, the way `autonomy` is refused.
+  Publishing the setting in the `AGENTS.md` Config Reg block is not part of this decision.
+- **Read-only runs do not stop.** The rule governs code-editing runs. A read-only run is never
+  stopped by it: a reviewer with no index still reviews, and a lens that cannot read reports
+  `SKIPPED` with the reason.
+- **A repository with governed docs and no usable CodeGraph stops** until CodeGraph is installed or
+  the setting is `false`, because every code join downstream would otherwise be silently absent.
 - **Record line.** The run record carries `run-start doctor: <exit> <check ids>`, for example
   `run-start doctor: 1 codegraph.index`. The bug-crusher report and the pull request description
   carry the same line.
 - **Nothing installs.** Exit `3` means the `codegraph` executable is missing. In supervised mode the
-  agent asks the user and quotes the printed fix line. In autonomous mode it records the item as
-  pending human review. Neither mode installs anything.
+  agent asks the user and quotes the printed fix line. In autonomous mode it stops with the same
+  line. Neither mode installs anything: the stop is the report, and installing it stays the user's
+  decision.
+
+**This reverses the rule the squad carried before 2026-11-07**, which was "warn and continue; never
+block a run on it". It is the owner's explicit decision, recorded in
+[ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) with the alternatives that were
+rejected. The cost is a repository that cannot repair its index stopping code-editing runs until it
+does; the alternative was a run that proceeds as if its code search worked.
+
+**The worktree consequence.** The MCP servers stay bound to the canonical checkout, so a worktree's
+worker can be answered about another branch. The per-role rules are in the
+[MCP runbook](../docgraph/mcp-runbook.md#the-worktree-limitation-per-role); the short form is that a
+shell role asks its own index, a shell-less role whose packet names a worktree passes that path as `codegraph_explore`'s
+`projectPath`, which answers from that worktree's own index (with none named, the default project), and reads directly only when that call cannot answer for
+the branch in hand (an error, a not-indexed reply, or a provenance `branch=` that differs),
+naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in its direct-read reason (on the `Discovery:` line for a role that reports one; a review lens keeps its fixed output); and the
+architect returns `BLOCKED` naming "server root differs" so the two CLI gates run in the worktree
+before it plans.
 
 The check is defined by [`doctor`](../cli-command-surface.md#doctor--repository-documentation-tooling)
-and its [runbook](../docgraph/mcp-runbook.md#the-live-check-doctor---check). The squad step names
-the command and the two path checks only, with no editor- or harness-specific tool names, because
-these instructions ship to every harness.
+and its [runbook](../docgraph/mcp-runbook.md#the-workers-first-command-doctor---ensure). The squad
+step names the command and the two path checks only, with no editor- or harness-specific tool names,
+because these instructions ship to every harness.
 
 **Where the rule lives.** The squad instructions carry the predicate as prose, so the agent
 evaluates it on any harness, including one with no shell builtins to lean on.
@@ -1782,8 +2059,114 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 
 ---
 
+## 11. Copilot system-prompt override (opt-in, machine-wide)
+
+`kyber-weave squad copilot-prompt` replaces GitHub Copilot's top-level system prompt in VS Code
+with Kyber-Weave's own prompt. It is off until a person runs `install`. It is machine-wide,
+because VS Code reads the setting only from the default profile's user `settings.json`, and one
+Agent Host serves every window ([ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md)).
+The operating guide is the [adoption guide](onboarding.md#copilot-system-prompt-override-opt-in);
+the doctor checks and limits are in the [runbook](copilot-prompt-runbook.md).
+
+```mermaid
+flowchart TD
+    Install["squad copilot-prompt install"] --> Detect{"VS Code user data found<br/>for each build?"}
+    Detect -- "none" --> Fail1["exit 1, nothing written"]
+    Detect -- "yes" --> Plan["Plan a JsonServerSplice edit<br/>of each User/settings.json"]
+    Plan --> Refused{"Any file holds a foreign<br/>'*' entry or cannot be spliced?"}
+    Refused -- "yes" --> Fail2["exit 1, no file changed"]
+    Refused -- "no" --> Write["Write the prompt file first,<br/>then each settings file (AtomicFile)"]
+    Write --> Done["exit 0: every Copilot chat on the machine<br/>uses the prompt after a restart"]
+```
+
+### Opt-in state
+
+There is no receipt. The override is on when both halves hold:
+
+1. The prompt file exists at `~/.kyber-weave/copilot/system-prompt.yaml`
+   (`CopilotPromptFile.InstalledPath`).
+2. A detected build's `User/settings.json` has a `*` entry under
+   `chat.agentHost.copilot.modelCapabilityOverrides` whose `promptOverrideFile` equals that path.
+
+Either half alone is not the state. `CopilotOverrideSettings.Read` reads the entry leniently
+(comments, trailing commas, byte-order mark) and never writes. The doctor probe runs only when the
+file in half 1 exists.
+
+Detection is per build. `VsCodeUserSettingsPaths` resolves each build's user-data directory
+(`Code` or `Code - Insiders`) for the platform. macOS uses `~/Library/Application Support`, Windows
+uses `%APPDATA%` with a fallback to `AppData\Roaming`, and Linux uses `~/.config`. A build is in
+scope only when its user-data directory exists. `--flavour` narrows the set.
+
+### Prompt embedding and refresh
+
+- The source is `products/kyber-squad/copilot/system-prompt.yaml`. It is embedded in
+  `KyberWeave.Core` under the manifest name `CopilotPrompt.system-prompt.yaml`, so only a new
+  binary can change it, and the install needs no network.
+- `CopilotPromptFile.Validate` accepts exactly one YAML document with a non-empty `systemPrompt`
+  and no key other than `systemPrompt` and `toolDescriptions`. VS Code treats an unusable file as
+  no file, so an unknown key is refused rather than ignored.
+- `kyber-weave update` refreshes the file through `CopilotPromptRefresher` only when the file
+  already exists and differs from the embedded text. It never creates the file, because creating it
+  changes every chat on the machine. A read-only file is left alone with a warning.
+- The refresh runs on both update paths in `SelfUpdater`: the already-current path, and
+  `FinishUpdate` after the swap, in the finishing process, as [ADR 0065](../adr/0065-the-self-updater-hands-everything-after-the-swap-to-the-new-binary.md)
+  requires for any post-update step. A refresh failure is a warning, and the update's exit code
+  does not depend on it.
+- VS Code reads the file when a chat session starts. A running session keeps the prompt it started
+  with, so `run start` is too late to apply a new prompt.
+
+### Settings splice and refusal rule
+
+Edits go through `JsonServerSplice` with the key path `["chat.agentHost.copilot.modelCapabilityOverrides"]`,
+the entry name `*`, and the body `{"promptOverrideFile": "<absolute path>"}`. The splice is a byte
+edit. Comments, key order, trailing commas and the byte-order mark outside the insertion are kept.
+Writes go through `AtomicFile`. A new JSON-with-comments library or a re-serialise would drop
+comments, so neither is used.
+
+| Existing state in a settings file | Install | Uninstall |
+|---|---|---|
+| No `*` entry | Inserts the entry. | Nothing to remove. |
+| `*` entry naming this prompt file | No change; reported as already set. | Removes the entry. |
+| `*` entry naming another file, or with no `promptOverrideFile` | Refuses that file; no file changes; exit 1. | Leaves it alone; refuses the whole uninstall; exit 1. |
+| Not readable JSON | Refuses; exit 1. | Refuses; exit 1. |
+
+Model-specific entries (any key other than `*`) are never touched. VS Code gives a model-specific
+entry priority over `*` for that model, so `status` lists them.
+
+Uninstall removes the settings entries first and deletes the prompt file second, so no setting is
+left pointing at a file that was already removed. A refusal in any file stops the whole uninstall
+before anything is written, so the prompt file is never removed while a setting still depends on it.
+
+### Coexistence with the agent-scoped guard
+
+The prompt is instruction-only. It changes what the top-level agent is told, not what it may call.
+The guard that stops a conductor from doing work it should route is PR 576's agent-scoped deny
+hook, recorded in the decision "The Copilot conductor holds tools a hook denies it". That guard
+stays in place beside the prompt:
+
+- Copilot keeps the conductor, bug-crusher and product-owner as custom agents with full tools. The
+  agent-scoped deny hook (`kyber-weave-arbiter guard`) denies the tools each one must not use.
+- The conductor is an agent the person selects in the agent picker. It is not a skill, and the
+  prompt does not start it. Without it selected, the model offered to dispatch the conductor agent
+  itself; the prompt now asks the person to switch to the conductor agent for non-trivial work.
+- Workers dispatched through `task` keep Copilot's own prompt, because only the top-level agent's
+  prompt is replaced.
+
+The prompt's conductor branch depends on the open workspace holding `.kyber-weave/kyber-weave.yml`.
+Without that file the prompt tells the model to act as a general coding assistant.
+
+### Doctor integration
+
+`RepositoryDoctor.Run` appends `CopilotPromptProbe.Run` after its own checks. The probe adds nothing
+when the prompt file is absent, and under `--ensure` it turns each failure into a warning. The
+checks, their ids, and the log line they read are in the [runbook](copilot-prompt-runbook.md).
+
+---
+
 ## Related
 
+- [ADR 0067](../adr/0067-copilot-system-prompt-override-is-machine-wide.md) — the opt-in, machine-wide Copilot system-prompt override
+- [Copilot prompt runbook](copilot-prompt-runbook.md) — doctor checks, the `mode=replace` line, silent fallback, and known limits
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation

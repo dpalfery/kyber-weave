@@ -27,6 +27,17 @@ public static class DocsServerInstructions
         contradictory documentation), docs_validate_governed_document_schema and docs_detect_drift_between_documents_and_code (the same schema and drift
         gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision
         (which repository and revision the documentation comes from).
+
+        Every response starts with a provenance line naming the repository root, its branch, its
+        git directory, the short revision, whether the working tree is dirty, and the document
+        count. Two answers with the same git directory are the same repository, even when their
+        roots differ because they are separate worktrees.
+
+        Responses also report a broken code index rather than guessing around it. If a response
+        carries the line STATUS: TOOL_FAILURE, the tool could not read the CodeGraph index its
+        code joins come from: stop and fix that instead of answering without it. A repository that
+        sets stop-on-tool-failure: false gets a warning line instead, and the answer still comes
+        back.
         """;
 
     /// <summary>Applies the instructions to the server options.</summary>

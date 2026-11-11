@@ -10,8 +10,9 @@ namespace KyberWeave.Cli.Commands.Doctor;
 /// <remarks>
 ///     <para>
 ///         Mode resolution follows D11. <c>--check</c> is always read-only. <c>--provision</c> always provisions.
-///         A bare run provisions only when stdin is a terminal and <c>CI</c> is unset. Otherwise it acts as
-///         <c>--check</c> and says so, so an unattended run never writes an index by surprise.
+///         <c>--ensure</c> prepares the index and then proves both tools, and is the one command a worker runs before
+///         it starts work. A bare run provisions only when stdin is a terminal and <c>CI</c> is unset. Otherwise it
+///         acts as <c>--check</c> and says so, so an unattended run never writes an index by surprise.
 ///     </para>
 ///     <para>
 ///         The terminal and environment are injected, so the mode choice is testable without a real console. The
@@ -41,14 +42,18 @@ public sealed class DoctorCommand : Command<DoctorSettings>
     /// <summary>The MCP executable. Null uses <see cref="DefaultMcpExecutable"/>.</summary>
     internal string? McpExecutable { get; init; }
 
+    /// <summary>How many of the three mutually exclusive mode options the caller gave.</summary>
+    private static int ModesRequested(DoctorSettings settings) =>
+        (settings.Check ? 1 : 0) + (settings.Provision ? 1 : 0) + (settings.Ensure ? 1 : 0);
+
     /// <inheritdoc />
     public override int Execute(CommandContext context, DoctorSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (settings.Check && settings.Provision)
+        if (ModesRequested(settings) > 1)
         {
-            Console.Error.WriteLine("kyber-weave: error: choose one of --check or --provision, not both.");
+            Console.Error.WriteLine("kyber-weave: error: choose one of --check, --provision or --ensure, not more than one.");
             return 2;
         }
 
@@ -66,6 +71,8 @@ public sealed class DoctorCommand : Command<DoctorSettings>
         bool hint = false;
         if (settings.Check)
             mode = DoctorMode.Check;
+        else if (settings.Ensure)
+            mode = DoctorMode.Ensure;
         else if (settings.Provision)
             mode = DoctorMode.Provision;
         else if (terminal && !ci)

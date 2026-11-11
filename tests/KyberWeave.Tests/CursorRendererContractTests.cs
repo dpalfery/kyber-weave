@@ -101,7 +101,9 @@ public sealed class CursorRendererContractTests
             string expectedBody = sharedIdentities.Contains(primary.Name)
                 ? source.Skills.Single(canonical => canonical.Name == primary.Name).InstructionBody
                 : primary.InstructionBody;
-            string normalized = expectedBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            string normalized = TestSquadCorpus
+                .ExpectedRenderText(SquadTarget.Cursor, expectedBody)
+                .Replace("\r\n", "\n", StringComparison.Ordinal);
             Assert.Equal(normalized.EndsWith('\n') ? normalized : normalized + "\n", body);
         }
 
@@ -190,7 +192,9 @@ public sealed class CursorRendererContractTests
                 .ToArray();
             Assert.Equal(LoweredSkillFrontmatterKeys, actualKeys);
 
-            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            string expectedBody = TestSquadCorpus
+                .ExpectedBodyText(SquadTarget.Cursor, agent)
+                .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedBody.EndsWith('\n'))
             {
                 expectedBody += "\n";

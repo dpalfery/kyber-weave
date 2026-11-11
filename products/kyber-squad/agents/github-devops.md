@@ -5,7 +5,7 @@ description: "Owns CI/CD: GitHub Actions workflows, Docker build configuration, 
 invocation: subagent
 model-profile: general
 capability-profile: publishing-worker
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -37,7 +37,20 @@ You do **not** own:
 - Azure resource provisioning — that belongs to `pulumi-dev`. Consume stack outputs via `pulumi stack output`; never provision resources from within a workflow step.
 - Application code, test authorship, or schema migrations.
 
-Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+Your packet is your whole scope.
+
+## Run-start step
+
+A harness that gives the orchestrator no shell dispatches this step to you. Where the orchestrator has a shell it runs the command itself; where it has none it hands you the exact command with `RUN-START: true`, and the Arbiter reads that marker as an `investigate` dispatch, so the roster check and its read-only rule apply to the work under it. The command is:
+
+```text
+kyber-weave run start --harness <token> --type <type> --slug <slug> [--resume <branch>] [--failing-version <version>] [--json]
+```
+
+- Run it exactly as given, from the repository root. Do not substitute the harness token, type or slug: together they name the branch the run's pull request will carry.
+- It is local source control only. It fetches `origin` with `--prune`, creates the branch from the base the `run.base-branch` setting names or from `origin/HEAD` when the repository names none, and creates no commit, no push and no pull request.
+- Report back the facts it printed: `base`, `branch`, `where`, `revision`, and the failing, `HEAD` and base versions. The orchestrator records them in the run record and dispatches the rest of the run into `where`.
+- Exit `0` is the branch in place (a failed fetch alone only warns and continues when `stop-on-tool-failure` is off). Exit `2` is input it refused: relay the argument it names and stop. Exit `3` is the missing `codegraph` binary: relay the printed line and its `fix:` hint, and install or repair nothing. Exit `1` is a tool failure: when `stop-on-tool-failure` is on or git cannot create the branch, relay the error as a blocker, because a run with no branch has nothing to commit to.
 
 ## Standard
 
@@ -47,7 +60,7 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
@@ -59,23 +72,18 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
-- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
+- Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Workflow
 
-1. Read the path declared as **<github-actions-coding-standard>** before writing any workflow.
+1. Fetch **<github-actions-coding-standard>** before writing any workflow through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Where a build step runs another technology's toolchain, fetch that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example — the same way. Read a file only when the tool is missing.
 2. Read the existing `.github/workflows/` to understand the current pipeline shape before proposing changes.
 3. Identify which environments exist and which Pulumi stacks map to them.
 4. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.
 5. Write or update the workflow file(s). Validate YAML structure — GitHub Actions YAML errors are silent until runtime.
-6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving workflow errors or pipeline failures:
-   - **Iteration Cap:** Maximum of 3 incremental fix iterations against the same failing pipeline step or workflow failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If unresolved after 3 attempts, halt immediately and trip the circuit breaker.
-   - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm edits remain strictly within authorized workflow and CI files. If resolving a failure requires expanding blast radius into unapproved scripts or out-of-scope infrastructure, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
-   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one pipeline job causes another job to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the second job regresses the first (A→B→A) or a failure signature repeats.
-   - **JEV Checkpoint 3 (Invariant Contradiction):** If pipeline steps assert contradictory requirements across platforms or environments, do not apply hacks. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
-7. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
-8. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
+6. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
+7. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
 
 ## Coordination
 
@@ -96,13 +104,4 @@ TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — age
 OPEN_QUESTIONS: <bullets, or "none">
 ```
 
-If the iteration circuit breaker trips, return instead:
-
-```text
-STATUS: ESCALATION
-CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>
-FAILURE_CLUSTER: <failing job/step names or failure cluster>
-CONTRADICTORY_INVARIANTS: <invariant A vs invariant B, or none>
-BLAST_RADIUS: <files touched / attempted vs authorized scope>
-RECOMMENDED_ACTION: <pipeline modernization | environment alignment | architect re-planning>
-```
+If the failure loop trips, return the escalation in `skills/task-gate/references/rework.md` instead.

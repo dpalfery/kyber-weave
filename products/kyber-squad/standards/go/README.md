@@ -112,15 +112,20 @@ Test authorship follows `<test-coding-standard>`. This standard requires that th
 testable: dependencies passed in as interfaces, no package-level mutable state. Test
 authorship belongs to `test-dev`.
 
-## Commands
+## Completion
 
 The same on macOS, Linux, and Windows (PowerShell; `-race` needs a C compiler on `PATH`):
 
 ```bash
-gofmt -l .                # prints nothing
+gofmt -l .                # the format check: prints the files that need it, and nothing when clean
 go vet ./...
 staticcheck ./...
-go build ./...
+go build ./...            # the build
 go mod tidy -diff         # Go 1.23+; no output means go.mod and go.sum are tidy
 go test -race ./...
 ```
+
+`gofmt` is the formatter, and `-l` lists the files it would rewrite, so an empty list is the pass.
+`go build ./...` is the build: it compiles every package in the module. The `go test` line is the
+gate the review council and CI run. A dev agent never runs the full suite; it runs the tests
+covering its change (`go test -race -run '<TestName>' ./<package>`).

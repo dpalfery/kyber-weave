@@ -1587,20 +1587,23 @@ export class CanonStore {
   systemPromptPartsForSession(
     sessionId: string,
     excludeSpanId?: string | Set<string>,
+    harness?: string,
   ): Array<{ spanId: string; text: string; timestamp?: string }> {
     if (!sessionId) return []
+    const share = harness === undefined ? undefined : normalizeHarnessName(harness)
     const rows = this.db
       .prepare(
         // Turn spans (`llm.invoke`) are skipped in SQL, so their (largest) parts blobs are
         // never read or inflated; a row cap would silently drop session prompts instead.
-        `SELECT span_id, op, timestamp, content_json, parts_json FROM records
+        `SELECT span_id, op, harness, timestamp, content_json, parts_json FROM records
          WHERE COALESCE(session_id, trace_id) = ? AND COALESCE(op, '') <> 'llm.invoke'
          ORDER BY timestamp`,
       )
-      .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+      .all(sessionId) as { span_id: unknown; op: unknown; harness: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
     const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
     for (const row of rows) {
       if (row.op === 'llm.invoke') continue
+      if (share !== undefined && canonicalHarnessId(String(row.harness)) !== share) continue
       const spanId = String(row.span_id)
       if (typeof excludeSpanId === 'string' ? spanId === excludeSpanId : excludeSpanId?.has(spanId) === true) continue
       const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)

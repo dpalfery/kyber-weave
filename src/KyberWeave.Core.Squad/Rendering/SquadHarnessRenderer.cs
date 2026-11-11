@@ -28,6 +28,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public abstract class SquadHarnessRenderer : ISquadRenderer
 {
+    /// <summary>
+    /// Where canonical text names the harness that will run it, e.g. a run-start step that has to
+    /// report which harness it started.
+    /// </summary>
+    private const string HarnessPlaceholder = "{{harness}}";
+
     private protected SquadHarnessRenderer(SquadHarnessSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -79,7 +85,17 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 source.CapabilityProfiles,
                 source.FallbackProfiles);
 
-            return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, source)));
+            // The canonical text carries a {{harness}} placeholder where the name of the harness
+            // running it belongs; this is the one place it is answered, after validation so every
+            // source rule still reads what the author wrote.
+            //
+            // The shared worker baseline is applied here for the same reason: it is one paragraph, it
+            // reaches every worker on every round trip, and this pipeline is the only step all
+            // thirteen harnesses share, so a rule written once cannot reach twelve of them.
+            SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
+                SubstituteHarnessToken(source, Spec.Token),
+                SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory));
+            return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
         catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)
         {
@@ -137,6 +153,54 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             throw new SquadRenderValidationException(
                 $"Resource '{resource.RelativePath}' owned by '{owner}' is not a canonical portable relative path.");
         }
+    }
+
+    /// <summary>
+    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, over
+    /// every piece of canonical text a render can emit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A deployed run cannot work out which harness it is in from its surroundings: the folder it
+    /// happened to run in was wrong once (a Command Code run inside the <c>Devin</c> checkout), and
+    /// so was an environment variable (<c>OPENCODE_CONFIG</c> set in a Claude session). So the
+    /// canonical text asks the question and the catalogue answers it here, per target.
+    /// </para>
+    /// <para>
+    /// This is the whole of the substitution, deliberately: agent bodies, skill bodies,
+    /// descriptions and resource content are the surfaces a harness's prose travels on, and every
+    /// renderer reaches all of them through this pipeline. Substituting per renderer is what would
+    /// leave the defect this method exists to prevent, where an agent file carries the token and
+    /// its skill projection still carries the braces.
+    /// </para>
+    /// <para>
+    /// A text with no placeholder comes back as the same string instance, so a corpus that has not
+    /// adopted the placeholder renders byte for byte as it did before.
+    /// </para>
+    /// </remarks>
+    private static SquadSource SubstituteHarnessToken(SquadSource source, string token)
+    {
+        static string ReplaceText(string text, string replacement) =>
+            text.Replace(HarnessPlaceholder, replacement, StringComparison.Ordinal);
+
+        static IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources, string replacement) =>
+            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content, replacement) })];
+
+        return source with
+        {
+            Agents = [.. source.Agents.Select(agent => agent with
+            {
+                Description = ReplaceText(agent.Description, token),
+                InstructionBody = ReplaceText(agent.InstructionBody, token),
+                Resources = ReplaceResources(agent.Resources, token)
+            })],
+            Skills = [.. source.Skills.Select(skill => skill with
+            {
+                Description = ReplaceText(skill.Description, token),
+                InstructionBody = ReplaceText(skill.InstructionBody, token),
+                Resources = ReplaceResources(skill.Resources, token)
+            })]
+        };
     }
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
@@ -239,11 +303,12 @@ internal sealed class SquadHarnessRenderContext
 
     /// <summary>
     /// The Arbiter wiring to render, or null. A null or disabled wiring renders byte for byte as
-    /// before the field existed, and global scope has no project configuration to enforce from
-    /// (Req 22.4).
+    /// before the field existed. An enabled request stays visible at global scope so the render
+    /// can lower the request's global-scope command-line context without changing the byte-wise
+    /// output of an omitted or disabled wiring.
     /// </summary>
     public SquadArbiterWiring? EnabledArbiter =>
-        Request.Arbiter is { Enabled: true } && Scope == SquadDeploymentScope.Project ? Request.Arbiter : null;
+        Request.Arbiter is { Enabled: true } ? Request.Arbiter : null;
 
     /// <summary>
     /// The harness's own per-render state, created once on first use: a renderer is shared across
@@ -500,35 +565,57 @@ internal sealed class SquadHarnessRenderContext
     }
 
     /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
-    public void AddArbiterPluginShim(string relativePath)
+    public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
     {
-        if (EnabledArbiter is not null)
+        if (EnabledArbiter is null)
         {
-            Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token)));
+            return;
         }
+
+        string relativePath = Scope == SquadDeploymentScope.Global
+            ? globalRelativePath ?? projectRelativePath
+            : projectRelativePath;
+
+        Files.Add(CreateFile(relativePath, ArbiterPluginShim.Render(Token, Scope)));
     }
 
     /// <summary>
     /// Adds Squad's owned block for a shared hook file whose containers are <c>PreToolUse</c> and
     /// <c>PostToolUse</c> matcher groups, when the request enables Arbiter. Files are untouched
-    /// either way: the block travels separately for the deployment plan to splice.
+    /// either way: the block travels separately for the deployment plan to splice. Under global
+    /// scope the file sits directly beneath the harness's global root, so the harness's project
+    /// directory (<c>.codex/</c>, <c>.agents/</c> and so on) is dropped from the path.
     /// </summary>
-    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher)
+    /// <param name="format">The shared hook-file shape the block is spliced into.</param>
+    /// <param name="matcher">The tool-name matcher for the <c>PreToolUse</c> and <c>PostToolUse</c> groups.</param>
+    /// <param name="includeSubagentStop">
+    /// Adds a <c>SubagentStop</c> entry: a matcher-less group with the same command and timeout.
+    /// Only Factory asks for it, because only Factory fires a hook when a background subagent
+    /// stops.
+    /// </param>
+    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher, bool includeSubagentStop = false)
     {
         if (EnabledArbiter is not { } arbiter)
         {
             return;
         }
 
-        string commandLine = ArbiterHookWiring.HookCommandLine(Token);
-        Blocks.Add(new SquadRenderedBlock(
-            Token,
-            SquadHookJsonBlock.RelativePath(format),
-            format,
-            [
-                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
-                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
-            ]));
+        string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
+        string projectPath = SquadHookJsonBlock.RelativePath(format);
+        string relativePath = Scope == SquadDeploymentScope.Global ? Path.GetFileName(projectPath) : projectPath;
+        List<SquadRenderedBlockEntry> entries =
+        [
+            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
+            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
+        ];
+        if (includeSubagentStop)
+        {
+            entries.Add(new SquadRenderedBlockEntry(
+                "SubagentStop",
+                MatcherGroup(matcher: null, commandLine, arbiter.HookTimeoutSeconds)));
+        }
+
+        Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));
     }
 
     /// <summary>
@@ -598,18 +685,28 @@ internal sealed class SquadHarnessRenderContext
     public SquadRenderResult ToResult(bool emptyBlocks = false) =>
         new(true, Files, Degradations, Warnings, [], Blocks.Count > 0 || emptyBlocks ? Blocks : null);
 
-    private static JsonObject MatcherGroup(string matcher, string commandLine, int timeoutSeconds) =>
-        new()
+    /// <summary>
+    /// One matcher group holding a single command hook. A null <paramref name="matcher"/> omits the
+    /// key, which is how Factory's <c>SubagentStop</c> group runs on every stop rather than on a
+    /// named tool.
+    /// </summary>
+    private static JsonObject MatcherGroup(string? matcher, string commandLine, int timeoutSeconds)
+    {
+        JsonObject group = new();
+        if (matcher is not null)
         {
-            ["matcher"] = matcher,
-            ["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = commandLine,
-                    ["timeout"] = timeoutSeconds
-                })
-        };
+            group["matcher"] = matcher;
+        }
+
+        group["hooks"] = new JsonArray(
+            new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = commandLine,
+                ["timeout"] = timeoutSeconds
+            });
+        return group;
+    }
 
     /// <summary>
     /// Rejects a canonical name that would not stay one portable path segment: blank, carrying a

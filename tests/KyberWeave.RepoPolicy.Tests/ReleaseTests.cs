@@ -3226,6 +3226,73 @@ public sealed class ReleaseTests
         Assert.Contains("--version", loop, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The running binary replaces its own file, then re-renders arbiter hooks.
+    /// The update must finish in the new binary and must not crash with
+    /// "Could not load file or assembly YamlDotNet" after the swap. The case runs
+    /// under a real home, so YAML is read after the swap, and the stale hook path
+    /// under /legacy/ must be gone afterwards.
+    /// </summary>
+    [Fact]
+    public void UpdateLoopRunsTheArbiterRefreshAfterARealSwap()
+    {
+        string loop = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
+
+        // Anchored at the layout release's definition rather than at the `begin_case` header so the body
+        // window captures the `Copyright=...release-local.sh` padded-publish that makes the size guard
+        // meaningful. The header itself and every constant the case uses still fall inside this window.
+        const string layoutAnchor = "LAYOUT_VERSION=\"${TO_VERSION}.layout\"";
+        const string caseHeader = "begin_case arbiter-hooks-after-swap";
+        Assert.Contains(layoutAnchor, loop, StringComparison.Ordinal);
+        Assert.Contains(caseHeader, loop, StringComparison.Ordinal);
+        Assert.Contains("/legacy/kyber-weave-arbiter", loop, StringComparison.Ordinal);
+
+        int start = loop.IndexOf(layoutAnchor, StringComparison.Ordinal);
+        int caseHeaderIdx = loop.IndexOf(caseHeader, StringComparison.Ordinal);
+        int end = loop.Length;
+
+        // The end is computed relative to the case header (which sits inside `body`) so `nextCase`
+        // does not snap to our own `begin_case arbiter-hooks-after-swap` line. There is no later
+        // case in this section, but the search is still anchored at the case header for symmetry
+        // with the existing pin shape.
+        int nextCase =
+            loop.IndexOf("begin_case", caseHeaderIdx + caseHeader.Length, StringComparison.Ordinal);
+        if (nextCase >= 0)
+        {
+            end = Math.Min(end, nextCase);
+        }
+
+        int nextDivider =
+            loop.IndexOf("# ----", caseHeaderIdx, StringComparison.Ordinal);
+        if (nextDivider >= 0)
+        {
+            end = Math.Min(end, nextDivider);
+        }
+
+        string body = loop.Substring(start, end - start);
+
+        Assert.Contains("Could not load file or assembly", body, StringComparison.Ordinal);
+        Assert.Contains("arbiter install", body, StringComparison.Ordinal);
+        Assert.Contains("--project", body, StringComparison.Ordinal);
+        Assert.Contains("cmp", body, StringComparison.Ordinal);
+        Assert.Contains("update_case", body, StringComparison.Ordinal);
+        Assert.Contains("--no-kyberdash", body, StringComparison.Ordinal);
+
+        // The size guard expression, not just the byte count: a regression that keeps "4096" in a comment
+        // — or that swaps the comparison for `-gt` while leaving the number — must not satisfy this pin.
+        Assert.Contains("-lt 4096", body, StringComparison.Ordinal);
+        // The padding that shifts every assembly by a page lives in the `Copyright` metadata of the
+        // layout release's publish; without it, two builds of one tree would lay out identically and
+        // hide the post-swap YamlDotNet defect from the swap-test and from production alike.
+        Assert.Contains("Copyright=", body, StringComparison.Ordinal);
+        Assert.Contains("release-local.sh", body, StringComparison.Ordinal);
+        // The case must run its update against the pinned layout release. A bare "LAYOUT_VERSION" assert is
+        // tautological because body starts at the LAYOUT_VERSION definition; the only occurrence that matters
+        // is `update_case "$LAYOUT_VERSION" --no-kyberdash --no-menubar` inside this section.
+        Assert.Contains("update_case \"$LAYOUT_VERSION\"", body, StringComparison.Ordinal);
+    }
+
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>

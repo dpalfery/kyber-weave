@@ -21,6 +21,7 @@ here.
 - [`rules/secondary-cost-display`](secondary-cost-display.md) — Mandates that financial spend is strictly a derived secondary figure, never a primary sort, top-level navigation item, or landing metric.
 - [`rules/composite-efficiency-ban`](composite-efficiency-ban.md) — Prohibits computing or rendering single-scalar composite efficiency scores or letter grades across multidimensional agent telemetry.
 - [`rules/kyberdash-display-layer`](kyberdash-display-layer.md) — Mandates that the KyberDash tray and web dashboard are display layers over one engine, one datastore and one API layer, holding no feature logic, scheduler or job.
+- [`rules/global-scope-by-default`](global-scope-by-default.md) — States that user scope is the default for installable per-harness state and config, with project scope as an explicit opt-in and the Arbiter MCP fallback for unsupported hooks.
 - [`rules/kyberdash-harness-collection`](kyberdash-harness-collection.md) — States, per harness, what must be collected and what the dashboard must show, with the completeness predicate and the primary-versus-fallback mechanism hierarchy.
 
 The repository's non-negotiables currently live in the root [`AGENTS.md`](../../AGENTS.md),

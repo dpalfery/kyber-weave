@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { afterAll, describe, expect, it, vi } from 'vitest'
 
+import { decodeOtlpMetricsProtobuf } from './receiver.js'
 import {
   DEFAULT_OTLP_PORT,
   OTLP_ADMIN_PAUSE_PATH,
@@ -28,6 +29,7 @@ import {
   decodeOtlpMetricsJson,
   decodeOtlpProtobuf,
   type OtlpLog,
+  type OtlpMetric,
   type OtlpSpan,
 } from './receiver.js'
 
@@ -1091,6 +1093,199 @@ function jsonMetricsFixture(): string {
   })
 }
 
+type ProtobufMetricPointSpec = {
+  asInt?: number | bigint
+  asDouble?: number
+  count?: number | bigint
+  sum?: number
+  timeUnixNano?: bigint | string
+  startTimeUnixNano?: bigint | string
+  attributes?: FixtureAttribute[]
+}
+
+type ProtobufMetricSpec = {
+  name: string
+  description?: string
+  unit?: string
+  kind?: 'gauge' | 'sum' | 'histogram' | 'exponentialHistogram' | 'summary' | 'unknown'
+  aggregationTemporality?: number
+  isMonotonic?: boolean
+  dataPoints?: ProtobufMetricPointSpec[]
+}
+
+function encodeMetricDataPoint(
+  point: ProtobufMetricPointSpec,
+  kind: ProtobufMetricSpec['kind'],
+): number[] {
+  const fields: number[] = []
+  if (point.startTimeUnixNano !== undefined) {
+    fields.push(...pbFixed64Field(2, BigInt(point.startTimeUnixNano)))
+  }
+  if (point.timeUnixNano !== undefined) {
+    fields.push(...pbFixed64Field(3, BigInt(point.timeUnixNano)))
+  }
+  if (kind === 'histogram' || kind === 'summary' || kind === 'exponentialHistogram') {
+    if (point.count !== undefined) {
+      fields.push(...pbFixed64Field(4, BigInt(point.count)))
+    }
+    if (point.sum !== undefined) {
+      fields.push(...pbFixed64Field(5, doubleBits(point.sum)))
+    }
+    const attrField = kind === 'histogram' ? 9 : kind === 'exponentialHistogram' ? 1 : 7
+    if (point.attributes && point.attributes.length > 0) {
+      for (const attr of point.attributes) {
+        fields.push(...pbLengthDelimited(attrField, pbKeyValue(attr)))
+      }
+    }
+  } else {
+    if (point.asDouble !== undefined) {
+      fields.push(...pbFixed64Field(4, doubleBits(point.asDouble)))
+    }
+    if (point.asInt !== undefined) {
+      fields.push(...pbFixed64Field(6, BigInt(point.asInt)))
+    }
+    if (point.attributes && point.attributes.length > 0) {
+      for (const attr of point.attributes) {
+        fields.push(...pbLengthDelimited(7, pbKeyValue(attr)))
+      }
+    }
+  }
+  return fields
+}
+
+function encodeMetric(spec: ProtobufMetricSpec): number[] {
+  const fields: number[] = [
+    ...pbStringField(1, spec.name),
+    ...(spec.description ? pbStringField(2, spec.description) : []),
+    ...(spec.unit ? pbStringField(3, spec.unit) : []),
+  ]
+
+  const kind = spec.kind ?? 'sum'
+  const points = (spec.dataPoints ?? []).flatMap((p) =>
+    pbSubmessage(1, encodeMetricDataPoint(p, kind)),
+  )
+
+  switch (kind) {
+    case 'gauge':
+      fields.push(...pbSubmessage(5, points))
+      break
+    case 'sum':
+      fields.push(
+        ...pbSubmessage(7, [
+          ...points,
+          ...(spec.aggregationTemporality !== undefined
+            ? pbVarintField(2, spec.aggregationTemporality)
+            : []),
+          ...(spec.isMonotonic !== undefined ? pbVarintField(3, spec.isMonotonic ? 1 : 0) : []),
+        ]),
+      )
+      break
+    case 'histogram':
+      fields.push(
+        ...pbSubmessage(9, [
+          ...points,
+          ...(spec.aggregationTemporality !== undefined
+            ? pbVarintField(2, spec.aggregationTemporality)
+            : []),
+        ]),
+      )
+      break
+    case 'exponentialHistogram':
+      fields.push(
+        ...pbSubmessage(10, [
+          ...points,
+          ...(spec.aggregationTemporality !== undefined
+            ? pbVarintField(2, spec.aggregationTemporality)
+            : []),
+        ]),
+      )
+      break
+    case 'summary':
+      fields.push(...pbSubmessage(11, points))
+      break
+    case 'unknown':
+      break
+  }
+
+  return fields
+}
+
+/**
+ * Genuine OTLP protobuf bytes for metrics payloads. By default mirrors the
+ * two-metric fixture jsonMetricsFixture() emits.
+ */
+function protobufMetricsFixture(
+  customMetrics?: ProtobufMetricSpec[],
+  options?: {
+    resourceAttributes?: FixtureAttribute[]
+    scopeName?: string
+    scopeVersion?: string
+  },
+): Uint8Array {
+  const resourceAttrs = options?.resourceAttributes ?? [
+    { key: 'service.name', value: { t: 'string', v: 'droid' } },
+  ]
+  const scopeName = options?.scopeName ?? 'droid.telemetry'
+  const scopeVersion = options?.scopeVersion ?? '1.0.0'
+
+  const metrics: ProtobufMetricSpec[] =
+    customMetrics ?? [
+      {
+        name: LEGACY_METRIC_NAME,
+        description: `Factory native metric ${LEGACY_METRIC_NAME}`,
+        unit: '1',
+        kind: 'sum',
+        aggregationTemporality: 2,
+        isMonotonic: true,
+        dataPoints: [
+          {
+            asInt: LEGACY_METRIC_VALUE,
+            timeUnixNano: 1756478400123456789n,
+            attributes: [
+              { key: 'session.id', value: { t: 'string', v: 'droid-session-native-only' } },
+            ],
+          },
+        ],
+      },
+      {
+        name: GENAI_METRIC_NAME,
+        description: `Factory native metric ${GENAI_METRIC_NAME}`,
+        unit: '1',
+        kind: 'sum',
+        aggregationTemporality: 2,
+        isMonotonic: true,
+        dataPoints: [
+          {
+            asInt: GENAI_METRIC_VALUE,
+            timeUnixNano: 1756478400123456789n,
+            attributes: [
+              { key: 'session.id', value: { t: 'string', v: 'droid-session-native-only' } },
+            ],
+          },
+        ],
+      },
+    ]
+
+  const resource = resourceAttrs.flatMap((attribute) =>
+    pbLengthDelimited(1, pbKeyValue(attribute)),
+  )
+
+  const scopeMetrics = [
+    ...pbSubmessage(1, [
+      ...pbStringField(1, scopeName),
+      ...pbStringField(2, scopeVersion),
+    ]),
+    ...metrics.flatMap((m) => pbSubmessage(2, encodeMetric(m))),
+  ]
+
+  const resourceMetrics = [
+    ...pbSubmessage(1, resource),
+    ...pbSubmessage(2, scopeMetrics),
+  ]
+
+  return Uint8Array.from(pbSubmessage(1, resourceMetrics))
+}
+
 /**
  * A receiver store that records what it is handed.
  *
@@ -1253,7 +1448,39 @@ describe('OtlpReceiver metrics signal (the native OTLP path)', () => {
     }
   })
 
-  it('leaves the log path untouched by the metrics path', async () => {
+  it('accepts application/x-protobuf at POST /v1/metrics and hands decoded metrics to the sink', async () => {
+    const store = new RecordingStore()
+    const { receiver, url } = await startReceiverWithStore(store)
+
+    const response = await postMetrics(url, 'application/x-protobuf', protobufMetricsFixture())
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ acceptedMetrics: 2 })
+    const handed = stringsIn(store.recordedMetrics)
+    expect(handed, 'the decoded metrics must reach the metrics sink').toContain(LEGACY_METRIC_NAME)
+    expect(handed).toContain(GENAI_METRIC_NAME)
+    const recorded = JSON.stringify(store.recordedMetrics)
+    expect(recorded).toContain(String(LEGACY_METRIC_VALUE))
+    expect(recorded).toContain(String(GENAI_METRIC_VALUE))
+    expect(receiver.getHealth().failures5m).toBe(0)
+  })
+
+  it('accepts application/protobuf with parameters (charset) at POST /v1/metrics', async () => {
+    const store = new RecordingStore()
+    const { receiver, url } = await startReceiverWithStore(store)
+
+    const response = await postMetrics(
+      url,
+      'application/protobuf; charset=utf-8',
+      protobufMetricsFixture(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ acceptedMetrics: 2 })
+    expect(receiver.getHealth().failures5m).toBe(0)
+  })
+
+    it('leaves the log path untouched by the metrics path', async () => {
     const store = new RecordingStore()
     const { url } = await startReceiverWithStore(store)
 
@@ -1391,6 +1618,293 @@ describe('the metric decode seam (identity stripping)', () => {
     }
     expect(point?.attributes?.['gen_ai.request.model']).toBe(
       METRIC_RETAINED_ATTRIBUTES['gen_ai.request.model'],
+    )
+  })
+})
+
+
+describe('decodeOtlpMetricsProtobuf', () => {
+  it('decodes gauge, sum, histogram, exponentialHistogram, and summary metrics', () => {
+    const bytes = protobufMetricsFixture([
+      {
+        name: 'test.gauge',
+        kind: 'gauge',
+        dataPoints: [{ asDouble: 1.23, timeUnixNano: 1756478400123456789n }],
+      },
+      {
+        name: 'test.sum',
+        kind: 'sum',
+        aggregationTemporality: 2,
+        isMonotonic: true,
+        dataPoints: [{ asInt: 42, timeUnixNano: 1756478400123456789n }],
+      },
+      {
+        name: 'test.histogram',
+        kind: 'histogram',
+        aggregationTemporality: 1,
+        dataPoints: [{ count: 10, sum: 55.5, timeUnixNano: 1756478400123456789n }],
+      },
+      {
+        name: 'test.exponentialHistogram',
+        kind: 'exponentialHistogram',
+        aggregationTemporality: 2,
+        dataPoints: [{ count: 5, sum: 20.0, timeUnixNano: 1756478400123456789n }],
+      },
+      {
+        name: 'test.summary',
+        kind: 'summary',
+        dataPoints: [{ count: 8, sum: 100.0, timeUnixNano: 1756478400123456789n }],
+      },
+    ])
+
+    const decoded = decodeOtlpMetricsProtobuf(bytes)
+    expect(decoded).toHaveLength(5)
+    expect(decoded.map((m: OtlpMetric) => m.kind)).toEqual([
+      'gauge',
+      'sum',
+      'histogram',
+      'exponentialHistogram',
+      'summary',
+    ])
+    expect(decoded.map((m: OtlpMetric) => m.name)).toEqual([
+      'test.gauge',
+      'test.sum',
+      'test.histogram',
+      'test.exponentialHistogram',
+      'test.summary',
+    ])
+    const expHist = decoded.find((m: OtlpMetric) => m.kind === 'exponentialHistogram')
+    expect(expHist?.dataPoints).toHaveLength(1)
+    expect(expHist?.dataPoints[0]?.count).toBe(5)
+    expect(expHist?.dataPoints[0]?.sum).toBe(20.0)
+  })
+
+  it('decodes as_int and as_double NumberDataPoints with stripped attributes and string timestamps', () => {
+    const bytes = protobufMetricsFixture(
+      [
+        {
+          name: 'metric.points',
+          kind: 'gauge',
+          dataPoints: [
+            {
+              asInt: 100,
+              startTimeUnixNano: 1756478400000000000n,
+              timeUnixNano: 1756478400123456789n,
+              attributes: [
+                { key: 'session.id', value: { t: 'string', v: 'session-123' } },
+                { key: 'user.email', value: { t: 'string', v: 'leak@example.com' } },
+                { key: 'user.id', value: { t: 'string', v: 'usr-999' } },
+              ],
+            },
+            {
+              asDouble: 3.14159,
+              startTimeUnixNano: 1756478400000000000n,
+              timeUnixNano: 1756478400123456789n,
+              attributes: [
+                { key: 'conversation.id', value: { t: 'string', v: 'conv-456' } },
+                { key: 'account.id', value: { t: 'string', v: 'acc-888' } },
+              ],
+            },
+          ],
+        },
+      ],
+      {
+        resourceAttributes: [
+          { key: 'service.name', value: { t: 'string', v: 'test-svc' } },
+          { key: 'user.email', value: { t: 'string', v: 'leak-resource@example.com' } },
+        ],
+      },
+    )
+
+    const [metric] = decodeOtlpMetricsProtobuf(bytes)
+    expect(metric?.dataPoints).toHaveLength(2)
+
+    const intPoint = metric?.dataPoints[0]
+    expect(intPoint?.value).toBe(100)
+    expect(intPoint?.startTimeUnixNano).toBe('1756478400000000000')
+    expect(intPoint?.timeUnixNano).toBe('1756478400123456789')
+    expect(intPoint?.attributes['session.id']).toBe('session-123')
+    expect(intPoint?.attributes['user.email']).toBeUndefined()
+    expect(intPoint?.attributes['user.id']).toBeUndefined()
+
+    const doublePoint = metric?.dataPoints[1]
+    expect(doublePoint?.value).toBeCloseTo(3.14159, 4)
+    expect(doublePoint?.startTimeUnixNano).toBe('1756478400000000000')
+    expect(doublePoint?.timeUnixNano).toBe('1756478400123456789')
+    expect(doublePoint?.attributes['conversation.id']).toBe('conv-456')
+    expect(doublePoint?.attributes['account.id']).toBeUndefined()
+
+    expect(metric?.resource['service.name']).toBe('test-svc')
+    expect(metric?.resource['user.email']).toBeUndefined()
+  })
+
+  it('decodes sum with aggregation_temporality and is_monotonic', () => {
+    const bytes = protobufMetricsFixture([
+      {
+        name: 'cumulative.monotonic.sum',
+        kind: 'sum',
+        aggregationTemporality: 2,
+        isMonotonic: true,
+        dataPoints: [{ asInt: 50, timeUnixNano: 1756478400123456789n }],
+      },
+      {
+        name: 'delta.nonmonotonic.sum',
+        kind: 'sum',
+        aggregationTemporality: 1,
+        isMonotonic: false,
+        dataPoints: [{ asInt: -10, timeUnixNano: 1756478400123456789n }],
+      },
+    ])
+
+    const [m1, m2] = decodeOtlpMetricsProtobuf(bytes)
+    expect(m1?.aggregationTemporality).toBe(2)
+    expect(m1?.isMonotonic).toBe(true)
+    expect(m1?.dataPoints[0]?.value).toBe(50)
+
+    expect(m2?.aggregationTemporality).toBe(1)
+    expect(m2?.isMonotonic).toBe(false)
+    expect(m2?.dataPoints[0]?.value).toBe(-10)
+  })
+
+  it('decodes histogram with count and sum', () => {
+    const bytes = protobufMetricsFixture([
+      {
+        name: 'request.duration',
+        kind: 'histogram',
+        aggregationTemporality: 2,
+        dataPoints: [
+          {
+            count: 42,
+            sum: 1234.5,
+            timeUnixNano: 1756478400123456789n,
+          },
+        ],
+      },
+    ])
+
+    const [metric] = decodeOtlpMetricsProtobuf(bytes)
+    expect(metric?.kind).toBe('histogram')
+    expect(metric?.aggregationTemporality).toBe(2)
+    expect(metric?.dataPoints).toHaveLength(1)
+    const point = metric?.dataPoints[0]
+    expect(point?.count).toBe(42)
+    expect(point?.sum).toBeCloseTo(1234.5, 1)
+    expect(point?.value).toBeNull()
+  })
+
+  it('decodes a metric with no data points as kind unknown and empty dataPoints array', () => {
+    const bytes = protobufMetricsFixture([
+      {
+        name: 'unmeasured.metric',
+        description: 'a metric with no data shape',
+        unit: 'ms',
+        kind: 'unknown',
+      },
+    ])
+
+    const [metric] = decodeOtlpMetricsProtobuf(bytes)
+    expect(metric).toMatchObject({
+      name: 'unmeasured.metric',
+      description: 'a metric with no data shape',
+      unit: 'ms',
+      kind: 'unknown',
+      dataPoints: [],
+    })
+  })
+
+  it('rejects a metric with multiple oneof data shapes set, throwing OtlpDecodeError', () => {
+    // Malformed metric carrying both gauge (field 5) and sum (field 7)
+    const malformedMetric = [
+      ...pbStringField(1, 'malformed.metric'),
+      ...pbSubmessage(5, pbSubmessage(1, pbFixed64Field(4, doubleBits(10.0)))),
+      ...pbSubmessage(7, pbSubmessage(1, pbFixed64Field(6, 20n))),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, malformedMetric),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    expect(() => decodeOtlpMetricsProtobuf(bytes)).toThrow(OtlpDecodeError)
+  })
+
+  it('returns independent and deep-cloned resource and scope objects for sibling metrics', () => {
+    const bytes = protobufMetricsFixture(
+      [
+        { name: 'm1', kind: 'gauge', dataPoints: [{ asInt: 1 }] },
+        { name: 'm2', kind: 'gauge', dataPoints: [{ asInt: 2 }] },
+      ],
+      {
+        resourceAttributes: [
+          { key: 'tags', value: { t: 'array', v: [{ t: 'string', v: 'alpha' }] } },
+        ],
+      },
+    )
+
+    const [m1, m2] = decodeOtlpMetricsProtobuf(bytes)
+    expect(m1?.resource).not.toBe(m2?.resource)
+    expect(m1?.scope).not.toBe(m2?.scope)
+    expect(m1?.resource).toEqual(m2?.resource)
+    expect(m1?.scope).toEqual(m2?.scope)
+
+    // Mutation of nested resource attributes on m1 must not affect m2
+    const m1Tags = m1?.resource['tags'] as unknown[]
+    expect(m1Tags).toEqual(['alpha'])
+    m1Tags.push('beta')
+    expect(m2?.resource['tags']).toEqual(['alpha'])
+  })
+
+  it('rejects an invalid aggregationTemporality with OtlpDecodeError', () => {
+    const sumWithInvalidTemporality = [
+      ...pbStringField(1, 'sum.with.invalid.temporality'),
+      ...pbSubmessage(7, [
+        ...pbVarintField(2, 99), // 99 is invalid
+        ...pbSubmessage(1, pbFixed64Field(6, 42n)),
+      ]),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, sumWithInvalidTemporality),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    expect(() => decodeOtlpMetricsProtobuf(bytes)).toThrow(OtlpDecodeError)
+  })
+
+  it('leaves aggregationTemporality undefined when omitted or unspecified (0)', () => {
+    const sumWithZeroTemporality = [
+      ...pbStringField(1, 'sum.with.zero.temporality'),
+      ...pbSubmessage(7, [
+        ...pbVarintField(2, 0), // 0 is AGGREGATION_TEMPORALITY_UNSPECIFIED
+        ...pbSubmessage(1, pbFixed64Field(6, 42n)),
+      ]),
+    ]
+    const scopeMetrics = [
+      ...pbSubmessage(1, [...pbStringField(1, 'test.scope')]),
+      ...pbSubmessage(2, sumWithZeroTemporality),
+    ]
+    const resourceMetrics = [
+      ...pbSubmessage(1, []),
+      ...pbSubmessage(2, scopeMetrics),
+    ]
+    const bytes = Uint8Array.from(pbSubmessage(1, resourceMetrics))
+
+    const [metric] = decodeOtlpMetricsProtobuf(bytes)
+    expect(metric?.aggregationTemporality).toBeUndefined()
+  })
+
+  it('throws OtlpDecodeError on truncated protobuf payload', () => {
+    const bytes = protobufMetricsFixture()
+    expect(() => decodeOtlpMetricsProtobuf(bytes.subarray(0, bytes.length - 4))).toThrow(
+      OtlpDecodeError,
     )
   })
 })

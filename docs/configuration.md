@@ -4,8 +4,9 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 code-refs:
+  - KyberWeaveConfig
   - KyberWeaveConfigLoader
   - OntologyConfig
   - SquadConfig
@@ -59,6 +60,8 @@ config-reg:
   auth-design: docs/reference/auth-design.md
 
 autonomy: supervised
+onboarding: done
+stop-on-tool-failure: true
 
 squad:
   bundle: full
@@ -224,6 +227,38 @@ rejected.
 block that no longer matches configuration as `KW-CONFIG-REG-002`, but only once a repository
 has adopted the registry — see [governance](docgraph/governance.md).
 
+### Stop on tool failure
+
+A top-level `stop-on-tool-failure:` key decides what a code-editing run does when a required
+tool — CodeGraph, or the docs server's CodeGraph read — cannot be repaired:
+
+```yaml
+stop-on-tool-failure: false
+```
+
+- **Absent means stop.** A repository that says nothing is the strict case: the run stops before
+  dispatching workers. Continuing past a broken code index has to be asked for explicitly.
+- **The values are `true` and `false`.** Anything else is a configuration error naming the
+  setting and the two values it accepts, the same treatment `autonomy:` gets — not a binding
+  failure naming a type an operator cannot see. A file that cannot be loaded at all leaves the
+  doctor's default in place, which is stop: a broken configuration must not be the thing that
+  weakens the rule.
+- **`false` warns and continues.** The failure is reported and the work proceeds, with code joins
+  possibly missing.
+- **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
+  no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
+  between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
+  route the exit code rather than interpreting it.
+- **What it never covers.** A read-only run is never stopped by it. A repository with no governed
+  docs skips the check. `doctor --check` ignores it, because a caller that asked for a verdict gets
+  one. And a missing `codegraph` binary is exit `3` under either value: installing it is the user's
+  decision.
+
+It is not published in the `AGENTS.md` Config Reg block, so a portable instruction file cannot read
+it directly; the CLI and the MCP server are the readers. See
+[the run-start rule](kyber-squad/architecture.md#run-start-documentation-check) and
+[ADR 0061](adr/0061-code-editing-runs-stop-on-unusable-tools.md).
+
 ### Intake assessment
 
 An `intake:` key under `ontology:` opts a repository in to the intake assessment:
@@ -250,12 +285,119 @@ It is a value, not a path, so `docs validate` never resolves it as one
 (`KW-CONFIG-REG-002`). The name is reserved: declaring `intake-assessment` under `config-reg:`
 is rejected.
 
-The rule both mode properties rest on — why a registry entry carries a kind, and why a mode
+The rule the mode properties rest on — why a registry entry carries a kind, and why a mode
 word is exempt from the path check without any other check being relaxed — is documented in
 [mode properties](docgraph/architecture.md#mode-properties-are-not-paths). What the assessment
 asks, and what the conductor does with the property it resolves, is documented in the
 [requirements](kyber-squad/requirements.md#intake-assessment) and the
 [adoption guide](kyber-squad/onboarding.md#intake-assessment-opt-in-per-repository).
+
+### Onboarding
+
+`onboarding` records whether this repository has answered the question every run depends on: which
+technologies, gates and coding standards it wants. It sits at the top level, beside `autonomy`:
+
+```yaml
+onboarding: done
+```
+
+| Value | Meaning |
+|---|---|
+| `done` | The onboarding skill was applied: the technologies were chosen and their gates and standards written. |
+| `declined` | The repository was offered onboarding and chose not to take it. It behaves exactly as `done` does where the run is concerned. |
+| absent | The question is **unanswered**. This is the only state that stops a run. |
+
+**Absent is not a third answer.** A repository whose configuration never wrote the key has not been
+asked, so `kyber-weave run start` stops (the first check after configuration loads, ahead of the tool
+checks and the fetch) and names the `kyber-docs-onboarding-and-assessment` skill and the verb that
+records the answer. Both recorded
+values end the question, which is why `declined` exists: without it the only answers a repository
+could record would be "done" and "never asked", so a user who said no would be asked again on every
+start.
+
+**The stop comes first, ahead of the tool checks and the fetch.** The gates and standards a run
+will be held to are exactly what onboarding chooses, so a run that proceeded would plan work against
+defaults nobody reviewed and report that at the end instead of before it. Reporting a failing fetch
+first would send the operator to repair a remote that was never what stood in the way.
+
+**Autonomous runs stop too, asking nothing.** Under `autonomy: autonomous` the run stops and leaves
+the setting exactly as it found it: a run that asked would break "ask the user nothing", and one
+that wrote an answer would record a decision nobody made.
+
+**A repository with no `kyber-weave.yml` is never stopped.** Nothing there has opted into being
+configured, so there is no gates-and-standards choice for onboarding to record; the stop speaks
+where the repository has opted in and stays quiet where it has not.
+
+**Written through the CLI, not by hand.** `kyber-weave docs onboarding <done|declined>` records the
+value in place — keeping the operator's comments and every other key — and then re-splices the
+Config Reg block that publishes it. A key holding anything other than the two values is a
+configuration error naming both, refused before any run reads it.
+
+**A chosen value publishes a mode property; an absent one publishes nothing.** The answer renders
+into the generated block of the repository root `AGENTS.md`:
+
+```markdown
+- **<onboarding>**: `done`
+```
+
+An absent answer publishes no line, so no reader mistakes silence for `done`. Like `autonomy` and
+the `run:` properties, `onboarding` is a value rather than a path, so `docs validate` never resolves
+it as one (`KW-CONFIG-REG-001`); a missing or wrong line in the block is a stale block
+(`KW-CONFIG-REG-002`). Declaring the name under `config-reg:` is rejected with the setting that owns
+it named in the refusal.
+
+**The stop happens once, because both answers end it.** Onboarding is a one-time answer, not a
+recurring check: a technology added later is not a reason to stop, and no command warns about it
+today. What covers it is the worker that needs the missing standard, which returns its own question
+rather than a confident answer from somewhere else (see
+[coding standards](standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file)).
+
+### Run controls
+
+Three settings govern how a run starts, once the onboarding question above is answered.
+`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other two sit under a `run:`
+key:
+
+```yaml
+stop-on-tool-failure: false
+run:
+  base-branch: develop
+  harness-names: true
+```
+
+| Setting | Default | Effect |
+|---|---|---|
+| `stop-on-tool-failure` | `true` | Whether a tool that fails during the run stops it. An absent key means **stop**. |
+| `run.base-branch` | `origin/HEAD` | The branch a run branches from and is compared against. `main` is never assumed: a repository whose default branch is `develop`, or whose operator named a release branch, is compared against the branch that was actually named. A value already carrying the `origin/` prefix is used as written. |
+| `run.harness-names` | `true` | Whether a rendered artifact publishes the harness name. An absent key publishes it. |
+
+`stop-on-tool-failure` and `run.harness-names` take `true` or `false`; any other value is a
+configuration error, because a free-form read would let `sometimes` arrive as a later `false`.
+`run.base-branch` is a branch name, and a blank value is treated as absent so that a property
+publishing an empty branch cannot look configured while resolving to nothing a run can compare
+against.
+
+**A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
+renders `<run-base-branch>` and `<run-harness-names>` into the generated block of the repository
+root `AGENTS.md` only when the key was actually written:
+
+```markdown
+- **<run-base-branch>**: `develop`
+- **<run-harness-names>**: `true`
+```
+
+An absent key publishes no line, because an agent already applies the documented default and
+only a value somebody chose can differ from it. Declaring either name (or `stop-on-tool-failure`)
+under `config-reg:` is rejected with the setting that owns it named in the refusal. They
+are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
+but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`). As noted above, `stop-on-tool-failure`
+is deliberately not published in the block: the CLI and the MCP server are the readers, not an
+agent instruction file (ADR 0061).
+
+The run that reads them is [`run start`](cli-command-surface.md#run--run-start), which exits `1`
+on a tool failure while `stop-on-tool-failure` is on — and warns instead of stopping when it is
+off. An absent setting stops, and that default is applied in code rather than in instruction
+text, because absence is the common case and a run cannot rely on an agent having read a rule.
 
 ### Several documentation roots
 
@@ -358,7 +500,7 @@ safely merges the ignore entry for new and existing hosts.
 ## Arbiter configuration
 
 The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
-section, the Arbiter is disabled, the provider is `none`, and all 18 shipped rules are
+section, the Arbiter is disabled, the provider is `none`, and all 20 shipped rules are
 enabled. Hooks render only when `enabled` is true.
 
 ```yaml
@@ -367,7 +509,7 @@ arbiter:
   provider:
     kind: none            # none (default) | systemone
     endpoint: https://api.typesafe.ai/v1   # or http://localhost:11434/v1 for Ollama
-    model: jev-1.13.0     # pinned; locally nimble or tev1
+    model: jev-1.14.0     # pinned; jev-1.13.0 stays supported; locally nimble or tev1
     timeout-ms: 3000
   rules:
     - id: KW-ARB-SCOPE-002
@@ -388,8 +530,23 @@ Host rule ids must not start with `KW-ARB-`. The per-user
 `~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else, and
 replaces the repository's provider field by field. The API key never appears here — or in
 any hook or MCP file: it resolves from `TYPESAFE_API_KEY`, then the OS credential store
-entry for the endpoint origin. See the [runbook](kyber-arbiter/runbook.md) for `setup`,
-`status`, and `doctor`.
+entry for the endpoint origin. To use OpenRouter, set `endpoint` to
+`https://openrouter.ai/api/v1` and `model` to `typesafe/jev-1.14` or `typesafe/jev-1.13`. See
+the [runbook](kyber-arbiter/runbook.md) for `setup`, `status`, and `doctor`.
+
+The user-level `~/.kyber-weave/kyber-weave.yml` may also hold `arbiter.global.targets`.
+This list records which harness targets are installed at global scope, and it is valid only
+in the home config. A project config file that declares `arbiter.global` fails as
+`KW-ARB-CONFIG-011`; the project docs and runtime hook checks treat that as a project-scope
+configuration error rather than a user-level setting. A `--global` `squad install` or
+`squad update` reads `~/.kyber-weave/kyber-weave.yml` as this user-level file, not as a
+project config, so the `arbiter.global` block it holds is accepted. This holds whatever root a
+legacy single-root global receipt anchors at. A home without that file falls back to the
+project loader, which reads a legacy root-level `kyber-weave.yml` there. At runtime, a global hook that finds a
+project config with `arbiter.enabled: true` logs `deferred-to-project`, leaves the ledger
+untouched, and lets the project-level decision win. Global state and the per-root ledger live
+under `~/.kyber-weave/arbiter/projects/<root-key>/`, while the target registry remains in the
+user config at `arbiter.global.targets`.
 
 ### Gate `applies-when`
 
@@ -443,6 +600,7 @@ concurrency cap (see `ReviewConfig`):
 | `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
 | `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+| `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
 
 Every .NET `dotnet build` invocation in the gate path carries
 `-nr:false -p:UseSharedCompilation=false` (no MSBuild node reuse, no shared
@@ -457,6 +615,36 @@ that names `{task}` refuses the run when no `--task` slug was given.
 review:
   max-concurrent-workers: 4
 ```
+
+`test-map` is what lets a task gate run tests at all: this repository's single product test project
+takes about 25 minutes with coverage, so a gate that ran it per task would cost far more than the task.
+Each entry maps one source glob to the fully qualified classes that cover it, and a `{tests}` token in
+a task gate's `run` becomes those class names. A changed path the map does not cover falls back to the
+`<Stem>Tests` naming convention, and a path no existing test file answers leaves the gate skipped
+(`KW-REVIEW-026`) rather than running a filter that matches nothing and exits zero. The rules the token
+follows are in [the review council architecture](code-review/architecture.md#the-tests-a-task-gate-runs).
+
+```yaml
+review:
+  test-map:
+    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+      - KyberWeave.Tests.TaskGateSelectionTests
+```
+
+A gate may set `full-suite: true` (a boolean, default `false`). It marks a gate that runs the full product
+suite; the shipped `test`, `ts-test` and `cargo-test` gates set it. Such a gate runs only when the caller
+declares itself the review council or CI with `--council`, or when stdin is a terminal. Otherwise the gate is
+reported as a refused blocking failure (`KW-REVIEW-033`, a gate that never started) and not run. The other gates still run,
+unless the caller asked for the whole suite with `--all`: under `--all` a refused gate ends the run at once,
+with no gate started and exit `1`, because the declared suite cannot be delivered.
+
+A gate may set `requires-paths`: a list of repository-relative paths the gate needs before it can start. The
+dash gates here declare `dash/node_modules`. When a listed path is absent the gate does not start — it reports
+`exitCode: -1` and `outcome: "notStarted"` under `KW-REVIEW-033`, at Error when the gate is blocking and at
+Warning otherwise, with a summary that names the path and the install that unblocks it. It never passes, and it
+never reads as a code failure. An empty list, an empty entry, an absolute path, or a path containing `..` is
+refused when the configuration loads, so an entry that could never name something inside the repository never
+reaches a run.
 
 ## Harness profiles
 
@@ -492,7 +680,7 @@ offered for it either.
 
 | Key | Default | Effect |
 |---|---|---|
-| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees — today `kw-docs`, `kw-dash`, and `kw-arbiter` |
+| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees — today `kw-docs`, `kw-dash`, `kw-arbiter`, and `codegraph` for a repository that wants an index |
 | `required-servers.<name>.command` | required | Launch command as argv — the program first, then each argument. Never a shell line, for the same reason `review.gates` takes argv |
 | `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships, today `kyber-weave-mcp`) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked. `first-party` is bound to the shipped binary: it is accepted only when the command's program is `kyber-weave-mcp` |
 | `required-servers.<name>.level` | `required` | `required` reports a missing server as a warning; `recommended` reports the same line at `info` |
@@ -510,7 +698,17 @@ mcp:
       provenance: third-party
       level: recommended
       install: codegraph init .
+    kw-dash:
+      command: [kyberdash, mcp]
+      provenance: third-party
+      level: recommended
+      install: curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh -s -- --prerelease
 ```
+
+**`kw-dash`** is the read-only KyberDash analytics server (`kyberdash mcp`), not
+`kyber-weave-mcp`. Declare it when this repository's agents should use KyberDash analytics
+from checked-in harness wiring; setup for every harness is
+[KyberDash MCP (`kw-dash`)](dash/mcp.md). `docs init` never adds `kw-dash` automatically.
 
 `docs init` scaffolds the section with exactly one server — `kw-docs`, launched
 `kyber-weave-mcp --repo-root .`, first-party — when it creates a host configuration, and
@@ -528,6 +726,14 @@ Unknown keys are ignored, as in every other section. A declaration that gives a 
 blank name, names no command, carries an empty argument, claims `first-party` for a command
 that does not run `kyber-weave-mcp`, or gives an unrecognised `provenance` or `level` fails
 the load as `KW-CONFIG-001`, naming the section and the server at fault.
+
+**The `codegraph` declaration does more than the wiring check.** It is the switch the docs MCP
+server reads: a repository that lists `codegraph` here gets the index refresh on its tool calls,
+and has its tools fail with `STATUS: TOOL_FAILURE` when the index cannot be read. A repository that
+never declared it takes no index lock and reports nothing, so a host that wants nothing to do with
+CodeGraph keeps working unchanged — the same reason the default is no servers at all. `docs init`
+leaves the entry commented out in the scaffold, so turning it on is a deliberate edit. See
+[the response contract](docgraph/mcp-runbook.md#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot).
 
 **`first-party` is a claim about who ships the binary, so it is refused when it is untrue.**
 The provenance decides the remedy an absent binary gets, and the first-party remedy is

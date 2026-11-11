@@ -154,6 +154,8 @@ dotnet test tests/UnitTests/UnitTests.csproj -c Release --no-build
 dotnet test tests/IntegrationTests/IntegrationTests.csproj -c Release --no-build
 ```
 
+This example shows what the review council and CI run. A dev agent runs the filtered form for the tests covering its change, never the whole project.
+
 ---
 
 ## 6. Performance Checklist

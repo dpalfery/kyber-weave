@@ -259,6 +259,31 @@ public sealed class HostConfigYamlTests
     }
 
     /// <summary>
+    /// Adds <c>arbiter.global.targets</c> as a user-level sequence without disturbing the rest of the file.
+    /// </summary>
+    [Fact]
+    public void AddsArbiterGlobalTargetsWithoutDuplicatingExistingTargets()
+    {
+        const string yaml =
+            """
+            # Hand-maintained host configuration
+            arbiter:
+              enabled: true
+              provider:
+                kind: systemone
+            """;
+
+        string result = HostConfigYaml.WithArbiterGlobalTargets(yaml, ["harness-token-01", "harness-token-02"]);
+
+        Assert.Contains("global:", result, StringComparison.Ordinal);
+        Assert.Contains("targets:", result, StringComparison.Ordinal);
+        Assert.Contains("- 'harness-token-01'", result, StringComparison.Ordinal);
+        Assert.Contains("- 'harness-token-02'", result, StringComparison.Ordinal);
+        Assert.Contains("# Hand-maintained host configuration", result, StringComparison.Ordinal);
+        Assert.Contains("kind: systemone", result, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The technologies edit reads the same line endings the configuration was written with. A
     /// lone-CR file is one long line to a <c>'\n'</c> split, so the <c>ontology:</c> key goes
     /// unfound and a second block is appended — two <c>ontology</c> keys, which YAML refuses to
@@ -650,5 +675,43 @@ public sealed class HostConfigYamlTests
     private static YamlMappingNode ReadProvider(string yaml)
     {
         return (YamlMappingNode)ReadArbiter(yaml).Children[new YamlScalarNode("provider")];
+    }
+
+    [Fact]
+    public void WithOnboarding_RewritesBareOnboardingWithTrailingSpace()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding:\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "done");
+        Assert.Equal("ontology:\n  docs-root: docs\nonboarding: done\n", result);
+    }
+
+    [Fact]
+    public void WithOnboarding_PreservesInlineCommentWhenRewritingBareOnboarding()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding: # keep this comment\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "done");
+        Assert.Equal("ontology:\n  docs-root: docs\nonboarding: done # keep this comment\n", result);
+    }
+
+    [Fact]
+    public void WithOnboarding_RejectsNewlinesInAnswer()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\n";
+        Assert.Throws<ArgumentException>(() => HostConfigYaml.WithOnboarding(yaml, "done\ninjected: true"));
+    }
+
+    [Fact]
+    public void WithOnboarding_ThrowsInvalidDataExceptionOnBlockChildren()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\nonboarding:\n  - done\n";
+        Assert.Throws<InvalidDataException>(() => HostConfigYaml.WithOnboarding(yaml, "done"));
+    }
+
+    [Fact]
+    public void WithOnboarding_RewritesQuotedKeyInPlaceWithoutDuplicating()
+    {
+        const string yaml = "ontology:\n  docs-root: docs\n\"onboarding\": done\n";
+        string result = HostConfigYaml.WithOnboarding(yaml, "declined");
+        Assert.Equal("ontology:\n  docs-root: docs\n\"onboarding\": declined\n", result);
     }
 }

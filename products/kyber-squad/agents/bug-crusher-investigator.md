@@ -22,14 +22,16 @@ Your verdict is the routing decision for everything downstream, so the honest an
 
 Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
 
-- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
 # Method
 
-**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
+**1. Reproduce first.** Run the exact command the human reported, or the closest thing you can construct from what they gave you. If that command is the full suite, run only the failing classes it reported. Capture the real output. Everything after this depends on having seen the failure yourself — a root cause inferred from a pasted stack trace alone is a hypothesis, not a finding, and you should mark it as such.
+
+The dispatch carries the run-start facts: the branch, where its checkout sits, and three versions — the failing binary's, `HEAD`, and the base the branch was started from. Read them before you reproduce anything and compare the three: the defect is a regression only when the failing build is the commit under review rather than the base, and that comparison is handed to you so you are not hunting for it.
 
 If you cannot reproduce it, say so plainly and name what you would need (branch, environment variable, database state, exact command). Do not paper over it by diagnosing from the code alone. An unreproduced defect gets no fix.
 

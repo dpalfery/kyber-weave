@@ -54,13 +54,13 @@ internal static class ProcessConsoleCapture
     /// Runs <paramref name="execute"/> once, before returning, with console output captured
     /// in an isolated asynchronous-local context.
     /// </summary>
-    public static CapturedConsoleExecution<T> Run<T>([InstantHandle] Func<T> execute)
+    public static CapturedConsoleExecution<T> Run<T>([InstantHandle] Func<T> execute, int width = 0)
     {
         ArgumentNullException.ThrowIfNull(execute);
         EnsureInstalled();
 
         using StringWriter writer = new();
-        IAnsiConsole capture = CreateCaptureConsole(writer);
+        IAnsiConsole capture = CreateCaptureConsole(writer, width);
 
         StringWriter? priorWriter = CurrentWriter.Value;
         IAnsiConsole? priorAnsiConsole = CurrentAnsiConsole.Value;
@@ -108,7 +108,7 @@ internal static class ProcessConsoleCapture
         }
     }
 
-    private static IAnsiConsole CreateCaptureConsole(StringWriter writer)
+    private static IAnsiConsole CreateCaptureConsole(StringWriter writer, int width = 0)
     {
         IAnsiConsole capture = AnsiConsole.Create(new AnsiConsoleSettings
         {
@@ -119,6 +119,8 @@ internal static class ProcessConsoleCapture
             Enrichment = new ProfileEnrichment { UseDefaultEnrichers = false }
         });
         ConsoleWidth.EnsureUsable(capture);
+        if (width > 0)
+            capture.Profile.Width = width;
         return capture;
     }
 

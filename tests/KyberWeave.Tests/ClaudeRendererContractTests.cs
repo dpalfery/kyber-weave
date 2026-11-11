@@ -229,7 +229,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
             // Exact comparison: the renderer appends the normalized body verbatim, so a
             // duplicated or padded body must fail, and the message names the offender.
-            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            string expectedAgentBody = TestSquadCorpus
+                .ExpectedBodyText(SquadTarget.Claude, agent)
+                .Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedAgentBody.EndsWith('\n'))
             {
                 expectedAgentBody += "\n";
@@ -243,8 +245,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
@@ -529,14 +531,18 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 .OrderBy(v => v, StringComparer.Ordinal));
 
         Assert.Equal(primaryAgent.Name, RequireScalar(skillFrontmatter, "name", primaryAgent.Name));
-        string expectedDescription = string.Join(" ", primaryAgent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        string expectedDescription = string.Join(" ", TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Claude, primaryAgent.Description)
+            .Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         Assert.Equal(expectedDescription, RequireScalar(skillFrontmatter, "description", primaryAgent.Name));
         Assert.Equal("MIT", RequireScalar(skillFrontmatter, "license", primaryAgent.Name));
 
-        // Body matches normalized canonical agent body.
-        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        // Body matches normalized canonical agent body, with the harness token resolved.
+        string expectedAgentBody = TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Claude, primaryAgent.InstructionBody)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         if (!expectedAgentBody.EndsWith('\n'))
         {
             expectedAgentBody += "\n";
@@ -549,7 +555,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
             SquadDeploymentFile resourceFile = Assert.Single(
                 result.Files,
                 f => f.RelativePath == $".claude/skills/{primaryAgent.Name}/{resource.RelativePath}");
-            ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
+            ReadOnlySpan<byte> expectedBytes =
+                Encoding.UTF8.GetBytes(TestSquadCorpus.ExpectedRenderText(SquadTarget.Claude, resource.Content));
             Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
         }
 

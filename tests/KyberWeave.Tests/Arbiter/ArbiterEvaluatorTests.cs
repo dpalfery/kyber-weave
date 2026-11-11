@@ -60,8 +60,10 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                 ? AnswerFor(rules, facts)
                 : rules.Where(rule => rule.Ask is not null)
                     .ToDictionary(rule => rule.Id, rule => "within-task", StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, true));
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, true, Scores));
         }
+
+        public IReadOnlyDictionary<string, ArbiterStep1Score>? Scores { get; set; }
     }
 
     private sealed class ThrowingProvider : IArbiterProvider
@@ -104,8 +106,17 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             throw new InvalidOperationException("git facts exploded");
     }
 
+    /// <remarks>
+    /// The docs root is <c>docs</c>, matching the planning paths the plan-read cases name:
+    /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, where a prompt
+    /// naming <c>docs/plans/…</c> would name no configured planning directory.
+    /// </remarks>
     private static KyberWeaveConfig ConfigWith(IReadOnlyList<ArbiterRule> rules) =>
-        new() { Arbiter = new ArbiterConfig { Enabled = true, Rules = rules } };
+        new()
+        {
+            Arbiter = new ArbiterConfig { Enabled = true, Rules = rules },
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
 
     private static ArbiterEvent DelegateEvent(string prompt) =>
         new()
@@ -207,6 +218,35 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(1, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Evaluator_WritesStepOneScoresToTheDecisionRecord()
+    {
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        CountingProvider provider = new(ArbiterDirectory)
+        {
+            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
+            {
+                ["KW-ARB-ASK-001"] = new([0.9, 0.1], 0.85, 0.8),
+            },
+        };
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+            AskRule("KW-ARB-ASK-002", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        await CreateEvaluator(provider).EvaluateAsync(DelegateEvent(Prompt), config);
+
+        ArbiterDecisionRecord record = new DecisionLog(ArbiterDirectory).ReadAll()[0];
+        ArbiterDecisionRule scored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-001");
+        Assert.Equal([0.9, 0.1], scored.Probabilities!);
+        Assert.Equal(0.85, scored.Confidence);
+        Assert.Equal(0.8, scored.Threshold);
+        ArbiterDecisionRule unscored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-002");
+        Assert.Null(unscored.Probabilities);
+        Assert.Null(unscored.Confidence);
+        Assert.Null(unscored.Threshold);
     }
 
     [Fact]
@@ -489,5 +529,61 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(2, result.Dispatches.Count);
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
+    }
+
+    /// <summary>
+    /// The shipped plan-read rule, evaluated the way a run evaluates it: the dispatch carries
+    /// the routing header, the prompt's body names the plan, and the conductor is escalated
+    /// instead of dispatching a worker who would open it. Only that rule is configured, so the
+    /// verdict is its own and not another delegate rule's.
+    /// </summary>
+    [Fact]
+    public async Task Evaluator_EscalatesADispatchWhosePromptNamesThePlan()
+    {
+        const string Prompt =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\n" +
+            "Read docs/plans/plan.md and implement the task it describes.";
+        ArbiterRule planRead = Assert.Single(
+            ArbiterConfig.ProductDefaults.Rules,
+            rule => string.Equals(rule.Id, "KW-ARB-PLANREAD-001", StringComparison.Ordinal));
+        ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider());
+        KyberWeaveConfig config = ConfigWith([planRead]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.False(result.IsError, result.ErrorMessage);
+        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+    }
+
+    /// <summary>
+    /// A per-task commit is now the normal case, so the scope-drift rule must still see what a
+    /// finished task changed. It reads the paths changed since the ledger's pre-dispatch
+    /// snapshot, and that set has to include a path whose change is committed while the tree is
+    /// clean — otherwise every committed task looks as though it changed nothing, and
+    /// <c>KW-ARB-DIFF-001</c> cannot see drift at all.
+    /// </summary>
+    /// <remarks>
+    /// The repository is built through <see cref="RunStartProbe" />, the suite's allow-listed
+    /// driver of a real git repository, because the proof needs two commits: a snapshot taken
+    /// on a clean tree, then one commit on top with the tree clean again.
+    /// </remarks>
+    [Fact]
+    public void PerTaskCommitsDoNotHideScopeDrift()
+    {
+        using RunStartProbe probe = RunStartProbe.Create();
+        GitSnapshot? snapshot = GitFacts.CaptureSnapshot(probe.Root);
+        Assert.NotNull(snapshot);
+
+        probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
+        string committed = Path.Combine(probe.Root, "src", "OneTask.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(committed)!);
+        File.WriteAllText(committed, "// one task's work\n", System.Text.Encoding.UTF8);
+        probe.Git("add", "-A");
+        probe.Git("commit", "-m", "test(squad): one task, one commit");
+        Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
+
+        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
+
+        Assert.Contains("src/OneTask.cs", changed);
     }
 }

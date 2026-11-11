@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-11-08
 ---
 
 # C# coding standard
@@ -33,6 +33,12 @@ Consequences worth stating:
   runs all Roslyn analyzers with `TreatWarningsAsErrors=true` under `AnalysisMode=all`,
   developer task-gates (`review.task-gates`) omit `dotnet format analyzers`, saving ~24s
   per task with zero loss of analyzer coverage.
+- **A format gate's exit 0 does not prove a project file was checked.** `dotnet format
+  --include` accepts a `.csproj`, `.props` or `.targets` path and exits 0 without formatting
+  anything, because it rewrites C# documents; a path that does not exist behaves the same way.
+  Measured on Linux, Windows and macOS for all three verbs. Those globs in a gate's `include`
+  buy **selection** — a change to one of those files makes the gate run instead of selecting
+  nothing — and never coverage of the project file itself.
 - **Persistent InspectCode AST caching.** Whole-solution ReSharper InspectCode
   (`inspectcode`) runs with `--caches-home=artifacts/inspectcode-cache` to persist AST
   caches across runs, cutting warm inspection duration by ~35% wall-clock and ~68% CPU.
@@ -135,3 +141,34 @@ markup — a path containing brackets otherwise corrupts the render or throws.
 
 Test authorship follows `<test-coding-standard>`. Language-level C# in test files follows
 this document.
+
+## Completion
+
+A finishing worker builds once, runs the test classes its change touches, and passes the format
+check. Nothing here runs the whole suite: the review council's `test` gate and CI run it, and a
+cross-cutting change is no exception. Run everything through the process watchdog, from the
+repository root.
+
+```bash
+scripts/proc-guard.sh run -- dotnet build KyberWeave.sln -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
+scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+```
+
+- **Build first, and let the later runs reuse it.** The build is where the analyzers run, so a
+  warning stops here rather than at review; `--no-build` on the test line is safe only after it.
+- **A filter names a class by its fully qualified name.** A short class name runs zero tests and
+  exits 0, so read the total and treat zero as nothing verified. A filter that matches nothing is
+  a wrong class name, not a pass.
+- **The format check is two verbs**, `whitespace` and `style`, because the council runs both as
+  blocking gates (`format-whitespace` and `format-style`). Either one failing is a finding no test
+  catches.
+- **A faster loop after one build** runs the compiled assembly directly:
+  `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "KyberWeave.Tests.<Class>"`.
+  With `--artifacts-path <dir>` the same assembly is at `<dir>/bin/KyberWeave.Tests/release/`
+  (the configuration is lowercase in that path). The
+  [test standard](../test/README.md#completion) gives the full runner contract.
+- **The watchdog refuses a full run** with exit 89 unless the caller passes `--council` or stdin is
+  a terminal. Only the review council and CI pass `--council`; a person at a terminal is not
+  refused.

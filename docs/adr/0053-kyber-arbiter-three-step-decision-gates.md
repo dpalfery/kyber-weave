@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-04
+last-reviewed: 2026-11-09
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -16,6 +16,9 @@ through a rule engine that answers in up to three steps — plain code, a decisi
 reasoning agent — enforced by harness hooks, delivered in three phases by harness group:
 Phase 1 Claude, Copilot in VS Code, Copilot CLI, and OpenCode; Phase 2 Pi, Codex, and Cursor;
 Phase 3 Kilo, Antigravity, Factory, Devin, Warp, and ZCode.
+
+Amended 2026-11-08 by the conductor run-speed programme: decision 9's changed-path basis
+becomes committed plus dirty (D44), and decision 23 adds `KW-ARB-PLANREAD-001`.
 
 ## Context
 
@@ -64,16 +67,21 @@ judgement about meaning is made without a confidence attached.
 8. **Undecidable maps by trigger family (D10).** Conductor and investigate triggers escalate
    on `undecidable`; review triggers allow and log, because lenses and refutations run as
    they do today. A plan with no parseable tasks escalates.
-9. **Review uses hooks with refutation as step 2 (D11).** Lens applicability gates the spawn
-   (skip below P(applies) 0.1); quote presence and hunk membership annotate the return; a
-   `choice` question verifies claims at confidence 0.9 or a corroborating gate skips the
-   refutation. A finding is never dropped on a model answer alone.
+9. **Review uses hooks with refutation as step 2 (D11).** Lens applicability gates the spawn (skip
+   below P(applies) 0.1). The changed-path basis is the review base against the working tree —
+   **committed plus dirty**, the form `GitFacts.GetChangedPathsSinceBase` already computes — not the
+   dirty list alone, because per-task commits are the normal case and a dirty-only basis makes a
+   committed change invisible. An empty set is **not** treated as Markdown-only: `correctness` and
+   `test-adequacy` apply unless the changed paths positively show there is no code to judge, so a
+   tree we cannot read is judged rather than skipped. Quote presence and hunk membership annotate
+   the return; a `choice` question verifies claims at confidence 0.9 or a corroborating gate skips
+   the refutation. A finding is never dropped on a model answer alone.
 10. **Gates declare `applies-when` (D12).** A gate that matches no changed path is reported
     as not applicable (`KW-REVIEW-026`), never executed, and never counted as passed or
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Eighteen shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
+12. **Nineteen shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -99,18 +107,27 @@ judgement about meaning is made without a confidence attached.
 18. **Delegation identity is explicit headers (D21, D27).** The conductor writes `PLAN_FILE:`
     and `TASK:`; code-reviewer writes `LENS:` and `REFUTE:` alongside the marker. Index
     inference is diagnosis only, never a decision input.
-19. **One-command install (D22).** `kyber-weave arbiter install --target <t>` is the install
-    path in force: it ensures `.kyber-weave/kyber-weave.yml` (reusing the `docs init` scaffold),
-    sets `arbiter.enabled: true` non-destructively, renders the target through the existing
-    Squad install pipeline, applies the provider, stores the key in the OS credential store,
-    verifies, and prints the target's trust step. It replaces the three-part sequence (`docs
-    init`, hand-edit `arbiter.enabled`, `squad install --target <t>`, `arbiter setup`). The
-    binary still ships via `install.sh`/`kyber-weave update` with `--no-arbiter`, and
-    `kyber-weave update` re-renders the arbiter hooks/scripts for registered projects with
-    `arbiter.enabled` after replacing binaries (`--no-arbiter` or an absent arbiter skips it).
-    `arbiter uninstall --target <t>` removes only Squad-owned files/blocks; key deletion is
-    opt-in (`--remove-key`). A global install renders no hooks and records
-    `arbiter-not-enforced`.
+19. **One-command install (D22).** User scope is the default for every feature that installs or
+    configures per-harness artifacts. `kyber-weave arbiter install --target <t>` installs in
+    user scope by default, and `--project` is the opt-in project-scope variant. The command
+    ensures config at project scope (`.kyber-weave/kyber-weave.yml`) with scaffolding (reusing
+    the `docs init` scaffold), while global scope writes user config `~/.kyber-weave/kyber-weave.yml`
+    without scaffolding. In both scopes, it sets `arbiter.enabled: true` non-destructively,
+    renders the target through the existing Squad install pipeline, applies the provider, stores
+    the key in the OS credential store, verifies, and prints the target's trust step. It
+    replaces the three-part sequence (`docs init`, hand-edit `arbiter.enabled`, `squad install
+    --target <t>`, `arbiter setup`). The binary still ships via `install.sh`/`kyber-weave
+    update` with `--no-arbiter`, and `kyber-weave update` re-renders the arbiter hooks/scripts
+    for registered projects with `arbiter.enabled` after replacing binaries (`--no-arbiter` or
+    an absent arbiter skips it). `arbiter uninstall --target <t>` removes only Squad-owned
+    files/blocks; key deletion is opt-in (`--remove-key`). A global install renders user-level
+    hooks in each supported harness's global hook location; a harness with no global hook uses
+    project scope only when the user chooses `--project`; a harness with no hook support falls
+    back to the Arbiter MCP server `kyber-weave-arbiter serve`. Each rendered harness is tagged
+    as `enforced-global`, `enforced-project`, `partial`, or `fallback-only`, with reason codes
+    `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness` when
+    the matrix does not fully enforce it. The install output lists exactly what was written and
+    which harnesses are enforced versus fallback-only.
 20. **Size is justified, not cut to fit (D26, D29).** Each phase documents estimated changed
     lines by area as information. Correctness comes before line-count targets; the Phase 1
     size escalation past the review ceiling is accepted.
@@ -121,6 +138,15 @@ judgement about meaning is made without a confidence attached.
     no `FILES:` header (D33): no mechanism is added for a problem that has not occurred.
 22. **One specification covers all three phases (D34).** Phase PRs land in order; a single
     closeout after Phase 3 archives the specification.
+23. **The plan-read ban is enforced at dispatch (fix 10).** `KW-ARB-PLANREAD-001` runs on the
+    `delegate` trigger. After the routing header block is removed, it asks whether the prompt names
+    a path under `config.planning-dirs`; if it does, the dispatch escalates. The routing header is
+    removed first because that block names the plan by design, so a rule reading the raw prompt
+    would fire on every dispatch. Documentation-profile targets are exempt, because a `docs-dev`
+    dispatch naming the plan at closeout is correct. It shares `PlanReadInstruction` with
+    `KW-DOC-TASKS-005`, so the prompt-time ban and the authoring-time check cannot drift apart, and
+    it may not fire where dispatch hooks are unconfirmed — a harness with no hook runs no rule, and
+    claiming otherwise would report a check that never executed.
 
 Egress follows one rule (R9): a step-1 question declares its state as named facts, and no
 fact outside those declared states leaves the machine.
@@ -144,15 +170,26 @@ fact outside those declared states leaves the machine.
 - **Phase 1 exceeds the review ceiling.** At roughly 17,900 lines of code and tests it is
   over `review.policy.max-reviewable-lines`, so the Phase 1 verdict is `NEEDS_HUMAN` on size
   as well as on reserved paths. That escalation is accepted, not worked around.
-- **Unsupported harnesses stay advisory until Phase 3.** Warp and ZCode have no hooks; the
-  MCP fallback that covers them ships last, and affected triggers record
-  `arbiter-not-enforced` meanwhile.
+- **Unsupported harnesses stay fallback-only until the matrix is verified.** Warp and ZCode have
+  no hooks, and the MCP fallback records the harness as `fallback-only` with the reason code
+  `hooks-disabled-by-harness` or `dispatch-unconfirmed` until the hook matrix is verified.
+- **Completion is the worker's own report.** A task counts as complete when its worker's
+  report reads `RESULT: PASS`, because the separate task reviewer the design named no longer
+  exists. A worker can therefore mark its own task complete; the final review still judges
+  the whole change.
 - **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
   is not committed; a fresh clone escalates dependent tasks until architect attests, after
   user confirmation, what is complete (D31).
-- **Step-1 thresholds are tuned for one model.** Shipped thresholds start conservative for
-  `jev-1.13.0`; any other model warns in `doctor` until its thresholds are tuned from the
-  recorded decision log.
+- **Step-1 thresholds are measured for Jev 1.13 and Jev 1.14.** Shipped thresholds started
+  conservative for `jev-1.13.0`. A measurement on 2026-11-09 with 120 labelled cases left
+  them unchanged and moved the default model to `jev-1.14.0`; `jev-1.13.0` stays supported.
+  OpenRouter's `typesafe/jev-1.14` and `typesafe/jev-1.13`, the ids measured, are tuned too.
+  The cases are synthetic, labelled by two Claude models, and run through OpenRouter; the
+  method and limits are in [the architecture guide](../kyber-arbiter/architecture.md). The
+  repository treats `jev-1.13-free` as the free-tier id of Jev 1.13 and it shares those
+  floors, although TypeSafe's models page, changelog and Jev 1.14 post do not list it. Any
+  other model warns in `doctor` until its thresholds are measured. The decision log cannot
+  supply that measurement yet, because it records no scores for step-1 answers.
 - **Phase PRs target an integration branch.** While the specification was open,
   `docs validate --merge-ready` reported `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2
   PRs. Each phase PR targeted the long-lived integration branch `integration/kyber-arbiter`,
@@ -160,11 +197,11 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (18 shipped), `KW-REVIEW-026` (gate not applicable), the degradation
-code `arbiter-not-enforced`, the record schemas `kyber-arbiter.decision/v1` and
-`kyber-arbiter.ledger/v1`, and the routing headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`,
-`LENS:`, and `REFUTE:` are permanent. Renaming one silently un-suppresses host tuning,
-receipts, and logs keyed on it.
+Rule ids `KW-ARB-*` (19 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+`fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
+record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
+headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, and `REFUTE:` are permanent.
+Renaming one silently un-suppresses host tuning, receipts, and logs keyed on it.
 
 ## Related
 
@@ -174,3 +211,4 @@ receipts, and logs keyed on it.
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers and gate applicability
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-ARB-*` id and `KW-REVIEW-026`
+- [ADR 0063](0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) — the tracked task file, whose prompt-time ban decision 23 enforces with the same detector

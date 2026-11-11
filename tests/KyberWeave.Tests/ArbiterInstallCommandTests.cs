@@ -1,8 +1,10 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -84,22 +86,39 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The install is project-scoped: <c>--global</c> is rejected with exit 2 before
-    /// any write, so a project install can never spray hooks into the home tree.
+    /// An explicit <c>--global</c> is accepted and behaves exactly like the default
+    /// global scope: it writes under the user home, records the target in the user
+    /// config, and exits 0. The mutually exclusive <c>--global --project</c> case is
+    /// covered by the dedicated rule-id test.
     /// </summary>
     [Fact]
-    public void Install_GlobalScope_IsRejectedWithExitTwo()
+    public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Global = true }));
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+                Global = true,
+            }));
 
-        Assert.Equal(2, execution.ExitCode);
+        Assert.Equal(0, execution.ExitCode);
         Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(_store.Writes);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
+
+        string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
+        Assert.True(Directory.Exists(globalRoot), "the explicit global install should write beneath the target's global root");
+
+        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -114,7 +133,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true }));
 
         Assert.Equal(0, execution.ExitCode);
         string config = File.ReadAllText(ConfigPath(host));
@@ -142,6 +161,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -196,6 +216,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
         CommandExecution second = Capture(() => command.Execute(
             null!,
@@ -205,6 +226,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "systemone",
                 ArbiterKey = key,
+                Project = true,
             }));
 
         Assert.Equal(0, first.ExitCode);
@@ -234,7 +256,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
         Assert.Equal(0, execution.ExitCode);
         string config = File.ReadAllText(ConfigPath(host));
@@ -279,6 +301,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Provider = "systemone",
                 ArbiterKey = key,
                 Yes = true,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -290,6 +313,149 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             StringComparison.Ordinal);
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
         Assert.Equal(key, _store.Read(TypeSafeOrigin));
+    }
+
+    /// <summary>
+    /// A default install writes under the user home (global scope) rather than the project
+    /// root, and it records the harness in the user config so later refreshes know which
+    /// global hooks to maintain. The command stays in the home tree even when the project
+    /// path is set, because a global install is intentionally user-scoped.
+    /// </summary>
+    [Fact]
+    public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
+    {
+        string host = NewDir("install-global-default");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
+
+        string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
+        Assert.True(Directory.Exists(globalRoot), "the default install should write beneath the target's global root");
+
+        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A default global install must create the user-level config but must not scaffold the
+    /// injected home itself, because the home is a runtime user directory and not the project root
+    /// the docs scaffolder is meant to populate.
+    /// </summary>
+    [Fact]
+    public void Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
+    {
+        string host = NewDir("install-global-default-empty-home");
+        Assert.False(File.Exists(UserHostConfig.GetPath(_home.Path)));
+        Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")));
+        Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")));
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.True(File.Exists(UserHostConfig.GetPath(_home.Path)), "the default global install should create the user config");
+        Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")), "a global install must not scaffold docs under the home directory");
+        Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")), "a global install must not scaffold AGENTS.md under the home directory");
+    }
+
+    /// <summary>
+    /// The D13 table is shaped for each configured harness: the target token, the tier, the
+    /// exact path written, the reason code and the trust step or off-switch that still needs
+    /// a user action. Output must be informative even when the harness is a fallback-only or
+    /// partial case under global scope.
+    /// </summary>
+    [Fact]
+    public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
+    {
+        string host = NewDir("install-d13");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+
+        ArbiterInstallCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings
+            {
+                Path = host,
+                Target = "claude",
+                Provider = "none",
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("tier", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reason", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("warp", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("copilot", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("chat.useHooks", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// <c>--path</c> is only legal for an explicit project install. A bare global install must
+    /// reject it before any side effects so the command cannot accidentally write a project file
+    /// or user config from the wrong scope.
+    /// </summary>
+    [Fact]
+    public void Install_PathWithoutProject_ExitsTwoWithScopeError()
+    {
+        string host = NewDir("install-path-without-project");
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
+            });
+            return app.Run(["arbiter", "install", "--target", "claude", "--path", host]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("--project", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--path", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The scope flags are mutually exclusive: a global install cannot also opt into project
+    /// scope. The command must fail with the install-rule id rather than silently picking one.
+    /// </summary>
+    [Fact]
+    public void Install_GlobalAndProject_ExitsTwoWithKwArbInstall001()
+    {
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandApp app = new();
+            app.Configure(config =>
+            {
+                config.UseStrictParsing();
+                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
+            });
+            return app.Run(["arbiter", "install", "--target", "claude", "--global", "--project"]);
+        });
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("KW-ARB-INSTALL-001", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -310,6 +476,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
                 Target = "kilo",
                 Provider = "none",
                 DryRun = true,
+                Project = true,
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -334,7 +501,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         ArbiterInstallCommand command = new();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("block mapping", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -368,8 +535,71 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(host));
     }
 
+    /// <summary>
+    /// Three block-bearing targets installed in turn into one home all exit 0, and the single
+    /// global receipt records one <c>hooks.json</c> block per target. This is the reported
+    /// defect: the second install exited 1 with "Squad receipt block path 'hooks.json' for target
+    /// 'cursor' is not a unique portable deployment path." and rolled back, so one home could
+    /// hold only one of cursor, codex, factory and antigravity. Each install prepends the target
+    /// it just wrote, so the blocks are stored in the reverse of installation order; the contract
+    /// is the set of blocks one receipt holds, never their sequence, and a target recorded twice
+    /// has to fail rather than collapse into that set.
+    /// </summary>
+    [Fact]
+    public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
+    {
+        string host = NewDir("install-three-global-blocks");
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
+        ArbiterInstallCommand command = new();
+
+        CommandExecution cursor = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "cursor", Provider = "none" }));
+        AssertInstalled(cursor, "cursor");
+
+        CommandExecution codex = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "codex", Provider = "none" }));
+        AssertInstalled(codex, "codex");
+
+        CommandExecution factory = Capture(() => command.Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "factory", Provider = "none" }));
+        AssertInstalled(factory, "factory");
+
+        string receiptPath = Path.Combine(
+            _home.Path,
+            ".kyber-weave",
+            "squad",
+            "global",
+            "squad.receipt.json");
+        Assert.True(File.Exists(receiptPath), $"Expected one global receipt at '{receiptPath}'.");
+
+        SquadStateStore reader = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "cli-receipt-reader")));
+        SquadReceipt receipt = reader.DeserializeReceipt(File.ReadAllText(receiptPath));
+
+        Assert.Equal(SquadDeploymentScope.Global, receipt.Scope);
+        Assert.Equal(3, receipt.Blocks.Count);
+
+        Dictionary<string, string> pathByTarget = new(StringComparer.Ordinal);
+        Assert.All(
+            receipt.Blocks,
+            block => Assert.True(
+                pathByTarget.TryAdd(block.Target, block.RelativePath),
+                $"The receipt holds more than one block for target '{block.Target}'."));
+
+        string[] expectedTargets = ["codex", "cursor", "factory"];
+        Assert.Equal(expectedTargets, pathByTarget.Keys.Order(StringComparer.Ordinal));
+        Assert.All(pathByTarget.Values, path => Assert.Equal("hooks.json", path));
+    }
+
     private static string ConfigPath(string host) =>
         Path.Combine(host, ".kyber-weave", "kyber-weave.yml");
+
+    private static void AssertInstalled(CommandExecution execution, string target) =>
+        Assert.True(
+            execution.ExitCode == 0,
+            $"The global '{target}' install exited {execution.ExitCode}: {execution.Output}");
 
     private string NewDir(string name)
     {

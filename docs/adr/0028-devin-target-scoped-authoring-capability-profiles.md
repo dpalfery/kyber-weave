@@ -4,7 +4,7 @@ title: Devin Target-Scoped Capability Profiles for Headless Authoring Roles, wit
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-09
 component: KyberSquad
 ---
 
@@ -37,6 +37,15 @@ execute grant — any client of that server may call the tools. A shell is not a
 not permission to implement. `architect-devin` and `product-planning-devin` still grant
 `process.execute: allow` on Devin so those roles can initialise a missing destination before
 editing; `architect-copilot` is unchanged.
+
+Amended 2026-11-09: the shared `architect` profile now holds `process.execute: allow` on every
+target, so the architect can run `kyber-weave docs validate . --merge-ready`, `kyber-weave docs
+drift .` and `codegraph explore "…"` in a run's worktree, where the MCP servers (bound to the
+canonical checkout) cannot see its plan. The planning-only boundary is unchanged: writes stay
+scoped to the plan, spec and todo directories and the Arbiter classification is untouched.
+`architect-devin` and `architect-copilot` now equal the shared profile. Decision 2, the
+Alternatives and the Consequences are updated to match; the earlier 2026-10-28 amendment text
+above records the position before this change.
 
 ## Context
 
@@ -84,8 +93,9 @@ routed them through read-only MCP tools on every target. The Devin-scoped profil
 
 2. **`architect` and `product-owner` are the only roles that name one.** `architect-devin` and
    `product-planning-devin` mirror their shared profiles exactly except for
-   `process.execute: allow`, which the shared profiles hold as `deny` for both `architect` and
-   `product-planning`. That Devin grant is for initialising a missing file before edit, not for
+   `process.execute: allow`. The shared `product-planning` profile holds `deny`; the shared
+   `architect` profile held `deny` until the 2026-11-09 amendment and now holds `allow`, so
+   `architect-devin` equals it. That Devin grant is for initialising a missing file before edit, not for
    the documentation gates — those are the MCP tools
    `docs_validate_governed_document_schema` and
    `docs_detect_drift_between_documents_and_code` (amended 2026-10-28). `docs-dev`
@@ -125,8 +135,10 @@ routed them through read-only MCP tools on every target. The Devin-scoped profil
 ## Alternatives rejected
 
 - **Granting `process.execute: allow` on the shared `architect` and `product-planning` profiles.**
-  Fixes Devin and widens every other target with it, including the ones where the grant is
-  deliberately not a shell. `architect-copilot` already exists to avoid exactly this.
+  Rejected on 2026-10-03 because it widened every target. For `product-planning` the rejection
+  stands. For `architect` it was reversed on 2026-11-09: the MCP servers cannot see a worktree, so
+  the shell is needed on every target, and the widening is accepted with the compensating
+  controls recorded in the architecture document.
 - **Keeping the roles write-only and relying on the conductor alone.** Leaves `architect`
   unable to run its documentation gates autonomously on Devin before the MCP tools existed.
   The pre-creation protocol is kept as the fallback, not as the mechanism. The gates
@@ -156,10 +168,11 @@ routed them through read-only MCP tools on every target. The Devin-scoped profil
   accepted because the alternative is a harness that cannot create the artifact the role exists to
   write. `architect` and `product-owner` use the shell to initialise a missing destination before
   editing; `docs-dev` uses it to archive and run its checks. The conductor pre-creation protocol stays as the fallback if a write
-  still fails on a nonexistent file. The shared profile's narrower intent — `process.execute:
-  deny` on the shared `architect` profile on every target except Devin file-creation via
-  `architect-devin`, and documentation gates through MCP rather than a shell — is preserved on
-  non-Devin targets and in the lattice record.
+  still fails on a nonexistent file. The shared `product-planning` profile keeps
+  `process.execute: deny` on every target except Devin file-creation via `product-planning-devin`.
+  The shared `architect` profile no longer does: since 2026-11-09 it holds `allow` on every target,
+  an accepted widening whose limits are the agent body's command list and the Arbiter's
+  planning-only classification, not the lattice.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
   contract. It is the one claim here to re-check against a real install if Devin's tool surface
   changes; ADR 0025's real-install confirmations are still open on the same build.

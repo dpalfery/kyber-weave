@@ -264,11 +264,12 @@ public sealed class SquadDocsHarvestContractTests
     /// <summary>
     /// The execution contract records the closeout run: a run record, the DOCS_REVIEW
     /// rows, the Q2 CLOSEOUT_COMPLETE marker, and the PR description that carries them.
+    /// The rules live in the shared execution skill both entry points load.
     /// </summary>
     [Fact]
     public void ExecutionAndReviewCloseoutRecordsRunRecordAndDocsReview()
     {
-        string text = ReadProduct("agents", "conductor", "references", "execution-and-review.md");
+        string text = ReadProduct("skills", "delivery-execution", "SKILL.md");
 
         AssertAll(text, "run record", "DOCS_REVIEW", "CLOSEOUT_COMPLETE", "PR description");
     }
@@ -325,7 +326,12 @@ public sealed class SquadDocsHarvestContractTests
             .FirstOrDefault(line => line.StartsWith("agents:", StringComparison.Ordinal))
             ?.Trim();
 
-        Assert.Equal("agents: ['bug-crusher-investigator', 'docs-dev']", actual);
+        Assert.Equal(
+            "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
+            "'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', " +
+            "'review-lens', 'review-triage', 'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', " +
+            "'typescript-dev']",
+            actual);
     }
 
     /// <summary>
@@ -500,7 +506,7 @@ public sealed class SquadDocsHarvestContractTests
         [
             Path.Combine("agents", "docs-dev.md"),
             Path.Combine("agents", "conductor.md"),
-            Path.Combine("agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine("skills", "delivery-execution", "SKILL.md"),
             Path.Combine("agents", "conductor", "references", "autonomy.md"),
             Path.Combine("agents", "conductor", "references", "plan-path.md"),
             Path.Combine("agents", "conductor", "references", "spec-path.md"),
@@ -524,8 +530,9 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// docs-dev holds a shell only for the four command classes its packet names: archival
-    /// <c>git mv</c>, the two documentation checks, and targeted doc-pinning tests. The body
+    /// docs-dev holds a shell only for the five command classes its packet names: archival
+    /// <c>git mv</c>, the artifact task file's <c>git rm</c>, the two documentation checks, and
+    /// targeted doc-pinning tests. The body
     /// also states the never-commit-or-push rule and that docs-dev is the only archiver, so
     /// a later edit cannot widen the instruction-scoped boundary silently.
     /// </summary>
@@ -551,7 +558,7 @@ public sealed class SquadDocsHarvestContractTests
             .Split('\n')
             .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(4, bullets.Length);
+        Assert.Equal(5, bullets.Length);
 
         // Every backticked span with a space is a command. "dotnet run" is the invocation-form
         // selector the validate and drift bullets name ("or the same `dotnet run` form"), not a
@@ -568,8 +575,9 @@ public sealed class SquadDocsHarvestContractTests
         string[] allowedCommands =
         [
             "dotnet run",
-            "dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready",
+            "dotnet run --project <the CLI project> -- docs validate . --merge-ready",
             "git mv",
+            "git rm",
             "kyber-weave docs drift .",
             "kyber-weave docs validate . --merge-ready",
         ];

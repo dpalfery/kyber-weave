@@ -130,7 +130,7 @@ public sealed class SquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => ResolveProjectStateDirectory(targetRoot),
-            SquadDeploymentScope.Global => ResolveGlobalStateDirectory(),
+            SquadDeploymentScope.Global => ResolveGlobalStateDirectory(targetRoot),
             SquadDeploymentScope.Instance => ResolveInstanceStateDirectory(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
@@ -442,13 +442,11 @@ public sealed class SquadStateStore
 
     /// <summary>
     /// Serializes a receipt as stable, indented JSON with portable relative paths. A Global
-    /// receipt is always written on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
-    /// plus its required <c>layout</c> — since v2 exists for Global receipts only (A3); a
-    /// project receipt without blocks is written byte-identical to every receipt this store
-    /// has ever produced, on <see cref="ReceiptSchemaV1"/> with no <c>layout</c> field; a
-    /// project receipt that owns at least one block is written on
-    /// <see cref="ReceiptSchemaV3"/> — the v1 project field set plus its required
-    /// <c>blocks</c>. The write schema is derived from <see cref="SquadReceipt.Scope"/>
+    /// receipt without blocks stays on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
+    /// plus its required <c>layout</c> — while every receipt that owns at least one hook block is
+    /// serialized on <see cref="ReceiptSchemaV3"/>; a project block receipt stays byte-identical to
+    /// the project contract, and a global block receipt uses the same schema while preserving the
+    /// home-root layout. The write schema is derived from <see cref="SquadReceipt.Scope"/>
     /// and <see cref="SquadReceipt.Blocks"/> alone, never from the schema string already on
     /// <paramref name="receipt"/> — so a receipt built directly through the record's
     /// constructor upgrades to v2 or v3 the moment it is written for the scope and content
@@ -460,13 +458,13 @@ public sealed class SquadStateStore
         ValidateReceipt(receipt);
 
         bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
-        bool isV3 = !isGlobal && receipt.Blocks.Count > 0;
+        bool isV3 = receipt.Blocks.Count > 0 && receipt.Scope != SquadDeploymentScope.Instance;
 
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, ReceiptWriterOptions))
         {
             writer.WriteStartObject();
-            writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : isV3 ? ReceiptSchemaV3 : ReceiptSchemaV1);
+            writer.WriteString("schema", isV3 ? ReceiptSchemaV3 : isGlobal ? ReceiptSchemaV2 : ReceiptSchemaV1);
             writer.WriteString("scope", receipt.Scope switch
             {
                 SquadDeploymentScope.Project => "project",
@@ -561,8 +559,9 @@ public sealed class SquadStateStore
         {
             (true, _, _) => SquadDeploymentScope.Global,
             (_, true, "project") => SquadDeploymentScope.Project,
+            (_, true, "global") => SquadDeploymentScope.Global,
             (_, true, _) => throw new InvalidDataException(
-                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only, but found " +
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project or global scope only, but found " +
                 $"scope '{scopeText ?? "null"}'."),
             (_, _, "project") => SquadDeploymentScope.Project,
             (_, _, "global") => SquadDeploymentScope.Global,
@@ -593,7 +592,7 @@ public sealed class SquadStateStore
                 : [];
 
         SquadReceiptLayout layout;
-        if (isV2)
+        if (isV2 || (isV3 && scope == SquadDeploymentScope.Global))
         {
             string? layoutText = root.GetProperty("layout").GetString();
             layout = layoutText switch
@@ -668,7 +667,7 @@ public sealed class SquadStateStore
         return ResolveStateFile(targetRoot, scope, LockFileName);
     }
 
-    internal string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope)
+    public string ResolveReceiptPath(string targetRoot, SquadDeploymentScope scope)
     {
         return ResolveStateFile(targetRoot, scope, ReceiptFileName);
     }
@@ -799,8 +798,19 @@ public sealed class SquadStateStore
         return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
-    private string ResolveGlobalStateDirectory()
+    private string ResolveGlobalStateDirectory(string? targetRoot = null)
     {
+        if (!string.IsNullOrWhiteSpace(targetRoot))
+        {
+            string candidateRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot));
+            string candidateDir = Path.Combine(candidateRoot, GlobalStateRelativeDirectory);
+            if (File.Exists(Path.Combine(candidateDir, ReceiptFileName)) ||
+                File.Exists(Path.Combine(candidateDir, LockFileName)))
+            {
+                return ResolveDirectoryUnder(candidateRoot, GlobalStateRelativeDirectory);
+            }
+        }
+
         return ResolveDirectoryUnder(ResolveHomeStateRoot(), GlobalStateRelativeDirectory);
     }
 
@@ -885,7 +895,7 @@ public sealed class SquadStateStore
                 ResolveProjectStateDirectory(targetRoot),
                 fileName),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
-                ResolveGlobalStateDirectory(),
+                ResolveGlobalStateDirectory(targetRoot),
                 fileName),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
@@ -1215,10 +1225,10 @@ public sealed class SquadStateStore
                 $"Squad receipt schema must be '{ReceiptSchemaV1}', '{ReceiptSchemaV2}' or '{ReceiptSchemaV3}'.");
 
         bool isV3 = string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
-        if (isV3 && receipt.Scope != SquadDeploymentScope.Project)
+        if (isV3 && receipt.Scope is not (SquadDeploymentScope.Project or SquadDeploymentScope.Global))
         {
             throw new InvalidDataException(
-                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only.");
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project or global scope only.");
         }
 
         if (isV3 && receipt.Blocks.Count == 0)
@@ -1259,12 +1269,13 @@ public sealed class SquadStateStore
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
 
-        // Uniqueness is scoped the way the deployment engine scopes physical files. Project
-        // scope writes every target beneath the one deployment root, so two targets claiming
-        // one path would claim one physical file and the path alone must be unique. Global
-        // scope writes beneath each target's own root, so the same relative path legitimately
-        // appears once per target and only (target, path) must be unique — mirroring
-        // SquadDeploymentPlan's deployment identity.
+        // Uniqueness is scoped the way the deployment engine scopes physical files. Project and
+        // instance scope write every target beneath the one deployment root, so two targets
+        // claiming one path would claim one physical file and the path alone must be unique.
+        // Global scope writes beneath each target's own root, so the same relative path
+        // legitimately appears once per target and only (target, path) must be unique. Both this
+        // loop and the block loop derive that identity from StoredDeploymentIdentity, so a stored
+        // file and a stored block can never disagree about which physical file they claim.
         HashSet<string> deployedIdentities = new(StringComparer.OrdinalIgnoreCase);
         foreach (SquadOwnedFile? file in receipt.Files)
         {
@@ -1294,9 +1305,8 @@ public sealed class SquadStateStore
             ValidateDigest(file.Sha256, "file digest");
             ValidateCanonicalTarget(file.Target, "file target");
 
-            string deploymentIdentity = receipt.Scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
-                ? portableIdentity
-                : SquadDeploymentPlan.DeployedFileIdentity(file.Target, portableIdentity);
+            string deploymentIdentity =
+                StoredDeploymentIdentity(receipt.Scope, file.Target, portableIdentity);
             if (!deployedIdentities.Add(deploymentIdentity))
                 throw new InvalidDataException(
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
@@ -1351,10 +1361,12 @@ public sealed class SquadStateStore
 
     /// <summary>
     /// Validates the owned blocks the way owned files are validated: every block names a
-    /// portable canonical path for an exact canonical target, every entry carries a
-    /// JSON-pointer container and a digest, and both levels are unique. Project scope
-    /// writes every target beneath the one deployment root, so the path alone is the
-    /// block identity — blocks are project-only, so no per-target identity applies.
+    /// portable canonical path for an exact canonical target, every entry carries a JSON-pointer
+    /// container and a digest, and one block cannot claim the same container twice. A block's
+    /// deployment identity follows the same scope-aware rule a stored file's does — the portable
+    /// path alone under project and instance scope, the target beside the path under global
+    /// scope — because global deployment writes each target beneath its own root, where four of
+    /// the six formats legitimately name the same bare <c>hooks.json</c>.
     /// </summary>
     private static void ValidateReceiptBlocks(SquadReceipt receipt)
     {
@@ -1391,7 +1403,8 @@ public sealed class SquadStateStore
 
             ValidateCanonicalTarget(block.Target, "block target");
 
-            if (!blockIdentities.Add(portableIdentity))
+            if (!blockIdentities.Add(
+                    StoredDeploymentIdentity(receipt.Scope, block.Target, portableIdentity)))
             {
                 throw new InvalidDataException(
                     $"Squad receipt block path '{block.RelativePath}' for target '{block.Target}' " +
@@ -1416,6 +1429,26 @@ public sealed class SquadStateStore
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Derives the deployment identity of one stored path — a deployed file's or an owned
+    /// block's — from the scope it was written in. Project and instance scope deploy every target
+    /// beneath the one root, so the portable path alone identifies the physical file. Global
+    /// scope deploys each target beneath its own root, so the same portable path names a
+    /// different physical file per target and the target is part of the identity. Both receipt
+    /// loops call this one rule so they cannot disagree, and it mirrors
+    /// <see cref="SquadDeploymentPlan.DeployedFileIdentity" />, the identity the deployment engine
+    /// itself uses.
+    /// </summary>
+    private static string StoredDeploymentIdentity(
+        SquadDeploymentScope scope,
+        string target,
+        string portablePath)
+    {
+        return scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
+            ? portablePath
+            : SquadDeploymentPlan.DeployedFileIdentity(target, portablePath);
     }
 
     private static void ValidateCanonicalTarget(string? value, string fieldName)
@@ -1532,9 +1565,12 @@ public sealed class SquadStateStore
     /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
     /// (present only if the receipt was hand-authored to include it — always Global, per A3)
     /// and a required <c>layout</c> added, restricted to its two canonical tokens; schema v3
-    /// is the exact v1 project field set plus a required <c>blocks</c>, with <c>scope</c>
-    /// restricted to <c>project</c>. A reader that predates v3 falls into the v1 branch and
-    /// refuses the unknown <c>blocks</c> field outright rather than misreading it.
+    /// is the v1 field set plus a required <c>blocks</c>, with <c>scope</c> allowed to be
+    /// <c>project</c> or <c>global</c>, <c>layout</c> and <c>homeFiles</c> permitted beside it,
+    /// and a canonical <c>layout</c> required once the scope is <c>global</c> — the shape rc.20
+    /// writes for a global install that owns hook blocks. A reader that predates v3 falls into
+    /// the v1 branch and refuses the unknown <c>blocks</c> field outright rather than misreading
+    /// it.
     /// </summary>
     private static void ValidateReceiptJsonShape(JsonElement root)
     {
@@ -1625,8 +1661,23 @@ public sealed class SquadStateStore
         RequireExactJsonFields(
             root,
             ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files", "blocks"],
-            "receipt");
-        RequireCanonicalJsonEnum(root, "scope", ["project"], "receipt");
+            "receipt",
+            ["layout", "homeFiles"]);
+
+        string? scopeToken = root.GetProperty("scope").GetString();
+        if (scopeToken is not ("project" or "global"))
+            throw new InvalidDataException(
+                $"Squad receipt schema '{ReceiptSchemaV3}' accepts scopes 'project' or 'global' only, but found " +
+                $"'{scopeToken ?? "null"}'.");
+
+        if (string.Equals(scopeToken, "global", StringComparison.Ordinal))
+        {
+            JsonElement layout = root.GetProperty("layout");
+            string? layoutToken = layout.ValueKind == JsonValueKind.String ? layout.GetString() : null;
+            if (layoutToken is not ("single-root" or "per-target-roots"))
+                throw new InvalidDataException(
+                    "Squad receipt field 'layout' must be 'single-root' or 'per-target-roots' for a global v3 receipt.");
+        }
     }
 
     private static void ValidateReceiptJsonShapeV2(JsonElement root)

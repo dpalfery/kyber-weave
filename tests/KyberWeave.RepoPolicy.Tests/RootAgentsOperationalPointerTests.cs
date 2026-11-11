@@ -117,6 +117,72 @@ public sealed class RootAgentsOperationalPointerTests
         Assert.True(rows >= 1, "The Where to go next table has no KyberDash row.");
     }
 
+    /// <summary>
+    /// Only the review council and CI run the full suite. An exception for cross-cutting code
+    /// starts the very runs the rule exists to stop, and a bare <c>review gates .</c> is one of
+    /// them: its <c>test</c> gate has no filter, so any .NET change runs the whole product suite.
+    /// </summary>
+    [Fact]
+    public void NoDevAgentRunsTheFullSuiteAndCrossCuttingIsNoException()
+    {
+        // Flattened so a re-wrap of the paragraph cannot break a phrase across two lines.
+        string commands = System.Text.RegularExpressions.Regex.Replace(
+            Section(ReadAgents(), "## Commands", "## Exploration order"), @"\s+", " ");
+
+        Assert.True(
+            commands.Contains("No dev agent runs the full test suite", StringComparison.Ordinal),
+            "The Commands section must state that no dev agent runs the full test suite.");
+        Assert.True(
+            commands.Contains("a cross-cutting change is no exception", StringComparison.Ordinal),
+            "The Commands section must say a cross-cutting change is no exception.");
+        Assert.False(
+            commands.Contains("Run `--full` locally", StringComparison.Ordinal),
+            "The Commands section must not tell anyone to run --full locally.");
+        Assert.False(
+            commands.Contains("review gates . --out", StringComparison.Ordinal),
+            "The Commands section must not hand dev agents a command that runs the test gate.");
+    }
+
+    /// <summary>
+    /// The script prints its last line to every agent that used it, so advice there is an
+    /// instruction. And <c>-class</c> matches the fully qualified name, so <c>Docs*</c> runs nothing.
+    /// </summary>
+    [Fact]
+    public void FastLoopNeitherOffersAFullRunNorDocumentsAClassPatternThatMatchesNothing()
+    {
+        string script = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+
+        Assert.False(
+            script.Contains("Use --full only for", StringComparison.Ordinal),
+            "fast-loop.sh must not end a clean run by offering --full.");
+        Assert.False(
+            script.Contains("--class Docs*", StringComparison.Ordinal),
+            "fast-loop.sh must not document a --class pattern with no namespace.");
+    }
+
+    /// <summary>
+    /// The root file points at these documents for the commands instead of carrying them, so
+    /// a command dropped from one of them leaves an empty target.
+    /// </summary>
+    [Theory]
+    [InlineData("docs/standards/test/README.md", "FullyQualifiedName~")]
+    [InlineData("tests/KyberWeave.RepoPolicy.Tests/AGENTS.md", "FullyQualifiedName~")]
+    [InlineData("dash/AGENTS.md", "test:related")]
+    [InlineData("dash/tray/AGENTS.md", "cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '")]
+    public void EachAreaDocumentHoldsTheTargetedCommandTheRootFilePointsAt(string relativePath, string command)
+    {
+        string commands = Section(ReadAgents(), "## Commands", "## Exploration order");
+        string target = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+
+        Assert.True(
+            commands.Contains(relativePath, StringComparison.Ordinal),
+            $"The Commands section must point at {relativePath}.");
+        Assert.True(
+            target.Contains(command, StringComparison.Ordinal),
+            $"{relativePath} must hold the targeted command '{command}'.");
+    }
+
     private static string ReadAgents()
     {
         Assert.True(File.Exists(AgentsPath), $"Root instruction file '{AgentsPath}' is missing.");

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 
@@ -23,11 +24,31 @@ public sealed class SquadWorktreeMcpContractTests
 {
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
+    /// <summary>
+    /// The shared execution contract, which both entry points load. It is a canonical skill rather
+    /// than a conductor reference so a fallback target receives it.
+    /// </summary>
     private const string ConductorExecutionPath =
-        "products/kyber-squad/agents/conductor/references/execution-and-review.md";
+        "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string McpRunbookDocPath = "docs/docgraph/mcp-runbook.md";
+
+    private const string BugCrusherSkillPath = "products/kyber-squad/skills/bug-crusher/SKILL.md";
+
+    /// <summary>
+    ///     The condition that starts the second route: the harness gives the orchestrator no way to run a
+    ///     command itself. The nouns are the ones the shipped prose may use for that capability.
+    /// </summary>
+    private static readonly Regex NoShellCondition = new(
+        @"(?i)\b(?:no|without|lacks?|has no|have no)\b[^\r\n]{0,60}" +
+        @"\b(?:shell|terminal|subprocess|bash|command execution|command runner)\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Handing the step to a worker instead of running it in the orchestrator's own context.</summary>
+    private static readonly Regex DispatchRoute = new(
+        @"(?i)\bdispatc(?:h|hes|hing|hed)\b",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static string ReadRepoFile(string relativePath)
     {
@@ -73,6 +94,24 @@ public sealed class SquadWorktreeMcpContractTests
     }
 
     /// <summary>
+    ///     The conductor's "never block a run" line and its instruction to run the run-start check only
+    ///     agree when the check has a second route: run it in the harness's shell when the orchestrator
+    ///     has one, and dispatch a worker to run it when the harness gives the orchestrator none. Both
+    ///     entry points state that route, so neither has to choose between blocking the run and skipping
+    ///     the check.
+    /// </summary>
+    [Theory]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(BugCrusherSkillPath)]
+    public void RunStartSurfaces_RouteTheCheckThroughTheShellOrDispatchSeam(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        Assert.Matches(NoShellCondition, content);
+        Assert.Matches(DispatchRoute, content);
+    }
+
+    /// <summary>
     ///     Architecture and DocGraph MCP runbook documentation must specify the worktree MCP canonical binding
     ///     protocol and the prohibition against <c>.codegraph</c> symlinks.
     /// </summary>
@@ -89,6 +128,88 @@ public sealed class SquadWorktreeMcpContractTests
         Assert.Matches(
             @"(?i)\b(?:ban|prohibit|reject|forbid)\b[^\r\n]*\.codegraph\s+symlink\w*\b",
             content);
+    }
+
+    /// <summary>
+    ///     The execution contract states that a new worktree indexes itself, because a worktree does not see
+    ///     the canonical checkout's index.
+    /// </summary>
+    /// <remarks>
+    ///     A git worktree has its own working tree and its own <c>.codegraph/</c>; the canonical index is not
+    ///     visible from it. A worker that assumed otherwise queried an index describing files it was not
+    ///     editing and got confident answers about the wrong tree. <c>doctor --ensure</c> is the step that
+    ///     gives the worktree an index of its own, and it is the one command every worker runs first.
+    /// </remarks>
+    [Fact]
+    public void ExecutionContractStatesThatAWorktreeIndexesItself()
+    {
+        string content = ReadRepoFile(ConductorExecutionPath);
+
+        Assert.Contains("doctor --ensure", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bworktree\b[^\r\n]*\b(?:index\w*|own)\b", content);
+    }
+
+    /// <summary>
+    ///     The execution contract sends shell roles to <c>codegraph explore</c> in the worktree's own shell,
+    ///     rather than to the MCP query bound to the canonical checkout.
+    /// </summary>
+    /// <remarks>
+    ///     D24/D25: the MCP servers stay bound to the canonical checkout on purpose, so their answers
+    ///     describe that tree. A role with a shell asks its own worktree instead; a role without one is given
+    ///     the worktree's absolute path in its packet and passes it as <c>codegraph_explore</c>'s
+    ///     <c>projectPath</c>. This is the rule that keeps a worker from believing a branch it is not on.
+    /// </remarks>
+    [Fact]
+    public void ExecutionContractSendsShellRolesToTheWorktreeIndex()
+    {
+        string content = ReadRepoFile(ConductorExecutionPath);
+
+        Assert.Contains("codegraph explore", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bcanonical\b[^\r\n]*(?:bound|checkout|path)\b", content);
+    }
+
+    /// <summary>
+    ///     Shell-less roles ask the worktree's own index through <c>projectPath</c>, and no shipped role or
+    ///     skill tells them to read the worktree directly instead.
+    /// </summary>
+    /// <remarks>
+    ///     ADR 0061 decision 7, amended 2026-11-10: the old rule sent shell-less workers to raw file reads
+    ///     because the MCP server was bound to the canonical checkout, and agents read it as "do not use
+    ///     CodeGraph in a worktree". <c>codegraph_explore</c> takes a <c>projectPath</c> that answers from
+    ///     the nearest index at or above it, so the worktree's own index is reachable without a shell.
+    /// </remarks>
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData("products/kyber-squad/agents/review-lens.md")]
+    [InlineData("products/kyber-squad/agents/review-triage.md")]
+    [InlineData("products/kyber-squad/agents/azure-reader.md")]
+    [InlineData("products/kyber-squad/agents/research-agent.md")]
+    [InlineData("products/kyber-squad/agents/product-owner.md")]
+    [InlineData("products/kyber-squad/skills/product-owner/SKILL.md")]
+    [InlineData("products/kyber-squad/agents/architect.md")]
+    [InlineData(ArchitectureDocPath)]
+    [InlineData(McpRunbookDocPath)]
+    [InlineData("docs/kyber-squad/onboarding.md")]
+    public void ShellLessRolesAskTheWorktreeIndexThroughProjectPath(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+
+        // The positive shape, as one pattern: the worktree path is passed as projectPath, which
+        // answers from the worktree's own index. Prose is hard-wrapped, so gaps may cross lines.
+        Assert.Matches(@"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?`projectPath`[\s\S]{0,200}?\bown index\b", content);
+
+        // The fallback is qualified, and the failure modes are named.
+        Assert.Matches(@"(?i)\bdirect(?:ly| reads?)\b[\s\S]{0,60}?\bonly when\b[\s\S]{0,60}?\bcan(?:not)? answer\b", content);
+        Assert.Contains("not-indexed", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"(?i)`(?:projectPath|cli): (?:error|not-indexed)`", content);
+        Assert.Contains("`projectPath: wrong-branch <got> vs <wanted>`", content, StringComparison.Ordinal);
+
+        // The old rule in any of its phrasings: a direct read that is not the qualified fallback.
+        Assert.DoesNotMatch(
+            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?|a file|files|the file|the named\s+file)\s+directly\b(?!\s+only\s+when)",
+            content);
+        Assert.DoesNotMatch(@"(?i)shell-less role reads the worktree path|Direct reads of that path\.", content);
     }
 
     /// <summary>

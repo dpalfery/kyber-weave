@@ -3,24 +3,30 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the test developer's Arbiter contract (packet 7.4): the completion digest
-/// carries a machine-readable <c>RED_EVIDENCE:</c> line the in-flight ledger can
-/// parse for the <c>KW-ARB-MODE-001</c> fact <c>ledger.red-evidence</c> — the
-/// runner filter, the failing tests and the reason, or <c>none</c> when the work
-/// recorded no RED run.
+/// Pins the test developer's Arbiter contract (packet 7.4): the completion digest carries a
+/// machine-readable <c>RED_EVIDENCE:</c> line the in-flight ledger can parse for the
+/// <c>KW-ARB-MODE-001</c> fact <c>ledger.red-evidence</c> — the runner filter, the failing
+/// tests and the reason, or <c>none</c> when the work recorded no RED run.
 /// </summary>
+/// <remarks>
+/// The digest template is a report format, and report formats belong to the one skill a worker
+/// loads when it finishes: slices of this programme moved them out of each agent body so the same
+/// template is not maintained once per agent (the rule map's "Report formats" row). The strings
+/// are pinned exactly as they were; only their home moved, and
+/// <c>WorkerRuleSingleHomeTests</c> keeps them from growing a second copy.
+/// </remarks>
 public sealed class ArbiterTestDevContractTests
 {
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private static string TestDevContract =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "test-dev.md"));
+    private static string TaskGateContract =>
+        File.ReadAllText(Path.Combine(ProductRoot, "skills", "task-gate", "SKILL.md"));
 
     [Fact]
     public void CompletionDigest_CarriesTheMachineReadableRedEvidenceLine()
     {
-        string contract = TestDevContract;
+        string contract = TaskGateContract;
 
         Assert.Contains(
             "RED_EVIDENCE: <runner filter> — <failing tests> — <reason>",
@@ -32,7 +38,7 @@ public sealed class ArbiterTestDevContractTests
     [Fact]
     public void CompletionDigest_RecordsNoneWhenTheWorkRecordedNoRedRun()
     {
-        string contract = TestDevContract;
+        string contract = TaskGateContract;
 
         Assert.Contains("RED_EVIDENCE: none", contract, StringComparison.Ordinal);
         Assert.Contains("no RED run", contract, StringComparison.Ordinal);
@@ -41,10 +47,10 @@ public sealed class ArbiterTestDevContractTests
     [Fact]
     public void RedEvidenceLine_IsPartOfTheCompletionDigestTemplate()
     {
-        string contract = TestDevContract;
+        string contract = TaskGateContract;
 
         int digestStart = contract.IndexOf("## Completion digest", StringComparison.Ordinal);
-        Assert.True(digestStart >= 0, "test-dev.md must keep its Completion digest section.");
+        Assert.True(digestStart >= 0, "the task-gate skill must keep its Completion digest section.");
         string digest = contract[digestStart..];
 
         Assert.Contains(

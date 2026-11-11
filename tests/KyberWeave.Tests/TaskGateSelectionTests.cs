@@ -109,6 +109,133 @@ public sealed class TaskGateSelectionTests
         Assert.Contains(".agent_scratchpad/t5-beta/artifacts", betaRun);
     }
 
+    /// <summary>
+    /// Decision D30: a gate declares <c>{tests}</c> and receives the fully qualified names of the test
+    /// classes that cover the change, so the task gate runs the tests that mean something instead of
+    /// the whole product suite. The name has to be fully qualified — xUnit's <c>-class</c> matches the
+    /// fully qualified name, and a short name runs zero tests and still exits zero — and it has to
+    /// name a class that exists, which is what has gone wrong repeatedly in this programme.
+    /// </summary>
+    [Fact]
+    public void TheTestsTokenExpandsToTheFullyQualifiedClassThatCoversTheChange()
+    {
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [TestsGate()], ["src/KyberWeave.Core/Review/TaskGateSelection.cs"], null, "unix");
+
+        PlannedTaskGate gate = Assert.Single(plan.Gates);
+        string argv = string.Join(" ", gate.Run);
+
+        Assert.DoesNotContain("{tests}", argv, StringComparison.Ordinal);
+        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, argv, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnArgumentContainingBothTaskAndTestsExpandsBothTokens()
+    {
+        ReviewTaskGate gate = new(
+            "tests-task",
+            ["**/*.cs"],
+            null,
+            ["dotnet", "test", "--filter", "{tests}-for-{task}"],
+            [],
+            true,
+            900);
+
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [gate], ["src/KyberWeave.Core/Review/TaskGateSelection.cs"], "my-task", "unix");
+
+        PlannedTaskGate plannedGate = Assert.Single(plan.Gates);
+        string filterArg = plannedGate.Run[3];
+
+        Assert.DoesNotContain("{task}", filterArg, StringComparison.Ordinal);
+        Assert.DoesNotContain("{tests}", filterArg, StringComparison.Ordinal);
+        Assert.Contains("my-task", filterArg, StringComparison.Ordinal);
+        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, filterArg, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A change no test class covers is skipped rather than passed, and skipped rather than turned
+    /// into a filter that matches nothing: the gate would exit zero on an empty filter, which reads
+    /// as a suite that ran and passed.
+    /// </summary>
+    [Fact]
+    public void AChangeNoTestClassCoversSkipsTheTestsGateRatherThanRunningAnEmptyFilter()
+    {
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [TestsGate()], ["src/KyberWeave.Cli/Program.cs"], null, "unix");
+
+        Assert.True(
+            plan.Refusals.Count == 0,
+            "Nothing mapped is a skip, not a refusal: " + string.Join("; ", plan.Refusals));
+        Assert.Empty(plan.Gates);
+        SkippedTaskGate skip = Assert.Single(plan.Skipped);
+        Assert.Equal("tests", skip.Id);
+        Assert.Contains("test", skip.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AnInaccessibleOrMissingRootRefusesThePlan()
+    {
+        ReviewTaskGate gate = FormatGate();
+        TaskGatePlan plan = TaskGateSelection.Plan([gate], Changed, null, "unix", "non_existent_directory_xyz");
+
+        string refusal = Assert.Single(plan.Refusals);
+        Assert.Contains("non_existent_directory_xyz", refusal, StringComparison.Ordinal);
+        Assert.Empty(plan.Gates);
+    }
+
+    [Fact]
+    public void TestClassMappingInvalidRootReturnsEmptyWithoutThrowing()
+    {
+        IReadOnlyList<string> resolved = TestClassMapping.Resolve("non_existent_directory_xyz", Changed);
+        Assert.Empty(resolved);
+    }
+
+    [Fact]
+    public void TestClassMappingMatchesDirectoryIgnoringCase()
+    {
+        IReadOnlyList<string> resolved = TestClassMapping.Resolve(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
+        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, resolved);
+    }
+
+    [Fact]
+    public void TestsTokenResolvesOnlyFromFilesMatchingGateInclude()
+    {
+        ReviewTaskGate propsGate = new(
+            "props-tests",
+            ["**/*.props"],
+            null,
+            ["dotnet", "test", "--filter", "{tests}"],
+            [],
+            true,
+            900);
+
+        // Changed contains both a .props file (no covering test) and a .cs file (has covering test)
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [propsGate],
+            ["Directory.Build.props", "src/KyberWeave.Core/Review/TaskGateSelection.cs"],
+            null,
+            "unix");
+
+        // propsGate matches only Directory.Build.props, which has no tests, so it skips
+        Assert.Empty(plan.Gates);
+        SkippedTaskGate skip = Assert.Single(plan.Skipped);
+        Assert.Equal("props-tests", skip.Id);
+        Assert.Contains("no test class covers", skip.Reason, StringComparison.Ordinal);
+    }
+
+    private static ReviewTaskGate TestsGate()
+    {
+        return new ReviewTaskGate(
+            "tests",
+            ["**/*.cs"],
+            null,
+            ["dotnet", "test", "tests/KyberWeave.Tests/KyberWeave.Tests.csproj", "-c", "Release", "--filter", "{tests}"],
+            [],
+            true,
+            900);
+    }
+
     private static ReviewTaskGate DotnetBuildGate()
     {
         return new ReviewTaskGate(

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-08
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0046-docs-explore-section-answer
@@ -34,6 +34,10 @@ score = exact-identity + partial-identity + (2.0 x title similarity) + body rele
 score = score x authority
 ```
 
+**`partial-identity` counts only for a document the question already touches.** It is zero
+unless `exact-identity`, title similarity or body relevance is already above zero. A shared
+prefix ranks the documents a question touches; it never introduces one.
+
 | Contribution | Weight | Fires when |
 |---|---|---|
 | Exact `id` or path match | 6.0 | the query names the document outright |
@@ -56,6 +60,19 @@ Partial identity exists because ids are structured slugs (`docgraph/architecture
 controlled vocabulary. Without it, "DocGraph architecture" returned every architecture
 document in the repository: several files sharing one generic word, ranked above the one
 actually asked for.
+
+That purpose is ranking, so partial identity is a **re-ranker and not an introducer**. It
+ranks the documents the question already touches, and it never introduces one. "Touches"
+means one of three things, all of them the document saying or declaring something the
+question asks about:
+
+- an exact match on what the document declares outright — its id, path, component,
+  keyword, code-ref or endpoint;
+- a term the question shares with the document's title;
+- an informative term of the question that the document's prose contains.
+
+When none of the three holds, the partial-identity contribution is zero and the document
+cannot clear the relevance floor however much of its slug the question appears to cover.
 
 Optional `keywords` (and the internal `aliases` synonym) sit in that same identity layer:
 they are claims, not body mentions, which is why an exact keyword match outranks title and
@@ -100,6 +117,13 @@ opaque `kyberdash`. Coverage then counts a hit when a query token and an identit
 share a prefix of at least three characters either way — `dashboard` covers `dash`. Shorter
 stems are ignored so `it` cannot match `iteration`.
 
+The prefix rule and that floor are unchanged, and so is `Coverage` itself. What changed is
+its **consequence for qualification**. A shared prefix no longer admits a document on its
+own: `dashboard` still covers `dash`, but that coverage now only moves a document's rank
+among the documents the question already touches. If no exact match, no title term and no
+prose term ties the question to the document, the coverage multiplies nothing, because
+there is nothing for it to add to.
+
 These ranking weights and the prefix floor are the contract in
 [ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md).
 
@@ -107,6 +131,20 @@ These ranking weights and the prefix floor are the contract in
 
 A document scoring below **0.25** is not returned at all, and a query where nothing clears
 the floor returns an explicit miss rather than a best-effort list.
+
+The floor is only reached by a document the question can touch in the first place. An exact
+identity match, a shared title term, or an informative query term in the prose is what puts
+a document in contention; partial identity then orders the contenders. A document with no
+such tie scores zero on every contribution except the partial one, and the partial one is
+withheld — so slug similarity can no longer lift an untouched document over 0.25.
+
+That was a real defect, not a hypothetical. A question on a subject the corpus does not
+cover was answered from a task item whose id carried a token that was a prefix of one of
+the question's words: the shared prefix scored partial identity at 0.5625, title and body
+contributed zero, the authority discount for a draft document scaled the total to 0.478,
+and 0.478 is above the floor, so the item qualified and won. Nothing in that document —
+prose, title or keywords — mentioned the question's subject. A document the question does
+not touch is now unreachable by slug coverage alone.
 
 This matters more than it looks. Callers are told to try retrieval before grepping; if a
 miss comes back as three weak results, the caller has no signal to fall back and will
@@ -146,6 +184,10 @@ section's first `###`, or a `###` subsection. Deeper headings stay inside their 
 `###`. Sibling leaves under one `##` compete for that topic's score; confidence compares
 topics, not every leaf.
 
+The qualification rule above applies at **document** level only. Inside a document that has
+already cleared the floor, leaf selection adds partial document identity unguarded, which is
+safe: it can only reorder documents that have already qualified.
+
 The winning leaf comes back **whole**. **24,000 characters** is a ceiling, not a target —
 a shorter leaf returns a shorter answer with no padding. Past the ceiling the response is
 marked incomplete and a **stateless cursor** returns the next span of the **same** leaf. The
@@ -183,12 +225,35 @@ standard returned** for the technology, split with a 1500-character floor each.
 Within a standard, `##` sections are ranked by rarity-weighted similarity, selected until
 the budget runs out, then **emitted in document order** so the prose still reads. Short
 sections are damped, because a three-word stub can overlap a query almost perfectly while
-saying nothing.
+saying nothing. A section is selected only when its score clears the 0.02 section floor, with
+the top-ranked clearing section always included even if it alone exceeds the budget so the
+answer is never a path and a list of headings.
 
-Anything that did not fit is named in the response by heading. The caller learns what else
-the document holds without opening it, and can ask again deliberately — and is told
-whether a section was dropped for lack of budget or lack of relevance, since only the
-former makes asking again with a larger `charBudget` worthwhile.
+**A topic is scored on its words, not its phrase.** Vectorising the topic yields its
+individual words plus one fused compound per adjacent pair — `error handling` also produces
+`errorhandling` — and rarity weighting multiplies each term by its inverse document
+frequency, so a fused pair that almost no document states outweighs the words the caller
+actually wrote. `TopicVector` therefore drops a synthesised compound that no candidate section
+states, while question scaffolding and corpus-ubiquitous terms are already removed by rarity
+weighting; informative words the caller wrote stay in the query whether or not a section
+states them. Both the refused and the accepted variant of this rule were measured on this
+corpus: dropping *every* term no section states was rejected because removing that mass
+rescales the remaining scores, and a topic nothing answers (`csharp` with `mocking time`)
+came back a confident wrong answer instead of a miss.
+
+**A section dropped for irrelevance and a section dropped for lack of budget are reported
+differently.** Anything that did not fit is named in the response by heading, so the caller
+learns what else the document holds without opening it and can ask again deliberately. The
+budget marker is followed by a statement that the cut is expected — the document is longer
+than the `charBudget`, so what did not fit is left out rather than missing — while the
+relevance marker never suggests a larger budget, because no larger budget brings back a
+section the topic did not select.
+
+**The index and the tool part company on an unanswerable topic.** `DocumentIndex.CodingStandards`
+returns no prose when a topic selects no section, and a test pins that. The fallback is the
+tool's decision: `docs_get_coding_standard_for_technology` says the topic matched nothing in
+one line and then returns the standard in document order inside the same budget, because a
+caller that receives prose-lessness opens the file — the cost the budget exists to prevent.
 
 ## Retrieval is not analysis
 

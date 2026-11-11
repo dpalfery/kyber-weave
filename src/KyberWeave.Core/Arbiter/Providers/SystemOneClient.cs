@@ -31,7 +31,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     private readonly string _model;
     private readonly int _timeoutMs;
     private readonly Func<Uri, string?>? _keyResolver;
-    private readonly Func<ArbiterRule, string?>? _instructionsResolver;
+    private readonly Func<ArbiterRule, ArbiterFactSet, string?>? _instructionsResolver;
 
     /// <summary>Creates a client over an injected handler, so tests stay offline.</summary>
     /// <param name="handler">The transport; owned and disposed with the client.</param>
@@ -39,14 +39,14 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     /// <param name="model">The answering model, which also selects the budget.</param>
     /// <param name="timeoutMs">The per-call budget covering retries.</param>
     /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
-    /// <param name="instructionsResolver">Resolves lens text or repository files for instructions.</param>
+    /// <param name="instructionsResolver">Resolves a rule's instructions from the facts of the trigger being asked.</param>
     public SystemOneClient(
         HttpMessageHandler handler,
         Uri endpoint,
         string model,
         int timeoutMs,
         Func<Uri, string?>? keyResolver = null,
-        Func<ArbiterRule, string?>? instructionsResolver = null)
+        Func<ArbiterRule, ArbiterFactSet, string?>? instructionsResolver = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -63,6 +63,20 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         _keyResolver = keyResolver;
         _instructionsResolver = instructionsResolver;
     }
+
+    /// <summary>Creates the client the product runs, with lens instructions wired in.</summary>
+    /// <param name="handler">The transport; owned and disposed with the client.</param>
+    /// <param name="endpoint">The provider base URL; <c>/systemone</c> is appended.</param>
+    /// <param name="model">The answering model, which also selects the budget.</param>
+    /// <param name="timeoutMs">The per-call budget covering retries.</param>
+    /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
+    public static SystemOneClient CreateForProduct(
+        HttpMessageHandler handler,
+        Uri endpoint,
+        string model,
+        int timeoutMs,
+        Func<Uri, string?>? keyResolver) =>
+        new(handler, endpoint, model, timeoutMs, keyResolver, LensInstructions.Resolve);
 
     /// <inheritdoc />
     public async Task<ArbiterStep1BatchResult> AskStep1Async(
@@ -216,12 +230,17 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         IReadOnlyList<ArbiterRule> askRules, SystemOneParsedResponse parsed)
     {
         Dictionary<string, string> answers = new(StringComparer.Ordinal);
+        Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
         foreach (ArbiterRule rule in askRules)
         {
             string answer = RuleEngine.Undecidable;
             if (parsed.AnswersByRule.TryGetValue(rule.Id, out JsonElement element))
             {
-                answer = ApplyAnswer(rule, element);
+                answer = ApplyAnswer(rule, element, out ArbiterStep1Score? score);
+                if (score is not null)
+                {
+                    scores[rule.Id] = score;
+                }
             }
 
             answers[rule.Id] = answer;
@@ -230,11 +249,12 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         ArbiterStep1Usage? usage = parsed.InputTokens is int input && parsed.OutputTokens is int output
             ? new ArbiterStep1Usage(input, output)
             : null;
-        return new ArbiterStep1BatchResult(answers, parsed.Model ?? _model, usage, true);
+        return new ArbiterStep1BatchResult(answers, parsed.Model ?? _model, usage, true, scores);
     }
 
-    private static string ApplyAnswer(ArbiterRule rule, JsonElement element)
+    private static string ApplyAnswer(ArbiterRule rule, JsonElement element, out ArbiterStep1Score? score)
     {
+        score = null;
         if (rule.Ask is null)
         {
             return RuleEngine.Undecidable;
@@ -247,6 +267,11 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
             {
                 return RuleEngine.Undecidable;
             }
+
+            score = new ArbiterStep1Score(
+                SystemOneContracts.ReadProbabilities(element, rule.Answers),
+                confidence,
+                rule.Ask.ConfidenceAtLeast);
 
             // Below its floor the answer is undecidable; a missing confidence
             // cannot clear a floor. A wrong valid value is still wrong.
@@ -263,10 +288,18 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 
         if (string.Equals(rule.Ask.Type, "score", StringComparison.Ordinal))
         {
-            if (!SystemOneContracts.TryReadScore(element, out double score, out double? scoreConfidence))
+            if (!SystemOneContracts.TryReadScore(element, out double value, out double? scoreConfidence))
             {
                 return RuleEngine.Undecidable;
             }
+
+            string[] levelKeys = rule.Ask.Levels is { } scoredLevels
+                ? [.. Enumerable.Range(0, scoredLevels.Count).Select(index => index.ToString(CultureInfo.InvariantCulture))]
+                : [];
+            score = new ArbiterStep1Score(
+                SystemOneContracts.ReadProbabilities(element, levelKeys),
+                scoreConfidence,
+                rule.Ask.ConfidenceAtLeast);
 
             if (rule.Ask.ConfidenceAtLeast is double scoreFloor
                 && (scoreConfidence is null || scoreConfidence < scoreFloor))
@@ -277,7 +310,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
             string mapped;
             if (rule.Ask.Levels is { Count: > 0 } levels)
             {
-                double rounded = Math.Round(score, MidpointRounding.AwayFromZero);
+                double rounded = Math.Round(value, MidpointRounding.AwayFromZero);
                 if (rounded < 0 || rounded > levels.Count - 1)
                 {
                     return RuleEngine.Undecidable;
@@ -287,7 +320,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
             }
             else
             {
-                mapped = score.ToString(CultureInfo.InvariantCulture);
+                mapped = value.ToString(CultureInfo.InvariantCulture);
             }
             return rule.Answers.Contains(mapped, StringComparer.Ordinal)
                 ? mapped
@@ -307,6 +340,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
             string first = rule.Answers[0];
             string second = rule.Answers.Count > 1 ? rule.Answers[1] : RuleEngine.Undecidable;
             double ceiling = rule.Ask.ProbabilityBelow ?? 0.5;
+            score = new ArbiterStep1Score([probability], null, ceiling);
             return probability < ceiling ? second : first;
         }
 

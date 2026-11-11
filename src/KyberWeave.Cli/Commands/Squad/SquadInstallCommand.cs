@@ -118,7 +118,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // defaults and the task-gate hint below says where review gates come from. Only a
         // global run, which has no project whose gates could be missing, keeps the load
         // failure fatal.
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
+        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+            targetRoot,
+            scope,
+            stateStore.UserPaths.HomeDirectory);
         if (!configResult.Success && scope != SquadDeploymentScope.Project)
         {
             SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
@@ -217,7 +220,15 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
                 // Until trust is granted the hooks stay off (§10.7), so the install names
                 // each selected target's trust gate where the audit cannot observe the gap.
+                // Global Warp stays fallback-only: the install still prints the MCP registration
+                // guidance, but it never mutates ~/.warp/.mcp.json.
                 WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
+                if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
+                {
+                    string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
+                    string configPath = targetToken == "warp" ? "~/.warp/.mcp.json" : "~/.zcode/.mcp.json";
+                    Console.WriteLine(RegistrationStepMessage(configPath));
+                }
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
 
@@ -267,6 +278,11 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         return Execute(context, settings, CancellationToken.None);
     }
 
+    private static string RegistrationStepMessage(string configPath)
+    {
+        return $"Register kyber-weave-arbiter in {configPath}: kyber-weave-arbiter serve --repo-root <root>";
+    }
+
     /// <summary>
     /// Prints the Arbiter trust gate for each selected target that has one.
     /// </summary>
@@ -279,7 +295,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         IReadOnlyList<SquadTarget> targets,
         SquadArbiterWiring wiring)
     {
-        if (!wiring.Enabled)
+        bool shouldEmitFallbackInstructions = targets.Contains(SquadTarget.Warp) || targets.Contains(SquadTarget.ZCode);
+        if (!wiring.Enabled && !shouldEmitFallbackInstructions)
         {
             return;
         }
@@ -299,4 +316,5 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             }
         });
     }
+
 }

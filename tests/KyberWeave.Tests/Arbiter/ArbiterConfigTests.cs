@@ -34,6 +34,8 @@ public sealed class ArbiterConfigTests
         "KW-ARB-CLAIM-001",
         "KW-ARB-GATE-CORROBORATED-001",
         "KW-ARB-GATE-001",
+        "KW-ARB-PLANREAD-001",
+        "KW-ARB-GATE-REPORT-001",
     ];
 
     [Fact]
@@ -44,9 +46,9 @@ public sealed class ArbiterConfigTests
         Assert.False(config.Enabled);
         Assert.Equal(ArbiterProviderKind.None, config.Provider.Kind);
         Assert.Equal("https://api.typesafe.ai/v1", config.Provider.Endpoint);
-        Assert.Equal("jev-1.13.0", config.Provider.Model);
+        Assert.Equal("jev-1.14.0", config.Provider.Model);
         Assert.Equal(3000, config.Provider.TimeoutMs);
-        // 18 shipped rule ids; ROSTER-001 runs on two triggers, so it appears twice.
+        // 20 shipped rule ids; ROSTER-001 runs on two triggers, so it appears twice.
         Assert.Equal(ExpectedRuleIds, config.Rules.Select(rule => rule.Id).Distinct());
         Assert.Equal(ExpectedRuleIds.Length + 1, config.Rules.Count);
         Assert.All(config.Rules, rule => Assert.True(rule.Enabled));

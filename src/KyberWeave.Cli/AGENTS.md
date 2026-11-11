@@ -1,9 +1,9 @@
 # KyberWeave.Cli
 
-The `kyber-weave` binary. Spectre.Console.Cli, six branches — `skill`, `agent`, `docs`,
-`squad`, `utilities`, and `review` — registered in `Program.cs`, plus a top-level `update`
-verb that replaces the running Release binaries. The complete registered surface, with every
-verb, flag, and exit-code rule, is indexed in
+The `kyber-weave` binary. Spectre.Console.Cli, eight branches — `skill`, `agent`, `docs`,
+`squad`, `utilities`, `review`, `run`, and `arbiter` — registered in `Program.cs`, plus
+top-level `doctor` and `update` verbs, the latter replacing the running Release binaries.
+The complete registered surface, with every verb, flag, and exit-code rule, is indexed in
 [`docs/cli-command-surface.md`](../../docs/cli-command-surface.md).
 
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
@@ -40,6 +40,7 @@ Exit codes are deliberately not uniform, because the branches carry different ri
 | `scan` | any critical, raised by `--fail-on warning\|error` |
 | `route` | accuracy below `--min-accuracy` |
 | `docs mcp-migrate` | `1` when any named target was refused — a slug the catalog does not know, a symlink, a denied file, a malformed or foreign document, conflicting old and new entries, or an unrecordable receipt. A refused target writes zero bytes and the other named targets still proceed; a preview, a completed migration, and nothing-to-do exit `0` |
+| `run start` | `1` when a tool it depends on fails and `stop-on-tool-failure` is on, or the configuration does not load; `2` when refused input — a harness token, type, slug, or `--resume` naming no local or `origin` branch; `3` when the `codegraph` binary is missing. The name is resolved before the configuration is loaded, and the configuration before the binary is probed, so `2` outranks `1` outranks `3` |
 
 Scanning gates on `Critical` alone by default so that adopting it does not immediately
 break every host build. Do not tighten that default.

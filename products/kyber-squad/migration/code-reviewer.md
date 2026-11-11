@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: 030485d17e258b65565c7bc547a3daaa6a6c3171d79930790eb10b02540505fb
+final-body-sha256: 896ea2dfb9200415042d41b239c2fbcc1f2821e3fccbbdfdf9f134ce9c9fa379
 ---
 # code-reviewer migration
 
@@ -22,8 +22,10 @@ pass the host's `REVIEW.md` sections to each seat and record a missing seat atte
 coverage gap, the Arbiter review contract — routing headers on council and refutation dispatches,
 the review-note statuses, and the audit citation (packet 7.3) — the fallback contract for a reviewer
 that holds `arbiter_evaluate_agent_dispatch_or_return` instead of a hook (packet 17.4), and the status-provenance rule that
-keeps an Arbiter note distinct from a `STATUS:` line a lens or a tool printed. `final-body-sha256`
-covers that evolved body.
+keeps an Arbiter note distinct from a `STATUS:` line a lens or a tool printed. It now also carries the single-gate re-check
+through the runner's `--gate` option, and the seat handback: a harness that gives the reviewer no way to start its own
+council stops it with `STATUS: COUNCIL_SEATS_NEEDED`, and the session above seats the lenses and re-invokes it.
+`final-body-sha256` covers that evolved body.
 
 ## Canonical projection
 

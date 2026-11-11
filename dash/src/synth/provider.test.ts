@@ -25,13 +25,14 @@ import type { ParsedProviderCall } from '../providers/types.js'
 import { copilot } from '../providers/copilot.js'
 import { createAntigravityProvider } from '../providers/antigravity.js'
 import { createCursorProvider } from '../providers/cursor.js'
+import { createDroidProvider } from '../providers/droid.js'
 import { createKiloCodeProvider } from '../providers/kilo-code.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
 import { measurabilityFor } from '../canon/measurability.js'
 import { contextLimitOf } from '../canon/context-window.js'
 import { CanonStore } from '../canon/store.js'
 import { Synthesizer } from './synth.js'
-import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
+import { PROVIDER_PARSE_ERROR, PROVIDER_READERS, ingestProviders } from './provider.js'
 import { codexReader } from './readers/codex.js'
 import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
 
@@ -1452,5 +1453,74 @@ describe('D29 — Antigravity catalogue carrier and its tool children through in
         measurabilityFor('antigravity')['tool_definitions'],
       )
     }
+  })
+})
+
+describe('droid content reader registration', () => {
+  it('registers the Droid content reader under the droid provider', async () => {
+    // Dynamic import: the reader module does not exist yet, and a static import
+    // would fail every existing test in this file, not just the Droid ones.
+    const { droidReader } = await import('./readers/droid.js')
+
+    expect(PROVIDER_READERS.get('droid')).toBe(droidReader)
+  })
+
+  it('synthesizes one tool.invoke record per transcript tool_use, under harness droid', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-droid-synth-'))
+    tempRoots.push(root)
+    const dir = join(root, 'sessions', '-tmp-my-project')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, 'session-1.jsonl')
+    writeFileSync(path, [
+      { type: 'session_start', id: 'session-1', cwd: '/tmp/my-project', title: 'Fix login bug' },
+      { type: 'message', id: 'u1', timestamp: '2026-11-09T10:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'fix it' }] } },
+      {
+        type: 'message',
+        id: 'a1',
+        timestamp: '2026-11-09T10:00:01.000Z',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tu-1', name: 'Read', input: { file_path: 'src/login.ts' } },
+            { type: 'tool_use', id: 'tu-2', name: 'Grep', input: { pattern: 'login' } },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'u2',
+        timestamp: '2026-11-09T10:00:03.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu-1', content: 'export function login() {}', is_error: false },
+            { type: 'tool_result', tool_use_id: 'tu-2', content: 'src/login.ts:1', is_error: false },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'a2',
+        timestamp: '2026-11-09T10:00:05.000Z',
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu-3', name: 'Execute', input: { command: 'npm test' } }] },
+      },
+    ].map((entry) => JSON.stringify(entry)).join('\n'))
+    writeFileSync(join(dir, 'session-1.settings.json'), JSON.stringify({
+      model: 'gpt-5',
+      tokenUsage: { inputTokens: 300, outputTokens: 90, cacheCreationTokens: 0, cacheReadTokens: 0, thinkingTokens: 0 },
+    }))
+
+    const calls = await parsedCalls(createDroidProvider(root), { path, project: 'my-project', provider: 'droid' })
+    const result = await ingestProviders(['droid'], () => ({
+      calls,
+      filePath: path,
+      harnessId: 'droid',
+      sourceKey: 'droid:session-1',
+    }))
+
+    expect(result.problems).toEqual([])
+    const toolRecords = result.records.filter((record) => record.op === 'tool.invoke')
+    expect(toolRecords).toHaveLength(3)
+    expect(toolRecords.map((record) => record.harness)).toEqual(['droid', 'droid', 'droid'])
   })
 })

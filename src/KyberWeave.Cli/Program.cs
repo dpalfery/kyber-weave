@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
@@ -96,6 +97,13 @@ app.Configure(config =>
                 "Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
             .WithExample("docs", "init", ".")
             .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
+
+        docs.AddCommand<DocsOnboardingCommand>("onboarding")
+            .WithDescription(
+                "Record this repository's answer to the onboarding question — done or declined — in " +
+                ".kyber-weave/kyber-weave.yml, and refresh the Config Reg block in AGENTS.md.")
+            .WithExample("docs", "onboarding", "done")
+            .WithExample("docs", "onboarding", "declined");
 
         docs.AddCommand<DocsValidateCommand>("validate")
             .WithDescription("Check documentation frontmatter against the ontology schema (KW-DOC-SPEC-*).")
@@ -203,6 +211,23 @@ app.Configure(config =>
             .WithExample("squad", "run", "claude")
             .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
 
+        squad.AddBranch("copilot-prompt", copilotPrompt =>
+        {
+            copilotPrompt.SetDescription("Opt in to replacing GitHub Copilot's top-level system prompt in VS Code. Off until installed.");
+
+            copilotPrompt.AddCommand<CopilotPromptInstallCommand>("install")
+                .WithDescription("Write the Kyber-Weave Copilot prompt and point VS Code's override setting at it. Affects every Copilot chat on this machine.")
+                .WithExample("squad", "copilot-prompt", "install", "--yes");
+
+            copilotPrompt.AddCommand<CopilotPromptUninstallCommand>("uninstall")
+                .WithDescription("Remove the override entry this install wrote and delete the prompt file. Leaves any other entry alone.")
+                .WithExample("squad", "copilot-prompt", "uninstall", "--yes");
+
+            copilotPrompt.AddCommand<CopilotPromptStatusCommand>("status")
+                .WithDescription("Show whether the prompt file is installed and whether each VS Code build's override entry points at it.")
+                .WithExample("squad", "copilot-prompt", "status");
+        });
+
         squad.AddBranch("instance", instance =>
         {
             instance.SetDescription("Manage harness preset instance folders.");
@@ -282,6 +307,12 @@ app.Configure(config =>
             .WithExample("review", "catalogue", ".")
             .WithExample("review", "catalogue", ".", "--technology", "go");
 
+        review.AddCommand<ReviewSuppressionsCommand>("suppressions")
+            .WithDescription("Refuse a warning suppression the change adds unless it states a reason, judging " +
+                             "added lines only.")
+            .WithExample("review", "suppressions", ".")
+            .WithExample("review", "suppressions", ".", "--base", "origin/main");
+
         review.AddCommand<ReviewDuplicatesCommand>("duplicates")
             .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
             .WithExample("review", "duplicates", ".")
@@ -290,6 +321,26 @@ app.Configure(config =>
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
+    });
+
+    // Run Lifecycle Command Branch — the step before anyone investigates or plans: fetch, pick the base,
+    // and put the work on the branch it belongs on. Its own branch because a run is a workflow over a
+    // repository, not a governed artifact class.
+    config.AddBranch("run", run =>
+    {
+        run.SetDescription("Start a run: fetch, resolve the base, and create the branch the work belongs on.");
+
+        run.AddCommand<RunStartCommand>("start")
+            .WithDescription(
+                "Fetch origin, resolve the base branch, compare the failing build's version, and create the " +
+                "run's branch from the right remote base.")
+            .WithExample("run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate")
+            .WithExample(
+                "run", "start", "--harness", "commandcode", "--type", "fix", "--slug",
+                "arbiter-global-block-identity", "--failing-version", "0.1.2")
+            .WithExample(
+                "run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
+                "--resume", "claude/fix/existing-fix", "--json");
     });
 
     // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,

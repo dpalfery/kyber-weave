@@ -27,11 +27,18 @@ namespace KyberWeave.Tests;
 public sealed class McpDocsProvenanceTests : IDisposable
 {
     /// <summary>
-    /// The header contract from the plan: exactly one line, root first, with a short SHA or
-    /// the literal <c>unavailable</c>, and a dirty marker or <c>unknown</c>.
+    /// The header contract from the plan: exactly one line, root first, then the branch and the
+    /// git directory it was read from, a short SHA or the literal <c>unavailable</c>, a dirty
+    /// marker or <c>unknown</c>, and the live document count.
     /// </summary>
+    /// <remarks>
+    /// The tokens after the root are named rather than assumed adjacent to it: the header gained
+    /// <c>branch=</c> and <c>repo=</c>, and a pattern that expected <c>rev=</c> straight after the
+    /// root swallowed both into the root capture. A branch name cannot contain a space, so
+    /// <c>\S+</c> is exact there; a repository path can, so <c>repo=</c> runs to the next token.
+    /// </remarks>
     private static readonly Regex ProvenancePattern = new(
-        @"^provenance: root=(?<root>.+?) rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
+        @"^provenance: root=(?<root>.+?) branch=\S+ repo=.+? rev=(?<rev>[0-9a-f]{4,40}|unavailable) "
         + @"dirty=(?<dirty>yes|no|unknown) documents=(?<documents>\d+)$",
         RegexOptions.CultureInvariant);
 
