@@ -33,6 +33,7 @@ namespace KyberWeave.Arbiter.Hooks;
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
 {
     private const string ModelTrigger = "delegate.model";
+    private const string ModelTargetingOff = "off";
 
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;
     private readonly Func<string, IArbiterGitFacts>? _gitFactsFactory;
@@ -252,7 +253,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
             || string.Equals(result.Outcome, RuleEffects.Applies, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.NotApplicable, StringComparison.Ordinal))
         {
-            return new HookOutcome(HookOutcomeKind.Allow, ModelToken: DeliveredToken(result.LedgerId, arbiterDirectory));
+            ArbiterModelBlock? block = ModelBlockFor(result.LedgerId, arbiterDirectory);
+            bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
+            return new HookOutcome(
+                HookOutcomeKind.Allow,
+                ModelToken: block is { Delivered: true } ? block.Token : null,
+                ModelBlock: targeting ? block : null);
         }
 
         ArbiterDecisionRecord? record = string.IsNullOrEmpty(result.LedgerId)
@@ -296,21 +302,20 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
     }
 
     /// <summary>
-    /// The model token the delegate.model secondary delivers on this evaluation's dispatch, or null when
-    /// it delivers none (off, shadow, caller-named, or no resolved token). The secondary shares the
-    /// primary's ledger id, so the block is read from the decision that carries it.
+    /// The delegate.model block the secondary resolved on this evaluation's dispatch, or null when it
+    /// resolved none. The secondary shares the primary's ledger id, so the block is read from the decision
+    /// that carries it. Whether the block was delivered is the block's own flag, not decided here.
     /// </summary>
-    private static string? DeliveredToken(string ledgerId, string arbiterDirectory)
+    private static ArbiterModelBlock? ModelBlockFor(string ledgerId, string arbiterDirectory)
     {
         if (string.IsNullOrEmpty(ledgerId))
         {
             return null;
         }
 
-        ArbiterModelBlock? block = new DecisionLog(arbiterDirectory).ReadAll()
+        return new DecisionLog(arbiterDirectory).ReadAll()
             .LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
                 && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
-        return block is { Delivered: true } ? block.Token : null;
     }
 
     private static string RenderReason(

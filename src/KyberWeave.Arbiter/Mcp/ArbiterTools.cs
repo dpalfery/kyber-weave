@@ -230,6 +230,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(DateTimeOffset.UtcNow), context.Log);
+        ArbiterModelBlock? retarget = null;
         foreach (PendingEvaluation item in pending)
         {
             HookOutcome outcome;
@@ -254,10 +255,24 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 string named = item.Refute is null ? string.Empty : $"finding: {item.Refute}\n";
                 return provenance + "\noutcome: " + OutcomeName(outcome.Kind) + "\n" + named + outcome.Reason;
             }
+
+            retarget ??= outcome.ModelBlock;
         }
 
-        return provenance + "\noutcome: allow";
+        return retarget is null
+            ? provenance + "\noutcome: allow"
+            : provenance + "\noutcome: allow\n" + RetargetAdvisory(retarget);
     }
+
+    /// <summary>
+    /// The retarget the hook would make, as one advisory line. The serve path writes no model field
+    /// anywhere, so the line is the whole effect: the caller decides what to dispatch with. A profile
+    /// with no token is reported as such, with the resolver's reason, rather than hidden.
+    /// </summary>
+    private static string RetargetAdvisory(ArbiterModelBlock block) =>
+        $"advisory (source: serve): would retarget to profile {OneLine(block.Profile)} " +
+        $"token {OneLine(block.Token ?? "<none>")} (reason: {OneLine(block.Reason ?? "none")}). " +
+        "Not written: the serve path changes no model.";
 
     [McpServerTool(Name = "arbiter_list_effective_rules_by_trigger", ReadOnly = true, OpenWorld = false)]
     [Description("""

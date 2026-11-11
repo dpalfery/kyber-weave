@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -39,11 +40,14 @@ public enum HookOutcomeKind
 /// <param name="RewrittenInputJson">The complete rewritten input, for allow-with-rewrite.</param>
 /// <param name="ModelToken">The model alias the decision sets on a sub-agent dispatch, when the harness
 /// accepts one. Null leaves the dispatch's model as the harness would have chosen it.</param>
+/// <param name="ModelBlock">The delegate.model block the evaluation resolved, delivered or not, when model
+/// targeting is not off. The serve path reads it to report the retarget as advisory; no harness writes from it.</param>
 public sealed record HookOutcome(
     HookOutcomeKind Kind,
     string? Reason = null,
     string? RewrittenInputJson = null,
-    string? ModelToken = null);
+    string? ModelToken = null,
+    ArbiterModelBlock? ModelBlock = null);
 
 /// <summary>
 /// Whether a harness lets the Arbiter set the model of a dispatched sub-agent: the field that carries
