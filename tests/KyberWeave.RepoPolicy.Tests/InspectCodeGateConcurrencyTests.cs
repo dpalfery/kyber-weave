@@ -4,8 +4,9 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins how the <c>inspectcode</c> review gate is scheduled in <c>.kyber-weave/kyber-weave.yml</c>: it runs
-/// alongside the gates declared after it, and it is declared between <c>build</c> and <c>test</c>.
+/// Pins how the <c>inspectcode</c> review gate is declared in <c>.kyber-weave/kyber-weave.yml</c>: it runs
+/// alongside the gates declared after it, it is declared between <c>build</c> and <c>test</c>, and it runs
+/// through the report wrapper without a build of its own.
 /// </summary>
 /// <remarks>
 /// The analyzer reads the whole solution and takes minutes. Declared last and run in turn, it started only after
@@ -38,11 +39,44 @@ public sealed class InspectCodeGateConcurrencyTests
     [Fact]
     public void TheInspectCodeGateCapsItsAnalysisThreads()
     {
+        Assert.Contains("--jobs=4", InspectCodeArgv());
+    }
+
+    /// <summary>
+    /// The gate runs through the report wrapper, and the wrapper watches the same file the analyzer writes.
+    /// </summary>
+    /// <remarks>
+    /// On macOS 27.3 Beta the analyzer finishes its report and never exits. Without the wrapper the gate runs to
+    /// its time limit with a finished report on disk. A wrapper watching another path would never see the report.
+    /// </remarks>
+    [Fact]
+    public void TheInspectCodeGateRunsThroughTheReportWrapperOnTheAnalyzersOwnOutputPath()
+    {
+        List<string?> argv = InspectCodeArgv();
+        int separator = argv.IndexOf("--");
+
+        Assert.Equal("scripts/report-gate.sh", argv[0]);
+        Assert.True(separator > 0, "The wrapper's options must end with '--' before the analyzer command.");
+        Assert.Equal(["dotnet", "jb", "inspectcode"], argv.Skip(separator + 1).Take(3));
+
+        string? watched = argv[argv.IndexOf("--report") + 1];
+        Assert.Contains($"--output={watched}", argv.Skip(separator + 1));
+        Assert.Equal("</Report>", argv[argv.IndexOf("--ends-with") + 1]);
+    }
+
+    /// <summary>
+    /// The analyzer does not build, so the gate must not start on a tree nothing has restored: it would resolve
+    /// nothing, exit zero, and read as a clean run.
+    /// </summary>
+    [Fact]
+    public void TheInspectCodeGateSkipsItsOwnBuildAndRequiresARestoredTree()
+    {
         YamlMappingNode gate = Gates().Single(candidate => Scalar(candidate, "id") == "inspectcode");
-        IEnumerable<string?> argv = ((YamlSequenceNode)gate.Children[new YamlScalarNode("run")]).Children
+        IEnumerable<string?> required = ((YamlSequenceNode)gate.Children[new YamlScalarNode("requires-paths")]).Children
             .Select(item => ((YamlScalarNode)item).Value);
 
-        Assert.Contains("--jobs=4", argv);
+        Assert.Contains("--no-build", InspectCodeArgv());
+        Assert.Contains("src/KyberWeave.Core/obj/project.assets.json", required);
     }
 
     /// <summary>No other gate is concurrent: the rest share the Release binaries and run in turn.</summary>
@@ -54,6 +88,14 @@ public sealed class InspectCodeGateConcurrencyTests
             .Select(gate => Scalar(gate, "id"));
 
         Assert.Equal(["inspectcode"], concurrent);
+    }
+
+    private static List<string?> InspectCodeArgv()
+    {
+        YamlMappingNode gate = Gates().Single(candidate => Scalar(candidate, "id") == "inspectcode");
+        return ((YamlSequenceNode)gate.Children[new YamlScalarNode("run")]).Children
+            .Select(item => ((YamlScalarNode)item).Value)
+            .ToList();
     }
 
     private static List<YamlMappingNode> Gates()

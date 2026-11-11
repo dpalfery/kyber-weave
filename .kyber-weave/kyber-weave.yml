@@ -72,14 +72,22 @@ review:
     # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
     # Declared here, straight after `build`, and `concurrent`, so it starts on a restored tree
     # and runs alongside the test run instead of after it: declared last and run in turn, a
-    # review waited for the full suite and then for the analyzer. It builds and reads Debug,
-    # and the gates below run the Release binaries `build` made, so they share no output.
+    # review waited for the full suite and then for the analyzer.
+    # `--no-build` because `build` has just restored and compiled the tree: the analyzer's own
+    # Debug build added nothing to its findings and wrote into obj/ beside the gates below.
+    # `requires-paths` keeps that honest when the gate is run on its own: without a restore the
+    # analyzer would resolve nothing, exit 0 and read as a clean run, so it does not start.
     # `--jobs=4` because the full test run beside it is load-sensitive: on an 18-core machine
     # four analysis threads took 108 seconds against 91 unbounded, with the same findings.
+    # `scripts/report-gate.sh` because on macOS 27.3 Beta the analyzer writes its whole report
+    # and then never exits. The wrapper removes any earlier report, and stops the analyzer only
+    # once this run's report is complete and has not changed for 20 seconds. A hang before that
+    # still runs to the time limit and is reported as timed out.
     # Not measured: this gate beside the full test run. A dev agent may not run that suite.
     - id: inspectcode
       include: *net-source-paths
-      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache", "--jobs=4"]
+      run: [scripts/report-gate.sh, --report, artifacts/inspectcode.xml, --ends-with, "</Report>", --grace, "20", --, dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache", "--jobs=4", --no-build]
+      requires-paths: ["src/KyberWeave.Core/obj/project.assets.json"]
       blocking: true
       concurrent: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate

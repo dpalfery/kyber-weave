@@ -266,6 +266,18 @@
       "bound": "GuardTimeout (20 s) kills the tree. The guard's process table, elapsed-time lookup, and clock are fixtures, so the guard can never examine or signal a live process."
     },
     {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ReportGateScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by RunScriptArguments: the caller's timeout (ScriptTimeout, 30 s, or 5 s for the cases that must hang) kills the tree. The wrapped command is a sh -c stand-in in a temporary directory."
+    },
+    {
+      "file": "tests/KyberWeave.RepoPolicy.Tests/ReportGateScriptTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, timeout);",
+      "count": 1,
+      "bound": "The caller's timeout (30 s, or 5 s for the cases that must hang) kills the tree, including the stand-in's sleep."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardSlotTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
       "count": 1,

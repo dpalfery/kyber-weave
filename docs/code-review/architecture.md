@@ -715,6 +715,18 @@ partitioned by ecosystem:
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
 
+The gate is declared straight after `build` and is `concurrent`, so it overlaps the test run. It passes
+`--no-build`, because `build` has already restored and compiled the tree, and `--jobs=4`, to keep load off
+the test run beside it. It declares `requires-paths` on a restore output, so run on its own on an unrestored
+tree it does not start instead of exiting zero having resolved nothing.
+
+Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
+then never exits, because .NET does not return from closing a listening socket while another thread is
+blocked accepting on it. The wrapper removes any report an earlier run left, then stops the analyzer only
+when this run's report ends with `</Report>` and has not changed for 20 seconds, and exits zero. A hang
+before the report is complete still runs to `timeout-seconds` and is reported as timed out, and a zero exit
+with no complete report fails.
+
 #### Test and build gates run under the process watchdog
 
 The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
