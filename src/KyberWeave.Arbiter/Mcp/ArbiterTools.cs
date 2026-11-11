@@ -581,10 +581,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             KyberWeaveConfig config = context.LoadConfig(context.RepoRoot);
             return config.Arbiter.Enabled ? source.ProviderFor(config) : new NoneProvider();
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
-            or YamlDotNet.Core.YamlException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Unusable configuration answers fail-safe, and the reason goes to the log so it is not silent.
+            // The provider factory is an injected seam whose failure types cannot be enumerated, so any failure answers fail-safe.
             context.Log.WriteLine($"arbiter: no provider from the configuration, answering without one: {OneLine(ex.Message)}");
             return new NoneProvider();
         }
