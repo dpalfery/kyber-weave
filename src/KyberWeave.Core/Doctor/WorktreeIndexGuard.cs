@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
 
@@ -67,7 +68,7 @@ public static class WorktreeIndexGuard
                 "codegraph.index",
                 false,
                 $"the repository configuration could not be read: {ex.Message}",
-                "make .kyber-weave/kyber-weave.yml readable, then run: kyber-weave doctor --ensure");
+                $"make .kyber-weave/kyber-weave.yml readable, then run: kyber-weave doctor --ensure {ShellQuote.Quote(root)}");
             return new WorktreeIndexOutcome(
                 WorktreeIndexStatus.Failed,
                 Created: false,
@@ -94,6 +95,16 @@ public static class WorktreeIndexGuard
             outcome.Checks);
     }
 
-    private static string? ReadText(string path) =>
-        File.Exists(path) ? File.ReadAllText(path) : null;
+    /// <summary>Reads a file, treating one that is not there as absent and letting an unreadable one throw.</summary>
+    private static string? ReadText(string path)
+    {
+        try
+        {
+            return File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
 }
