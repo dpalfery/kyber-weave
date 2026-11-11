@@ -6,6 +6,8 @@ import { tmpdir } from 'os'
 
 import { kiloCode, createKiloCodeProvider } from './kilo-code.js'
 import type { ParsedProviderCall } from './types.js'
+import type { SourceRecordEnvelope } from '../synth/readers/types.js'
+import { spanIdFor } from '../synth/synth.js'
 
 /// `node:sqlite` is loaded through `createRequire` rather than a static import so
 /// the suite still loads on a Node build without it. The cast is the slice of
@@ -258,5 +260,118 @@ describe('kilo-code provider - shared-runtime sqlite store', () => {
     // turnId is span identity. Reusing it as the pairing key would move the
     // span the record is keyed on, which is why pairing has its own field.
     expect(calls.map((call) => call.turnId)).toEqual([undefined, undefined, undefined])
+  })
+})
+
+describe('kilo child-session record identity', () => {
+  const ROOT = 'sess-kilo-root'
+  const CHILD = 'sess-kilo-child'
+  const T0 = Date.parse('2026-09-10T10:00:00.000Z')
+  const ROOT_FIRST = `kilo-code:${ROOT}:msg-root-a1`
+  const CHILD_SPAN = `synth:kilo-shared-runtime:${ROOT}:msg-child-a1`
+
+  /// A kilo.db with a root session and one subagent child session (parent_id = root).
+  /// Root messages sit at T0 and T0+2s; the child message sits between them at T0+1s.
+  async function buildSubagentStore(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'kilo-child-identity-'))
+    onTestFinished(async () => {
+      await rm(dir, { recursive: true, force: true })
+    })
+    const dbPath = join(dir, 'kilo.db')
+    const db = openSqlite(dbPath)
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
+        slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL,
+        version TEXT NOT NULL, time_created INTEGER, time_updated INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        time_created INTEGER, time_updated INTEGER, data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL, time_created INTEGER,
+        time_updated INTEGER, data TEXT NOT NULL
+      );
+    `)
+    const insertSession = (id: string, parentId: string | null) => {
+      db.prepare(`
+        INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived)
+        VALUES (?, 'proj-1', ?, ?, '/Users/hal/myproject', ?, '1.4.2', ?, ?, NULL)
+      `).run(id, parentId, `slug-${id}`, `title ${id}`, T0, T0)
+    }
+    const insertAssistant = (id: string, sessionId: string, offsetMs: number) => {
+      db.prepare(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`)
+        .run(id, sessionId, T0 + offsetMs, T0 + offsetMs, JSON.stringify({
+          role: 'assistant',
+          modelID: 'claude-opus-4-6',
+          tokens_input: 100,
+          tokens_output: 20,
+        }))
+      db.prepare(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(`part-${id}`, id, sessionId, T0 + offsetMs, T0 + offsetMs, JSON.stringify({ type: 'text', text: `answer ${id}` }))
+    }
+
+    insertSession(ROOT, null)
+    insertSession(CHILD, ROOT)
+    insertAssistant('msg-root-a1', ROOT, 0)
+    insertAssistant('msg-child-a1', CHILD, 1000)
+    insertAssistant('msg-root-a2', ROOT, 2000)
+    db.close()
+    return dbPath
+  }
+
+  /// Parses the root session; `seenKeys` carries the keys already inside the window.
+  async function parseRootSession(dbPath: string, seenKeys: Set<string>): Promise<ParsedProviderCall[]> {
+    const source = { path: `${dbPath}:${ROOT}`, project: 'myproject', provider: 'kilo-code' }
+    const calls: ParsedProviderCall[] = []
+    for await (const call of createKiloCodeProvider().createSessionParser(source, seenKeys).parse()) calls.push(call)
+    return calls
+  }
+
+  /// The envelope a shared-runtime record carries when the native id is absent:
+  /// the record is keyed on the root session, with no stable record id.
+  function sharedRuntimeEnvelope(call: ParsedProviderCall): SourceRecordEnvelope {
+    return {
+      harnessId: 'kilo-shared-runtime',
+      sourceKey: `kilo-shared-runtime:${ROOT}`,
+      nativeSessionId: ROOT,
+      nativeRecordId: undefined,
+      sourceRevision: 'rev-1',
+      parserContractVersion: '1',
+      importedAt: '2026-09-12T00:00:00.000Z',
+      locationToken: '~/.local/share/kilo/kilo.db',
+      call,
+    }
+  }
+
+  /// Span ids as the synthesizer derives them: the ordinal is the call's index in the batch.
+  function spanIdsOf(calls: ParsedProviderCall[]): string[] {
+    return calls.map((call, index) => spanIdFor(call, sharedRuntimeEnvelope(call), index))
+  }
+
+  it('keys a subagent message span on its Kilo message id, whether or not an earlier message is in the window', async () => {
+    const dbPath = await buildSubagentStore()
+
+    const fullWindow = await parseRootSession(dbPath, new Set())
+    const trimmedWindow = await parseRootSession(dbPath, new Set([ROOT_FIRST]))
+
+    const childInFull = spanIdsOf(fullWindow)[1]
+    const childInTrimmed = spanIdsOf(trimmedWindow)[0]
+    expect(childInFull, 'child span must name the message id, not a hash').toBe(CHILD_SPAN)
+    expect(childInTrimmed, 'child span must not move when an earlier message leaves the window').toBe(childInFull)
+  })
+
+  it('keeps a root message span on its message id and pairs the subagent message by id', async () => {
+    const dbPath = await buildSubagentStore()
+
+    const calls = await parseRootSession(dbPath, new Set())
+    const spans = spanIdsOf(calls)
+
+    expect(spans[2]).toBe(`synth:kilo-shared-runtime:${ROOT}:msg-root-a2`)
+    expect(calls[1]?.pairingId, 'pairingId stays the Kilo message id').toBe('msg-child-a1')
+    expect(calls[1]?.sessionId).toBe(ROOT)
   })
 })
