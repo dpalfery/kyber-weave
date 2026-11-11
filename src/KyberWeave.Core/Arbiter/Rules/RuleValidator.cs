@@ -53,6 +53,18 @@ public static class RuleValidator
     /// <summary><c>arbiter.global</c> appears in a project-level config; it is valid only in the user config.</summary>
     public const string UserGlobalTargetsForbidden = "KW-ARB-CONFIG-011";
 
+    /// <summary>An unknown <c>model-targeting</c> mode, difficulty key, or difficulty profile. Names the valid values.</summary>
+    public const string ModelTargetingInvalid = "KW-ARB-CONFIG-012";
+
+    /// <summary>An invalid <c>model-targeting.ladder</c>: empty, repeated, or not a profile name. Shows an example ladder.</summary>
+    public const string LadderInvalid = "KW-ARB-CONFIG-013";
+
+    /// <summary><c>shadow</c> set on a rule whose shadow state the model-targeting mode owns.</summary>
+    public const string ShadowOwnedByMode = "KW-ARB-CONFIG-014";
+
+    /// <summary>A savings value out of range or in a forbidden place: a store limit, a bot login, a shipped-only effect or key.</summary>
+    public const string SavingsValueInvalid = "KW-ARB-CONFIG-015";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 

@@ -1,9 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Parsing;
+using KyberWeave.Core.Text;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Arbiter;
@@ -15,6 +17,33 @@ public static class ArbiterConfigLoader
 
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
+
+    /// <summary>The upper bound on <c>arbiter.stores.max-item-bytes</c>: one mebibyte.</summary>
+    private const int MaxStoreItemBytesLimit = 1_048_576;
+
+    private static readonly string[] ModelTargetingModes = ["off", "shadow", "enforce"];
+
+    private static readonly string[] DifficultyKeys = ["easy", "standard", "hard"];
+
+    /// <summary>Shipped rules whose shadow state <c>arbiter.model-targeting.mode</c> owns.</summary>
+    private static readonly HashSet<string> ModelTargetingRuleIds = new(StringComparer.Ordinal)
+    {
+        "KW-ARB-DIFFICULTY-001",
+        "KW-ARB-LADDER-001",
+    };
+
+    /// <summary>Effects the savings families reserve for shipped rules; a host rule may not use them.</summary>
+    private static readonly HashSet<string> ShippedOnlyEffects = new(StringComparer.Ordinal)
+    {
+        RuleEffects.Keep,
+        RuleEffects.Retarget,
+        RuleEffects.Spawn,
+        RuleEffects.Answer,
+        RuleEffects.SameFailure,
+        RuleEffects.Advise,
+        RuleEffects.Drop,
+        RuleEffects.Duplicate,
+    };
 
     internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section) =>
         Merge(defaults, section, isUserConfig: false);
@@ -50,6 +79,10 @@ public static class ArbiterConfigLoader
                     throw new YamlException(
                         $"[{RuleValidator.MalformedSection}] arbiter.rules has an entry with no id. Every rule needs one.");
 
+                if (entry.Shadow is not null && ModelTargetingRuleIds.Contains(id))
+                    throw new YamlException(
+                        $"[{RuleValidator.ShadowOwnedByMode}] rule '{id}' sets shadow, but arbiter.model-targeting.mode owns its shadow state. Set the mode instead.");
+
                 if (!seenHost.Add(id))
                     throw new YamlException(
                         $"[{RuleValidator.DuplicateOrReservedId}] arbiter.rules declares '{id}' more than once.");
@@ -67,6 +100,7 @@ public static class ArbiterConfigLoader
                         throw new YamlException(
                             $"[{RuleValidator.DuplicateOrReservedId}] rule '{id}' uses the reserved '{ShippedIdPrefix}' prefix. " +
                             "Host rules use their own ids, without that prefix.");
+                    CheckHostSavingsFields(id, entry);
                     if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? hostConverted, out string? error))
                         throw new YamlException($"[{RuleValidator.MalformedSection}] {error}");
                     hostRules.AddRange(hostConverted);
@@ -91,6 +125,9 @@ public static class ArbiterConfigLoader
             Rules = rules,
             OwnerFileKindMap = defaults.OwnerFileKindMap,
             LensPaths = defaults.LensPaths,
+            ModelTargeting = MergeModelTargeting(defaults.ModelTargeting, section.ModelTargeting),
+            Stores = MergeStores(defaults.Stores, section.Stores),
+            CommentTriage = MergeCommentTriage(defaults.CommentTriage, section.CommentTriage),
         };
     }
 
@@ -127,6 +164,9 @@ public static class ArbiterConfigLoader
             Rules = merged.Rules,
             OwnerFileKindMap = merged.OwnerFileKindMap,
             LensPaths = merged.LensPaths,
+            ModelTargeting = merged.ModelTargeting,
+            Stores = merged.Stores,
+            CommentTriage = merged.CommentTriage,
         };
     }
 
@@ -340,7 +380,8 @@ public static class ArbiterConfigLoader
             entry.Question is not null ||
             entry.Answers is not null ||
             entry.Decide is not null ||
-            entry.Ask is not null)
+            entry.Ask is not null ||
+            entry.ForEach is not null)
         {
             return $"[{RuleValidator.DuplicateOrReservedId}] rule '{id}' sets a field only host rules may set. " +
                 "A shipped rule tunes only enabled, confidence-at-least / probability-below and effects; " +
@@ -403,7 +444,8 @@ public static class ArbiterConfigLoader
             new Dictionary<string, string>(effects, StringComparer.Ordinal),
             clauses,
             ask,
-            entry.Enabled ?? true)).ToList();
+            entry.Enabled ?? true,
+            entry.Shadow ?? false)).ToList();
         error = null;
         return true;
     }
@@ -450,7 +492,8 @@ public static class ArbiterConfigLoader
             ask.ConfidenceAtLeast,
             ask.ProbabilityBelow,
             ask.When,
-            ask.TunedFor is null ? null : [.. ask.TunedFor]);
+            ask.TunedFor is null ? null : [.. ask.TunedFor],
+            ask.ForEach);
         error = null;
         return true;
     }
@@ -702,9 +745,156 @@ public static class ArbiterConfigLoader
         return shipped with
         {
             Enabled = entry.Enabled ?? shipped.Enabled,
+            Shadow = entry.Shadow ?? shipped.Shadow,
             Ask = ask,
             Effects = effects,
         };
+    }
+
+    /// <summary>
+    /// Refuses the savings-only fields on a host rule: list iteration at rule level, and the effects
+    /// the savings families reserve for shipped rules. Each refusal is <c>KW-ARB-CONFIG-015</c>.
+    /// </summary>
+    private static void CheckHostSavingsFields(string id, ArbiterRuleYaml entry)
+    {
+        if (entry.ForEach is not null)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] host rule '{id}' sets for-each at rule level. List iteration belongs inside an ask, and only shipped rules may use it.");
+        }
+
+        if (entry.Effects is null)
+            return;
+
+        foreach ((string answer, string effect) in entry.Effects)
+        {
+            if (ShippedOnlyEffects.Contains(effect))
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.SavingsValueInvalid}] host rule '{id}' maps '{answer}' to '{effect}', an effect only shipped rules may use.");
+            }
+        }
+    }
+
+    private static ArbiterModelTargetingConfig MergeModelTargeting(
+        ArbiterModelTargetingConfig defaults,
+        ArbiterModelTargetingYaml? section)
+    {
+        if (section is null)
+            return defaults;
+
+        string mode = defaults.Mode;
+        if (section.Mode is not null)
+        {
+            mode = section.Mode.Trim();
+            if (!ModelTargetingModes.Contains(mode, StringComparer.Ordinal))
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.mode '{section.Mode}' is not a mode. " +
+                    $"Use one of: {string.Join(", ", ModelTargetingModes)}.");
+            }
+        }
+
+        Dictionary<string, string> difficulty = new(defaults.DifficultyProfiles, StringComparer.Ordinal);
+        if (section.DifficultyProfiles is not null)
+        {
+            foreach ((string key, string profile) in section.DifficultyProfiles)
+            {
+                if (!DifficultyKeys.Contains(key, StringComparer.Ordinal))
+                {
+                    throw new YamlException(
+                        $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles names '{key}', which is not a difficulty. " +
+                        $"Use one of: {string.Join(", ", DifficultyKeys)}.");
+                }
+
+                if (!ArbiterSemanticProfiles.All.Contains(profile, StringComparer.Ordinal))
+                {
+                    throw new YamlException(
+                        $"[{RuleValidator.ModelTargetingInvalid}] arbiter.model-targeting.difficulty-profiles.{key} is '{profile}', which is not a profile name. " +
+                        $"Use one of: {string.Join(", ", ArbiterSemanticProfiles.All)}.");
+                }
+
+                difficulty[key] = profile;
+            }
+        }
+
+        IReadOnlyList<string> ladder = section.Ladder is null ? defaults.Ladder : ValidateLadder(section.Ladder);
+        return new ArbiterModelTargetingConfig(mode, difficulty, ladder);
+    }
+
+    /// <summary>Checks a ladder is non-empty, repeats no profile, and names only semantic profiles.</summary>
+    private static IReadOnlyList<string> ValidateLadder(List<string> ladder)
+    {
+        const string Example = "[fast, general, deep-planning]";
+        if (ladder.Count == 0)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder is empty. List the profiles cheapest first, e.g. {Example}.");
+        }
+
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string profile in ladder)
+        {
+            if (!ArbiterSemanticProfiles.All.Contains(profile, StringComparer.Ordinal))
+            {
+                string? nearest = StringDistance.Nearest(profile, ArbiterSemanticProfiles.All);
+                string hint = nearest is null ? string.Empty : $" Did you mean '{nearest}'?";
+                throw new YamlException(
+                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}', which is not a profile name. " +
+                    $"List profile names, not model tokens, e.g. {Example}.{hint}");
+            }
+
+            if (!seen.Add(profile))
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.LadderInvalid}] arbiter.model-targeting.ladder names '{profile}' more than once. Each profile appears once, e.g. {Example}.");
+            }
+        }
+
+        return [.. ladder];
+    }
+
+    private static ArbiterStoresConfig MergeStores(ArbiterStoresConfig defaults, ArbiterStoresYaml? section)
+    {
+        if (section is null)
+            return defaults;
+
+        int maxItemBytes = section.MaxItemBytes ?? defaults.MaxItemBytes;
+        if (maxItemBytes is < 1 or > MaxStoreItemBytesLimit)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.max-item-bytes must be between 1 and {MaxStoreItemBytesLimit} bytes.");
+        }
+
+        int retainDays = section.RetainDays ?? defaults.RetainDays;
+        if (retainDays < 1)
+            throw new YamlException($"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.retain-days must be at least 1.");
+
+        return new ArbiterStoresConfig(maxItemBytes, retainDays);
+    }
+
+    private static ArbiterCommentTriageConfig MergeCommentTriage(
+        ArbiterCommentTriageConfig defaults,
+        ArbiterCommentTriageYaml? section)
+    {
+        if (section?.BotLogins is null)
+            return defaults;
+
+        List<string> logins = [];
+        foreach (string? login in section.BotLogins)
+        {
+            string trimmed = login?.Trim() ?? string.Empty;
+            if (trimmed.Length == 0)
+            {
+                throw new YamlException(
+                    $"[{RuleValidator.SavingsValueInvalid}] arbiter.comment-triage.bot-logins has a blank login. Remove it or name the bot.");
+            }
+
+            logins.Add(trimmed);
+        }
+
+        // A list replaces the default rather than appending to it.
+        return new ArbiterCommentTriageConfig([.. logins.Distinct(StringComparer.Ordinal)]);
     }
 
     private static ArbiterProviderConfig MergeProvider(ArbiterProviderConfig defaults, ArbiterProviderYaml? section)
