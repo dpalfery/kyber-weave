@@ -1,12 +1,15 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Core.Configuration;
 using ModelContextProtocol.Server;
 
@@ -81,8 +84,10 @@ public sealed record ArbiterFacts
 }
 
 /// <summary>
-/// The three Arbiter tools the D4 fallback serves over stdio: evaluate an event, list the
-/// rules, and report readiness. Every response leads with the provenance line.
+/// The Arbiter tools the serve surface answers over stdio: the three decision tools for the D4 fallback (evaluate an
+/// event, list the rules, report readiness), and two fail-safe answer tools (select relevant document sections,
+/// classify a bot review comment). The three decision tools lead every response with the provenance line; the two
+/// answer tools return JSON.
 /// </summary>
 /// <remarks>
 /// <c>arbiter_evaluate_agent_dispatch_or_return</c> routes through the hook's own decision engine rather than a
@@ -101,8 +106,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <summary>The most evaluations one MCP call may fan out to.</summary>
     private const int MaxFanOutUnits = 64;
 
-    /// <summary>The largest client text one MCP call may embed, in characters.</summary>
-    private const int MaxTextChars = 256 * 1024;
+    /// <summary>The largest client text one MCP call may embed, in characters: the shared Arbiter limit.</summary>
+    private const int MaxTextChars = ArbiterTextLimits.MaxTextChars;
 
     [McpServerTool(Name = "arbiter_evaluate_agent_dispatch_or_return", ReadOnly = false, OpenWorld = false)]
     [Description("""
@@ -230,6 +235,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(DateTimeOffset.UtcNow), context.Log);
+        ArbiterModelBlock? retarget = null;
         foreach (PendingEvaluation item in pending)
         {
             HookOutcome outcome;
@@ -254,10 +260,24 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 string named = item.Refute is null ? string.Empty : $"finding: {item.Refute}\n";
                 return provenance + "\noutcome: " + OutcomeName(outcome.Kind) + "\n" + named + outcome.Reason;
             }
+
+            retarget ??= outcome.ModelBlock;
         }
 
-        return provenance + "\noutcome: allow";
+        return retarget is null
+            ? provenance + "\noutcome: allow"
+            : provenance + "\noutcome: allow\n" + RetargetAdvisory(retarget);
     }
+
+    /// <summary>
+    /// The retarget the hook would make, as one advisory line. The serve path writes no model field
+    /// anywhere, so the line is the whole effect: the caller decides what to dispatch with. A profile
+    /// with no token is reported as such, with the resolver's reason, rather than hidden.
+    /// </summary>
+    private static string RetargetAdvisory(ArbiterModelBlock block) =>
+        $"advisory (source: serve): would retarget to profile {OneLine(block.Profile)} " +
+        $"token {OneLine(block.Token ?? "<none>")} (reason: {OneLine(block.Reason ?? "none")}). " +
+        "Not written: the serve path changes no model.";
 
     [McpServerTool(Name = "arbiter_list_effective_rules_by_trigger", ReadOnly = true, OpenWorld = false)]
     [Description("""
@@ -364,6 +384,213 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         sb.Append("  key: ").Append(key);
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Lists the sections of one repository document a task needs. Returns JSON with <c>sections</c>, <c>failedSafe</c>
+    /// and <c>truncated</c>, or an <c>error</c> when the document is missing or outside the root.
+    /// </summary>
+    /// <param name="path">The repository-relative document path.</param>
+    /// <param name="task">The task the sections are selected for.</param>
+    /// <param name="maxSections">The most sections to list; null lists every selected section.</param>
+    [McpServerTool(Name = "arbiter_select_relevant_document_sections", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Lists the sections of one repository markdown document that a task needs, each with its id, title and line range, so a worker reads only the sections that bear on the task. Fails safe: when the Arbiter is not configured, unsure, or its provider fails, every section is listed. Returns JSON; a missing document is an error.
+        """)]
+    public string SelectRelevantDocumentSections(
+        [Description("The repository-relative path of the markdown document.")]
+        string path,
+        [Description("The task the worker is about to do, in plain words.")]
+        string task,
+        [Description("The most sections to list. Omit to list every selected section.")]
+        int? maxSections = null)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ErrorJson("The document path is empty.");
+        }
+
+        string? full = FileTextFacts.ResolveContainedFile(context.RepoRoot, path);
+        if (full is null)
+        {
+            return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
+        }
+
+        if (new FileInfo(full).Length > SectionSelector.MaxDocumentBytes)
+        {
+            return ErrorJson($"The document is larger than {SectionSelector.MaxDocumentBytes} bytes.");
+        }
+
+        if (maxSections is < 1)
+        {
+            return ErrorJson("maxSections must be at least 1.");
+        }
+
+        SectionSelection selection = WithProvider(provider =>
+            new SectionSelector(provider).SelectAsync(full, task ?? string.Empty).GetAwaiter().GetResult());
+        IEnumerable<DocumentSection> shown = maxSections is int cap
+            ? selection.Selected.Take(cap)
+            : selection.Selected;
+        bool truncated = maxSections is int limit && selection.Selected.Count > limit;
+        return JsonSerializer.Serialize(new
+        {
+            sections = shown.Select(section => new
+            {
+                id = section.Id,
+                title = section.Title,
+                startLine = section.StartLine,
+                endLine = section.EndLine,
+            }).ToArray(),
+            failedSafe = selection.FailedSafe,
+            truncated,
+        });
+    }
+
+    /// <summary>
+    /// Classifies one bot review comment as <c>real</c>, <c>nitpick</c> or <c>already-fixed</c> against the code at the
+    /// cited line, and records the decision. Returns JSON with <c>class</c>, <c>confidence</c>, <c>decisionId</c>,
+    /// <c>shadow</c>, <c>wouldClass</c> and <c>status</c>. While the rule is in shadow <c>class</c> is always <c>real</c>.
+    /// A disabled or absent rule, or no provider, reports <c>status</c> <c>not-evaluated</c>.
+    /// </summary>
+    /// <param name="path">The repository-relative path the comment cites.</param>
+    /// <param name="line">The 1-based line the comment cites.</param>
+    /// <param name="body">The comment text.</param>
+    /// <param name="commitSha">The commit the comment was made on, when known.</param>
+    /// <param name="summary">When true, <paramref name="body"/> is a PR-level summary; <paramref name="path"/> and <paramref name="line"/> are ignored and each table row is classified.</param>
+    /// <param name="author">The login that posted the summary, when known. Only a configured bot's summary is classified.</param>
+    [McpServerTool(Name = "arbiter_classify_bot_review_comment", ReadOnly = false, OpenWorld = false)]
+    [Description("""
+        Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. While the rule is in shadow (log-only), class is always real and wouldClass gives the class the model would have returned; shadow true says so. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items, each with the same fields. Returns JSON.
+        """)]
+    public string ClassifyBotReviewComment(
+        [Description("The repository-relative path the comment cites. Ignored when summary is true.")]
+        string path,
+        [Description("The 1-based line the comment cites. Ignored when summary is true.")]
+        int line,
+        [Description("The comment text, or the summary text when summary is true.")]
+        string body,
+        [Description("The commit the comment was made on, when known.")]
+        string? commitSha = null,
+        [Description("True when the body is a PR-level summary with a findings table.")]
+        bool summary = false,
+        [Description("The login that posted the summary, when known.")]
+        string? author = null)
+    {
+        if (body is null)
+        {
+            return ErrorJson("The comment body is missing.");
+        }
+
+        if (body.Length > MaxTextChars)
+        {
+            return ErrorJson($"The comment is larger than {MaxTextChars} characters.");
+        }
+
+        string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
+        // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
+        // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
+        (KyberWeaveConfig? config, _) = Load();
+        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfig.ProductDefaults.Rules;
+        string ruleSet = ArbiterProvenance.RuleSetHash(rules);
+        if (summary)
+        {
+            IReadOnlyList<string> botLogins = config?.Arbiter.CommentTriage.BotLogins ?? [];
+            CommentSummaryResult summaryResult = WithProvider(provider =>
+                new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, botLogins, rules)
+                    .ClassifySummaryAsync(new CommentSummaryRequest(body, author))
+                    .GetAwaiter()
+                    .GetResult());
+            return JsonSerializer.Serialize(new
+            {
+                items = summaryResult.Items.Select(item => new
+                {
+                    path = item.Path,
+                    line = item.Line,
+                    issue = item.Issue,
+                    @class = item.Class,
+                    confidence = item.Confidence,
+                    decisionId = item.DecisionId,
+                    shadow = item.Shadow,
+                    wouldClass = item.WouldClass,
+                    status = item.Status,
+                }),
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ErrorJson("The comment path is empty.");
+        }
+
+        if (line < 1)
+        {
+            return ErrorJson("The comment line must be at least 1.");
+        }
+
+        // The same containment answer the sections tool gives: a path that leaves the root is an error, not a read.
+        if (FileTextFacts.ResolveWithinRoot(context.RepoRoot, path) is null)
+        {
+            return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
+        }
+
+        CommentTriageResult result = WithProvider(provider =>
+            new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, rules: rules)
+                .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha))
+                .GetAwaiter()
+                .GetResult());
+        return JsonSerializer.Serialize(new
+        {
+            @class = result.Class,
+            confidence = result.Confidence,
+            decisionId = result.DecisionId,
+            shadow = result.Shadow,
+            wouldClass = result.WouldClass,
+            status = result.Status,
+        });
+    }
+
+    /// <summary>
+    /// Runs <paramref name="use"/> with the provider the host configuration names. The served surface is synchronous,
+    /// as the engine is, so the async service is awaited here. A provider the tool builds is disposed afterwards.
+    /// </summary>
+    private T WithProvider<T>(Func<IArbiterProvider, T> use)
+    {
+        IArbiterProvider provider = ProviderForRoot();
+        try
+        {
+            return use(provider);
+        }
+        finally
+        {
+            (provider as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The provider for the root's configuration. A root with no usable configuration, or with the Arbiter disabled,
+    /// answers with <see cref="NoneProvider"/>, so both tools fail safe rather than refuse.
+    /// </summary>
+    private IArbiterProvider ProviderForRoot()
+    {
+        if (context.Engine is not IArbiterProviderSource source)
+        {
+            return new NoneProvider();
+        }
+
+        try
+        {
+            KyberWeaveConfig config = context.LoadConfig(context.RepoRoot);
+            return config.Arbiter.Enabled ? source.ProviderFor(config) : new NoneProvider();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
+            or YamlDotNet.Core.YamlException)
+        {
+            // Unusable configuration answers fail-safe, and the reason goes to the log so it is not silent.
+            context.Log.WriteLine($"arbiter: no provider from the configuration, answering without one: {OneLine(ex.Message)}");
+            return new NoneProvider();
+        }
+    }
+
+    private static string ErrorJson(string message) => JsonSerializer.Serialize(new { error = message });
 
     private (KyberWeaveConfig? Config, string? Error) Load()
     {

@@ -1,4 +1,4 @@
-# The 21 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 32 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -334,6 +334,225 @@ rules:
             - { fact: review.changed-paths, subset-of: review.no-code-change-paths }
         answer: no-code-change
     effects: { no-code-change: skip }
+
+  # Model targeting on a delegate.model dispatch. The difficulty question asks how hard the
+  # task is; an answer retargets to that difficulty's profile only when the classifier is at
+  # least 0.8 sure, and below the floor the answer is undecidable and the dispatch keeps its model.
+  # Mode off disables the rule, shadow records it without effect, and enforce lets it gate.
+  - id: KW-ARB-DIFFICULTY-001
+    trigger: delegate.model
+    question: "How hard is this task: easy, standard or hard?"
+    answers: [easy, standard, hard]
+    ask:
+      type: choice
+      state: { task: plan.task.text, files: plan.task.files, file-kinds: plan.task.file-kinds }
+      criteria:
+        easy: A small, local change with one obvious path.
+        standard: A change with several files or a non-obvious path, but no cross-cutting risk.
+        hard: A change that spans layers, alters contracts, or needs careful design.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { easy: retarget, standard: retarget, hard: retarget }
+
+  # Model targeting on a retry. Step 0 decides from the ledger alone, in order: a harness that
+  # does not observe returns cannot prove the attempt failed; a first attempt, or one that passed,
+  # has nothing to climb from; a failed attempt whose profile was never recorded cannot be
+  # climbed from; a failed attempt already on the top rung has nowhere higher to go. Only a
+  # failed attempt below the top steps up. Every answer except step-up keeps the model.
+  - id: KW-ARB-LADDER-001
+    trigger: delegate.model
+    question: Did the previous attempt at this task fail on a profile below the top of the ladder?
+    answers: [returns-unobservable, first-attempt, profile-unrecorded, top-of-ladder, step-up]
+    decide:
+      - when: { fact: harness.observes-returns, equals: false }
+        answer: returns-unobservable
+      - when: { not: { fact: model-targeting.prior-result, equals: fail } }
+        answer: first-attempt
+      - when: { fact: model-targeting.prior-profile, exists: false }
+        answer: profile-unrecorded
+      - when: { fact: model-targeting.ladder.next, exists: false }
+        answer: top-of-ladder
+      - when: { fact: model-targeting.ladder.next, exists: true }
+        answer: step-up
+    effects:
+      returns-unobservable: keep
+      first-attempt: keep
+      profile-unrecorded: keep
+      top-of-ladder: keep
+      step-up: retarget
+
+  # The nitpick filter reads one lens finding. A Critical finding, or one a failed gate
+  # already corroborates, is substantive without a question. Every other finding is asked
+  # once; only a confident nitpick drops it. Shipped in shadow: the drop is logged, and the
+  # host still sees the finding, until the calibration run has been read.
+  - id: KW-ARB-NITPICK-001
+    trigger: lens.returned
+    question: Is this lens finding a nitpick, or a substantive defect?
+    answers: [substantive, nitpick, unsure]
+    shadow: true
+    decide:
+      - when:
+          any:
+            - { fact: finding.severity, equals: Critical }
+            - { fact: finding.gate-corroborated, equals: true }
+        answer: substantive
+    ask:
+      type: choice
+      state: { claim: finding.excerpt }
+      criteria:
+        substantive: The finding names a defect that changes behaviour, correctness or safety.
+        nitpick: The finding is about style, naming or preference and changes no behaviour.
+        unsure: The finding cannot be classed as either from the text given.
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { substantive: allow, nitpick: drop, unsure: allow }
+
+  # A refutation of a finding the nitpick filter dropped is not worth a refuter. It follows
+  # the filter's shadow state, so both rules are shipped in shadow together.
+  - id: KW-ARB-NITPICK-002
+    trigger: refute.spawn
+    question: Did the nitpick filter drop this finding?
+    answers: [dropped]
+    shadow: true
+    decide:
+      - when: { fact: finding.dropped, equals: true }
+        answer: dropped
+    effects: { dropped: verify }
+
+  # A refutation of a finding that repeats an earlier finding of the same review is not worth a refuter. The
+  # candidates are the review's earlier findings on the same file within 20 lines (at most three, oldest first).
+  # They travel in one batch, and the first candidate answered same-defect at or above the floor names the
+  # duplicate. Shipped in shadow: the duplicate is logged, and the refuter still runs, until calibration is read.
+  - id: KW-ARB-DUP-001
+    trigger: refute.spawn
+    question: Does an earlier finding of this review name the same defect as the refuted finding?
+    answers: [same-defect, different-defect]
+    shadow: true
+    ask:
+      type: choice
+      for-each: review.prior-findings
+      state: { claim: finding.excerpt, prior: candidate.text }
+      criteria:
+        same-defect: "The earlier finding describes the same defect at the same place as the refuted finding."
+        different-defect: "The earlier finding describes a different defect, or the same place for another reason."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { same-defect: duplicate, different-defect: allow }
+
+  # A bug-crusher investigate of a defect the Arbiter judges trivial is answered with the substitute report and
+  # the investigator is not spawned. A defect that needs the architect keeps the investigate. Shipped in shadow:
+  # the answer is logged, and the investigator still runs, until calibration is read.
+  - id: KW-ARB-TRIAGE-001
+    trigger: triage.shortcut
+    question: "Is this defect a trivial single-site fix that needs no architect?"
+    answers: [trivial, needs-architect]
+    shadow: true
+    ask:
+      type: choice
+      state: { defect: defect.report }
+      criteria:
+        trivial: "The defect is a single-site fault with an obvious local fix in one file."
+        needs-architect: "The defect spans sites, needs a design choice, or the cause is not clear from the report."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { trivial: answer, needs-architect: keep }
+
+  # A conductor's intake for a plan or a spec is answered with the recommendation and the planner is not spawned.
+  # Only the planner dispatch that carries the INTAKE: marker derives this shortcut. Shipped in shadow.
+  - id: KW-ARB-INTAKE-001
+    trigger: intake.shortcut
+    question: "Does this request call for a written plan or a written specification?"
+    answers: [plan, spec]
+    shadow: true
+    ask:
+      type: choice
+      state: { request: intake.request }
+      criteria:
+        plan: "The request is a bounded change with clear scope that a plan can carry."
+        spec: "The request is a feature with requirements that need a specification first."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { plan: answer, spec: answer }
+
+  # A docs-dev dispatch that declares no documentation change is answered without spawning docs-dev. A change that
+  # touches a governed path always keeps the dispatch, and the provider is never asked. Shipped in shadow.
+  - id: KW-ARB-DOCIMPACT-001
+    trigger: docs-impact.shortcut
+    question: "Does this change need no documentation change?"
+    answers: [touches, no-doc-change, doc-change, unknown]
+    shadow: true
+    decide:
+      - when: { fact: docs.governed-paths-changed, equals: true }
+        answer: touches
+      - when: { fact: docs.governed-paths-changed, exists: false }
+        answer: unknown
+    ask:
+      type: choice
+      state: { changed: review.changed-paths }
+      criteria:
+        no-doc-change: "No governed document describes the changed paths, so no documentation needs to change."
+        doc-change: "A governed document describes the changed paths and would need to change."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { touches: keep, unknown: keep, no-doc-change: answer, doc-change: keep }
+
+  # A rework dispatch whose failure repeats the failure of the same cluster is advised, never denied. The first
+  # failure of a cluster is only recorded. Shipped in shadow: the advisory is logged until calibration is read.
+  - id: KW-ARB-FAILURE-001
+    trigger: delegate.failure
+    question: "Is the current failure the same failure as the previous attempt of this cluster?"
+    answers: [same, different, first]
+    shadow: true
+    decide:
+      - when: { fact: failure.previous-text, exists: false }
+        answer: first
+    ask:
+      type: choice
+      state: { previous: failure.previous-text, current: failure.current-text }
+      criteria:
+        same: "The current failure reports the same error at the same place as the previous attempt."
+        different: "The current failure reports a different error, or the same place for another reason."
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { same: same-failure, different: allow, first: allow }
+
+  # Section trimming: asks, for each candidate section of a document, whether the task needs it. Only a
+  # confident not-relevant answer trims a section; any unsure answer keeps every section. Shipped in shadow: the
+  # answer is logged until calibration is read.
+  - id: KW-ARB-TRIM-001
+    trigger: sections.select
+    question: "Does this section of the document bear on the task?"
+    answers: [relevant, not-relevant]
+    shadow: true
+    ask:
+      type: choice
+      for-each: section.candidates
+      state: { task: task.text, section: candidate.text }
+      criteria:
+        relevant: "The section describes behaviour, steps or facts the task touches."
+        not-relevant: "The section does not bear on the task, so the worker does not need it to do the task."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { relevant: keep, not-relevant: advise }
+
+  # Bot review comment triage: classifies one bot comment against the code at the cited line as it is now.
+  # A nitpick or an already-fixed comment is advised; any unsure answer keeps the comment real. Shipped in shadow until
+  # calibration is read.
+  - id: KW-ARB-COMMENT-001
+    trigger: comment.triage
+    question: "Is this bot review comment a real defect, a nitpick, or already fixed in the current code?"
+    answers: [real, nitpick, already-fixed]
+    shadow: true
+    ask:
+      type: choice
+      state: { comment: comment.body, code: file.text-at-line }
+      criteria:
+        real: "The code at the cited line has the defect the comment describes."
+        nitpick: "The comment is a style or preference point that does not change behaviour or correctness."
+        already-fixed: "The code at the cited line no longer has the defect the comment describes."
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { real: keep, nitpick: advise, already-fixed: advise }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

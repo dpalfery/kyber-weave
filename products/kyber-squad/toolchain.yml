@@ -35,6 +35,8 @@ required-mcp-tools:
     - docs_validate_governed_document_schema
   kw-arbiter:
     - arbiter_check_configuration_and_key_readiness
+    - arbiter_classify_bot_review_comment
     - arbiter_evaluate_agent_dispatch_or_return
     - arbiter_list_effective_rules_by_trigger
+    - arbiter_select_relevant_document_sections
 validated-release: null

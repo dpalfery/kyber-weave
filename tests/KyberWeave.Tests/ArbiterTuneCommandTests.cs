@@ -222,6 +222,137 @@ public sealed class ArbiterTuneCommandTests : IDisposable
         Assert.Contains("PASS", execution.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Task 2.9 fixture: two <c>delegate.model</c> decisions on DIFFICULTY-001, one shadow (not delivered,
+    /// reason <c>shadow</c>) and one enforced (delivered to <c>general</c> on token <c>t-general</c>), each with
+    /// a paired return. The TASK_GATE outcome is not in this fixture: the gate report the return names is
+    /// not written, so the TASK_GATE assertion is deferred (see the task 2.9 coverage gap).
+    /// </summary>
+    private async Task WriteDelegateModelFixtureAsync()
+    {
+        Directory.CreateDirectory(ArbiterDirectory);
+        DecisionLog decisions = new(ArbiterDirectory);
+        await decisions.AppendAsync(DelegateModelDecision(
+            "d-shadow", "ledger-shadow", shadow: true, delivered: false, reason: "shadow"));
+        await decisions.AppendAsync(DelegateModelDecision(
+            "d-enforced", "ledger-enforced", shadow: false, delivered: true, reason: null));
+
+        InFlightLedger ledger = new(ArbiterDirectory);
+        await ledger.AppendAsync(new ArbiterLedgerEvent(
+            "post-shadow", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
+        {
+            PreId = "ledger-shadow",
+            Returns = new ArbiterReturnMarkers(TaskReview: "FAIL"),
+        });
+        await ledger.AppendAsync(new ArbiterLedgerEvent(
+            "post-enforced", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
+        {
+            PreId = "ledger-enforced",
+            Returns = new ArbiterReturnMarkers(TaskReview: "PASS"),
+        });
+    }
+
+    /// <summary>One <c>delegate.model</c> decision: a DIFFICULTY-001 step-1 score, with its model block.</summary>
+    private static ArbiterDecisionRecord DelegateModelDecision(
+        string id,
+        string ledgerId,
+        bool shadow,
+        bool delivered,
+        string? reason)
+    {
+        ArbiterDecisionRule ruleRecord = new(
+            "KW-ARB-DIFFICULTY-001",
+            1,
+            "hard",
+            null,
+            0.9,
+            CurrentThreshold,
+            "keep",
+            [],
+            null)
+        {
+            Shadow = shadow ? true : null,
+            WouldEffect = shadow ? "retarget" : null,
+        };
+        ArbiterProviderRecord provider = new(
+            "systemone", null, "jev-1.13.0", null, 12, ArbiterProviderStatuses.Answered);
+
+        return new ArbiterDecisionRecord(
+            id,
+            At,
+            "hook",
+            "claude",
+            null,
+            ledgerId,
+            "delegate.model",
+            "conductor",
+            "header",
+            "csharp-dev",
+            null,
+            null,
+            null,
+            "shipped",
+            [ruleRecord],
+            provider,
+            delivered ? "retarget" : "keep",
+            0,
+            5,
+            model: new ArbiterModelBlock("general", "t-general", "claude-sonnet-5-5", "difficulty", delivered, reason));
+    }
+
+    /// <summary>
+    /// The delegate.model rows: the profile, token and <c>delivered</c> sit beside the joined
+    /// <c>RESULT:</c>, with shadow and enforced rows kept apart. Shape asserted in the <c>--json</c>
+    /// report: each rule carries a <c>model</c> array of
+    /// <c>{decision, shadow, profile, token, delivered, result}</c>.
+    /// </summary>
+    [Fact]
+    public async Task Tune_DelegateModelRowsShowProfileTokenAndDeliveredBesideResult()
+    {
+        await WriteDelegateModelFixtureAsync();
+
+        CommandExecution execution = RunTune(_repo.Path);
+
+        Assert.Equal(0, execution.ExitCode);
+        string[] lines = execution.Output.Split('\n');
+        string shadowLine = Assert.Single(lines, line => line.Contains("d-shadow", StringComparison.Ordinal));
+        string enforcedLine = Assert.Single(lines, line => line.Contains("d-enforced", StringComparison.Ordinal));
+        Assert.Contains("profile general", shadowLine, StringComparison.Ordinal);
+        Assert.Contains("token t-general", shadowLine, StringComparison.Ordinal);
+        Assert.Contains("delivered false", shadowLine, StringComparison.Ordinal);
+        Assert.Contains("RESULT: FAIL", shadowLine, StringComparison.Ordinal);
+        Assert.Contains("profile general", enforcedLine, StringComparison.Ordinal);
+        Assert.Contains("token t-general", enforcedLine, StringComparison.Ordinal);
+        Assert.Contains("delivered true", enforcedLine, StringComparison.Ordinal);
+        Assert.Contains("RESULT: PASS", enforcedLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tune_JsonDelegateModelRowsKeepShadowAndEnforcedApart()
+    {
+        await WriteDelegateModelFixtureAsync();
+
+        CommandExecution execution = RunTune(_repo.Path, "--json");
+
+        Assert.Equal(0, execution.ExitCode);
+        JsonElement rule = RuleWithId(JsonDocument.Parse(execution.Output).RootElement, "KW-ARB-DIFFICULTY-001");
+        List<JsonElement> rows = rule.GetProperty("model").EnumerateArray().ToList();
+        JsonElement shadow = Assert.Single(rows, row => row.GetProperty("decision").GetString() == "d-shadow");
+        JsonElement enforced = Assert.Single(rows, row => row.GetProperty("decision").GetString() == "d-enforced");
+
+        Assert.True(shadow.GetProperty("shadow").GetBoolean());
+        Assert.Equal("general", shadow.GetProperty("profile").GetString());
+        Assert.Equal("t-general", shadow.GetProperty("token").GetString());
+        Assert.False(shadow.GetProperty("delivered").GetBoolean());
+        Assert.Equal("FAIL", shadow.GetProperty("result").GetString());
+
+        Assert.False(enforced.GetProperty("shadow").GetBoolean());
+        Assert.Equal("general", enforced.GetProperty("profile").GetString());
+        Assert.Equal("t-general", enforced.GetProperty("token").GetString());
+        Assert.True(enforced.GetProperty("delivered").GetBoolean());
+        Assert.Equal("PASS", enforced.GetProperty("result").GetString());
+    }
+
     /// <summary>With no logs the command says so on one line and exits zero, and creates nothing.</summary>
     [Fact]
     public void Tune_WithNoLogsSaysNoScoredAnswersOnOneLineAndExitsZero()

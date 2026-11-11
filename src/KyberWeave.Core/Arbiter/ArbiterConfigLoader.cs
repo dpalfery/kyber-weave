@@ -120,16 +120,17 @@ public static class ArbiterConfigLoader
         }
 
         rules.AddRange(hostRules);
+        ArbiterModelTargetingConfig modelTargeting = MergeModelTargeting(defaults.ModelTargeting, section.ModelTargeting);
 
         return new ArbiterConfig
         {
             Enabled = section.Enabled ?? defaults.Enabled,
             ExplicitlyEnabled = section.Enabled,
             Provider = MergeProvider(defaults.Provider, section.Provider),
-            Rules = rules,
+            Rules = ModelTargetingRules.Apply(rules, modelTargeting.Mode),
             OwnerFileKindMap = defaults.OwnerFileKindMap,
             LensPaths = defaults.LensPaths,
-            ModelTargeting = MergeModelTargeting(defaults.ModelTargeting, section.ModelTargeting),
+            ModelTargeting = modelTargeting,
             Stores = MergeStores(defaults.Stores, section.Stores),
             CommentTriage = MergeCommentTriage(defaults.CommentTriage, section.CommentTriage),
         };

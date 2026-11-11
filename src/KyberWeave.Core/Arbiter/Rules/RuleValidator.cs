@@ -364,6 +364,10 @@ public static class RuleValidator
                 continue;
             }
 
+            // A for-each ask binds candidate.* per list item when it expands, so the trigger never supplies it.
+            if (rule.Ask?.ForEach is not null && fact.StartsWith("candidate.", StringComparison.Ordinal))
+                continue;
+
             if (!supplied.Contains(fact))
             {
                 diagnostics.Add(new Diagnostic(

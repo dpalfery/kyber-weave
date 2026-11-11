@@ -26,6 +26,19 @@ shadow with one model-targeting switch, render-time model targets, a per-harness
 override declaration, and the run-store rule. Decision 9 gains the hunk-level lens skip
 (`KW-ARB-LENS-002`) in decision 30.
 
+Amended 2026-11-11 by the arbiter decision-model savings work, phase 3: decision 9's rule that a
+finding is never dropped on a model answer alone is qualified by the nitpick filter
+(`KW-ARB-NITPICK-001`), which drops only a confident nitpick and only once enforced. Decision 29's run
+stores are implemented under `<arbiter-dir>/stores/`. The triggers `intake.shortcut`,
+`triage.shortcut`, `docs-impact.shortcut`, `delegate.failure`, `sections.select` and `comment.triage`
+are derived as the phase 1 catalogue set out. The `answer`, `same-failure`, `advise`, `drop` and
+`duplicate` effects are live on their rules once enforced. Nine phase 3 rules ship in shadow.
+
+Amended 2026-11-11 by the arbiter decision-model savings closeout (decision 39 of that
+specification): the rule that an unverified capability is unsupported governs the per-dispatch
+model override only. The hook-capability rule above, that undocumented cells count as supported
+until a defect proves otherwise, is unchanged.
+
 ## Context
 
 The Squad's in-flight decisions were made by the model being governed. Delegation scope was
@@ -87,7 +100,7 @@ judgement about meaning is made without a confidence attached.
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Twenty-one shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
+12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine, so the count is now thirty-two. Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -256,15 +269,17 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (21 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+Rule ids `KW-ARB-*` (32 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
 `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
 record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
-headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, and `REFUTE:` are permanent.
+headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, `REFUTE:`, and `REVIEW_RUN:` are permanent.
 Renaming one silently un-suppresses host tuning, receipts, and logs keyed on it.
 
 The savings phase 1 adds `KW-ARB-LENS-002`, `KW-ARB-CONFIG-012` to `KW-ARB-CONFIG-015`, and
-`KW-ARB-MODEL-001`. The ids `KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001` and `KW-ARB-NITPICK-001` are reserved
-for phases 2 and 3, and ship there.
+`KW-ARB-MODEL-001`. The ids `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001` shipped in phase 2. The savings phase 3 adds
+`KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`, `KW-ARB-TRIAGE-001`,
+`KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`, `KW-ARB-TRIM-001` and
+`KW-ARB-COMMENT-001`.
 
 ## Related
 

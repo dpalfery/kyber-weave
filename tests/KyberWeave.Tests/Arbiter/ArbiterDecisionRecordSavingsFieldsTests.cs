@@ -17,7 +17,7 @@ public sealed class ArbiterDecisionRecordSavingsFieldsTests
 
     private static ArbiterDecisionRecord Record(
         string? primaryLedgerId = null,
-        string? model = null,
+        ArbiterModelBlock? model = null,
         bool? substitute = null,
         string? duplicateOf = null,
         IReadOnlyList<ArbiterDecisionRule>? rules = null) =>
@@ -82,12 +82,19 @@ public sealed class ArbiterDecisionRecordSavingsFieldsTests
     {
         JsonElement root = TopLevel(ArbiterJson.Serialize(Record(
             primaryLedgerId: "ledger-0",
-            model: "claude-haiku-5-5",
+            model: new ArbiterModelBlock("fast", "claude-haiku-5-5", "claude-sonnet-5-5", "ladder", true, null),
             substitute: true,
             duplicateOf: "rec-0")));
 
         Assert.Equal("ledger-0", root.GetProperty("primary-ledger-id").GetString());
-        Assert.Equal("claude-haiku-5-5", root.GetProperty("model").GetString());
+        JsonElement model = root.GetProperty("model");
+        Assert.Equal(JsonValueKind.Object, model.ValueKind);
+        Assert.Equal("fast", model.GetProperty("profile").GetString());
+        Assert.Equal("claude-haiku-5-5", model.GetProperty("token").GetString());
+        Assert.Equal("claude-sonnet-5-5", model.GetProperty("rendered-token").GetString());
+        Assert.Equal("ladder", model.GetProperty("source").GetString());
+        Assert.True(model.GetProperty("delivered").GetBoolean());
+        Assert.False(model.TryGetProperty("reason", out _));
         Assert.True(root.GetProperty("substitute").GetBoolean());
         Assert.Equal("rec-0", root.GetProperty("duplicate-of").GetString());
     }

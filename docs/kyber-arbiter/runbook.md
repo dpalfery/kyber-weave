@@ -155,14 +155,17 @@ The key and the executable are separate contracts: `kw-arbiter` is the value of
 `McpServerNames.Arbiter`, so it is the same spelling every renderer grants, while the argv above
 is unchanged.
 
-`serve` exposes three tools. `arbiter_evaluate_agent_dispatch_or_return(trigger, facts)` evaluates
+`serve` exposes five tools. `arbiter_evaluate_agent_dispatch_or_return(trigger, facts)` evaluates
 one event
 exactly as the hook would — same facts, rules, ledger append and decision record — and
 returns the same allow, envelope or review note; the caller asserts the routing facts and
 the log records `caller-source: asserted`, so this path is advisory.
-`arbiter_list_effective_rules_by_trigger(trigger?)` lists the rule catalogue, and
+`arbiter_list_effective_rules_by_trigger(trigger?)` lists the rule catalogue,
 `arbiter_check_configuration_and_key_readiness()` reports the
-root, rule-set hash, rule count and provider state, never the key — both read-only. Every
+root, rule-set hash, rule count and provider state, never the key, and
+`arbiter_select_relevant_document_sections` and `arbiter_classify_bot_review_comment` answer the
+section and bot-comment triage (see [phase 3 facts](architecture.md#phase-3-facts-review-shortcuts-stores-and-comments)).
+The evaluate and classify tools write decision records; the other three only read. Every
 response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
 conductor calls `arbiter_evaluate_agent_dispatch_or_return` before each dispatch and after each
@@ -257,8 +260,10 @@ partial, so repair or remove the line and run again.
 
 Two limits, both known:
 
-- The report pairs a decision with the `RESULT:` line only. The `TASK_GATE:` outcome and, for
-  `delegate.model`, the chosen profile are not shown yet; that pairing ships with model targeting.
+- The report pairs a decision with the `RESULT:` line only. The `TASK_GATE:` outcome is not paired
+  yet; that pairing is not wired.
+- A `delegate.model` row shows the profile, the token and `delivered`. Read them as described in
+  [Switching model targeting to enforce](#switching-model-targeting-to-enforce).
 - Shadow and enforced answers are counted apart, but a threshold's flip count is computed from the
   scores alone, so a shadow answer that would flip is counted the same way as an enforced one.
 
@@ -285,9 +290,118 @@ unreadable, or older than the Squad lock. The remedy is the one the message name
 kyber-weave squad update
 ```
 
-The update rewrites the table from the current presets. In phase 1 no hook reads the table to choose a
-model, so a stale table changes nothing at dispatch yet. The warning is early notice for the model
-phase, which reads the table. A project-scope target is not checked by this diagnostic.
+The update rewrites the table from the current presets. A stale table changes what a retarget is
+pointed at, so refresh it after changing a preset. A project-scope target is not checked by this
+diagnostic.
+
+## Switching model targeting to enforce
+
+`arbiter.model-targeting.mode` has three values. The default is `shadow`.
+
+| Mode | What happens |
+|---|---|
+| `off` | Both model rules are disabled. No `model` block is written. |
+| `shadow` | The rules run and each `delegate.model` decision records a `model` block with `reason: shadow`. Nothing is delivered. |
+| `enforce` | A retarget is written onto the dispatch, unless a reason above holds. |
+
+To move from shadow to enforce:
+
+1. Run `kyber-weave arbiter tune` and check the rows that carry a model block. Each shows the profile
+   the Arbiter chose, its token, and whether it was delivered.
+2. Confirm the table exists for the harness: `kyber-weave arbiter doctor` must not raise
+   `KW-ARB-MODEL-001`.
+3. Set `arbiter.model-targeting.mode: enforce` in the configuration. This is the only switch for the
+   two model rules; a per-rule `shadow` override on either fails `KW-ARB-CONFIG-014`.
+4. Run `kyber-weave arbiter doctor` and `kyber-weave arbiter validate` to check the configuration.
+
+### Reading the `tune` profile column
+
+Each `delegate.model` row reads like this:
+
+```text
+decision <id> score 0.82 profile general token claude-sonnet-5-5 delivered true RESULT: pass
+```
+
+- `profile` is the semantic profile the target chose (`fast`, `general`, `deep-planning` and so on).
+- `token` is the model token the table names for that profile, or `none` when the profile has no token.
+- `delivered` is `true` when the Claude adapter wrote the model field and no reason blocked the write. It is
+  not proof the model ran. In `shadow`, `delivered` is always `false`.
+- `RESULT:` is the worker's own report, paired from the ledger.
+
+A row appears only for a scored answer that carries a model block. The text report does not print the
+`reason`; the `--json` report does not carry it either. To see why a dispatch was kept, read its
+`model.reason` in `decisions.jsonl`.
+
+### What `delivered: true` does and does not mean
+
+`delivered: true` means the Arbiter wrote the model field onto the Claude `Agent` dispatch, and the decision
+records it only after that write held. It does not mean the model ran. Two settings can override it after the write:
+
+- An installed mod's `agent.spawn` hook can replace the model.
+- The `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` environment variable forces a model on every sub-agent.
+
+Check the dispatch's own transcript if you need to know which model ran.
+
+### When a retarget is not written
+
+- A token that is neither an accepted alias nor a full Claude id of an accepted family is not written. The
+  decision records `delivered: false` with `model.reason: token-not-accepted`, and the dispatch runs as it
+  would with no model block.
+- A write that throws is recorded as `delivered: false` with `model.reason: model-write-failed`. The hook log
+  has a line beginning `model-write-failed`. The dispatch runs without the model field, and its routing header
+  is stripped. Check `decisions.jsonl` first, then the hook log, when a retarget looks wrong.
+
+## Phase 3 rules: reading and enforcing
+
+Nine phase 3 rules ship in shadow: `KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`,
+`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+`KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. Until a rule is enforced, a dispatch behaves as it did
+before: the lens is still spawned, the finding still reaches the host, and the investigator, planner
+or docs-dev still runs. Read the shadow entries in `decisions.jsonl` first.
+
+- A `would-effect` of `drop` (nitpick filter) means the finding would have been set aside as
+  `ARBITER_DROPPED`. Compare a sample against the findings the council kept.
+- A `would-effect` of `duplicate` means the refutation would have been denied as `ARBITER_DUPLICATE`.
+- A `would-effect` of `answer` on a shortcut means the worker would have been withheld and the
+  substitute digest returned. Check the digest's `ARBITER_DECISION` against the worker's own report
+  before trusting it.
+- A `would-effect` of `same-failure` means the rework would have carried an `ARBITER_SAME_FAILURE`
+  advisory. It never denies, so it is safe to enforce once the advisory reads correctly.
+- A `would-effect` of `advise` on `KW-ARB-TRIM-001` or `KW-ARB-COMMENT-001` means a section would have
+  been trimmed or a bot comment advised as a nitpick or already fixed. Check each one before enforcing.
+
+To enforce one rule, set `shadow: false` on its entry under `arbiter.rules` in the project config, as
+[configuration](../configuration.md#savings-keys) describes. Enforce one rule at a time and read its
+entries after each change.
+
+Stores hold the text of review findings and worker failures under `<arbiter-dir>/stores/`. Each item
+is limited to `arbiter.stores.max-item-bytes` (default 16384), and an oversized item is refused, not
+cut short. `arbiter.stores.retain-days` (default 14, clamped to 1 to 3650 at run time) sets how long a
+store directory is kept. A directory's age is the time of its newest file, so an active run is not
+swept mid-review; a directory whose newest file is older than that is removed on a later append. A
+failed store write is reported as `unavailable`, never thrown.
+
+Two evidence lines appear in a decision record's notes, and neither drops a finding:
+
+- `review-run-missing` — a lens dispatch arrived with no `REVIEW_RUN` header, so its findings are
+  judged but not stored, and duplicate detection has no store to compare them against. Check that the
+  lens dispatch carries the header.
+- `findings-over-cap` — a return carried more findings than the 64-question budget. The findings past
+  the budget were not judged and are kept, not dropped.
+
+Two advisory commands run outside a dispatch:
+
+- `kyber-weave arbiter sections --path <FILE> --task <TEXT>` lists the sections of one markdown document
+  a task needs. It fails safe to every section.
+- `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]` classifies
+  one bot review comment as `real`, `nitpick` or `already-fixed`. Each call records a decision, and any
+  unsure answer is `real`. While the rule is in shadow the class printed is always `real`, and a
+  `shadow: would have been <class>` line says what the model gave.
+- `kyber-weave arbiter comment --summary --body <TEXT> --author <LOGIN>` classifies each row of a bot's
+  PR-level summary table (`Severity | File | Line | Issue`); `--path` and `--line` are ignored. Only a
+  login listed in `arbiter.comment-triage.bot-logins`, or one ending `[bot]`, is classified. Every
+  other row is `real` and unasked. Rows past 50 are `real` and unasked too. A missing or unreadable
+  table keeps the whole comment `real`.
 
 ## Recording a harness defect
 

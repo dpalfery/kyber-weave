@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -39,11 +40,14 @@ public enum HookOutcomeKind
 /// <param name="RewrittenInputJson">The complete rewritten input, for allow-with-rewrite.</param>
 /// <param name="ModelToken">The model alias the decision sets on a sub-agent dispatch, when the harness
 /// accepts one. Null leaves the dispatch's model as the harness would have chosen it.</param>
+/// <param name="ModelBlock">The delegate.model block the evaluation resolved, delivered or not, when model
+/// targeting is not off. The serve path reads it to report the retarget as advisory; no harness writes from it.</param>
 public sealed record HookOutcome(
     HookOutcomeKind Kind,
     string? Reason = null,
     string? RewrittenInputJson = null,
-    string? ModelToken = null);
+    string? ModelToken = null,
+    ArbiterModelBlock? ModelBlock = null);
 
 /// <summary>
 /// Whether a harness lets the Arbiter set the model of a dispatched sub-agent: the field that carries
@@ -84,6 +88,8 @@ public enum HookScope
 /// <summary>What a classified event is evaluated against, copied from the serving harness's adapter.</summary>
 /// <param name="ModelOverride">The serving harness's model-override declaration. Null when the caller
 /// supplies none, which a rule reads as unsupported.</param>
+/// <param name="ConfirmModelWrite">Writes an accepted model token into the harness input and reports whether
+/// the write held. The decision asks it before recording a delivered model. Null when the adapter writes later.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
@@ -91,7 +97,8 @@ public sealed record HookContext(
     bool ObservesReturns = true,
     string? HomeDirectory = null,
     HookScope Scope = HookScope.Project,
-    ModelOverrideCapability? ModelOverride = null);
+    ModelOverrideCapability? ModelOverride = null,
+    Func<string, bool>? ConfirmModelWrite = null);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
