@@ -142,7 +142,8 @@ internal static class ModelTargetFacts
             }
         }
 
-        IReadOnlyList<ArbiterDecisionRecord> records = decisions.ReadAll();
+        // The decision log is read only when an earlier attempt matches, and then once: most first attempts need no read.
+        Dictionary<string, ArbiterModelBlock>? delivered = null;
         ArbiterPriorAttempt? latest = null;
         foreach (ArbiterLedgerEvent post in events)
         {
@@ -156,7 +157,8 @@ internal static class ModelTargetFacts
                 continue;
             }
 
-            (string? profile, string? token) = RanOn(pre, records);
+            delivered ??= DeliveredBlocksByLedgerId(decisions.ReadAll());
+            (string? profile, string? token) = RanOn(pre, delivered);
             latest = new ArbiterPriorAttempt(
                 string.Equals(result, "PASS", StringComparison.Ordinal) ? "pass" : "fail",
                 profile,
@@ -166,20 +168,29 @@ internal static class ModelTargetFacts
         return latest;
     }
 
-    /// <summary>The profile and token the attempt ran on: the delivered model block when there is one, else the pre event.</summary>
-    private static (string? Profile, string? Token) RanOn(ArbiterLedgerEvent pre, IReadOnlyList<ArbiterDecisionRecord> records)
+    /// <summary>
+    /// The delivered model block of each ledger event, the first one logged for an event winning. Built once per
+    /// evaluation, so the attempts are matched by lookup rather than by a scan of the whole log for each.
+    /// </summary>
+    private static Dictionary<string, ArbiterModelBlock> DeliveredBlocksByLedgerId(IReadOnlyList<ArbiterDecisionRecord> records)
     {
+        Dictionary<string, ArbiterModelBlock> delivered = new(StringComparer.Ordinal);
         foreach (ArbiterDecisionRecord record in records)
         {
-            if (string.Equals(record.LedgerId, pre.Id, StringComparison.Ordinal)
-                && record.Model is { Delivered: true } block)
+            if (record.Model is { Delivered: true } block)
             {
-                return (block.Profile, block.Token);
+                delivered.TryAdd(record.LedgerId, block);
             }
         }
 
-        return (pre.ModelProfile, pre.ModelToken);
+        return delivered;
     }
+
+    /// <summary>The profile and token the attempt ran on: the delivered model block when there is one, else the pre event.</summary>
+    private static (string? Profile, string? Token) RanOn(ArbiterLedgerEvent pre, IReadOnlyDictionary<string, ArbiterModelBlock> delivered) =>
+        delivered.TryGetValue(pre.Id, out ArbiterModelBlock? block)
+            ? (block.Profile, block.Token)
+            : (pre.ModelProfile, pre.ModelToken);
 
     /// <summary>The ladder entry one rung above <paramref name="profile"/>, or null at the top or when the profile is off the ladder.</summary>
     private static string? NextRung(string? profile, IReadOnlyList<string> ladder)
