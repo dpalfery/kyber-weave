@@ -31,6 +31,23 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// <summary>The harness token this adapter serves.</summary>
     public const string Token = "claude";
 
+    /// <summary>
+    /// The sub-agents documentation the model-override declaration was read from. The aliases are
+    /// checked against this page, not against the code that lists them.
+    /// </summary>
+    private const string SubAgentsDocs = "https://code.claude.com/docs/en/sub-agents";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Declared only: the adapter does not write a model onto a dispatch yet. Claude sub-agents take
+    /// the model in the <c>model</c> field and accept four aliases.
+    /// </remarks>
+    public ModelOverrideCapability ModelOverride { get; } = new(
+        true,
+        "model",
+        new HashSet<string>(StringComparer.Ordinal) { "sonnet", "opus", "haiku", "fable" },
+        SubAgentsDocs);
+
     private readonly IHookDecisionEngine _engine;
 
     /// <summary>

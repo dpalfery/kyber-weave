@@ -65,6 +65,13 @@ public sealed record ArbiterEvent
     /// </summary>
     public bool ObservesReturns { get; init; } = true;
 
+    /// <summary>
+    /// The dispatch field that carries a sub-agent's model, when the serving harness lets the Arbiter
+    /// set it; null when it does not. The hook host copies it from the harness adapter so
+    /// <c>harness.model-override</c> reads the harness's declaration, not an assumption.
+    /// </summary>
+    public string? ModelOverrideField { get; init; }
+
     /// <summary>The tool output, on post-dispatch (return) events.</summary>
     public string? ToolOutput { get; init; }
 

@@ -213,7 +213,8 @@ public sealed class ArbiterEvaluator
             return new ArbiterDispatchEvaluation(null, RuleEffects.Allow);
         }
 
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config, ev.ObservesReturns);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);

@@ -192,6 +192,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 Session = sessionId,
                 Cwd = repoRoot,
                 ObservesReturns = context.ObservesReturns,
+                ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
                 ToolOutput = toolOutput,
                 IsDispatch = true,
             };

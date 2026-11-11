@@ -68,11 +68,14 @@ public static class TriggerFactBuilder
     /// always supplies it — true for every harness except the ones whose adapter
     /// declares otherwise — so a missing value can never silently disable an
     /// enforced rule.</param>
+    /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when
+    /// the harness offers no override: the value of <c>harness.model-override</c>.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
         KyberWeaveConfig config,
-        bool observesReturns = true)
+        bool observesReturns = true,
+        string? modelOverrideField = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -88,7 +91,8 @@ public static class TriggerFactBuilder
             classification.Caller,
             classification.CallerSource,
             config,
-            observesReturns);
+            observesReturns,
+            modelOverrideField);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -100,7 +104,8 @@ public static class TriggerFactBuilder
         string? caller,
         string? callerSource,
         KyberWeaveConfig config,
-        bool observesReturns = true)
+        bool observesReturns = true,
+        string? modelOverrideField = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -178,6 +183,7 @@ public static class TriggerFactBuilder
                 "roster.caller.delegates-to" => delegatesTo,
                 "roster.descriptions" => descriptions,
                 "harness.observes-returns" => observesReturns,
+                "harness.model-override" => modelOverrideField,
                 _ => null
             };
 

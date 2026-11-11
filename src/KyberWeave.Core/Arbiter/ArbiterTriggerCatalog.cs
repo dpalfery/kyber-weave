@@ -37,6 +37,7 @@ public static class ArbiterTriggerCatalog
         "ledger.completed-tasks",
         "ledger.red-evidence",
         "harness.observes-returns",
+        "harness.model-override",
         "roster.caller.delegates-to",
         "roster.descriptions",
         "rules.<id>.answer",
