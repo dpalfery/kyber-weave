@@ -50,7 +50,10 @@ public sealed class ArbiterLensCleanTreeTests : IDisposable
 
         string changed = Path.Combine(probe.Root, ChangedFile.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(changed)!);
-        File.WriteAllText(changed, "// one committed change\n", Encoding.UTF8);
+        File.WriteAllText(
+            changed,
+            "namespace Payments;\n\ninternal static class Payment\n{\n    public static int Total(int a, int b) => a + b;\n}\n",
+            Encoding.UTF8);
 
         probe.Git("add", "-A");
         probe.Git("commit", "-m", "feat: one committed change");

@@ -109,7 +109,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             () => "decision-test-1");
     }
 
-    private string Payload(string hookEvent, string target, string prompt, string? status = null)
+    private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
     {
         string cwd = _repo.Path.Replace("\\", "\\\\", StringComparison.Ordinal);
         string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
@@ -122,7 +122,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "\"session_id\":\"sess-real-1\",\"transcript_path\":\"/tmp/t.jsonl\"," +
             "\"cwd\":\"" + cwd + "\"," +
             "\"permission_mode\":\"default\"," +
-            "\"agent_id\":\"agent-conductor-1\",\"agent_type\":\"conductor\"," +
+            "\"agent_id\":\"agent-" + agentType + "-1\",\"agent_type\":\"" + agentType + "\"," +
             "\"tool_name\":\"Agent\",\"tool_input\":" + toolInput + "," +
             "\"tool_use_id\":\"toolu-real-1\"";
         if (status is not null)
@@ -167,7 +167,9 @@ public sealed class ArbiterRealEngineTests : IDisposable
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new MarkdownOnlyGitFacts());
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "review-lens", LensPrompt));
+        (int exit, string stdout, _) = Run(
+            command,
+            Payload("PreToolUse", "review-lens", LensPrompt, agentType: "code-reviewer"));
 
         Assert.Equal(0, exit);
         Assert.Contains("KW-ARB-LENS-002", stdout, StringComparison.Ordinal);
