@@ -46,7 +46,7 @@ public static class WorktreeIndexGuard
     /// <param name="lockDirectory">Where the index lock file lives.</param>
     /// <param name="restore">
     ///     Which tracked files the index run restores. The default restores every written file; the post-checkout hook
-    ///     will pass <see cref="CodeGraphRestore.InitConfigFilesOnly"/>. Passed through to the provisioner.
+    ///     passes <see cref="CodeGraphRestore.InitConfigFilesOnly"/>. Passed through to the provisioner.
     /// </param>
     public static WorktreeIndexOutcome Ensure(
         string root,

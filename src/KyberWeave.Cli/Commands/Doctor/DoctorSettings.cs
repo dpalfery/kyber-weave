@@ -40,7 +40,9 @@ public sealed class DoctorSettings : CommandSettings
     public int McpTimeoutSeconds { get; set; } = DefaultMcpTimeoutSeconds;
 
     [CommandOption("--post-checkout")]
-    [Description("Used by the git post-checkout hook to index a new worktree without restoring edits.")]
+    [Description(
+        "Used by the git post-checkout hook: index a new worktree, restoring only the files codegraph init writes. "
+        + "Starts no MCP server and installs no hook. Cannot be combined with --check, --provision or --ensure.")]
     public bool PostCheckout { get; set; }
 
     [CommandOption("--json")]
