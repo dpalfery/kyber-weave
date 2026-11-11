@@ -526,6 +526,61 @@ public sealed class SquadPerformanceContractTests
         Assert.DoesNotMatch(@"(?:\w-+|(?<![-\w])-|---)artifacts-path", content);
     }
 
+    /// <summary>
+    ///     One row per (sentence, product file) pair for the developer input-site rules: the table an
+    ///     implementer fills for a change that takes a value from outside the process, the whole-class
+    ///     rule for defect fixes, the six-field digest's non-field lines, and the test-dev and developer
+    ///     agent obligations that follow from them. A failure names the sentence and the file it is missing from.
+    /// </summary>
+    [Theory]
+    [InlineData("S1", "An implementation worker whose change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API fills the input-site table for that change before it reports done.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S2", "The table's columns and cell values are defined once, in the correctness lens of the code-review skill (references/lenses/correctness.md); the worker uses them unchanged.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S3", "Every THROWS or accepted wrong cell is fixed before the worker reports done, and each fixed cell is covered by a test that fails without the fix; a fixed cell that no test covers yet goes on the worker's COVERAGE_GAPS line, and the conductor sends it to test-dev before the task clears its exit gate.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S4", "The worker saves the table as .agent_scratchpad/<task-id>/input-sites.md, cites it on an Artifact: line, and reports Input sites: N traced, M files with none in the message body beside its digest.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S5", "A fix for a reported defect covers the defect's whole class: the worker states the class in one sentence and names at least three other inputs of that class that the original failure scenario did not name, each covered by a test, on one line: Defect class: <one sentence> — inputs: <input>; <input>; <input>.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "skills/task-gate/SKILL.md")]
+    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "agents/test-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/csharp-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/typescript-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/python-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/go-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/rust-dev.md")]
+    [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/dal-dev.md")]
+    [InlineData("S8", "A RED test for code that parses or converts a value from outside the process has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and a RED test for a reported defect also covers at least three other inputs of its class, as the Developer exit gate in the delivery-execution skill requires.", "agents/test-dev.md")]
+    public void DeveloperInputRuleSentenceIsStatedInItsProductFile(string sentenceId, string sentence, string file)
+    {
+        string text = Normalise(ReadRepoFile($"products/kyber-squad/{file}"));
+        string expected = Normalise(sentence);
+
+        Assert.True(
+            text.Contains(expected, StringComparison.Ordinal),
+            $"{sentenceId} is missing from products/kyber-squad/{file}: {expected}");
+    }
+
+    /// <summary>
+    ///     The docs rows for the developer input-site rules: the six-field digest's non-field lines in the
+    ///     requirements, and the parser fail-closed rule (KW-STD-INPUT-001) and its test obligation in each
+    ///     language standard. Each row resolves from the repository root.
+    /// </summary>
+    [Theory]
+    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "docs/kyber-squad/requirements.md")]
+    [InlineData("S9", "Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.", "docs/standards/csharp/README.md")]
+    [InlineData("S9", "Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.", "docs/standards/typescript/README.md")]
+    [InlineData("S9", "Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.", "docs/standards/go/README.md")]
+    [InlineData("S9", "Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.", "docs/standards/rust/README.md")]
+    [InlineData("S9", "Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.", "docs/standards/test/README.md")]
+    [InlineData("S10", "A test of such code has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and asserts the refusal.", "docs/standards/test/README.md")]
+    public void DeveloperInputRuleSentenceIsStatedInItsDocsFile(string sentenceId, string sentence, string file)
+    {
+        string text = Normalise(ReadRepoFile(file));
+        string expected = Normalise(sentence);
+
+        Assert.True(
+            text.Contains(expected, StringComparison.Ordinal),
+            $"{sentenceId} is missing from {file}: {expected}");
+    }
+
     [Fact]
     public void TestCodingStandardDocumentsDirectAssemblyRunnerAndBuildOnceIteration()
     {
@@ -932,6 +987,19 @@ public sealed class SquadPerformanceContractTests
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Removes Markdown emphasis and code markers and collapses every whitespace run to one space, so a
+    ///     re-wrap or an emphasis change does not move a sentence while its words and their order still must match.
+    /// </summary>
+    private static string Normalise(string text)
+    {
+        string unmarked = text
+            .Replace("`", string.Empty, StringComparison.Ordinal)
+            .Replace("*", string.Empty, StringComparison.Ordinal);
+
+        return Regex.Replace(unmarked, @"\s+", " ").Trim();
     }
 
     private static string ReadRepoFile(string relativePath)
