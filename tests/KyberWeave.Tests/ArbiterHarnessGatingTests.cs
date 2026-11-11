@@ -3,7 +3,6 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -304,16 +303,27 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
             CreatedFile: false,
             Entries: [new SquadOwnedBlockEntry("/hooks/PreToolUse/0", ZeroDigest)]);
 
+    /// <summary>User paths whose home is the temp home, so the store's home-level state lands beside the doctor's reads.</summary>
+    private sealed class TempHomeUserPaths(string homeDirectory, string applicationDataDirectory) : ISquadUserPaths
+    {
+        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
+
+        public string HomeDirectory { get; } = homeDirectory;
+    }
+
     private static SquadOwnedFile OwnedFile(string relativePath, string target) =>
         new(relativePath, ZeroDigest, target, Adopted: false);
 
     /// <summary>
-    /// Writes the global Squad receipt under the temp home. Global state is home-anchored, so the
-    /// receipt path is resolved from the home and the store only supplies the serializer.
+    /// Writes the global Squad receipt where a real install for the temp home writes it, and where the
+    /// gating code reads it back: under the home directory itself. Global state is home-anchored only
+    /// when the store's user paths report that home, so the store is built from user paths whose home
+    /// is the temp home, as the production reader builds its own.
     /// </summary>
     private void WriteGlobalReceipt(IReadOnlyList<SquadOwnedFile> files, IReadOnlyList<SquadOwnedBlock> blocks)
     {
-        SquadStateStore store = SquadCommandComposition.ResolveStateStore(new FakeSquadUserPaths(_userPaths.Path));
+        SquadStateStore store = SquadCommandComposition.ResolveStateStore(
+            new TempHomeUserPaths(_home.Path, _userPaths.Path));
         string path = store.ResolveReceiptPath(_home.Path, SquadDeploymentScope.Global);
         string schema = blocks.Count > 0 ? "kyber-squad.receipt/v3" : "kyber-squad.receipt/v1";
         WriteFile(
