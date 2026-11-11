@@ -1676,7 +1676,7 @@ exit code. A problem is a passing check whose reason starts with `warning:`:
 | `warning: ... has no #! line` | The hook has no shebang | Add a shell `#!` line, then `doctor --ensure` |
 | `warning: ... uses CRLF line endings` | Windows line endings | Convert to LF, then `doctor --ensure` |
 | `warning: ... exists without the executable bit` | Unix only; the hook is disabled, so kyber-weave will not enable it | Add the executable bit or remove the hook, then `doctor --ensure` |
-| `warning: ... has the start of the kyber-weave block but not its end` | A partial block | Delete the partial block by hand, then `doctor --ensure` |
+| (none) | A partial block: a begin marker with no end marker, or the reverse | Nothing to do. `doctor --ensure` removes the stray marker and the block lines after it that are still its own, keeps every other line, and writes one whole block. |
 | `warning: core.hooksPath points at ... which git tracks` | A tracked hooks folder | Point `core.hooksPath` outside the repository, or untrack the folder |
 | `warning: ... still has the kyber-weave block but worktree-index-hook is false` | Switched off, but the block remains | `kyber-weave doctor --ensure .` |
 

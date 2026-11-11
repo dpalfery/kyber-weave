@@ -71,9 +71,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         string leaf = Path.GetFileName(worktree);
         await WaitUntilAsync(text => ParseRecords(text).Any(record => record.Cwd == leaf));
 
-        // A run the switch started would be in flight by now. Give it time to write before reading the record.
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        string invocations = await File.ReadAllTextAsync(Path.Combine(_git.Markers, "invocations"));
+        string invocations = await ReadSettledRecordAsync();
         IReadOnlyList<InvocationRecord> records = ParseRecords(invocations);
         Assert.All(records, record => Assert.Equal(leaf, record.Cwd));
         Assert.Single(records, record => record.Args.StartsWith("doctor --post-checkout .", StringComparison.Ordinal));
@@ -249,6 +247,36 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         }
 
         Assert.Fail($"The kyber-weave invocation record did not reach the expected state within {ChildWindow.TotalSeconds} seconds.");
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Reads the record once it has stopped changing for a second and holds no half-written entry, so a run that
+    /// started late is seen rather than raced. It bounds the wait; it cannot prove nothing would ever follow.
+    /// </summary>
+    private async Task<string> ReadSettledRecordAsync()
+    {
+        string record = Path.Combine(_git.Markers, "invocations");
+        string pids = Path.Combine(_git.Markers, "pids");
+        DateTime deadline = DateTime.UtcNow.Add(ChildWindow);
+        string previous = string.Empty;
+        int unchanged = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            string text = await File.ReadAllTextAsync(record);
+            int started = File.Exists(pids) ? (await File.ReadAllLinesAsync(pids)).Length : 0;
+            bool complete = ParseRecords(text).Count == started;
+            unchanged = complete && text == previous ? unchanged + 1 : 0;
+            if (unchanged >= 10)
+            {
+                return text;
+            }
+
+            previous = text;
+            await Task.Delay(100);
+        }
+
+        Assert.Fail($"The kyber-weave invocation record did not settle within {ChildWindow.TotalSeconds} seconds.");
         return string.Empty;
     }
 

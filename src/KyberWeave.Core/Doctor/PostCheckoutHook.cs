@@ -126,12 +126,6 @@ public static class PostCheckoutHook
                     "the post-checkout hook uses CRLF line endings, so kyber-weave left it alone; convert it to LF " +
                     "then " + EnsureHint,
                     null);
-
-            case HookTextOutcome.RefusedUnmatchedBlock:
-                return Warn(
-                    "the post-checkout hook has the start of the kyber-weave block but not its end, so kyber-weave " +
-                    "left it alone; delete the partial block by hand, then " + EnsureHint,
-                    null);
         }
 
         if (!write)
@@ -170,12 +164,6 @@ public static class PostCheckoutHook
         {
             case HookTextOutcome.Unchanged:
                 return Pass("not installed: worktree-index-hook is false");
-
-            case HookTextOutcome.RefusedUnmatchedBlock:
-                return Warn(
-                    "the post-checkout hook has the start of the kyber-weave block but not its end; delete the " +
-                    "partial block by hand, then " + EnsureHint,
-                    null);
         }
 
         if (!write)
@@ -348,8 +336,7 @@ public static class PostCheckoutHookText
         if (!IsPosixShell(lines[0]))
             return new HookTextEdit(HookTextOutcome.RefusedNotPosixShell, null);
 
-        if (!TryStripOwnedLines(lines, out int firstBlock))
-            return new HookTextEdit(HookTextOutcome.RefusedUnmatchedBlock, null);
+        StripOwnedLines(lines, out int firstBlock);
 
         // A one-line hook has no line break after its shebang; the block needs one before it and one after.
         if (lines.Count == 1)
@@ -375,9 +362,7 @@ public static class PostCheckoutHookText
 
         List<string> lines = [.. existing.Split('\n')];
         int before = lines.Count;
-        if (!TryStripOwnedLines(lines, out _))
-            return new HookTextEdit(HookTextOutcome.RefusedUnmatchedBlock, null);
-
+        StripOwnedLines(lines, out _);
         if (lines.Count == before)
             return new HookTextEdit(HookTextOutcome.Unchanged, null);
 
@@ -388,48 +373,67 @@ public static class PostCheckoutHookText
     }
 
     /// <summary>
-    ///     Removes every owned block and every stray end marker from <paramref name="lines"/>.
+    ///     Removes every owned block and every stray marker from <paramref name="lines"/>.
     /// </summary>
     /// <remarks>
     ///     A marker is a whole line, never a fragment of one, so a hook that merely mentions the marker text inside its
-    ///     own command is not mistaken for a block. Every copy of the block goes, so a hook that ended up with two is
-    ///     left with one after the next install. An end marker with no begin marker before it is a leftover of ours.
+    ///     own command is not mistaken for a block; whitespace around it is ignored, because an editor that trims or
+    ///     pads lines must not make the block look absent. Every copy of the block goes, so a hook that ended up with
+    ///     two is left with one after the next install. An end marker with no begin marker before it is a leftover of
+    ///     ours. So is a begin marker with no end marker after it: it goes together with the lines after it that are
+    ///     still the block's own, and anything else is the owner's and stays.
     /// </remarks>
     /// <param name="lines">The hook's lines, edited in place.</param>
     /// <param name="firstBlock">The index the first removed block started at, or -1 when there was none.</param>
-    /// <returns>False when a begin marker has no end marker after it, in which case nothing is safe to remove.</returns>
-    private static bool TryStripOwnedLines(List<string> lines, out int firstBlock)
+    private static void StripOwnedLines(List<string> lines, out int firstBlock)
     {
+        string[] block = Block[..^1].Split('\n');
         firstBlock = -1;
         for (int index = 0; index < lines.Count;)
         {
-            if (lines[index] == EndMarker)
+            if (IsMarker(lines[index], EndMarker))
             {
                 lines.RemoveAt(index);
                 continue;
             }
 
-            if (lines[index] != BeginMarker)
+            if (!IsMarker(lines[index], BeginMarker))
             {
                 index++;
                 continue;
             }
 
-            int end = lines.IndexOf(EndMarker, index + 1);
-            if (end < 0)
-                return false;
+            int end = lines.FindIndex(index + 1, line => IsMarker(line, EndMarker));
+            int nextBegin = lines.FindIndex(index + 1, line => IsMarker(line, BeginMarker));
+            int count;
+            if (end >= 0 && (nextBegin < 0 || end < nextBegin))
+            {
+                count = end - index + 1;
+            }
+            else
+            {
+                // No end marker belongs to this begin marker. Only the lines that still read as the block are ours.
+                count = 1;
+                while (count < block.Length - 1
+                       && index + count < lines.Count
+                       && lines[index + count].Trim() == block[count].Trim())
+                {
+                    count++;
+                }
+            }
 
-            lines.RemoveRange(index, end - index + 1);
+            lines.RemoveRange(index, count);
             if (firstBlock < 0)
                 firstBlock = index;
         }
-
-        return true;
     }
 
+    private static bool IsMarker(string line, string marker) =>
+        line.AsSpan().Trim().SequenceEqual(marker);
+
     /// <summary>
-    ///     Whether the shebang names a POSIX shell, directly or through <c>/usr/bin/env</c>. Flags and
-    ///     <c>NAME=value</c> assignments after <c>env</c> are skipped.
+    ///     Whether the shebang names a POSIX shell, directly or through <c>/usr/bin/env</c>. After <c>env</c>, flags,
+    ///     the argument of a flag that takes one, and <c>NAME=value</c> assignments are skipped.
     /// </summary>
     private static bool IsPosixShell(string shebang)
     {
@@ -438,18 +442,29 @@ public static class PostCheckoutHookText
             return false;
 
         string interpreter = BaseName(words[0]);
-        if (interpreter == "env")
-        {
-            string? named = words.Skip(1).FirstOrDefault(
-                word => !word.StartsWith('-') && !word.Contains('=', StringComparison.Ordinal));
-            if (named is null)
-                return false;
+        if (interpreter != "env")
+            return IsShellName(interpreter);
 
-            interpreter = BaseName(named);
+        for (int index = 1; index < words.Length; index++)
+        {
+            string word = words[index];
+            if (word is "-u" or "-C" or "--unset" or "--chdir")
+            {
+                index++;
+                continue;
+            }
+
+            if (word.StartsWith('-') || word.Contains('=', StringComparison.Ordinal))
+                continue;
+
+            return IsShellName(BaseName(word));
         }
 
-        return interpreter is "sh" or "bash" or "dash" or "ksh" or "zsh";
+        return false;
     }
+
+    private static bool IsShellName(string name) =>
+        name is "sh" or "bash" or "dash" or "ksh" or "zsh";
 
     /// <summary>The program name without its folder, and without the <c>.exe</c> Git for Windows writes.</summary>
     private static string BaseName(string path)
@@ -500,7 +515,4 @@ public enum HookTextOutcome
 
     /// <summary>The hook uses CRLF line endings, so it was left alone.</summary>
     RefusedCrlf,
-
-    /// <summary>The hook has the block's begin marker but no end marker, so it was left alone rather than guessed at.</summary>
-    RefusedUnmatchedBlock,
 }

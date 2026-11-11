@@ -116,9 +116,38 @@ public sealed class PostCheckoutHookTextTests
     [Theory]
     [InlineData("#!/usr/bin/env FOO=bar bash\necho hi\n")]
     [InlineData("#!/bin/sh.exe\necho hi\n")]
+    [InlineData("#!/usr/bin/env -u FOO bash\necho hi\n")]
     public void InstallAcceptsAShellNamedThroughEnvAssignmentsOrWithAnExeSuffix(string existing)
     {
         Assert.Equal(HookTextOutcome.Inserted, PostCheckoutHookText.Install(existing).Outcome);
+    }
+
+    [Fact]
+    public void AStrayBeginMarkerGoesWithTheBlockLinesAfterItAndTheOwnersLinesStay()
+    {
+        string[] block = PostCheckoutHookText.Block.Split('\n');
+        string truncated = string.Join('\n', block.Take(4)) + "\n";
+        string existing = "#!/bin/sh\n" + truncated + "own-line\n";
+
+        HookTextEdit installed = PostCheckoutHookText.Install(existing);
+        HookTextEdit removed = PostCheckoutHookText.Remove(existing);
+
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n", installed.Text);
+        Assert.Equal(HookTextOutcome.Unchanged, PostCheckoutHookText.Install(installed.Text!).Outcome);
+        Assert.Equal("#!/bin/sh\nown-line\n", removed.Text);
+    }
+
+    [Fact]
+    public void MarkersWithTrailingWhitespaceAreStillTheBlock()
+    {
+        string padded = PostCheckoutHookText.Block
+            .Replace(">>>\n", ">>>  \n", StringComparison.Ordinal)
+            .Replace("<<<\n", "<<<\t\n", StringComparison.Ordinal);
+
+        HookTextEdit edit = PostCheckoutHookText.Install("#!/bin/sh\n" + padded + "own-line\n");
+
+        Assert.Equal(HookTextOutcome.Updated, edit.Outcome);
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n", edit.Text);
     }
 
     [Fact]
