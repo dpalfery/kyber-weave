@@ -246,6 +246,7 @@ public sealed class ArbiterEvaluator
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
         facts = _gitFacts.Enrich(facts, classification, ev);
+        facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
         facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
@@ -290,7 +291,7 @@ public sealed class ArbiterEvaluator
         // A rework dispatch reads the failure its cluster stored last, then stores this one, so the next rework of
         // the cluster has a prior to compare. The store is written on every evaluation but a dry run.
         string? priorDecisionId = null;
-        if (string.Equals(trigger, FailureFacts.Trigger, StringComparison.Ordinal)
+        if (secondaryNames.Contains(FailureFacts.Trigger)
             && FailureFacts.ClusterOf(prompt) is { } cluster
             && FailureFacts.CurrentTextOf(prompt) is { } currentFailure)
         {
@@ -383,7 +384,7 @@ public sealed class ArbiterEvaluator
 
         // One decision record per dispatch: every finding's rules sit on it, tagged with the finding they judged.
         List<JudgedFinding> judged = judgements
-            .Select(judgement => JudgeFinding(judgement, recordId, refutedSlug, priorDecisionId))
+            .Select(judgement => JudgeFinding(judgement, recordId, refutedSlug))
             .ToList();
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
             classification, ev, primaryJudgement, judged, recordId, config, rules, effective, ledgerId, planDigest,
@@ -415,7 +416,7 @@ public sealed class ArbiterEvaluator
         {
             ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
                 classification, ev, plan, secondaryCall, primaryOutcome, config, rules, facts, table, effective,
-                ledgerId, planDigest, elapsed, cancellationToken).ConfigureAwait(false);
+                ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
             secondaryResults.Add(evaluated);
         }
 
@@ -423,7 +424,10 @@ public sealed class ArbiterEvaluator
         // dispatch is answered when the primary allowed it. Every other secondary outcome leaves the primary's alone.
         bool answered = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal)
             && secondaryResults.Any(result => string.Equals(result.Outcome, RuleEffects.Answer, StringComparison.Ordinal));
-        string dispatchOutcome = answered ? RuleEffects.Answer : primaryOutcome;
+        // A same-failure advisory is the other secondary effect that reaches the dispatch, when the primary allowed it.
+        bool advised = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal)
+            && secondaryResults.Any(result => string.Equals(result.Outcome, RuleEffects.SameFailure, StringComparison.Ordinal));
+        string dispatchOutcome = answered ? RuleEffects.Answer : advised ? RuleEffects.SameFailure : primaryOutcome;
         return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
     }
 
@@ -676,8 +680,7 @@ public sealed class ArbiterEvaluator
     private static JudgedFinding JudgeFinding(
         FindingJudgement judgement,
         string recordId,
-        string? refutedSlug,
-        string? priorDecisionId)
+        string? refutedSlug)
     {
         ArbiterTriggerFamily family = judgement.Plan.Family;
         List<ArbiterDecisionRule> rules = Step0Rules(judgement.Plan);
@@ -698,9 +701,7 @@ public sealed class ArbiterEvaluator
                 && refutedSlug is not null
                 && EarlierIdOf(question.Candidate) is { } earlierId
                 ? ArbiterFindingNotices.DuplicateLine(refutedSlug, earlierId, recordId)
-                : string.Equals(mapped, RuleEffects.SameFailure, StringComparison.Ordinal) && priorDecisionId is not null
-                    ? ArbiterFailureNotices.SameFailureLine(priorDecisionId, recordId)
-                    : null;
+                : null;
             ArbiterDecisionRule entry = Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence);
             bool decisive = !string.Equals(mapped, RuleEffects.Allow, StringComparison.Ordinal);
             if (decisive && question.Candidate is not null)
@@ -820,11 +821,14 @@ public sealed class ArbiterEvaluator
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
+        string? priorDecisionId,
         Stopwatch elapsed,
         CancellationToken cancellationToken)
     {
         string neutral = SecondaryTriggers.NeutralEffect();
         bool primaryAllows = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal);
+        // The record's own id is allocated up front: a same-failure advisory names the record it is written on.
+        string secondaryRecordId = ArbiterRecordId.New(_clock.GetUtcNow());
         List<ArbiterDecisionRule> rules = Step0Rules(plan);
         List<string> effects = new(Step0EffectsOf(plan));
         List<string> payload = [];
@@ -856,7 +860,10 @@ public sealed class ArbiterEvaluator
             }
             else
             {
-                rules.Add(Step1Rule(question, answer, mapped, score, null, null, null));
+                string? evidence = string.Equals(mapped, RuleEffects.SameFailure, StringComparison.Ordinal) && priorDecisionId is not null
+                    ? ArbiterFailureNotices.SameFailureLine(priorDecisionId, secondaryRecordId)
+                    : null;
+                rules.Add(Step1Rule(question, answer, mapped, score, null, null, evidence));
                 effects.Add(mapped);
             }
         }
@@ -876,7 +883,6 @@ public sealed class ArbiterEvaluator
         }
 
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
-        string secondaryRecordId = ArbiterRecordId.New(_clock.GetUtcNow());
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: ledgerId,
             effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken, model: model,

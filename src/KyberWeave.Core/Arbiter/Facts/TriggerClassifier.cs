@@ -281,12 +281,8 @@ public static partial class TriggerClassifier
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";
 
-        // A rework dispatch to an implementation specialist: the same delegation, judged by the failure rule.
-        if (string.Equals(marker, FailureClusterMarker, StringComparison.Ordinal)
-            && string.Equals(caller, "conductor", StringComparison.Ordinal)
-            && string.Equals(targetClass, "implementation", StringComparison.Ordinal))
-            return "delegate.failure";
-
+        // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
+        // rides as a secondary trigger, derived by SecondaryTriggers.For.
         if (string.Equals(caller, "conductor", StringComparison.Ordinal))
         {
             if (string.Equals(targetClass, "implementation", StringComparison.Ordinal))
@@ -344,7 +340,6 @@ public static partial class TriggerClassifier
     private static string ToReturned(string trigger) => trigger switch
     {
         "delegate" => "delegate.returned",
-        "delegate.failure" => "delegate.returned",
         "delegate.planner" => "delegate.planner.returned",
         "investigate" => "investigate.returned",
         "lens.spawn" => "lens.returned",

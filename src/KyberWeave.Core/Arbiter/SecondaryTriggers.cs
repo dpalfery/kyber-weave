@@ -45,6 +45,13 @@ internal static class SecondaryTriggers
             triggers.Add(DelegateModel);
         }
 
+        if (string.Equals(primaryTrigger, Delegate, StringComparison.Ordinal)
+            && string.Equals(TriggerClassifier.TargetClassFor(ev.Target), ImplementationClass, StringComparison.Ordinal)
+            && FailureFacts.ClusterOf(ev.Prompt) is not null)
+        {
+            triggers.Add(FailureFacts.Trigger);
+        }
+
         if (string.Equals(primaryTrigger, Investigate, StringComparison.Ordinal)
             && string.Equals(ev.HarnessCaller ?? ev.Caller, BugCrusher, StringComparison.Ordinal)
             && string.Equals(ev.Target, BugCrusherInvestigator, StringComparison.Ordinal))

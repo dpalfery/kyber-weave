@@ -195,7 +195,9 @@ public static class ArbiterTriggerFamilies
             ArbiterTriggerFamily.ModelTarget =>
                 seen.Contains(Rules.RuleEffects.Retarget) ? Rules.RuleEffects.Retarget : Rules.RuleEffects.Keep,
             ArbiterTriggerFamily.Shortcut =>
-                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Answer) ? Rules.RuleEffects.Answer : Rules.RuleEffects.Spawn,
+                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Answer) ? Rules.RuleEffects.Answer
+                : seen.Count == 1 && seen.Contains(Rules.RuleEffects.Keep) ? Rules.RuleEffects.Keep
+                : Rules.RuleEffects.Spawn,
             ArbiterTriggerFamily.FailureCluster =>
                 seen.Contains(Rules.RuleEffects.SameFailure) ? Rules.RuleEffects.SameFailure : Rules.RuleEffects.Allow,
             ArbiterTriggerFamily.Advice =>
