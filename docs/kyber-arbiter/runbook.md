@@ -348,6 +348,43 @@ Check the dispatch's own transcript if you need to know which model ran.
   has a line beginning `model-write-failed`. The dispatch runs without the model field, and its routing header
   is stripped. Check `decisions.jsonl` first, then the hook log, when a retarget looks wrong.
 
+## Phase 3 rules: reading and enforcing
+
+Nine phase 3 rules ship in shadow: `KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`,
+`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+`KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. Until a rule is enforced, a dispatch behaves as it did
+before: the lens is still spawned, the finding still reaches the host, and the investigator, planner
+or docs-dev still runs. Read the shadow entries in `decisions.jsonl` first.
+
+- A `would-effect` of `drop` (nitpick filter) means the finding would have been set aside as
+  `ARBITER_DROPPED`. Compare a sample against the findings the council kept.
+- A `would-effect` of `duplicate` means the refutation would have been denied as `ARBITER_DUPLICATE`.
+- A `would-effect` of `answer` on a shortcut means the worker would have been withheld and the
+  substitute digest returned. Check the digest's `ARBITER_DECISION` against the worker's own report
+  before trusting it.
+- A `would-effect` of `same-failure` means the rework would have carried an `ARBITER_SAME_FAILURE`
+  advisory. It never denies, so it is safe to enforce once the advisory reads correctly.
+- A `would-effect` of `advise` on `KW-ARB-TRIM-001` or `KW-ARB-COMMENT-001` means a section would have
+  been trimmed or a bot comment advised as a nitpick or already fixed. Check each one before enforcing.
+
+To enforce one rule, set `shadow: false` on its entry under `arbiter.rules` in the project config, as
+[configuration](../configuration.md#savings-keys) describes. Enforce one rule at a time and read its
+entries after each change.
+
+Stores hold the text of review findings and worker failures under `<arbiter-dir>/stores/`. Each item
+is limited to `arbiter.stores.max-item-bytes` (default 16384), and an oversized item is refused, not
+cut short. Store directories last written more than `arbiter.stores.retain-days` ago (default 14) are
+removed on a later append. A failed store write is reported as `unavailable`, never thrown.
+
+Two advisory commands run outside a dispatch:
+
+- `kyber-weave arbiter sections --path <FILE> --task <TEXT>` lists the sections of one markdown document
+  a task needs. It fails safe to every section.
+- `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]` classifies
+  one bot review comment as `real`, `nitpick` or `already-fixed`. Each call records a decision, and any
+  unsure answer is `real`. `arbiter.comment-triage.bot-logins` is validated but not yet read by the
+  triage.
+
 ## Recording a harness defect
 
 Support is claimed from vendor documentation, so a misbehaving hook is a defect against the

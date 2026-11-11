@@ -500,7 +500,7 @@ safely merges the ignore entry for new and existing hosts.
 ## Arbiter configuration
 
 The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
-section, the Arbiter is disabled, the provider is `none`, and all 23 shipped rules are
+section, the Arbiter is disabled, the provider is `none`, and all 32 shipped rules are
 enabled. Hooks render only when `enabled` is true.
 
 ```yaml
@@ -554,8 +554,9 @@ These keys sit beside `provider`, `rules` and `stores`. The first four keys are 
 validated in phase 1. Model targeting uses `mode`, and the difficulty and ladder keys take effect
 with the phase 2 rules. In `shadow` (the default) the two model rules are logged and nothing is
 delivered; `enforce` writes the chosen model onto the dispatch; `off` disables both rules. The store
-and bot-login keys are validated now and read by the stores and
-comment triage in phase 3.
+and bot-login keys are validated now. The store keys are read by the run stores in phase 3. The
+bot logins are validated (a blank entry is refused) and held in the config, but no comment triage
+path reads them yet.
 
 ```yaml
 arbiter:
