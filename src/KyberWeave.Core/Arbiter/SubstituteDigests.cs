@@ -26,13 +26,20 @@ public static class SubstituteDigests
 
     /// <summary>The substitute recommendation for a conductor's intake the Arbiter answered without a planner.</summary>
     /// <param name="input">The intake request the planner was asked to assess.</param>
-    /// <param name="recommendation">The recommended artifact, <c>PLAN</c> or <c>SPEC</c>.</param>
+    /// <param name="recommendation">The recommended artifact, <c>PLAN</c> or <c>SPEC</c>; any other value is refused.</param>
     /// <param name="decisionId">The decision record that answered the shortcut.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="recommendation"/> is not <c>PLAN</c> or <c>SPEC</c>.</exception>
     public static string Intake(string input, string recommendation, string decisionId)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(recommendation);
         ArgumentNullException.ThrowIfNull(decisionId);
+        if (!IsRecommendation(recommendation))
+        {
+            // Only the two known values are written: any other text could carry a line break that forges a field.
+            throw new ArgumentException("The recommendation must be PLAN or SPEC.", nameof(recommendation));
+        }
+
         return string.Join(
             "\n",
             "STATUS: INTAKE_RECOMMENDATION",
@@ -43,6 +50,11 @@ public static class SubstituteDigests
             "OPEN_QUESTIONS: none",
             $"ARBITER_DECISION: {decisionId}");
     }
+
+    /// <summary>Whether <paramref name="recommendation"/> is one of the two artifacts an intake digest may name, exactly as written.</summary>
+    public static bool IsRecommendation(string recommendation) =>
+        string.Equals(recommendation, "PLAN", StringComparison.Ordinal)
+        || string.Equals(recommendation, "SPEC", StringComparison.Ordinal);
 
     /// <summary>The most characters one digest field carries from operator or caller text.</summary>
     private const int MaxFieldCharacters = 500;

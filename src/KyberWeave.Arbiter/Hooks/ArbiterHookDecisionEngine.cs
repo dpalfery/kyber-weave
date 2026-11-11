@@ -393,7 +393,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
     /// <summary>
     /// The substitute digest an answered shortcut hands back, named by the decision that answered it, or null when
-    /// the trigger is not a shortcut or its answer names no recommendation.
+    /// the trigger is not a shortcut or an intake answer is not PLAN or SPEC.
     /// </summary>
     private static string? SubstituteDigestFor(ArbiterDecisionRecord answered, string prompt)
     {
@@ -413,10 +413,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         string? recommendation = answered.Rules
-            .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.Answer, StringComparison.Ordinal))?.Answer;
-        return recommendation is null
+            .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.Answer, StringComparison.Ordinal))?.Answer
+            ?.ToUpperInvariant();
+        // An answer that is not PLAN or SPEC has no digest, so the shortcut's null path lets the dispatch continue loudly.
+        return recommendation is null || !SubstituteDigests.IsRecommendation(recommendation)
             ? null
-            : SubstituteDigests.Intake(IntakeInputOf(prompt), recommendation.ToUpperInvariant(), answered.Id);
+            : SubstituteDigests.Intake(IntakeInputOf(prompt), recommendation, answered.Id);
     }
 
     /// <summary>The request text an intake marker carries: the text after <c>INTAKE:</c> on the first body line.</summary>
