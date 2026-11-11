@@ -211,12 +211,14 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 Cwd = repoRoot,
                 ObservesReturns = context.ObservesReturns,
                 ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
+                ModelOverrideAliases = context.ModelOverride is { Supported: true } aliases ? aliases.AcceptedAliases : null,
                 Model = dispatchModel,
                 ToolOutput = toolOutput,
                 IsDispatch = true,
             };
             ArbiterEvaluationResult result = evaluator.EvaluateAsync(
-                ev, effective, new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook))
+                ev, effective,
+                new ArbiterEvaluatorOptions(Source: ArbiterSources.Hook, ConfirmModelWrite: context.ConfirmModelWrite))
                 .GetAwaiter().GetResult();
             return MapResult(result, harness, resolved, prompt, effective, arbiterDirectory, context, isPost);
         }

@@ -73,6 +73,12 @@ public sealed record ArbiterEvent
     public string? ModelOverrideField { get; init; }
 
     /// <summary>
+    /// The model aliases the serving harness accepts on a sub-agent dispatch, when it lets the Arbiter set
+    /// one; null when the caller did not declare them, which skips the accepted-token check.
+    /// </summary>
+    public IReadOnlySet<string>? ModelOverrideAliases { get; init; }
+
+    /// <summary>
     /// The model the caller asked the dispatch to run on, when the dispatch input names one. Source
     /// <c>caller</c>: it is what the caller wrote, not what the harness rendered.
     /// </summary>

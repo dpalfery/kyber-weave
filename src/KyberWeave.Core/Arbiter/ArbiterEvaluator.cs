@@ -35,7 +35,13 @@ public interface IArbiterPlanReader
 /// <summary>Options for one <see cref="ArbiterEvaluator"/> call.</summary>
 /// <param name="DryRun">When true, the evaluator reads the ledger and writes nothing.</param>
 /// <param name="Source">Who observed the event: <c>hook</c>, <c>serve</c> or <c>eval</c>.</param>
-public sealed record ArbiterEvaluatorOptions(bool DryRun = false, string Source = ArbiterSources.Hook);
+/// <param name="ConfirmModelWrite">Writes the model token into the harness input and reports whether it held. Asked
+/// before a delivered model is recorded, so the decision says delivered only for a write that happened. Null when no
+/// harness writes the model (serve, eval), in which case the decision is recorded as resolved.</param>
+public sealed record ArbiterEvaluatorOptions(
+    bool DryRun = false,
+    string Source = ArbiterSources.Hook,
+    Func<string, bool>? ConfirmModelWrite = null);
 
 /// <summary>
 /// The single entry point the hook host, <c>serve</c> and <c>eval</c> call,
@@ -135,7 +141,9 @@ public sealed class ArbiterEvaluator
                     null, null, ArbiterCallerSources.None, ev.Target, "not-squad",
                     new Dictionary<string, string>(StringComparer.Ordinal), null, true);
             ArbiterLedgerEvent ledgerEvent = BuildLedgerEvent(
-                ledgerId, now, effective.Source, ev, first, TaskFilesFor(ev, first), table);
+                ledgerId, now, effective.Source,
+                ev with { RenderedModelToken = RenderedTokenOf(ev, first.Target, table) },
+                first, TaskFilesFor(ev, first), table);
             if (effective.DryRun)
             {
                 // Dry run reads and writes nothing: the reads below prove the
@@ -613,8 +621,18 @@ public sealed class ArbiterEvaluator
 
         string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
         ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
-            ? ModelTargetResolver.Resolve(rules, facts, config.Arbiter.ModelTargeting, table, ev, config.Arbiter.ModelTargeting.Mode)
+            ? ModelTargetResolver.Resolve(
+                rules, facts, config.Arbiter.ModelTargeting, table,
+                ev with { RenderedModelToken = RenderedTokenOf(ev, classification.Target, table) },
+                config.Arbiter.ModelTargeting.Mode)
             : null;
+        if (model is { Delivered: true, Token: { } delivered }
+            && effective.ConfirmModelWrite is { } confirm
+            && !confirm(delivered))
+        {
+            model = model with { Delivered = false, Reason = ModelTargetResolver.ModelWriteFailed };
+        }
+
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: ledgerId,
@@ -876,6 +894,16 @@ public sealed class ArbiterEvaluator
             return null;
         }
     }
+
+    /// <summary>
+    /// The token the target agent is rendered with: the one the harness reported on the event, or else the
+    /// target's entry in the model targets table, which is what the rendered agent file carries.
+    /// </summary>
+    private static string? RenderedTokenOf(ArbiterEvent ev, string? target, ArbiterModelTargets? table) =>
+        ev.RenderedModelToken
+        ?? (table is not null && target is not null && table.Agents.TryGetValue(target, out ArbiterModelTargetsAgent? agent)
+            ? agent.Token
+            : null);
 
     /// <summary>
     /// The model fields of a delegate pre event. A caller-named model is the model that runs, so it is the token

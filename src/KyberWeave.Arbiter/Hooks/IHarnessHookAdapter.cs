@@ -88,6 +88,8 @@ public enum HookScope
 /// <summary>What a classified event is evaluated against, copied from the serving harness's adapter.</summary>
 /// <param name="ModelOverride">The serving harness's model-override declaration. Null when the caller
 /// supplies none, which a rule reads as unsupported.</param>
+/// <param name="ConfirmModelWrite">Writes an accepted model token into the harness input and reports whether
+/// the write held. The decision asks it before recording a delivered model. Null when the adapter writes later.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
@@ -95,7 +97,8 @@ public sealed record HookContext(
     bool ObservesReturns = true,
     string? HomeDirectory = null,
     HookScope Scope = HookScope.Project,
-    ModelOverrideCapability? ModelOverride = null);
+    ModelOverrideCapability? ModelOverride = null,
+    Func<string, bool>? ConfirmModelWrite = null);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry

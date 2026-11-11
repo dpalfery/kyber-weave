@@ -29,7 +29,7 @@ internal static class ModelTargetFacts
 {
     private const string FileKinds = "plan.task.file-kinds";
     private const string PriorAttempt = "ledger.task.prior-attempt";
-    private const string PriorResult = "model-targeting.prior-result";
+    internal const string PriorResult = "model-targeting.prior-result";
     private const string PriorProfile = "model-targeting.prior-profile";
     private const string LadderNext = "model-targeting.ladder.next";
     private const string TestOwner = "test-dev";

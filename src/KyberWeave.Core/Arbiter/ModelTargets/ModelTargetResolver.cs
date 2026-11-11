@@ -34,6 +34,12 @@ internal static class ModelTargetResolver
     /// <summary>The harness offers no model override field, so the token cannot be delivered.</summary>
     public const string UnsupportedHarness = "unsupported-harness";
 
+    /// <summary>The targeted token is not an alias the harness accepts, so no adapter would write it.</summary>
+    public const string TokenNotAccepted = "token-not-accepted";
+
+    /// <summary>The adapter could not write the accepted model into the dispatch, so the dispatch runs without it.</summary>
+    public const string ModelWriteFailed = "model-write-failed";
+
     /// <summary>The mode is shadow: the choice is recorded and not delivered.</summary>
     public const string Shadow = "shadow";
 
@@ -41,6 +47,7 @@ internal static class ModelTargetResolver
     private const string LadderNextFact = "model-targeting.ladder.next";
     private const string SourceLadder = "ladder";
     private const string SourceDifficulty = "difficulty";
+    private const string PriorFail = "fail";
 
     /// <summary>
     /// Returns the model block for the dispatch, or null when no rule wants a retarget or no profile follows
@@ -89,6 +96,13 @@ internal static class ModelTargetResolver
             return (ladderProfile, SourceLadder);
         }
 
+        // A failed retry is never sent cheaper by difficulty: the difficulty answer applies to a first attempt or a prior pass only.
+        if (facts.TryGet(ModelTargetFacts.PriorResult, out ArbiterFact? prior)
+            && string.Equals(prior.Value as string, PriorFail, StringComparison.Ordinal))
+        {
+            return (null, null);
+        }
+
         ArbiterDecisionRule? difficulty = rules.FirstOrDefault(rule => rule.Id == ModelTargetingRules.DifficultyRuleId && WantsRetarget(rule));
         if (difficulty is not null && targeting.DifficultyProfiles.TryGetValue(difficulty.Answer, out string? difficultyProfile))
         {
@@ -129,6 +143,11 @@ internal static class ModelTargetResolver
         if (ev.ModelOverrideField is null)
         {
             return UnsupportedHarness;
+        }
+
+        if (ev.ModelOverrideAliases is { } accepted && ModelTokenAliases.AliasFor(token, accepted) is null)
+        {
+            return TokenNotAccepted;
         }
 
         return string.Equals(mode, ModelTargetMode, StringComparison.Ordinal) ? Shadow : null;
