@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 using Xunit;
@@ -191,7 +192,7 @@ public sealed class ArbiterSavingsConfigTests
                   shadow: false
             """).Arbiter;
 
-        ArbiterRule rule = Assert.Single(config.Rules.Where(candidate => candidate.Id == "KW-ARB-PLAN-001"));
+        ArbiterRule rule = Assert.Single(config.Rules, candidate => candidate.Id == "KW-ARB-PLAN-001");
         Assert.False(rule.Shadow);
     }
 
