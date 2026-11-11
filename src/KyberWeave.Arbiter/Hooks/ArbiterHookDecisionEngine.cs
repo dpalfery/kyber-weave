@@ -274,7 +274,14 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             string? advisory = DecisionWithOutcome(arbiterDirectory, result.LedgerId, RuleEffects.SameFailure)?.Rules
                 .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.SameFailure, StringComparison.Ordinal)
                     && rule.Evidence is not null)?.Evidence;
-            return new HookOutcome(HookOutcomeKind.AllowWithNote, advisory ?? "ARBITER_SAME_FAILURE: yes");
+            // The rework proceeds on the resolved model, so the advisory carries the same model block an allow does.
+            ArbiterModelBlock? block = ModelBlockFor(result.LedgerId, arbiterDirectory);
+            bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
+            return new HookOutcome(
+                HookOutcomeKind.AllowWithNote,
+                advisory ?? "ARBITER_SAME_FAILURE: yes",
+                ModelToken: block is { Delivered: true } ? block.Token : null,
+                ModelBlock: targeting ? block : null);
         }
 
         // An answered shortcut withholds its worker: the dispatch is denied with the substitute digest the worker's

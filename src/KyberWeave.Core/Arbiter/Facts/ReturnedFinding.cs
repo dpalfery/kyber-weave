@@ -23,6 +23,18 @@ public sealed record ReturnedFinding(string Id, string Text, string? Severity)
     public static string StoredText(string text, bool dropped) =>
         text + "\n" + StatusPrefix + (dropped ? DroppedStatus : KeptStatus);
 
+    /// <summary>
+    /// The comparison key of a finding id: the slug after the lens in <c>&lt;lens&gt;/&lt;slug&gt;</c>, or the id itself when
+    /// it has no lens. A refutation names its finding by the bare slug while the store keeps the lens-qualified id, so
+    /// every comparison of ids passes both sides through this one normaliser.
+    /// </summary>
+    /// <param name="id">A finding id, bare or lens-qualified.</param>
+    public static string IdKey(string id)
+    {
+        int slash = id.LastIndexOf('/');
+        return slash < 0 ? id : id[(slash + 1)..];
+    }
+
     /// <summary>Splits a lens return into its findings, one per <c>id:</c> line, in order.</summary>
     /// <remarks>
     /// The same split <c>arbiter_evaluate_agent_dispatch_or_return</c> uses for refutations, so a finding is one block
@@ -45,14 +57,30 @@ public sealed record ReturnedFinding(string Id, string Text, string? Severity)
             findings.Add(new ReturnedFinding(
                 starts[index].Groups["id"].Value,
                 text,
-                severity.Success ? severity.Groups["value"].Value.Trim() : null));
+                severity.Success ? NormaliseSeverity(severity.Groups["value"].Value) : null));
         }
 
         return findings;
     }
 
+    /// <summary>
+    /// The severity in the one spelling the rules compare against: first letter capitalised, the rest lowercase, so
+    /// <c>critical</c>, <c>Critical</c> and <c>CRITICAL</c> all read as <c>Critical</c>.
+    /// </summary>
+    /// <remarks>
+    /// Normalised once, here, so every consumer (the rule's <c>equals</c> test, the stored fact) reads one form. A lens
+    /// may write its severity in any case; the rule must not depend on which.
+    /// </remarks>
+    private static string NormaliseSeverity(string raw)
+    {
+        string value = raw.Trim();
+        return value.Length == 0
+            ? value
+            : char.ToUpperInvariant(value[0]) + new string(value[1..].Select(char.ToLowerInvariant).ToArray());
+    }
+
     private static readonly Regex IdLine = new(
-        @"^[ \t]*-?[ \t]*id:[ \t]*(?<id>\S*)",
+        @"^[ \t]*-?[ \t]*id:[ \t]*(?<id>\S+)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 

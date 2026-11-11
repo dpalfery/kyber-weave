@@ -260,10 +260,11 @@ public static class TriggerFactBuilder
         ArgumentNullException.ThrowIfNull(storedItems);
 
         string? status = null;
+        string key = ReturnedFinding.IdKey(findingId);
         foreach (string item in storedItems)
         {
             IReadOnlyList<ReturnedFinding> stored = ReturnedFinding.ParseAll(item);
-            if (stored.Count > 0 && string.Equals(stored[0].Id, findingId, StringComparison.Ordinal))
+            if (stored.Count > 0 && string.Equals(ReturnedFinding.IdKey(stored[0].Id), key, StringComparison.Ordinal))
                 status = StatusOf(item) ?? status;
         }
 
@@ -278,8 +279,12 @@ public static class TriggerFactBuilder
     /// refuted finding's own item are candidates, so a finding is never compared against itself.
     /// </summary>
     /// <param name="facts">The fact bag to extend; it must already carry <c>finding.file</c> and <c>finding.line</c>.</param>
-    /// <param name="findingId">The refuted finding's bare id (the slug after the lens).</param>
+    /// <param name="findingId">The refuted finding's id, bare or lens-qualified; both sides are compared by slug.</param>
     /// <param name="storedItems">The review run's stored items, in append order.</param>
+    /// <remarks>
+    /// With no file or line for the finding the neighbours are undecidable, so the fact is left absent rather than
+    /// written as an empty list: an empty list would read as "no neighbours" and let a rule decide on nothing.
+    /// </remarks>
     public static ArbiterFactSet WithPriorFindings(ArbiterFactSet facts, string findingId, IReadOnlyList<string> storedItems)
     {
         ArgumentNullException.ThrowIfNull(facts);
@@ -288,16 +293,17 @@ public static class TriggerFactBuilder
 
         string? file = facts.TryGet("finding.file", out ArbiterFact? fileFact) ? fileFact.Value as string : null;
         int? line = facts.TryGet("finding.line", out ArbiterFact? lineFact) ? lineFact.Value as int? : null;
-        List<string> prior = [];
         if (file is null || line is null)
-            return facts.With("review.prior-findings", prior, ArbiterFactLabel.Derived);
+            return facts;
 
+        string key = ReturnedFinding.IdKey(findingId);
+        List<string> prior = [];
         foreach (string item in storedItems)
         {
             IReadOnlyList<ReturnedFinding> parsed = ReturnedFinding.ParseAll(item);
             if (parsed.Count == 0)
                 continue;
-            if (string.Equals(parsed[0].Id, findingId, StringComparison.Ordinal))
+            if (string.Equals(ReturnedFinding.IdKey(parsed[0].Id), key, StringComparison.Ordinal))
                 break;
             if (!string.Equals(FieldOf(item, "file"), file, StringComparison.Ordinal))
                 continue;

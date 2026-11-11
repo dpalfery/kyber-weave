@@ -46,6 +46,15 @@ public sealed class ArbiterRunStore
     private const string FindingsFileName = "findings.jsonl";
     private const string FailuresFileName = "failures.jsonl";
 
+    /// <summary>
+    /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
+    /// span past the largest representable time span cannot be formed, and the append must still store its item.
+    /// </summary>
+    private const int MaxRetainDays = 3650;
+
+    /// <summary>The failure-store key for a failure recorded with no session at all.</summary>
+    private const string AbsentSessionKey = "\0absent-session";
+
     private readonly string _storesDirectory;
     private readonly ArbiterStoreOptions _options;
     private readonly Func<DateTimeOffset> _clock;
@@ -71,8 +80,7 @@ public sealed class ArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         ArgumentNullException.ThrowIfNull(text);
-        string directory = Path.Combine(_storesDirectory, "review-" + Digest(reviewRun));
-        return AppendAsync(directory, FindingsFileName, text, ct);
+        return AppendAsync(ReviewDirectory(reviewRun), FindingsFileName, text, ct);
     }
 
     /// <summary>
@@ -93,8 +101,7 @@ public sealed class ArbiterRunStore
         ArgumentNullException.ThrowIfNull(reviewRun);
         ArgumentNullException.ThrowIfNull(findingSlug);
         string text = "refutation-of: " + findingSlug + "\nverdict: " + RefutationOutcome.Word(verdict);
-        string directory = Path.Combine(_storesDirectory, "review-" + Digest(reviewRun));
-        return AppendAsync(directory, FindingsFileName, text, ct);
+        return AppendAsync(ReviewDirectory(reviewRun), FindingsFileName, text, ct);
     }
 
     /// <summary>
@@ -137,9 +144,11 @@ public sealed class ArbiterRunStore
 
     private string FailureDirectory(string? planFile, string? planDigest, string? session)
     {
+        // An absent session and an empty one are different callers, so they key different stores. A NUL cannot
+        // appear in a session id from argv or a header, so the absent key never collides with a real session.
         string key = planFile is not null
             ? planFile + (planDigest ?? string.Empty)
-            : session ?? string.Empty;
+            : session ?? AbsentSessionKey;
         return Path.Combine(_storesDirectory, "run-" + Digest(key));
     }
 
@@ -153,7 +162,7 @@ public sealed class ArbiterRunStore
     public IReadOnlyList<string> ReadFindings(string reviewRun)
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
-        string path = Path.Combine(_storesDirectory, "review-" + Digest(reviewRun), FindingsFileName);
+        string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
         return ReadItems(path);
     }
 
@@ -193,7 +202,8 @@ public sealed class ArbiterRunStore
             return;
         }
 
-        TimeSpan retain = TimeSpan.FromDays(_options.RetainDays);
+        // Clamped before the conversion: a value past the representable span would throw, and the append must still store.
+        TimeSpan retain = TimeSpan.FromDays(Math.Clamp(_options.RetainDays, 1, MaxRetainDays));
         string keep = Path.GetFullPath(keepDirectory);
         DirectoryInfo root = new(_storesDirectory);
         EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
@@ -206,7 +216,7 @@ public sealed class ArbiterRunStore
                 continue;
             }
 
-            if (now - directory.LastWriteTimeUtc <= retain)
+            if (now - NewestItemTimeUtc(directory) <= retain)
             {
                 continue;
             }
@@ -224,6 +234,31 @@ public sealed class ArbiterRunStore
                 // Left for a later append; see the type remarks.
             }
         }
+    }
+
+    /// <summary>
+    /// The time a store directory was last written to, read from its newest file. A directory's own time moves only
+    /// when an entry is created or removed, so an active run appended to in place would look old and be swept
+    /// mid-review. The directory's time is the fallback for a directory that holds no file.
+    /// </summary>
+    private static DateTime NewestItemTimeUtc(DirectoryInfo directory)
+    {
+        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
+        DateTime? newest = null;
+        foreach (FileInfo file in directory.EnumerateFiles("*", options))
+        {
+            if (file.LinkTarget is not null)
+            {
+                continue;
+            }
+
+            if (newest is not { } current || file.LastWriteTimeUtc > current)
+            {
+                newest = file.LastWriteTimeUtc;
+            }
+        }
+
+        return newest ?? directory.LastWriteTimeUtc;
     }
 
     private static IReadOnlyList<string> ReadItems(string path)
@@ -268,6 +303,14 @@ public sealed class ArbiterRunStore
             return null;
         }
     }
+
+    /// <summary>
+    /// The directory a review run's findings are stored under, keyed by the digest of the run id. The digest is the
+    /// whole key, so no <c>REVIEW_RUN</c> header value, whatever its characters or length, can name a path outside the
+    /// stores.
+    /// </summary>
+    private string ReviewDirectory(string reviewRun) =>
+        Path.Combine(_storesDirectory, "review-" + Digest(reviewRun));
 
     private static string Digest(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
