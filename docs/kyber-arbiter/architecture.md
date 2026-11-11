@@ -263,10 +263,11 @@ cannot change any of it.
 The catalogue also accepts the family names `model.target`, `shortcut`, `failure.cluster` and
 `advice` as trigger names. Phase 1 emits none of them.
 
-Phase 1 catalogues the seven new triggers and their facts. Nothing classifies an event into
-`delegate.model`, `intake.shortcut`, `triage.shortcut`, `docs-impact.shortcut`,
-`delegate.failure`, `sections.select` or `comment.triage` yet. Their rules can be dry-run
-offline with `arbiter eval --trigger <t>`, and no live hook reaches them.
+Phase 1 catalogued the seven new triggers and their facts. Since phase 2, `SecondaryTriggers.For`
+derives `delegate.model` from every `delegate` event whose target is an implementation-class agent.
+Nothing derives the phase 3 secondary triggers yet: `intake.shortcut`, `triage.shortcut`,
+`docs-impact.shortcut`, `delegate.failure`, `sections.select` or `comment.triage`. Their rules can be
+dry-run offline with `arbiter eval --trigger <t>`, and no live hook reaches them.
 
 A non-allow outcome on a red-flag family is what ends the step-1 call early. The
 short-circuit signal is unchanged: `escalate`, `skip` and `verify` only. The new effects never
@@ -274,8 +275,9 @@ short-circuit, because each removes or changes work and must come from the rule 
 
 **Secondary triggers.** A secondary trigger is derived from the primary trigger of the same event,
 never classified from its own payload. The evaluator takes the derivation as
-`SecondaryTriggers.For(primaryTrigger, ev)`. In phase 1 that returns no trigger, so every dispatch
-evaluates its primary alone. When a derivation returns one, the evaluator:
+`SecondaryTriggers.For(primaryTrigger, ev)`. It returns `delegate.model` for a `delegate` dispatch to
+an implementation-class target and nothing for any other dispatch, so those evaluate their primary
+alone. When a derivation returns one, the evaluator:
 
 1. skips the secondary when the primary's step 0 already short-circuits, and makes no step-1 call;
 2. otherwise sends the primary's and the secondary's step-1 questions in one provider call;
@@ -305,8 +307,9 @@ These facts are filled on the hook path. Each is `derived` unless noted.
   `*.md` paths. A code change must never land in it.
 - **`finding.changed-lines`** on `lens.returned`: the new-side line numbers of `finding.file` that
   fall inside a changed hunk. Absent without a finding file. `KW-ARB-PREEX-001` reads it.
-- **`harness.model-override`** on `delegate.model`: the field name the harness's adapter declares
-  (`model` on Claude), or null where the harness offers no per-dispatch model.
+- **`harness.model-override`** on `delegate.model`: the dispatch field that carries a sub-agent's model,
+  as the harness's adapter declares it (`model` on Claude). Null where the harness offers no
+  per-dispatch model.
 
 Phase 2 fills the `delegate.model` facts: `delegation.model`, `plan.task.file-kinds`,
 `ledger.task.prior-attempt`, `model-targeting.ladder.next`, `model-targeting.prior-result` and
