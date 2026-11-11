@@ -52,6 +52,8 @@ public sealed class CopilotPromptFileTests : IDisposable
     [InlineData("conductor")]
     [InlineData("skill")]
     [InlineData("tool_search_tool")]
+    [InlineData("codegraph_explore")]
+    [InlineData("docs_answer_question_from_repo_documentation")]
     [InlineData("task")]
     public void EmbeddedText_NamesEachInstructionSource(string term)
     {
