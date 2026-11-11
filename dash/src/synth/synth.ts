@@ -127,6 +127,9 @@ export function nativeRecordIdentity(
   if (call.turnId !== undefined && call.turnId !== '' && cursorPairingId === undefined) {
     return { nativeRecordId: call.turnId }
   }
+  if (call.recordIdentity !== undefined && call.recordIdentity !== '') {
+    return { nativeRecordId: call.recordIdentity }
+  }
   const prefix = `${call.provider}:${call.sessionId}:`
   if (call.deduplicationKey.startsWith(prefix) && call.deduplicationKey.length > prefix.length) {
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
@@ -136,6 +139,24 @@ export function nativeRecordIdentity(
       .digest('hex')
       .slice(0, 16)
   return { nativeRecordId: digest, recordDigest: digest }
+}
+
+/**
+ * Per-item ordinal for the identity hash: the occurrence count among earlier
+ * items with the same native session and timestamp. Unlike the array index it
+ * does not shift when the batch window moves, so a re-parse mints the same id.
+ */
+function windowIndependentOrdinals(
+  calls: readonly ParsedProviderCall[],
+  envelopes?: readonly SourceRecordEnvelope[],
+): number[] {
+  const seen = new Map<string, number>()
+  return calls.map((call, index) => {
+    const key = `${nativeSessionIdFor(call, envelopes?.[index])}\0${call.timestamp}`
+    const ordinal = seen.get(key) ?? 0
+    seen.set(key, ordinal + 1)
+    return ordinal
+  })
 }
 
 export function provenanceFor(
@@ -1161,9 +1182,10 @@ export class Synthesizer {
       }
     }
 
+    const ordinals = windowIndependentOrdinals(collapsed.map((item) => item.call))
     return collapsed.flatMap((item, index) => {
       if (isExcludedHarness(item.call.provider)) return []
-      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, index)
+      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, ordinals[index]!)
       const toolRecords = synthesizeToolCalls(parent, item.call, item.readerTurn, sessionToolResults)
       return [parent, ...toolRecords]
     })
@@ -1187,9 +1209,10 @@ export class Synthesizer {
       }
     }
 
+    const ordinals = windowIndependentOrdinals(collapsed.map((envelope) => envelope.call), collapsed)
     return collapsed.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
-      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
+      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, ordinals[index]!)
       const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)
       return [parent, ...toolRecords]
     })

@@ -116,6 +116,10 @@ export type ParsedProviderCall = {
   // each turn at most once, with the pairing claim winning so the
   // usage-carrying span receives the reader parts and window.
   pairingId?: string
+  // Identity-only native record id for calls whose deduplication key does not
+  // carry a usable record segment (e.g. Kilo child-session calls). Synthesis
+  // reads it for span identity alone; it is never a pairing or twin-collapse key.
+  recordIdentity?: string
   toolSequence?: ToolCall[][]
   userMessage: string
   sessionId: string
