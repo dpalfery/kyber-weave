@@ -107,10 +107,12 @@ public static class ReviewJson
     public static GateReport ReadGates(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        GateReport report = JsonSerializer.Deserialize<GateReport>(json, Options)
+        JsonNode? root = JsonNode.Parse(json);
+        RejectNullListEntries(root, "$");
+        GateReport report = root.Deserialize<GateReport>(Options)
                             ?? throw new JsonException("The gate report is empty.");
-        if (report.Gates is null || report.Gates.Any(gate => gate is null))
-            throw new JsonException("The gate report's 'gates' must be a list of gate results, with no null entry.");
+        if (report.Gates is null)
+            throw new JsonException("The gate report's 'gates' must be a list of gate results.");
 
         if (report.Gates.FirstOrDefault(gate => string.IsNullOrWhiteSpace(gate.Id) || gate.Summary is null) is { } bad)
         {
@@ -131,6 +133,7 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         JsonNode? root = JsonNode.Parse(json);
+        RejectNullListEntries(root, "$");
         if (root is JsonObject document && document["findings"] is JsonArray findings)
         {
             foreach (JsonObject finding in findings.OfType<JsonObject>())
@@ -139,8 +142,8 @@ public static class ReviewJson
 
         FindingsReport report = root.Deserialize<FindingsReport>(Options)
                                 ?? throw new JsonException("The findings report is empty.");
-        if (report.Findings is null || report.Findings.Any(finding => finding is null))
-            throw new JsonException("The findings report's 'findings' must be a list of findings, with no null entry.");
+        if (report.Findings is null)
+            throw new JsonException("The findings report's 'findings' must be a list of findings.");
 
         // The serializer fills a JSON null into a string without complaint, so a finding with no id, lens or file
         // would reach the engine with no identity. Every required text field is checked here, in one place.
@@ -157,6 +160,35 @@ public static class ReviewJson
         }
 
         return report;
+    }
+
+    /// <summary>
+    /// Refuses a document holding a <c>null</c> element in any list, at any depth. The serializer binds such an
+    /// element as a null entry, and every reader downstream (the engine, the coverage check, the report) would have to
+    /// guard each list on its own; one walk before binding covers every list the document has or will gain.
+    /// </summary>
+    /// <param name="node">The node to walk.</param>
+    /// <param name="path">The node's JSON path, named in the refusal.</param>
+    private static void RejectNullListEntries(JsonNode? node, string path)
+    {
+        switch (node)
+        {
+            case JsonArray array:
+                for (int index = 0; index < array.Count; index++)
+                {
+                    string entry = $"{path}[{index}]";
+                    if (array[index] is null)
+                        throw new JsonException($"The list at '{path}' has a null entry at '{entry}'.");
+
+                    RejectNullListEntries(array[index], entry);
+                }
+
+                break;
+            case JsonObject obj:
+                foreach (KeyValuePair<string, JsonNode?> property in obj)
+                    RejectNullListEntries(property.Value, $"{path}.{property.Key}");
+                break;
+        }
     }
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)

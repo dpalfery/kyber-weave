@@ -47,14 +47,17 @@ public static partial class SeatOutputParser
     };
 
     /// <summary>
-    /// A list item that opens a finding with any field the seat schema defines. Built from <see cref="TextFields"/>
-    /// plus <c>guidance</c>, the one schema field the parser does not read as text, so a field the reader accepts
-    /// can never open a list this check misses. A prose bullet such as <c>- Note: ...</c> names no schema field and
-    /// stays prose.
+    /// A seat-schema key followed by a colon, wherever a YAML key can stand: at the start of a line at any indent,
+    /// after an optional <c>- </c>; or after <c>{</c>, <c>,</c> or a table's <c>|</c>. The key may be bare, single-
+    /// or double-quoted. Built from <see cref="TextFields"/> plus <c>guidance</c>, the one schema field the reader
+    /// does not take as text, so a field the reader accepts can never slip past this check. Case is ignored: a
+    /// seat that wrote <c>ID:</c> meant a field, and under fail-closed a false refusal is the cheaper mistake.
     /// </summary>
-    private static readonly Regex FindingItemStart = new(
-        @"^\s*-\s+(" + string.Join('|', TextFields.Append("guidance").Select(Regex.Escape)) + "):",
-        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
+    private static readonly Regex SchemaKey = new(
+        @"(?:^[ \t]*(?:-[ \t]+)?|[{,|][ \t]*)(?<quote>[""']?)(?:"
+        + string.Join('|', TextFields.Append("guidance").Select(Regex.Escape))
+        + @")\k<quote>[ \t]*:",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase);
 
     /// <summary>Parses the text a seat wrote for one lens.</summary>
     /// <param name="lens">The lens the seat ran, taken from the file name.</param>
@@ -71,7 +74,7 @@ public static partial class SeatOutputParser
         string[] lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
         string? attestation = null;
-        string? indexFallback = null;
+        List<string> indexFallbacks = [];
         List<SeatDiscovery?> discoveries = [];
         List<SeatInputSites?> inputSiteLines = [];
         SeatOutputKind? declared = null;
@@ -87,7 +90,7 @@ public static partial class SeatOutputParser
             if (line.StartsWith(AttestationPrefix, StringComparison.Ordinal))
                 attestation = trimmed;
             else if (line.StartsWith(IndexFallbackPrefix, StringComparison.Ordinal))
-                indexFallback = trimmed[IndexFallbackPrefix.Length..].Trim();
+                indexFallbacks.Add(trimmed[IndexFallbackPrefix.Length..].Trim());
             else if (line.StartsWith(DiscoveryPrefix, StringComparison.Ordinal))
                 discoveries.Add(ReadDiscovery(trimmed));
             else if (line.StartsWith(InputSitesPrefix, StringComparison.Ordinal))
@@ -115,6 +118,8 @@ public static partial class SeatOutputParser
                 body.Add(new SeatLine(line, index + 1));
         }
 
+        // The first Index fallback line is the seat's reason; every line is kept, so a repeat is reported, not lost.
+        string? indexFallback = indexFallbacks.Count > 0 ? indexFallbacks[0] : null;
         SeatDiscovery? discovery = SumDiscovery(discoveries);
         SeatInputSites? inputSites = SumInputSites(inputSiteLines);
         List<SeatLine> yaml = YamlLines(body);
@@ -124,16 +129,16 @@ public static partial class SeatOutputParser
         // findings, so it is refused.
         if (declared is { } kind)
         {
-            if (ListItemPosition(yaml) is { } item)
+            if (SchemaKeyPosition(body) is { } item)
             {
                 string outcome = kind == SeatOutputKind.NoFindings ? NoFindingsPrefix : SkippedPrefix;
                 throw new SeatOutputException(
                     $"The {lens} seat output declares '{outcome}' (line {declaredLine}, column 1) but also holds a " +
-                    $"list item (line {item.Line}, column {item.Column}). A seat reports findings or an outcome " +
+                    $"seat field (line {item.Line}, column {item.Column}). A seat reports findings or an outcome " +
                     "line, not both.");
             }
 
-            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites);
+            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites, indexFallbacks);
         }
 
         IReadOnlyList<ReviewFinding> findings = ReadFindings(lens, yaml);
@@ -145,7 +150,7 @@ public static partial class SeatOutputParser
         }
 
         return new SeatOutput(
-            lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery, inputSites);
+            lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery, inputSites, indexFallbacks);
     }
 
     /// <summary>
@@ -218,32 +223,28 @@ public static partial class SeatOutputParser
     }
 
     /// <summary>
-    /// Where the body under a declared outcome holds a list item, or null when it holds none. Two readings, so that
-    /// no shape slips past: a line that opens a list item with a field the seat schema defines, wherever it sits
-    /// in prose, and any body that YAML itself reads as a list (a flow item, a flow list, a quoted or unknown first
-    /// key, a plain bullet). A Markdown bullet that opens with emphasis (<c>- **Note:**</c>) is not YAML, so the
-    /// prose a seat writes after <c>NO FINDINGS:</c> stays allowed.
+    /// Where a seat field first appears in the lines under a declared outcome, or null when none does.
     /// </summary>
-    private static (int Line, int Column)? ListItemPosition(List<SeatLine> yaml)
+    /// <remarks>
+    /// Fail closed. Two earlier pattern checks each missed a shape a seat could write, and every miss dropped a
+    /// finding without a word. So every line other than the outcome and closing lines is searched, at any indent,
+    /// after any prose, inside or outside a fence, for a schema key followed by a colon. A false refusal costs one
+    /// re-run of the seat; a silently dropped finding is the defect this exists to prevent. Prose, a Markdown table,
+    /// and bullets that name no schema key (<c>- **Checked:**</c>, <c>- note: x</c>) stay allowed.
+    /// </remarks>
+    private static (int Line, int Column)? SchemaKeyPosition(List<SeatLine> body)
     {
-        if (yaml.Find(line => FindingItemStart.IsMatch(line.Text)) is { } item)
-            return (item.Number, item.Text.IndexOf('-', StringComparison.Ordinal) + 1);
+        foreach (SeatLine line in body)
+        {
+            Match match = SchemaKey.Match(line.Text);
+            if (!match.Success)
+                continue;
 
-        YamlStream stream = new();
-        try
-        {
-            stream.Load(new StringReader(string.Join('\n', yaml.Select(line => line.Text))));
-        }
-        catch (Exception ex) when (ex is YamlException or InvalidOperationException)
-        {
-            return null;
+            int leading = match.Value.Length - match.Value.TrimStart(' ', '\t').Length;
+            return (line.Number, match.Index + leading + 1);
         }
 
-        return stream.Documents
-            .Select(document => document.RootNode)
-            .OfType<YamlSequenceNode>()
-            .Select(sequence => ((int, int)?)SourcePosition(yaml, sequence.Start))
-            .FirstOrDefault();
+        return null;
     }
 
     /// <summary>
@@ -552,6 +553,7 @@ public sealed class SeatOutputException : FormatException
 /// <param name="IndexFallback">Why the seat fell back from the code index, when it did.</param>
 /// <param name="Discovery">How the seat found its evidence, when it recorded it.</param>
 /// <param name="InputSites">The correctness seat's count of the input sites it traced, when it wrote a readable one.</param>
+/// <param name="IndexFallbacks">Every <c>Index fallback:</c> line's value, in order; <see cref="IndexFallback"/> is the first.</param>
 public sealed record SeatOutput(
     string Lens,
     SeatOutputKind Kind,
@@ -559,7 +561,8 @@ public sealed record SeatOutput(
     string? Attestation,
     string? IndexFallback,
     SeatDiscovery? Discovery,
-    SeatInputSites? InputSites = null);
+    SeatInputSites? InputSites = null,
+    IReadOnlyList<string>? IndexFallbacks = null);
 
 /// <summary>The correctness seat's <c>Input sites: N traced, M files with none</c> closing line.</summary>
 /// <param name="Traced">Input sites the seat traced through the hostile-input classes.</param>
