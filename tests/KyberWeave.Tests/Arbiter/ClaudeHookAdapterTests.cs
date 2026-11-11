@@ -225,6 +225,9 @@ public sealed class ClaudeHookAdapterTests
 
         public string? SeenDispatchModel { get; private set; }
 
+        /// <summary>When set, the engine asks the adapter to write this token, and allows with no token if the write does not hold.</summary>
+        public string? ConfirmToken { get; init; }
+
         public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
             PreResult;
 
@@ -255,7 +258,15 @@ public sealed class ClaudeHookAdapterTests
             string? dispatchModel)
         {
             SeenDispatchModel = dispatchModel;
-            return PreResult;
+            if (ConfirmToken is null)
+            {
+                return PreResult;
+            }
+
+            bool held = context.ConfirmModelWrite?.Invoke(ConfirmToken) ?? false;
+            return held
+                ? new HookOutcome(HookOutcomeKind.Allow, ModelToken: ConfirmToken)
+                : new HookOutcome(HookOutcomeKind.Allow);
         }
 
         public HookOutcome DecidePostDispatch(
@@ -468,6 +479,34 @@ public sealed class ClaudeHookAdapterTests
         Assert.False(updated.TryGetProperty("model", out _));
         Assert.Contains("model-write-failed", log.ToString(), StringComparison.Ordinal);
         Assert.Contains("delivered: false", log.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Regression: a failed model write must still allow the dispatch with the routing header stripped, for every
+    /// target class. The GREEN change once stopped stripping for non-implementation targets when the write failed,
+    /// which left the header in the prompt the subagent received.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("code-reviewer")]
+    public void ModelWriteFailure_StripsTheHeaderForEveryTargetClass(string subagent)
+    {
+        ContextualScriptedEngine engine = new() { ConfirmToken = "sonnet" };
+        ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
+        string raw = DispatchPayload(HeaderedPrompt, subagent: subagent);
+        using JsonDocument doc = JsonDocument.Parse(raw);
+        using StringWriter log = new();
+        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+
+        string stdout = adapter.Handle(doc.RootElement, raw, "conductor", EnabledConfig(), context);
+
+        Assert.False(string.IsNullOrEmpty(stdout), $"{subagent}: the dispatch must be allowed, not passed through");
+        JsonElement updated = UpdatedInput(stdout);
+        Assert.Equal("Implement T2.", updated.GetProperty("prompt").GetString());
+        Assert.False(updated.TryGetProperty("model", out _));
+        Assert.True(updated.GetProperty("run_in_background").GetBoolean());
+        Assert.Equal(subagent, updated.GetProperty("subagent_type").GetString());
+        Assert.Contains("model-write-failed", log.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>

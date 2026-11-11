@@ -460,7 +460,8 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task PreEvent_NamesUnknownWhenNeitherModelIsKnown()
     {
-        WriteTable();
+        // No table agents entry for the target, so the evaluator cannot derive a rendered token either.
+        WriteTable(includeAgent: false);
 
         await RunAsync(Dispatch(model: null, renderedToken: null));
 
