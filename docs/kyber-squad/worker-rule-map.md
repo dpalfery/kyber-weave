@@ -151,8 +151,8 @@ order and the plan-read ban, and whose fourth is the batched-read line.
 
 The two review seats report discovery too. `review-lens` and `review-triage` put
 `Discovery: codegraph N, docs N, direct reads N` directly above their attestation line, below any
-`Index fallback:` line, and the verdict engine flags a seat that wrote none, or that read files
-directly with no index lookup and no fallback line, as `KW-REVIEW-044`.
+`Index fallback:` line, and the verdict engine flags a findings or `NO FINDINGS` seat that wrote none, or that read files
+directly with no index lookup and no fallback line, as `KW-REVIEW-044`. A `SKIPPED` seat is exempt.
 
 ## The task-end fix pass and build isolation
 
@@ -211,7 +211,7 @@ alone.
 | The six-field block and the `TASK_GATE:` line in `skills/delivery-execution/SKILL.md` alongside its new home in `skills/task-gate/SKILL.md` | Two audiences: the conductor requires the digest, the worker emits it. Both are pinned (`ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema`, `SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt`, `TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema`). |
 | The closed `CIRCUIT_BREAKER_TRIGGER` token set in `skills/task-gate/SKILL.md` alongside its procedure in `references/rework.md` | The skill raises the escalation the reference explains; `SquadCanonicalContentTests.TaskGateSkillDefinesTheDeterministicReviewGateContract` asserts the closed set on the skill file itself. |
 | Each developer agent's own agent-specific completion, plus its `TASK_GATE:` line | The shared contract's phased rollout keeps those: only `csharp-dev` and `test-dev` must return the full six-field block, and the conductor rejects a missing or `FAIL` `TASK_GATE` line from every developer worker. `SquadCanonicalContentTests.NonDeveloperAgentBodiesNeverEmitTaskGateDigest` keeps it out of the non-developer bodies. |
-| `review-lens` and `review-triage`'s `## Discovery order`, with its seat-specific `Discovery:` placement | A seat's closing lines are read by the verdict engine, so they report discovery directly above the attestation line rather than before a digest; `SquadCanonicalContentTests` asserts the `Discovery: codegraph N, docs N, direct reads N` line for them, and `KW-REVIEW-044` flags a seat that omits it. |
+| `review-lens` and `review-triage`'s `## Discovery order`, with its seat-specific `Discovery:` placement | A seat's closing lines are read by the verdict engine, so they report discovery directly above the attestation line rather than before a digest; `SquadCanonicalContentTests` asserts the `Discovery: codegraph N, docs N, direct reads N` line for them, and `KW-REVIEW-044` flags a findings or `NO FINDINGS` seat that omits it. |
 | The zero-stash and worktree-isolation text in `agents/test-dev.md`, `agents/conductor.md` and the two .NET agent bodies | Pinned by `TestDevSurfacesSpecifyZeroStashRedProofRule`, `ConductorSurfacesSpecifyZeroStashRedProofs`, `SpecialistSurfacesClarifyWorktreeOutputIsolationBypassesArtifactsPath` and `SpecialistPromptsClarifyArtifactAndBaselinePathsBelongInAccompanyingMessageBody`. |
 | The test-runner statement in the 9 standard templates that carry one | Same reason as the first row, and `TestStandardDefinesSharedTestInfrastructureAndGivesNoFullRunRoute` pins the test standard's version. |
 

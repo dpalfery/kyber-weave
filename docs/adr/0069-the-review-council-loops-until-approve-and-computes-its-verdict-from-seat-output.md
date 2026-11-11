@@ -79,9 +79,9 @@ lens needs a seat file or a recorded reason for not seating it.
   deadline-cut gate as NOT RUN, never blocking. The opt-in flag is a correction made in review: an
   exit code of 0 on a timed-out blocking gate everywhere would have let CI pass with tests not run.
 - **Seats report discovery.** A seat closes with `Discovery: codegraph N, docs N, direct reads N`
-  above its attestation line, and an `Index fallback:` line only when it read around the index. A
-  missing line, an unexplained run of direct reads, or a fallback value outside the three modes
-  draws `KW-REVIEW-044`. It is a warning, never a verdict input: the cost is now visible, not
+  above its attestation line, and an `Index fallback:` line only when it read around the index. On a
+  findings or `NO FINDINGS` seat, a missing line, an unexplained run of direct reads, or a
+  fallback value outside the three modes draws `KW-REVIEW-044`; a `SKIPPED` seat is exempt. It is a warning, never a verdict input: the cost is now visible, not
   reduced.
 - **Unseated lenses need a reason.** The verdict refuses to compute while a catalogue lens has
   neither a seat file nor a `--not-seated <lens>=<reason>` (`KW-REVIEW-041`); a verifier cycle

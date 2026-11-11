@@ -115,7 +115,7 @@ Then turn the same scepticism on the change's own account of itself. Compare wha
 
 ## 5. Verdict
 
-The verdict is **computed, not felt.** Run the verdict command the `code-review` skill names over the cycle's `seats` folder and `gates.json`, with your `--drop` and `--not-seated` entries, and report what it returns: `APPROVE` or `REQUEST_CHANGES`. The judgement is yours; the gate is not a vibe.
+The verdict is **computed, not felt.** Run the verdict command the `code-review` skill names: `--seats` and `--gates` on the cycle's `seats` folder and `gates.json`, `--out` on the cycle's `findings.json`, your `--drop` and `--not-seated` entries, and, in a verifier cycle, `--prior` with the prior cycle folder so the lenses you did not re-seat keep their coverage. Report what it returns: `APPROVE` or `REQUEST_CHANGES`. The judgement is yours; the gate is not a vibe.
 
 A verdict command refusal (KW-REVIEW-040, KW-REVIEW-041, KW-REVIEW-042) is yours to fix in the same cycle; it never goes to a developer and never counts as a review cycle.
 

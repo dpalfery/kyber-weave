@@ -320,7 +320,7 @@ the policy below:
   does. A line inside the file is never moved. A finding whose file is missing, outside the
   repository or unreadable is left as written and reported as unverified, one info line per file.
 
-A seat that wrote no `Discovery:` line, read files directly with no index lookup and no
+A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
 warning (`KW-REVIEW-044`); it is never a verdict input.
 
