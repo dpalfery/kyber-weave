@@ -555,8 +555,8 @@ validated in phase 1. Model targeting uses `mode`, and the difficulty and ladder
 with the phase 2 rules. In `shadow` (the default) the two model rules are logged and nothing is
 delivered; `enforce` writes the chosen model onto the dispatch; `off` disables both rules. The store
 and bot-login keys are validated now. The store keys are read by the run stores in phase 3. The
-bot logins are validated (a blank entry is refused) and held in the config, but no comment triage
-path reads them yet.
+bot logins are validated (a blank entry is refused) and read by the comment triage: a summary
+comment's rows are classified only when its author is listed here or ends `[bot]`.
 
 ```yaml
 arbiter:
@@ -583,7 +583,7 @@ arbiter:
 | `model-targeting.difficulty-profiles.easy` / `standard` / `hard` | `fast` / `general` / `deep-planning` | A semantic profile: `architect`, `deep-planning`, `fast`, `general`, `orchestration` or `reviewer` | `KW-ARB-CONFIG-012` |
 | `model-targeting.ladder` | `[fast, general, deep-planning]` | A non-empty list of semantic profiles, each once, cheapest first | `KW-ARB-CONFIG-013` |
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
-| `stores.retain-days` | `14` | At least 1 | `KW-ARB-CONFIG-015` |
+| `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
 

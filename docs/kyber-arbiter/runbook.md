@@ -155,14 +155,17 @@ The key and the executable are separate contracts: `kw-arbiter` is the value of
 `McpServerNames.Arbiter`, so it is the same spelling every renderer grants, while the argv above
 is unchanged.
 
-`serve` exposes three tools. `arbiter_evaluate_agent_dispatch_or_return(trigger, facts)` evaluates
+`serve` exposes five tools. `arbiter_evaluate_agent_dispatch_or_return(trigger, facts)` evaluates
 one event
 exactly as the hook would — same facts, rules, ledger append and decision record — and
 returns the same allow, envelope or review note; the caller asserts the routing facts and
 the log records `caller-source: asserted`, so this path is advisory.
-`arbiter_list_effective_rules_by_trigger(trigger?)` lists the rule catalogue, and
+`arbiter_list_effective_rules_by_trigger(trigger?)` lists the rule catalogue,
 `arbiter_check_configuration_and_key_readiness()` reports the
-root, rule-set hash, rule count and provider state, never the key — both read-only. Every
+root, rule-set hash, rule count and provider state, never the key, and
+`arbiter_select_relevant_document_sections` and `arbiter_classify_bot_review_comment` answer the
+section and bot-comment triage (see [phase 3 facts](architecture.md#phase-3-facts-review-shortcuts-stores-and-comments)).
+The evaluate and classify tools write decision records; the other three only read. Every
 response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
 conductor calls `arbiter_evaluate_agent_dispatch_or_return` before each dispatch and after each
@@ -373,8 +376,18 @@ entries after each change.
 
 Stores hold the text of review findings and worker failures under `<arbiter-dir>/stores/`. Each item
 is limited to `arbiter.stores.max-item-bytes` (default 16384), and an oversized item is refused, not
-cut short. Store directories last written more than `arbiter.stores.retain-days` ago (default 14) are
-removed on a later append. A failed store write is reported as `unavailable`, never thrown.
+cut short. `arbiter.stores.retain-days` (default 14, clamped to 1 to 3650 at run time) sets how long a
+store directory is kept. A directory's age is the time of its newest file, so an active run is not
+swept mid-review; a directory whose newest file is older than that is removed on a later append. A
+failed store write is reported as `unavailable`, never thrown.
+
+Two evidence lines appear in a decision record's notes, and neither drops a finding:
+
+- `review-run-missing` — a lens dispatch arrived with no `REVIEW_RUN` header, so its findings are
+  judged but not stored, and duplicate detection has no store to compare them against. Check that the
+  lens dispatch carries the header.
+- `findings-over-cap` — a return carried more findings than the 64-question budget. The findings past
+  the budget were not judged and are kept, not dropped.
 
 Two advisory commands run outside a dispatch:
 
@@ -382,8 +395,12 @@ Two advisory commands run outside a dispatch:
   a task needs. It fails safe to every section.
 - `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]` classifies
   one bot review comment as `real`, `nitpick` or `already-fixed`. Each call records a decision, and any
-  unsure answer is `real`. `arbiter.comment-triage.bot-logins` is validated but not yet read by the
-  triage.
+  unsure answer is `real`.
+- `kyber-weave arbiter comment --summary --body <TEXT> --author <LOGIN>` classifies each row of a bot's
+  PR-level summary table (`Severity | File | Line | Issue`); `--path` and `--line` are ignored. Only a
+  login listed in `arbiter.comment-triage.bot-logins`, or one ending `[bot]`, is classified. Every
+  other row is `real` and unasked. Rows past 50 are `real` and unasked too. A missing or unreadable
+  table keeps the whole comment `real`.
 
 ## Recording a harness defect
 

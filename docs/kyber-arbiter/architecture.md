@@ -370,7 +370,9 @@ by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-
   session when there is no plan. Each item is one JSON line. An item over
   `arbiter.stores.max-item-bytes` is refused as `TooLarge` and never shortened. Defaults are 16384 bytes
   and 14 days (`ArbiterStoreOptions`). Retention is best-effort: each append removes sibling store
-  directories last written more than `retain-days` ago, and a write failure is reported as
+  directories whose newest file was last written more than `retain-days` ago (a directory with no
+  file falls back to its own write time), so an active run appended to in place is not swept.
+  `retain-days` is clamped to 1 through 3650 when swept. A write failure is reported as
   `Unavailable`, never thrown.
 - **Triage, intake and docs-impact shortcuts (`KW-ARB-TRIAGE-001`, `-INTAKE-001`, `-DOCIMPACT-001`).**
   An answered shortcut withholds its worker: the dispatch is denied with a substitute digest, and the
@@ -394,7 +396,21 @@ by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-
   (≥ 0.85). Anything unsure, below the floor, or not obtained stays `real`, so the comment is fixed.
   Each call records a decision and returns its id. The CLI form is
   `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]`.
-  `comment-triage.bot-logins` is validated and held in the config ([configuration](../configuration.md#savings-keys)), but no triage path reads it yet.
+- **Bot summary tables (summary mode).** A bot's PR-level summary comment has no inline thread. With
+  `summary: true` (CLI `--summary`), `body` is that summary and each row of its first findings table
+  (`Severity | File | Line | Issue`, matched by header name) is classified through the same rule. The
+  `author` parameter (CLI `--author`) decides whether any row is classified: only a login listed in
+  `arbiter.comment-triage.bot-logins`, or one ending `[bot]`, is classified. Callers always pass
+  `author`. Every other row is `real` with no provider call. At most 50 rows (`MaxSummaryRows`) are
+  classified per call; rows past that are `real` and unasked. A table that cannot be read in full
+  (no table, or any malformed data row) yields no items, and the caller keeps the rows `real`. Each
+  classified row records its own decision.
+  `comment-triage.bot-logins` is read by the triage service on both the served tool and the CLI
+  ([configuration](../configuration.md#savings-keys)). With no logins configured, no summary row is
+  classified.
+- **Evidence lines (log-only, never a drop).** A decision record's notes carry `review-run-missing:` when
+  a lens dispatch has no `REVIEW_RUN` header, and `findings-over-cap:` with the count when a return
+  carries more findings than the 64-question budget. The findings past the budget are kept, not dropped.
 - **Not filled.** `gates.report` is catalogued but no filler sets it, so any rule that reads it
   answers `undecidable`.
 
@@ -879,7 +895,7 @@ Research verified against vendor documentation governs the user-level global hoo
 `kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
 for harnesses without hooks or with degraded dispatch (such as Warp, CommandCode, or ZCode). Its server key is **`kw-arbiter`**
 (`McpServerNames.Arbiter`), which is the name a client configuration declares and the name a
-grant is built from; the executable and its argv are unchanged. Three tools:
+grant is built from; the executable and its argv are unchanged. Five tools:
 
 - **`arbiter_evaluate_agent_dispatch_or_return(trigger, facts)`** — evaluates one event exactly as
   the hook would: the same facts, rules, ledger append and decision record, and the same allow,
@@ -893,6 +909,10 @@ grant is built from; the executable and its argv are unchanged. Three tools:
   and closed-world.
 - **`arbiter_check_configuration_and_key_readiness()`** — reports the root, the rule-set hash,
   the rule count and the provider state, never the key; read-only and closed-world.
+- **`arbiter_select_relevant_document_sections`** — the section selector for one repository markdown
+  document (`KW-ARB-TRIM-001`); read-only.
+- **`arbiter_classify_bot_review_comment`** — the bot-comment triage (`KW-ARB-COMMENT-001`), per
+  comment or, with `summary: true`, per summary row. It writes a decision record for each call.
 
 Every response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
