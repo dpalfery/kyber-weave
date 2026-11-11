@@ -36,6 +36,7 @@ public sealed class ArbiterConfigTests
         "KW-ARB-GATE-001",
         "KW-ARB-PLANREAD-001",
         "KW-ARB-GATE-REPORT-001",
+        "KW-ARB-LENS-002",
     ];
 
     [Fact]
