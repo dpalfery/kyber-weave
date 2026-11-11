@@ -133,7 +133,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         {
             Harness = "claude",
             Phase = "pre",
-            Target = "review-refuter",
+            Target = "review-lens",
             Prompt = runHeader + "REFUTE: " + RefuteValue + "\n\n" +
                      "id: " + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming",
             HarnessCaller = "code-reviewer",
@@ -418,7 +418,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-1", record.Id), DuplicateLineOf(record));
     }
 
-    /// <summary>Each refuter return records its outcome against its finding id in the review store.</summary>
+    /// <summary>
+    /// Each refuter return records its outcome against its finding id in the review store.
+    /// RED: production has no path that does this. A REFUTE return keeps the <c>refute.spawn</c> trigger
+    /// (<c>TriggerClassifier.ToReturned</c> maps only <c>lens.spawn</c>), and the store is written for
+    /// <c>lens.returned</c> only, as new finding items. GREEN needs csharp-dev to add a refutation-outcome
+    /// write to <c>ArbiterRunStore</c> plus an evaluator call on the refute return, keyed by the finding slug.
+    /// </summary>
     [Fact]
     public async Task EachRefuterReturnRecordsItsOutcomeAgainstItsFindingIdInTheStore()
     {
@@ -427,7 +433,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         {
             Harness = "claude",
             Phase = "return",
-            Target = "review-refuter",
+            Target = "review-lens",
             Prompt = "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + RefuteValue + "\n\nRefute.",
             HarnessCaller = "code-reviewer",
             IsDispatch = true,
