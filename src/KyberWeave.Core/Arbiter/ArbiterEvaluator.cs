@@ -180,14 +180,18 @@ public sealed class ArbiterEvaluator
     /// <param name="Rule">The rule as sent; an expansion carries a key of its own (rule id plus candidate).</param>
     private sealed record Question(string RuleId, string? Candidate, ArbiterRule Rule);
 
-    /// <summary>A trigger after step 0: its answers, and the step-1 questions it still needs.</summary>
+    /// <summary>
+    /// A trigger after step 0: its answers, the step-1 questions it still needs, and the rules that
+    /// could not be asked (an unreadable list). Those are never sent; they record as undecidable.
+    /// </summary>
     private sealed record TriggerPlan(
         string Trigger,
         ArbiterTriggerFamily Family,
         ArbiterOutcome Step0,
         IReadOnlyDictionary<string, string> Step0Answers,
         bool ShortCircuits,
-        List<Question> Questions);
+        List<Question> Questions,
+        List<Question> Unanswerable);
 
     /// <summary>What one batched provider call returned for a set of questions.</summary>
     private sealed record Step1Call(
@@ -321,6 +325,7 @@ public sealed class ArbiterEvaluator
             .ToDictionary(answer => answer.RuleId, answer => answer.Answer, StringComparer.Ordinal);
 
         List<Question> questions = [];
+        List<Question> unanswerable = [];
         if (!shortCircuits)
         {
             foreach (ArbiterRule rule in config.Arbiter.Rules)
@@ -336,23 +341,26 @@ public sealed class ArbiterEvaluator
                 bool shouldAsk = rule.Decide is null || rule.ShouldAsk(decideAnswer);
                 if (shouldAsk && SystemOneContracts.WhenMatches(rule.Ask, step0Answers))
                 {
-                    AddQuestions(rule, facts, candidateFacts, questions);
+                    AddQuestions(rule, facts, candidateFacts, questions, unanswerable);
                 }
             }
         }
 
-        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions);
+        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable);
     }
 
     /// <summary>
     /// Adds a rule's question. A <c>ForEach</c> rule asks once per item of its list fact, each
     /// keyed by rule id plus candidate, with the item bound to a per-item <c>candidate[i].*</c> fact.
+    /// A list that is missing, has the wrong shape, or is empty gives no question to ask; the rule
+    /// goes to <paramref name="unanswerable"/> so it still records, as undecidable.
     /// </summary>
     private static void AddQuestions(
         ArbiterRule rule,
         ArbiterFactSet facts,
         Dictionary<string, ArbiterFact> candidateFacts,
-        List<Question> questions)
+        List<Question> questions,
+        List<Question> unanswerable)
     {
         RuleAsk ask = rule.Ask!;
         if (ask.ForEach is null)
@@ -363,6 +371,8 @@ public sealed class ArbiterEvaluator
 
         if (!facts.TryGet(ask.ForEach, out ArbiterFact? list) || list.Value is not IEnumerable<string> items)
         {
+            // Unsure, missing or unreadable is undecidable, never a silent disappearance.
+            unanswerable.Add(new Question(rule.Id, null, rule));
             return;
         }
 
@@ -393,6 +403,12 @@ public sealed class ArbiterEvaluator
             };
             questions.Add(new Question(rule.Id, item, expanded));
             index++;
+        }
+
+        if (index == 0)
+        {
+            // An empty list leaves nothing to ask, so the rule records as undecidable too.
+            unanswerable.Add(new Question(rule.Id, null, rule));
         }
     }
 
@@ -489,7 +505,7 @@ public sealed class ArbiterEvaluator
     {
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
         List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
-        foreach (Question question in plan.Questions)
+        foreach (Question question in plan.Questions.Concat(plan.Unanswerable))
         {
             string answer = AnswerFor(question, call);
             string mapped = MapOrNotEvaluated(question.Rule, answer, plan.Family);
@@ -536,7 +552,7 @@ public sealed class ArbiterEvaluator
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
         List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
         List<string> payload = [];
-        foreach (Question question in plan.Questions)
+        foreach (Question question in plan.Questions.Concat(plan.Unanswerable))
         {
             string answer = AnswerFor(question, call);
             string mapped = MapOrNotEvaluated(question.Rule, answer, plan.Family);
