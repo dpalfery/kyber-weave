@@ -223,6 +223,7 @@ public static class CodeGraphProvisioner
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
         ChildRun prepared = PrepareIndex(root, verb, options, executor);
+        bool onlySynced = prepared.Ok && prepared.Verb == SyncVerb;
         if (!prepared.Ok && !prepared.NotInitialised)
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
@@ -233,7 +234,9 @@ public static class CodeGraphProvisioner
 
         checks.Add(VerbCheck(prepared, options, IndexCheckId, EnsureFlag));
 
-        if (RestoreWritten(root, dirtyBefore, executor) is { } restore)
+        // A sync writes no tracked file, so there is nothing of its own to undo. Restoring after one would revert
+        // whatever someone else edited in this tree while it ran, and a review now syncs a tree others may be in.
+        if (!onlySynced && RestoreWritten(root, dirtyBefore, executor) is { } restore)
             checks.Add(restore);
 
         // A repair already ran, and one is the whole budget. Proving an index that could not be prepared would report

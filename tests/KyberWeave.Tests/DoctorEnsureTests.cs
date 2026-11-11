@@ -226,6 +226,58 @@ public sealed class DoctorEnsureTests : IDisposable
     }
 
     /// <summary>
+    /// A sync writes no tracked file, so a file that turns dirty while it runs is someone else's edit in the same
+    /// tree. Restoring it would revert their work.
+    /// </summary>
+    [Fact]
+    public void EnsureLeavesAFileEditedDuringASyncAlone()
+    {
+        const string editedMeanwhile = "src/edited-during-sync.cs";
+        Directory.CreateDirectory(IndexDirectory);
+
+        bool synced = false;
+        ScriptedProcessExecutor executor = new(startInfo =>
+        {
+            if (startInfo.FileName == "git")
+            {
+                string arguments = string.Join(' ', startInfo.ArgumentList);
+                if (arguments.Contains("rev-parse", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(0, Root + "\n", string.Empty);
+                }
+
+                if (arguments.Contains("status", StringComparison.Ordinal)
+                    || arguments.Contains("diff", StringComparison.Ordinal))
+                {
+                    return new ProcessResult(0, synced ? $" M {editedMeanwhile}\n" : string.Empty, string.Empty);
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            if (startInfo.FileName == "codegraph")
+            {
+                if (startInfo.ArgumentList.Contains("sync", StringComparer.Ordinal))
+                {
+                    synced = true;
+                }
+
+                return DoctorHarness.Ok();
+            }
+
+            throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
+        });
+
+        RunEnsure(executor);
+
+        Assert.Contains(executor.CallsTo("codegraph"), call => call.ArgumentList.Contains("sync", StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            executor.CallsTo("git").Select(call => string.Join(' ', call.ArgumentList)),
+            arguments => arguments.Contains("checkout", StringComparison.Ordinal)
+                         || arguments.Contains("restore", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// When reading baseline tracked changes fails (e.g. git error), ensure must not assume the tree
     /// was clean and must skip restore so operator work is never wiped.
     /// </summary>
