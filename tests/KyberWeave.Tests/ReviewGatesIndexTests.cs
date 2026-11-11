@@ -67,26 +67,23 @@ public sealed class ReviewGatesIndexTests : IDisposable
     }
 
     [Fact]
-    public void AFailedIndexStopsTheRunBeforeAnyGateStartsAndNamesTheFix()
+    public void AFailedIndexWarnsNamesTheFixAndStillRunsTheGates()
     {
         Govern();
 
         CapturedConsoleExecution<int> run = Run(Codegraph("init", "index"));
 
-        Assert.True(run.Result == 1, $"A failed index must stop the run with exit 1, not {run.Result}. {run.Output}");
+        Assert.True(run.Result == 0, $"A review is read-only, so a failed index must not stop its gates. {run.Output}");
         JsonElement diagnostic = Assert.Single(Diagnostics(run.Output, IndexRule));
-        Assert.Equal("error", SeverityOf(diagnostic), ignoreCase: true);
+        Assert.Equal("warning", SeverityOf(diagnostic), ignoreCase: true);
         string hint = diagnostic.GetProperty("hint").GetString()!;
         Assert.Contains("kyber-weave doctor --ensure", hint, StringComparison.Ordinal);
         Assert.Contains(Path.GetFullPath(_repo), hint, StringComparison.Ordinal);
-        Assert.False(GateStarted(), "A failed index must stop the run before any gate starts.");
-        Assert.True(File.Exists(ReportPath), "A stopped run still writes its gate report, empty, to --out.");
-        using JsonDocument report = JsonDocument.Parse(File.ReadAllText(ReportPath));
-        Assert.Empty(report.RootElement.GetProperty("gates").EnumerateArray());
+        Assert.True(GateStarted(), "A warned index must still let the repository gates start.");
     }
 
     [Fact]
-    public void AMissingCodeGraphBinaryStopsTheRunTheSameWay()
+    public void AMissingCodeGraphBinaryWarnsTheSameWay()
     {
         Govern();
         ScriptedProcessExecutor executor = new(startInfo => startInfo.FileName switch
@@ -98,21 +95,9 @@ public sealed class ReviewGatesIndexTests : IDisposable
 
         CapturedConsoleExecution<int> run = Run(executor);
 
-        Assert.True(run.Result == 1, $"A missing binary must stop the run with exit 1, not {run.Result}. {run.Output}");
-        Assert.Equal("error", SeverityOf(Assert.Single(Diagnostics(run.Output, IndexRule))), ignoreCase: true);
-        Assert.False(GateStarted(), "A missing binary must stop the run before any gate starts.");
-    }
-
-    [Fact]
-    public void AFailedIndexWarnsAndRunsTheGatesWhenStopOnToolFailureIsFalse()
-    {
-        Govern("stop-on-tool-failure: false\n");
-
-        CapturedConsoleExecution<int> run = Run(Codegraph("init", "index"));
-
-        Assert.True(run.Result == 0, $"stop-on-tool-failure: false must let the gates run. {run.Output}");
+        Assert.True(run.Result == 0, $"A missing binary must not stop a review's gates. {run.Output}");
         Assert.Equal("warning", SeverityOf(Assert.Single(Diagnostics(run.Output, IndexRule))), ignoreCase: true);
-        Assert.True(GateStarted(), "A warned index must still let the repository gates start.");
+        Assert.True(GateStarted(), "A missing binary must still let the repository gates start.");
     }
 
     [Fact]

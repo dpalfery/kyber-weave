@@ -334,7 +334,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
-        // undo the branch: the operator repairs the index and continues with --resume.
+        // undo the branch: the operator repairs the index and the run continues in that tree.
         string indexTree = worktreePath ?? repositoryRoot;
         IProcessExecutor indexExecutor = _executor ?? ProcessExecutor.WithTimeout(IndexTimeout);
         WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
@@ -438,8 +438,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             $"the CodeGraph index for '{tree}' is not usable ({IndexReason(index)}), so the run stops here. " +
             $"The branch '{branch}' is in place.";
         string remedy =
-            $"run 'kyber-weave doctor --ensure {tree}' to repair the index, then continue with " +
-            $"'kyber-weave run start --resume {branch}'.";
+            $"run 'kyber-weave doctor --ensure {tree}' to repair the index. The branch needs no second " +
+            "run start: once that command passes, the run continues in that tree.";
 
         if (json)
         {

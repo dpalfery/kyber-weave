@@ -366,7 +366,7 @@ kyber-weave run start --harness <token> --type <type> --slug <slug> \
 11. Prepares the CodeGraph index of the tree the branch landed in, when the repository has governed
     docs: `codegraph init` when that tree has none, which is every new worktree, and `codegraph sync`
     otherwise. A tree it cannot index is exit `1` with the remedy `kyber-weave doctor --ensure <tree>`;
-    the branch stays in place, so continue with `--resume` once the index is repaired. With
+    the branch stays in place and needs no second `run start` once that command passes. With
     `stop-on-tool-failure: false` the failure is a warning and the run is ready.
 
 **The branch and title shapes.** Both name the harness, because the diff does not:

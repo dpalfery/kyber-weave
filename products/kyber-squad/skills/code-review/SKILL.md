@@ -42,10 +42,10 @@ review run in a worktree that reads the canonical checkout's index reviews code 
 
 **Index that tree first.** `kyber-weave doctor --ensure .` runs in the tree under review before any
 seat or gate starts. It creates the index when the tree has none and syncs it to the change
-otherwise, so no seat reads an index older than the diff. A failure stops the review with
-`STATUS: TOOL_FAILURE` and the doctor's `fix:` line, unless the repository set
-`stop-on-tool-failure: false`. The gate runner repeats the check and reports it as
-`KW-REVIEW-038`: it starts no gate over a tree it cannot index.
+otherwise, so no seat reads an index older than the diff. A failure does not stop the review,
+which is a read-only run: it is recorded under Council coverage with the doctor's `fix:` line, and
+every seat is told the index is unavailable. The gate runner repeats the check and reports it as
+`KW-REVIEW-038`.
 
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its

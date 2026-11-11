@@ -1883,7 +1883,8 @@ What follows is why it is shaped that way
   worktree it created or reused, or in the checkout when it branched in place. A tree it cannot index
   stops the run under `stop-on-tool-failure`. `kyber-weave review gates` applies the same guard before
   any repository gate starts (`KW-REVIEW-038`), so a worktree made with a plain `git worktree add` is
-  indexed, or refused, when a review reaches it.
+  indexed when a review reaches it, and a tree that cannot be indexed is reported, not stopped: a
+  review is a read-only run.
 - **Reported, not assumed.** The versions the operator is working between — the failing build,
   `HEAD`, and the base — and the divergence from the server are read *before* anything is switched,
   because that is the state the defect was observed in. The run record carries them, and every later

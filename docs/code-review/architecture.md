@@ -643,9 +643,10 @@ pointed at: `codegraph init` when the tree has none, `codegraph sync` otherwise,
 code path as `kyber-weave doctor --ensure`. A git worktree does not share another checkout's index,
 so a review in a fresh worktree would otherwise have none and its lenses would fall back to raw
 file reads or be answered from another branch. The result is `KW-REVIEW-038`: Info when the index was created
-or synced; Error, with no gate started and exit `1`, when it could not be prepared; Warning, with
-the gates still running, when the repository set `stop-on-tool-failure: false`. A repository
-without governed docs is not checked. `--agent` runs are not checked either: a task gate measures
+or synced; Warning, naming `kyber-weave doctor --ensure <tree>`, when it could not be prepared. The
+gates still run either way: a review is a read-only run, and
+[ADR 0061](../adr/0061-code-editing-runs-stop-on-unusable-tools.md) keeps those going without an
+index. A repository without governed docs is not checked. `--agent` runs are not checked either: a task gate measures
 one worker's change and consults no index.
 
 For whole-repository audits and CI verification, `--all` executes all declared gates matching

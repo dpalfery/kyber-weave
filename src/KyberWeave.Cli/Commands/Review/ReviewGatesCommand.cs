@@ -139,10 +139,12 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             }
         }
 
-        // Before any gate process starts, so no gate reads a tree that has no index. A repository without governed
-        // docs has no index to keep and is not checked.
+        // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
+        // none. A repository without governed docs has no index to keep and is not checked.
+        // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
+        string indexRoot = EnclosingRepositoryRoot(root);
         WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
-            root,
+            indexRoot,
             new DoctorOptions(
                 IndexTimeout,
                 McpTimeout,
@@ -151,19 +153,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             Executor ?? ProcessExecutor.WithTimeout(IndexTimeout),
             Path.GetTempPath());
         if (index.Status is not WorktreeIndexStatus.NotGoverned)
-            AddIndexDiagnostic(report, root, index);
-
-        if (index.StopsRun)
-        {
-            // Same as the --all refusal: the caller gets an empty gate report and no gate has run.
-            CommandHelpers.TryWriteReport(
-                settings.Out,
-                ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
-                ReportWriteFailed,
-                report);
-            CommandHelpers.Finish(report, settings, "review gates", "Gate");
-            return 1;
-        }
+            AddIndexDiagnostic(report, indexRoot, index);
 
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
@@ -418,22 +408,11 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     }
 
     /// <summary>
-    ///     Reports the index state under <see cref="IndexState" />. A failed index is an error when the repository
-    ///     stops on tool failure, and a warning when it does not.
+    ///     Reports the index state under <see cref="IndexState" />. A failed index is a warning and never stops the
+    ///     gates: a review is a read-only run, and ADR 0061 keeps read-only runs going without an index.
     /// </summary>
     private static void AddIndexDiagnostic(DiagnosticReport report, string root, WorktreeIndexOutcome index)
     {
-        if (index.StopsRun)
-        {
-            report.Add(new Diagnostic(
-                IndexState,
-                Severity.Error,
-                $"The CodeGraph index for '{root}' is not usable ({IndexReason(index)}), so no gate was started.",
-                "review.gates",
-                Hint: $"kyber-weave doctor --ensure {root}"));
-            return;
-        }
-
         if (index.Status is WorktreeIndexStatus.Ready)
         {
             report.Add(new Diagnostic(

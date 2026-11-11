@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: 267c7e8e71e548d2f51374cf43d54e8304b4c727031ff901a2d9f3cbb7def305
+final-body-sha256: 45ae657451dbde94aa0ddd2928428280742c4ebbcc368bf67a35c860463e7462
 ---
 # code-reviewer migration
 
@@ -26,7 +26,7 @@ keeps an Arbiter note distinct from a `STATUS:` line a lens or a tool printed. I
 through the runner's `--gate` option, and the seat handback: a harness that gives the reviewer no way to start its own
 council stops it with `STATUS: COUNCIL_SEATS_NEEDED`, and the session above seats the lenses and re-invokes it.
 It also indexes the tree under review with `kyber-weave doctor --ensure .` before any seat is dispatched, records that
-result and any seat's `Index fallback:` line under Council coverage, and stops on a tree it cannot index.
+result and any seat's `Index fallback:` line under Council coverage, and reports a tree it cannot index as a coverage gap.
 `final-body-sha256` covers that evolved body.
 
 ## Canonical projection

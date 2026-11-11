@@ -248,7 +248,8 @@ stop-on-tool-failure: false
 - **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
   no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
-  route the exit code rather than interpreting it.
+  route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
+  the tree it places the branch in.
 - **What it never covers.** A read-only run is never stopped by it. A repository with no governed
   docs skips the check. `doctor --check` ignores it, because a caller that asked for a verdict gets
   one. And a missing `codegraph` binary is exit `3` under either value: installing it is the user's
