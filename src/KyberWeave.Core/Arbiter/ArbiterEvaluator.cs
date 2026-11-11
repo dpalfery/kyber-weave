@@ -481,6 +481,18 @@ public sealed class ArbiterEvaluator
         return combined with { Answers = answers };
     }
 
+    /// <summary>
+    /// Combines the effects of the gating entries only. A shadow entry is log-only and never joins the
+    /// combination; when every entry is shadow, the family's neutral effect stands.
+    /// </summary>
+    private static string CombineGating(ArbiterTriggerFamily family, List<string> gating, List<ArbiterDecisionRule> rules)
+    {
+        bool onlyShadow = rules.Count > 0 && rules.All(rule => rule.Shadow == true);
+        return gating.Count == 0 && onlyShadow
+            ? ArbiterTriggerFamilies.NeutralEffect(family)
+            : ArbiterTriggerFamilies.Combine(family, gating);
+    }
+
     private static string ProviderStatusFor(TriggerPlan plan, Step1Call call) =>
         plan.ShortCircuits
             ? ArbiterProviderStatuses.ShortCircuited
@@ -504,7 +516,7 @@ public sealed class ArbiterEvaluator
         CancellationToken cancellationToken)
     {
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
-        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<string> effects = new(plan.Step0.RuleAnswers.Where(answer => !answer.Shadow).Select(answer => answer.Effect));
         foreach (Question question in plan.Questions.Concat(plan.Unanswerable))
         {
             string answer = AnswerFor(question, call);
@@ -515,13 +527,14 @@ public sealed class ArbiterEvaluator
             (string effect, bool? shadow, string? wouldEffect) = ShadowState(
                 question.Rule, mapped, ArbiterTriggerFamilies.NeutralEffect(plan.Family));
             rules.Add(Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence: null));
-            if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
+            if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)
+                && !question.Rule.Shadow)
             {
                 effects.Add(effect);
             }
         }
 
-        string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        string outcome = CombineGating(plan.Family, effects, rules);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: null,
@@ -554,7 +567,7 @@ public sealed class ArbiterEvaluator
         bool primaryAllows = string.Equals(
             primaryOutcome, ArbiterTriggerFamilies.NeutralEffect(primaryFamily), StringComparison.Ordinal);
         List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
-        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<string> effects = new(plan.Step0.RuleAnswers.Where(answer => !answer.Shadow).Select(answer => answer.Effect));
         List<string> payload = [];
         foreach (Question question in plan.Questions.Concat(plan.Unanswerable))
         {
@@ -580,7 +593,10 @@ public sealed class ArbiterEvaluator
             {
                 string? evidence = suppressed ? "suppressed: primary " + primaryOutcome : null;
                 rules.Add(Step1Rule(question, answer, neutral, score, shadow ? true : null, mapped, evidence));
-                effects.Add(neutral);
+                if (!shadow)
+                {
+                    effects.Add(neutral);
+                }
             }
             else
             {
@@ -589,7 +605,7 @@ public sealed class ArbiterEvaluator
             }
         }
 
-        string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        string outcome = CombineGating(plan.Family, effects, rules);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: ledgerId,
