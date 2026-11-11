@@ -672,7 +672,7 @@ concurrency cap (see `ReviewConfig`):
 |---|---|---|
 | `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `council-deadline-seconds` | `600` | Wall-clock budget for a `review gates --deadline` run, which the council passes. Each gate runs for the shorter of its own `timeout-seconds` and the time left; the gate the deadline cuts, every gate not yet started, and a gate stopped by its own timeout are reported as not run (`KW-REVIEW-039`, a warning) and left out of the exit code. Without `--deadline` (CI, task gates, pre-push) no run deadline applies and a timed-out blocking gate fails the run as before. `--deadline` is refused with `--gate` and `--agent`. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
-| `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
+| `gates` | `[]` | Repository-wide deterministic gates, started in declaration order; each waits for the one before it unless that one is `concurrent` |
 | `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
 | `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
 
@@ -720,6 +720,16 @@ Warning otherwise, with a summary that names the path and the install that unblo
 never reads as a code failure. An empty list, an empty entry, an absolute path, or a path containing `..` is
 refused when the configuration loads, so an entry that could never name something inside the repository never
 reaches a run.
+
+A gate may set `concurrent: true` (a boolean, default `false`). Such a gate starts at its place in the declared
+order, so every gate declared before it has finished, and then runs alongside the gates declared after it
+instead of holding them up. The report still lists it at its declared place. It is stopped at its own
+`timeout-seconds` like any gate and reported as timed out, never as passed. A run given `--stop-on-failure`
+that meets a blocking failure stops a concurrent gate that is still running and leaves it out of the report,
+as it does the gates that never started. The `inspectcode` gate here sets it: it is declared straight after
+`build` and overlaps the test run, and it runs through `scripts/report-gate.sh`, described in
+[the code review architecture](code-review/architecture.md#repository-gate-scoping-and-caching-in-this-repository). Set it only on a gate that neither reads nor writes what later gates
+produce; the runner does not check that.
 
 ## Harness profiles
 

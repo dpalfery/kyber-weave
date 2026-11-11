@@ -62,6 +62,16 @@ public sealed record ReviewGate(
     /// about this machine, not about the configuration.
     /// </remarks>
     public IReadOnlyList<string> RequiresPaths { get; init; } = [];
+
+    /// <summary>
+    /// Whether the gate runs alongside the gates declared after it instead of holding them up.
+    /// </summary>
+    /// <remarks>
+    /// The gate still starts at its place in the declared order, so everything declared before it has finished,
+    /// and its result still sits at that place in the report. Only a gate that neither reads nor writes what the
+    /// gates after it produce may set this: the runner does not check that.
+    /// </remarks>
+    public bool Concurrent { get; init; }
 }
 
 /// <summary>
