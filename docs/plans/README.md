@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+| Plan | Status | Scale | Summary |
+|---|---|---|---|
+| [A git post-checkout hook that indexes every new worktree](2026-11-11-worktree-index-git-hook.md) | Ready | `extends-component` (DocGraph, KyberSquad) | `doctor --ensure` installs an owned block in the clone's shared `post-checkout` hook that indexes each new worktree in the background, never fails a checkout and never reverts an edit made meanwhile; one setting turns it off |
 
 ## Archived Plans
 
