@@ -374,7 +374,7 @@ public sealed class ArbiterEvaluator
             {
                 if (field.Value.StartsWith("candidate.", StringComparison.Ordinal))
                 {
-                    string scoped = $"candidate[{index}]{field.Value["candidate".Length..]}";
+                    string scoped = $"candidate[{rule.Id}][{index}]{field.Value["candidate".Length..]}";
                     candidateFacts[scoped] = new ArbiterFact(item, ArbiterFactLabel.Derived);
                     state[field.Key] = scoped;
                 }

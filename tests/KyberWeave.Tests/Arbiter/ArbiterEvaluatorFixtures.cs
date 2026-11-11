@@ -35,6 +35,9 @@ internal static class ArbiterEvaluatorFixtures
         public IReadOnlyDictionary<string, string> AnswerByRuleId { get; init; } =
             new Dictionary<string, string>(StringComparer.Ordinal);
 
+        /// <summary>Answers a rule the id map does not name, for rules whose ids a test cannot know in advance.</summary>
+        public Func<ArbiterRule, string?>? AnswerRule { get; init; }
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
@@ -46,7 +49,8 @@ internal static class ArbiterEvaluatorFixtures
             Dictionary<string, string> answers = new(StringComparer.Ordinal);
             foreach (ArbiterRule rule in rules)
             {
-                if (AnswerByRuleId.TryGetValue(rule.Id, out string? answer))
+                string? answer = AnswerByRuleId.TryGetValue(rule.Id, out string? named) ? named : AnswerRule?.Invoke(rule);
+                if (answer is not null)
                 {
                     answers[rule.Id] = answer;
                 }
