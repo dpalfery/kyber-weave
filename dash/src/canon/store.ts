@@ -1559,6 +1559,28 @@ export class CanonStore {
   }
 
   /**
+   * One session's records as a stream, in timestamp order: the rows of
+   * `recordsForSession`, produced one at a time so a caller that finishes with
+   * each record before taking the next holds one at a time.
+   */
+  *iterateRecordsForSession(key: string): Generator<CanonicalRecord> {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+      )
+      .iterate(key) as IterableIterator<RecordRow>
+    for (const row of rows) yield toRecord(row)
+  }
+
+  /** `recordsForShare` as a stream: one session's records of one canonical harness. */
+  *iterateRecordsForShare(key: string, harness: string): Generator<CanonicalRecord> {
+    const canonical = normalizeHarnessName(harness)
+    for (const record of this.iterateRecordsForSession(key)) {
+      if (canonicalHarnessId(record.harness) === canonical) yield record
+    }
+  }
+
+  /**
    * One session's records, in timestamp order, each with the attributes the
    * derived views read.
    *
