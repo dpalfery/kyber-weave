@@ -86,6 +86,31 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Answers each step-1 question by the finding id in the facts it was asked with, so two findings in one
+    /// return can get different answers. A finding not named in the map is answered <c>substantive</c>.
+    /// </summary>
+    private sealed class PerFindingProvider(IReadOnlyDictionary<string, string> answerByFindingId) : IArbiterProvider
+    {
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default)
+        {
+            string id = facts.TryGet("finding.id", out ArbiterFact? idFact) && idFact.Value is string text ? text : string.Empty;
+            string answer = answerByFindingId.TryGetValue(id, out string? named) ? named : Substantive;
+            double confidence = answer == Nitpick ? 0.9 : 0.95;
+            Dictionary<string, string> answers = rules
+                .Where(rule => rule.Ask is not null)
+                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
+            Dictionary<string, ArbiterStep1Score> scores = rules
+                .Where(rule => rule.Ask is not null)
+                .ToDictionary(rule => rule.Id, _ => new ArbiterStep1Score(null, confidence, 0.85), StringComparer.Ordinal);
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true, scores));
+        }
+    }
+
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
@@ -373,6 +398,21 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
     [Fact]
     public async Task AnnotateOnTheSameFindingWinsAndTheDropIsLoggedAsSuppressed()
     {
+        // The shipped QUOTE-001 is decide-only, so a provider answer cannot reach it; this test asks it instead,
+        // with the same answers and effects the shipped rule declares.
+        ArbiterRule annotate = new(
+            AnnotateRule,
+            "lens.returned",
+            "Is each finding's excerpt present at its file:line?",
+            ["present", "elsewhere", "absent"],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["present"] = RuleEffects.Allow,
+                ["elsewhere"] = RuleEffects.Annotate,
+                ["absent"] = RuleEffects.Annotate,
+            },
+            Ask: new RuleAsk("choice", new Dictionary<string, string>(StringComparer.Ordinal)),
+            Shadow: false);
         ScriptedProvider provider = new()
         {
             AnswerByRuleId = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -380,16 +420,22 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
                 [NitpickRule] = Nitpick,
                 [AnnotateRule] = "elsewhere",
             },
+            ScoreByRuleId = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
+            {
+                [NitpickRule] = new ArbiterStep1Score(null, 0.9, 0.85),
+                [AnnotateRule] = new ArbiterStep1Score(null, 0.95, 0.85),
+            },
         };
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             LensReturn(MinorFinding),
-            ConfigWith([Enforced(NitpickRule), Enforced(AnnotateRule)]));
+            ConfigWith([Enforced(NitpickRule), annotate]));
 
         Assert.Equal(RuleEffects.Annotate, Assert.Single(result.Dispatches).Outcome);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
-        ArbiterDecisionRule nitpick = Assert.Single(record.Rules, rule => rule.Id == NitpickRule);
+        // The rule also has a step-0 entry (its decide clause was undecidable); the step-1 entry is the drop.
+        ArbiterDecisionRule nitpick = Assert.Single(record.Rules, rule => rule.Id == NitpickRule && rule.Step == 1);
         Assert.Equal(RuleEffects.Drop, nitpick.Effect);
         Assert.True(nitpick.Suppressed);
     }
@@ -416,6 +462,33 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         string item = Assert.Single(stored);
         Assert.Contains(FindingId, item, StringComparison.Ordinal);
         Assert.Contains("dropped", item, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The filter reads every finding a lens returns, not only the first: in a return of a substantive finding
+    /// followed by a nitpick, only the nitpick is dropped, and the store shows the drop on the nitpick alone.
+    /// Failure this guards: evaluating just the first finding leaves the second stored as kept.
+    /// </summary>
+    [Fact]
+    public async Task InAMultiFindingReturnOnlyTheNitpickIsDropped()
+    {
+        const string twoFindings =
+            "id: nit-1\nseverity: Minor\nfile: src/Widget.cs\nline: 12\nclaim: null check missing\n" +
+            "id: nit-2\nseverity: Minor\nfile: src/Widget.cs\nline: 40\nclaim: naming";
+        PerFindingProvider provider = new(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["nit-2"] = Nitpick,
+        });
+        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+
+        await evaluator.EvaluateAsync(LensReturn(twoFindings), ConfigWith([Enforced(NitpickRule)]));
+
+        IReadOnlyList<string> stored = new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
+        Assert.Equal(2, stored.Count);
+        Assert.Contains("id: nit-1", stored[0], StringComparison.Ordinal);
+        Assert.EndsWith("status: kept", stored[0], StringComparison.Ordinal);
+        Assert.Contains("id: nit-2", stored[1], StringComparison.Ordinal);
+        Assert.EndsWith("status: dropped", stored[1], StringComparison.Ordinal);
     }
 
     /// <summary>With no <c>REVIEW_RUN</c> header the review store is unread: the refuter fact is absent, so the rule cannot answer.</summary>

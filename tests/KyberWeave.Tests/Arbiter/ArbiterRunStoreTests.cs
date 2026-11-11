@@ -47,7 +47,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     private static string Sha256Hex(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static ArbiterRunStore Store(DateTimeOffset at, ArbiterStoreOptions? options = null) =>
+    private ArbiterRunStore Store(DateTimeOffset at, ArbiterStoreOptions? options = null) =>
         new(ArbiterDirectory, options, () => at);
 
     private static ArbiterLedgerEvent PreEvent(DateTimeOffset at) =>

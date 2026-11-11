@@ -12,28 +12,38 @@ namespace KyberWeave.Tests.Arbiter;
 /// Contract for task 3.5: duplicate findings. <c>REVIEW_RUN</c> names the review a dispatch belongs to,
 /// <c>review.prior-findings</c> lists that review's earlier findings on the same file, and
 /// <c>KW-ARB-DUP-001</c> on <c>refute.spawn</c> denies a refuter whose finding repeats an earlier one.
-/// RED: <c>REVIEW_RUN</c> is not a closed header yet, the rule is not shipped, the prior-findings fact is
-/// not built, and <c>ArbiterFindingNotices.DuplicateLine</c> and <c>ArbiterDecisionRule.Candidate</c> do not exist.
+/// RED: the rule is not shipped, the prior-findings fact is not built, and the for-each expansion of the
+/// step-1 question is not wired to it yet.
 /// </summary>
 /// <remarks>
 /// <para>
+/// Batch contract (approved design): <c>KW-ARB-DUP-001</c> has <c>for-each: review.prior-findings</c>, so every
+/// candidate becomes one step-1 question and all of them travel in ONE provider request (at most three).
+/// The decision is: the FIRST candidate, in store order (oldest first), answered <c>same-defect</c> at or above
+/// the 0.9 floor wins; its id becomes <c>duplicate-of</c>. Candidates answered otherwise do not decide.
+/// </para>
+/// <para>
 /// Assumed names (GREEN must match): <c>ArbiterFindingNotices.DuplicateLine(string findingId, string earlierId,
 /// string decisionId)</c> returns <c>ARBITER_DUPLICATE: &lt;finding id&gt; of &lt;earlier id&gt; decision=&lt;id&gt;</c>.
-/// Each step-1 question of the for-each expansion carries its prior finding as the fact
-/// <c>review.prior-finding</c> (the item's stored text), so the provider can answer per item.
-/// The prior findings are read from <c>ArbiterRunStore</c> (task 3.1), one stored item per finding.
+/// Each expanded question's rule id is <c>KW-ARB-DUP-001@&lt;stored text of the candidate&gt;</c>, so the provider
+/// can read which candidate a question is about from the batch it is handed. The prior findings are read from
+/// <c>ArbiterRunStore</c> (task 3.1), one stored item per finding.
+/// </para>
 /// </remarks>
 public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 {
     private const string DuplicateRule = "KW-ARB-DUP-001";
     private const string SameDefect = "same-defect";
     private const string DifferentDefect = "different-defect";
-    private const string PriorFactName = "review.prior-finding";
     private const string ThisRun = "RUN-THIS";
     private const string OtherRun = "RUN-OTHER";
     private const string Refuted = "nit-2";
+
+    /// <summary>The refute header names the lens and the finding slug: <c>&lt;lens&gt;/&lt;slug&gt;</c>.</summary>
+    private const string RefuteValue = "correctness/" + Refuted;
+
     private const string RefutePrompt =
-        "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + Refuted + "\n\n" +
+        "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + RefuteValue + "\n\n" +
         "id: " + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming";
 
     private readonly string _root = Path.Combine(
@@ -52,15 +62,21 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>
-    /// Answers each per-item question by the prior finding's text, and counts the questions asked. A
-    /// question for an item the function does not name is answered <c>different-defect</c>.
+    /// Answers each candidate's question by that candidate's stored text, and records every provider request
+    /// as the list of candidates it carried. A candidate the function does not name must be answered by it.
     /// </summary>
-    private sealed class ScriptedDuplicateProvider(Func<string, string> answerFor) : IArbiterProvider
+    private sealed class BatchDuplicateProvider(Func<string, string> answerFor) : IArbiterProvider
     {
-        private readonly List<string> _asked = [];
+        private readonly List<IReadOnlyList<string>> _batches = [];
 
-        /// <summary>The prior-finding texts the provider was asked about, in ask order.</summary>
-        public IReadOnlyList<string> Asked => _asked;
+        /// <summary>One entry per provider request, holding the candidate texts that request carried, in order.</summary>
+        public IReadOnlyList<IReadOnlyList<string>> Batches => _batches;
+
+        /// <summary>The number of provider requests made.</summary>
+        public int CallCount => _batches.Count;
+
+        /// <summary>Every candidate text the provider was asked about, across all requests, in ask order.</summary>
+        public IReadOnlyList<string> Asked => _batches.SelectMany(batch => batch).ToList();
 
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
@@ -68,14 +84,18 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
-            string prior = facts.Facts.TryGetValue(PriorFactName, out ArbiterFact? fact) && fact.Value is string text
-                ? text
-                : string.Empty;
-            _asked.Add(prior);
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => answerFor(prior), StringComparer.Ordinal);
+            List<ArbiterRule> questions = rules.Where(rule => rule.Ask is not null).ToList();
+            _batches.Add(questions.Select(CandidateOf).ToList());
+            Dictionary<string, string> answers = questions
+                .ToDictionary(rule => rule.Id, rule => answerFor(CandidateOf(rule)), StringComparer.Ordinal);
             return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true));
+        }
+
+        /// <summary>The candidate a per-item question is about: the stored text after the expansion's '@'.</summary>
+        private static string CandidateOf(ArbiterRule rule)
+        {
+            int at = rule.Id.IndexOf('@', StringComparison.Ordinal);
+            return at < 0 ? string.Empty : rule.Id[(at + 1)..];
         }
     }
 
@@ -114,7 +134,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Harness = "claude",
             Phase = "pre",
             Target = "review-refuter",
-            Prompt = runHeader + "REFUTE: " + Refuted + "\n\n" +
+            Prompt = runHeader + "REFUTE: " + RefuteValue + "\n\n" +
                      "id: " + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming",
             HarnessCaller = "code-reviewer",
             IsDispatch = true,
@@ -186,7 +206,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     [Fact]
     public void WithoutAReviewRunHeaderTheStoreIsUnreadAndTheRuleIsUndecidable()
     {
-        const string prompt = "KYBER-ARBITER: true\nREFUTE: nit-2\n\nid: nit-2\nfile: src/Widget.cs\nline: 12\nclaim: naming";
+        const string prompt = "KYBER-ARBITER: true\nREFUTE: " + RefuteValue + "\n\nid: " + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming";
         KyberWeaveConfig config = ConfigWith([Shipped(DuplicateRule)]);
 
         ArbiterFactSet facts = TriggerFactBuilder.Build(
@@ -199,17 +219,18 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     // ---- review.prior-findings (acceptance: same review, same file, +-20 lines, at most 3, oldest first) ----
 
     /// <summary>
-    /// A finding on the same file within 20 lines is a candidate. The provider is asked about it, and the
-    /// duplicate it names is the one it says repeats the refuted finding.
+    /// A finding on the same file within 20 lines is a candidate. It goes into the one batch request, and the
+    /// duplicate it names is the one the provider says repeats the refuted finding.
     /// </summary>
     [Fact]
     public async Task AnEarlierFindingOnTheSameFileWithinTwentyLinesIsCompared()
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 25));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
 
         ArbiterEvaluationResult result = await RefuteAsync(provider);
 
+        Assert.Equal(1, provider.CallCount);
         Assert.Contains(Prior("prior-1", "src/Widget.cs", 25), provider.Asked);
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
     }
@@ -219,11 +240,11 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task AnEarlierFindingTwentyOneLinesAwayIsNotCompared()
     {
         await SeedAsync(ThisRun, Prior("prior-far", "src/Widget.cs", 33));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
 
         ArbiterEvaluationResult result = await RefuteAsync(provider);
 
-        Assert.Empty(provider.Asked);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
@@ -232,15 +253,18 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task AnEarlierFindingOnAnotherFileIsNotCompared()
     {
         await SeedAsync(ThisRun, Prior("prior-other", "src/Other.cs", 12));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
 
         ArbiterEvaluationResult result = await RefuteAsync(provider);
 
-        Assert.Empty(provider.Asked);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
-    /// <summary>At most three earlier findings are compared, so a fourth same-file match is never asked.</summary>
+    /// <summary>
+    /// At most three earlier findings go into the batch, so a fourth same-file match is never asked and the
+    /// batch is one request of exactly three questions.
+    /// </summary>
     [Fact]
     public async Task AtMostThreeEarlierFindingsAreCompared()
     {
@@ -250,16 +274,19 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Prior("prior-2", "src/Widget.cs", 11),
             Prior("prior-3", "src/Widget.cs", 13),
             Prior("prior-4", "src/Widget.cs", 14));
-        ScriptedDuplicateProvider provider = new(text => text.Contains("prior-4", StringComparison.Ordinal) ? SameDefect : DifferentDefect);
+        BatchDuplicateProvider provider = new(text => text.Contains("prior-4", StringComparison.Ordinal) ? SameDefect : DifferentDefect);
 
         ArbiterEvaluationResult result = await RefuteAsync(provider);
 
-        Assert.Equal(3, provider.Asked.Count);
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal(3, Assert.Single(provider.Batches).Count);
         Assert.DoesNotContain(provider.Asked, text => text.Contains("prior-4", StringComparison.Ordinal));
         Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
-    /// <summary>Findings are compared oldest first: when two both match, the first one stored is the one named.</summary>
+    /// <summary>
+    /// Candidates go into the batch oldest first. When two both match, the first one stored is the one named.
+    /// </summary>
     [Fact]
     public async Task TheOldestMatchingFindingIsTheOneNamedAsDuplicateOf()
     {
@@ -267,18 +294,25 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             ThisRun,
             Prior("prior-old", "src/Widget.cs", 10),
             Prior("prior-new", "src/Widget.cs", 11));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal(
+            [Prior("prior-old", "src/Widget.cs", 10), Prior("prior-new", "src/Widget.cs", 11)],
+            provider.Asked);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
         Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-old", record.Id), DuplicateLineOf(record));
     }
 
-    /// <summary>The first item answered <c>same-defect</c> decides; an earlier item that answered otherwise does not.</summary>
+    /// <summary>
+    /// The first candidate in the batch answered <c>same-defect</c> decides; an earlier candidate that answered
+    /// otherwise does not. Both candidates travel in the same single request.
+    /// </summary>
     [Fact]
     public async Task TheFirstSameDefectAnswerDecidesTheDuplicate()
     {
@@ -286,12 +320,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             ThisRun,
             Prior("prior-a", "src/Widget.cs", 10),
             Prior("prior-b", "src/Widget.cs", 11));
-        ScriptedDuplicateProvider provider = new(text => text.Contains("prior-b", StringComparison.Ordinal) ? SameDefect : DifferentDefect);
+        BatchDuplicateProvider provider = new(text => text.Contains("prior-b", StringComparison.Ordinal) ? SameDefect : DifferentDefect);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
+        Assert.Equal(1, provider.CallCount);
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
         Assert.Equal(ArbiterFindingNotices.DuplicateLine(Refuted, "prior-b", record.Id), DuplicateLineOf(record));
     }
@@ -301,11 +336,11 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task AFindingFromAnotherReviewRunIsNeverCompared()
     {
         await SeedAsync(OtherRun, Prior("prior-elsewhere", "src/Widget.cs", 12));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
 
         ArbiterEvaluationResult result = await RefuteAsync(provider);
 
-        Assert.Empty(provider.Asked);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, Assert.Single(result.Dispatches).Outcome);
     }
 
@@ -339,7 +374,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task ASameDefectAnswerBelowTheFloorDoesNotDenyTheRefuter()
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScoredProvider(provider, 0.5));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -356,7 +391,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task TheShadowDuplicateRuleDoesNotDenyTheRefuter()
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -372,7 +407,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     public async Task AnEnforcedDuplicateDeniesTheRefuterWithItsReason()
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
-        ScriptedDuplicateProvider provider = new(_ => SameDefect);
+        BatchDuplicateProvider provider = new(_ => SameDefect);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScoredProvider(provider, 0.95));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
@@ -387,13 +422,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     [Fact]
     public async Task EachRefuterReturnRecordsItsOutcomeAgainstItsFindingIdInTheStore()
     {
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScriptedDuplicateProvider(_ => DifferentDefect));
+        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new BatchDuplicateProvider(_ => DifferentDefect));
         ArbiterEvent returned = new()
         {
             Harness = "claude",
             Phase = "return",
             Target = "review-refuter",
-            Prompt = "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + Refuted + "\n\nRefute.",
+            Prompt = "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + RefuteValue + "\n\nRefute.",
             HarnessCaller = "code-reviewer",
             IsDispatch = true,
             Session = "session-1",
@@ -414,8 +449,8 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         return rule.Evidence ?? string.Empty;
     }
 
-    /// <summary>Wraps a scripted provider and adds a fixed confidence score to every answer it gives.</summary>
-    private sealed class ScoredProvider(ScriptedDuplicateProvider inner, double confidence) : IArbiterProvider
+    /// <summary>Wraps a batch provider and adds a fixed confidence score to every answer it gives.</summary>
+    private sealed class ScoredProvider(BatchDuplicateProvider inner, double confidence) : IArbiterProvider
     {
         public async Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
