@@ -55,6 +55,12 @@ internal sealed class HookGitFacts(
     /// </summary>
     private const string ReviewBase = "origin/HEAD";
 
+    private const string ChangedHunksFact = "review.changed-hunks";
+    private const string RenameOnlyFact = "review.rename-only-paths";
+    private const string CommentOnlyFact = "review.comment-only-paths";
+    private const string NoCodeChangeFact = "review.no-code-change-paths";
+    private const string FindingChangedLinesFact = "finding.changed-lines";
+
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
     private const int MaxStoredSnapshots = 256;
@@ -75,10 +81,11 @@ internal sealed class HookGitFacts(
             && IsDispatchTriggerWithReturn(classification.Trigger);
         bool needsSinceDispatch = facts.Contains("git.changed-paths.since-dispatch");
         bool needsReviewChangedPaths = facts.Contains("review.changed-paths");
+        bool needsChangeSet = NeedsChangeSet(facts);
         string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
         facts = WithSurroundings(facts, cwd);
 
-        if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths)
+        if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
         {
             return facts;
         }
@@ -92,7 +99,7 @@ internal sealed class HookGitFacts(
             }
         }
 
-        if (!needsSinceDispatch && !needsReviewChangedPaths)
+        if (!needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
         {
             return facts;
         }
@@ -126,7 +133,96 @@ internal sealed class HookGitFacts(
             }
         }
 
+        if (needsChangeSet)
+        {
+            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, ResolveBase(cwd)));
+        }
+
         return facts;
+    }
+
+    private static bool NeedsChangeSet(ArbiterFactSet facts) =>
+        facts.Contains(ChangedHunksFact)
+        || facts.Contains(RenameOnlyFact)
+        || facts.Contains(CommentOnlyFact)
+        || facts.Contains(NoCodeChangeFact)
+        || facts.Contains(FindingChangedLinesFact);
+
+    /// <summary>
+    /// Fills the change facts from one measured change set. A null change set leaves every fact absent,
+    /// so a rule reads an unmeasured change as undecidable and never as an empty one.
+    /// </summary>
+    /// <remarks>
+    /// The no-code-change set is the union of comment-only, rename-only and changed markdown: a lens
+    /// may skip those paths, so a code change must never land in it. A file is comment-only only when
+    /// every one of its hunks is, because each hunk is judged alone.
+    /// </remarks>
+    private static ArbiterFactSet WithChangeFacts(ArbiterFactSet facts, ChangeSet? change)
+    {
+        if (change is null)
+        {
+            return facts;
+        }
+
+        List<string> changedPaths = change.Hunks.Select(measured => measured.Hunk.Path).Distinct(StringComparer.Ordinal).ToList();
+        List<string> commentOnly = changedPaths
+            .Where(path => change.Hunks
+                .Where(measured => string.Equals(measured.Hunk.Path, path, StringComparison.Ordinal))
+                .All(measured => CommentSyntax.IsCommentOnly(path, measured.ChangedLines)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        List<string> renameOnly = change.RenameOnlyPaths.Order(StringComparer.Ordinal).ToList();
+        List<string> noCodeChange = commentOnly
+            .Concat(renameOnly)
+            .Concat(changedPaths.Where(path => string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        if (facts.Contains(ChangedHunksFact))
+        {
+            facts = facts.With(ChangedHunksFact, change.Hunks.Select(measured => measured.Hunk).ToList(), ArbiterFactLabel.Derived);
+        }
+
+        if (facts.Contains(RenameOnlyFact))
+        {
+            facts = facts.With(RenameOnlyFact, renameOnly, ArbiterFactLabel.Derived);
+        }
+
+        if (facts.Contains(CommentOnlyFact))
+        {
+            facts = facts.With(CommentOnlyFact, commentOnly, ArbiterFactLabel.Derived);
+        }
+
+        if (facts.Contains(NoCodeChangeFact))
+        {
+            facts = facts.With(NoCodeChangeFact, noCodeChange, ArbiterFactLabel.Derived);
+        }
+
+        return facts.Contains(FindingChangedLinesFact)
+            ? WithFindingChangedLines(facts, change)
+            : facts;
+    }
+
+    /// <summary>
+    /// The new-side lines of the finding's file that fall inside a changed hunk: the lines a finding can
+    /// honestly claim the change touched. Absent without a finding file, because there is nothing to
+    /// intersect with the hunks.
+    /// </summary>
+    private static ArbiterFactSet WithFindingChangedLines(ArbiterFactSet facts, ChangeSet change)
+    {
+        if (!facts.TryGet("finding.file", out ArbiterFact? file) || file.Value is not string path)
+        {
+            return facts;
+        }
+
+        List<int> lines = change.Hunks
+            .Where(measured => string.Equals(measured.Hunk.Path, path, StringComparison.Ordinal) && measured.Hunk.Count > 0)
+            .SelectMany(measured => Enumerable.Range(measured.Hunk.Start, measured.Hunk.Count))
+            .Distinct()
+            .Order()
+            .ToList();
+        return facts.With(FindingChangedLinesFact, lines, ArbiterFactLabel.Derived);
     }
 
     private static ArbiterFactSet WithSurroundings(ArbiterFactSet facts, string cwd)

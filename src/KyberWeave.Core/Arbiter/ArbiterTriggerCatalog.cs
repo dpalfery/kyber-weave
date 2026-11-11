@@ -137,6 +137,7 @@ public static class ArbiterTriggerCatalog
                 "review.comment-only-paths",
                 "review.rename-only-paths",
                 "review.no-code-change-paths",
+                "review.changed-hunks",
             },
             ["lens.returned"] = new HashSet<string>(StringComparer.Ordinal)
             {
@@ -146,6 +147,9 @@ public static class ArbiterTriggerCatalog
                 "finding.excerpt",
                 "file.text-at-line",
                 "review.changed-hunks",
+                "review.comment-only-paths",
+                "review.rename-only-paths",
+                "review.no-code-change-paths",
                 "finding.changed-lines",
                 "finding.severity",
                 "finding.gate-corroborated",
@@ -161,6 +165,10 @@ public static class ArbiterTriggerCatalog
                 "gates.report",
                 "finding.dropped",
                 "review.prior-findings",
+                "review.changed-hunks",
+                "review.comment-only-paths",
+                "review.rename-only-paths",
+                "review.no-code-change-paths",
             },
             ["gate.select"] = new HashSet<string>(StringComparer.Ordinal)
             {

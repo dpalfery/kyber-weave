@@ -10,6 +10,30 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <param name="LineCount">Number of new-side lines in the hunk.</param>
 public sealed record HunkRange(string Path, int StartLine, int LineCount);
 
+/// <summary>One hunk of a change, with the old and new ranges git reports for it.</summary>
+/// <remarks>
+/// Ranges are the zero-context ones git prints. A zero count marks the side that has no lines:
+/// a pure insertion has <c>OldCount</c> 0, a pure deletion has <c>Count</c> 0. A whole new file
+/// is one hunk with <c>OldStart</c> and <c>OldCount</c> 0.
+/// </remarks>
+/// <param name="Path">Repository-relative path of the file, under its new name.</param>
+/// <param name="OldStart">One-based first old-side line.</param>
+/// <param name="OldCount">Number of old-side lines in the hunk.</param>
+/// <param name="Start">One-based first new-side line.</param>
+/// <param name="Count">Number of new-side lines in the hunk.</param>
+public sealed record ChangedHunk(string Path, int OldStart, int OldCount, int Start, int Count);
+
+/// <summary>A changed hunk together with the content of the lines it adds and removes.</summary>
+/// <param name="Hunk">The hunk's ranges.</param>
+/// <param name="ChangedLines">The line contents the hunk really changes, without the diff's <c>+</c> or <c>-</c> prefix:
+/// added and removed lines, net of any removed line git printed back unchanged.</param>
+public sealed record MeasuredHunk(ChangedHunk Hunk, IReadOnlyList<string> ChangedLines);
+
+/// <summary>One measurement of a change against a base: its hunks and the paths renamed without a content change.</summary>
+/// <param name="Hunks">Every hunk, ordered by path; the order within one path is git's.</param>
+/// <param name="RenameOnlyPaths">New paths of renames at full similarity. They have no hunk.</param>
+public sealed record ChangeSet(IReadOnlyList<MeasuredHunk> Hunks, IReadOnlySet<string> RenameOnlyPaths);
+
 /// <summary>The dirty-state snapshot the ledger stores at pre-dispatch.</summary>
 /// <param name="Head">The commit the snapshot was taken at.</param>
 /// <param name="BlobIds">Blob id per dirty or untracked path.</param>
@@ -180,6 +204,118 @@ public static class GitFacts
         string? diff = RunGit(
             workingDirectory, gitExecutable, string.Empty, "diff", "--unified=0", @base);
         return diff is null ? [] : ParseHunkRanges(diff);
+    }
+
+    /// <summary>Reads the changed hunks of the change against a base, committed work and the working tree together.</summary>
+    /// <remarks>
+    /// Untracked files are part of the change too: each is one whole-file hunk. The list is never
+    /// cut short, because a lens that sees part of a change judges a partial change as the whole.
+    /// </remarks>
+    /// <returns>Every hunk ordered by path; <c>null</c> when the base is unreadable or nothing changed.</returns>
+    public static IReadOnlyList<ChangedHunk>? GetChangedHunks(
+        string workingDirectory,
+        string @base,
+        string gitExecutable = "git")
+    {
+        ChangeSet? change = GetChangeSet(workingDirectory, @base, gitExecutable);
+        return change?.Hunks.Select(measured => measured.Hunk).ToList();
+    }
+
+    /// <summary>
+    /// Measures the change against a base once: its hunks with their line contents, and the paths
+    /// renamed at full similarity. Everything the review facts need comes from this one diff.
+    /// </summary>
+    /// <remarks>
+    /// The base is compared with the working tree, not with <c>HEAD</c>, so a change a lens has not
+    /// yet committed is measured. Rename detection is on, so a rename shows as one entry; a rename
+    /// that also edits content has hunks under its new path.
+    /// </remarks>
+    /// <returns>
+    /// The change set, or <c>null</c> when the base cannot be read, an untracked file cannot be read,
+    /// or nothing changed. A clean checkout is absence, not an empty measurement: a rule that reads
+    /// an empty change as measured would answer for a change it never saw.
+    /// </returns>
+    public static ChangeSet? GetChangeSet(
+        string workingDirectory,
+        string @base,
+        string gitExecutable = "git")
+    {
+        if (string.IsNullOrWhiteSpace(@base))
+        {
+            return null;
+        }
+
+        string? diff = RunGit(
+            workingDirectory,
+            gitExecutable,
+            string.Empty,
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "-M",
+            @base);
+        if (diff is null)
+        {
+            return null;
+        }
+
+        (List<MeasuredHunk> hunks, HashSet<string> renameOnly) = ParseChangeSet(diff);
+
+        // Untracked files sit outside every diff, so each is read whole. ls-files prints paths
+        // relative to the directory it runs in; --full-name keeps them repository-relative.
+        string? untracked = RunGit(
+            workingDirectory,
+            gitExecutable,
+            string.Empty,
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z");
+        if (untracked is null)
+        {
+            return null;
+        }
+
+        string? root = GetRoot(workingDirectory, gitExecutable);
+        if (root is null)
+        {
+            return null;
+        }
+
+        foreach (string path in SplitNul(untracked))
+        {
+            if (!IsRepoRelative(path))
+            {
+                return null;
+            }
+
+            string[] lines;
+            try
+            {
+                lines = File.ReadAllLines(Path.Combine(root, path));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return null;
+            }
+
+            hunks.Add(new MeasuredHunk(new ChangedHunk(path, 0, 0, 1, lines.Length), lines));
+        }
+
+        if (hunks.Count == 0 && renameOnly.Count == 0)
+        {
+            return null;
+        }
+
+        return new ChangeSet(
+            hunks.OrderBy(measured => measured.Hunk.Path, StringComparer.Ordinal).ToList(),
+            renameOnly);
     }
 
     /// <summary>
@@ -409,6 +545,172 @@ public static class GitFacts
     {
         return path.Equals("artifacts", StringComparison.Ordinal)
             || path.StartsWith("artifacts/", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Reads the hunks and the full-similarity renames out of one zero-context diff.
+    /// </summary>
+    /// <remarks>
+    /// A hunk's body is counted by its header, not recognised by its first characters: a removed
+    /// <c>-- x</c> prints as <c>--- x</c>, and an added <c>++ y</c> as <c>+++ y</c>, and either would
+    /// otherwise be read as a file header.
+    /// </remarks>
+    private static (List<MeasuredHunk> Hunks, HashSet<string> RenameOnly) ParseChangeSet(string diff)
+    {
+        List<PendingHunk> pending = [];
+        HashSet<string> renameOnly = new(StringComparer.Ordinal);
+        string? oldPath = null;
+        string? hunkPath = null;
+        bool fullSimilarity = false;
+        PendingHunk? current = null;
+        int bodyLinesLeft = 0;
+        using StringReader reader = new(diff);
+        while (reader.ReadLine() is { } line)
+        {
+            if (bodyLinesLeft > 0)
+            {
+                if (!line.StartsWith('\\'))
+                {
+                    bodyLinesLeft--;
+                    // A byte-order mark sits on a file's first line only, and git prints it on the removed
+                    // copy but not the re-added one. Stripping it lets the two cancel in NetChangedLines.
+                    string content = (line.Length > 0 ? line.Substring(1) : string.Empty).TrimStart('﻿');
+                    if (line.StartsWith('+'))
+                    {
+                        current?.Added.Add(content);
+                    }
+                    else
+                    {
+                        current?.Removed.Add(content);
+                    }
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                oldPath = null;
+                hunkPath = null;
+                fullSimilarity = false;
+            }
+            else if (line.StartsWith("similarity index 100%", StringComparison.Ordinal))
+            {
+                fullSimilarity = true;
+            }
+            else if (line.StartsWith("rename to ", StringComparison.Ordinal))
+            {
+                // Rename paths carry no a/ or b/ prefix, so they are unquoted but never stripped.
+                if (fullSimilarity)
+                {
+                    renameOnly.Add(Unquote(line.Substring("rename to ".Length)));
+                }
+            }
+            else if (line.StartsWith("--- ", StringComparison.Ordinal))
+            {
+                string side = NormalizeDiffPath(line.Substring(4).Trim());
+                oldPath = side.StartsWith("a/", StringComparison.Ordinal) ? side.Substring(2) : side;
+            }
+            else if (line.StartsWith("+++ ", StringComparison.Ordinal))
+            {
+                string side = NormalizeDiffPath(line.Substring(4).Trim());
+                // A deleted file's hunks are named by the path it had.
+                hunkPath = side == "/dev/null" ? oldPath : side;
+            }
+            else if (hunkPath is not null
+                && line.StartsWith("@@ ", StringComparison.Ordinal)
+                && TryParseHunkHeader(line, out int oldStart, out int oldCount, out int start, out int count))
+            {
+                current = new PendingHunk(new ChangedHunk(hunkPath, oldStart, oldCount, start, count));
+                pending.Add(current);
+                bodyLinesLeft = oldCount + count;
+            }
+        }
+
+        List<MeasuredHunk> hunks = pending
+            .Select(hunk => new MeasuredHunk(hunk.Hunk, NetChangedLines(hunk.Removed, hunk.Added)))
+            .ToList();
+        return (hunks, renameOnly);
+    }
+
+    /// <summary>
+    /// The lines a hunk actually changes: an added line cancels one identical removed line, so a line
+    /// git shows as removed and re-added unchanged is not part of the change.
+    /// </summary>
+    /// <remarks>
+    /// Git's diff heuristics often print a one-line insertion as a replacement of its neighbour. Read
+    /// literally, that replacement would make a comment-only edit look like a code edit.
+    /// </remarks>
+    private static List<string> NetChangedLines(List<string> removed, List<string> added)
+    {
+        List<string> unmatchedRemoved = [.. removed];
+        List<string> net = [];
+        foreach (string line in added)
+        {
+            if (!unmatchedRemoved.Remove(line))
+            {
+                net.Add(line);
+            }
+        }
+
+        net.AddRange(unmatchedRemoved);
+        return net;
+    }
+
+    /// <summary>A hunk whose body is still being read: its header and the lines it removes and adds.</summary>
+    private sealed class PendingHunk(ChangedHunk hunk)
+    {
+        public ChangedHunk Hunk { get; } = hunk;
+
+        public List<string> Removed { get; } = [];
+
+        public List<string> Added { get; } = [];
+    }
+
+    private static string Unquote(string path) =>
+        path.Length >= 2 && path[0] == '"' && path[^1] == '"'
+            ? path.Substring(1, path.Length - 2)
+            : path;
+
+    /// <summary>Reads both sides of a unified hunk header, <c>@@ -a[,b] +c[,d] @@</c>.</summary>
+    /// <remarks>A bare <c>-a</c> or <c>+c</c> side covers exactly one line.</remarks>
+    private static bool TryParseHunkHeader(
+        string header,
+        out int oldStart,
+        out int oldCount,
+        out int newStart,
+        out int newCount)
+    {
+        oldStart = 0;
+        oldCount = 0;
+        newStart = 0;
+        newCount = 0;
+        int plus = header.IndexOf(" +", 3, StringComparison.Ordinal);
+        int tail = plus < 0 ? -1 : header.IndexOf(" @@", plus, StringComparison.Ordinal);
+        if (!header.StartsWith("@@ -", StringComparison.Ordinal) || plus < 0 || tail < 0)
+        {
+            return false;
+        }
+
+        return TryParseRange(header.AsSpan(4, plus - 4), out oldStart, out oldCount)
+            && TryParseRange(header.AsSpan(plus + 2, tail - plus - 2), out newStart, out newCount);
+    }
+
+    private static bool TryParseRange(ReadOnlySpan<char> range, out int start, out int count)
+    {
+        start = 0;
+        count = 0;
+        int comma = range.IndexOf(',');
+        if (comma < 0)
+        {
+            count = 1;
+            return int.TryParse(range, out start) && start >= 0;
+        }
+
+        return int.TryParse(range[..comma], out start)
+            && int.TryParse(range[(comma + 1)..], out count)
+            && start >= 0
+            && count >= 0;
     }
 
     private static List<HunkRange> ParseHunkRanges(string diff)

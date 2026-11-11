@@ -47,6 +47,10 @@ public static class TriggerFactBuilder
         if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal))
             return ArbiterFactLabel.Derived;
 
+        // Measured by the hook from the changed hunks, not supplied by the lens that returned the finding.
+        if (string.Equals(fact, "finding.changed-lines", StringComparison.Ordinal))
+            return ArbiterFactLabel.Derived;
+
         if (fact.StartsWith("lens.name", StringComparison.Ordinal)
             || fact.StartsWith("finding.", StringComparison.Ordinal)
             || fact.StartsWith("gate.", StringComparison.Ordinal))
