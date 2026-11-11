@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -903,6 +903,34 @@ recorded as skipped. Quote fabrication and pre-existing code arrive as annotatio
 the existing quote check. The Arbiter never drops a finding on a model answer alone, and
 code-reviewer runs `kyber-weave arbiter audit --plan <PLAN_FILE>` at the end of a run and
 cites the result. See the [Kyber Arbiter architecture](../kyber-arbiter/architecture.md).
+
+### Hunk-level lens skipping (KW-ARB-LENS-002)
+
+Where the Arbiter hook is installed, a lens spawn is judged against the change's hunks before the
+lens starts. `KW-ARB-LENS-002` skips a lens only when the change has no code for that lens to judge,
+and the skip needs positive evidence:
+
+- every changed path is one of three kinds: **comment-only** (every hunk holds only comments in the
+  file's language), **rename-only** (a rename at 100% similarity), or **Markdown** (`*.md`);
+- the changed set is non-empty. An empty or unreadable set is `undecidable`, which allows, so the
+  lens runs.
+
+Comment-only is judged per file, and a file is comment-only only when every one of its hunks is. A
+single code line in one hunk makes the file code, even when its other hunks are comments. The
+comment syntax per extension is in the [Kyber Arbiter architecture](../kyber-arbiter/architecture.md#hunk-comment-syntax).
+Untracked files count as one whole-file hunk.
+
+The rule names six lenses that cannot find anything in such a change: `correctness`,
+`test-adequacy`, `performance`, `di-composition`, `duplicate-implementation` and `model-placement`.
+Every other lens is never skipped by this rule. In particular it never skips:
+
+- `security`: a secret can be added in a comment;
+- `documentation-accuracy`: comments are documentation;
+- `blast-radius-revertibility`: a rename moves callers.
+
+The rule is enforced, not shadowed. Its skips appear in the decision log like any other enforced
+answer. The rule only applies where the hook runs, and code-reviewer's `LENS:` headers are what
+let it judge each spawn.
 
 ## Current limitations
 

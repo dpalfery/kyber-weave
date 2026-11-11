@@ -4,7 +4,7 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -210,7 +210,7 @@ kyber-weave arbiter install --project --path . --target kilo --provider "" --key
 kyber-weave arbiter uninstall --target kilo  # default global scope: removes only Squad-owned files/blocks; add --project for repo scope; --remove-key to delete stored key
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
 kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value; reports by scope
-kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes post-dispatch advisory limitations
+kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries, and missing or stale model targets files (KW-ARB-MODEL-001); notes post-dispatch advisory limitations
 ```
 
 `--target` is required and validated against the Squad target roster; `--provider ""` means
@@ -231,12 +231,63 @@ kyber-weave arbiter rules [--trigger <t>]
 kyber-weave arbiter plan <file>      # what the parser understood, with KW-ARB-PLAN-001 / KW-ARB-PARSE-00x
 kyber-weave arbiter eval --trigger <t> --event <file> [--provider none]  # offline dry run; writes nothing
 kyber-weave arbiter audit [--plan <file>] [--session <id>] [--since <ISO-8601>]
+kyber-weave arbiter tune [path] [--rule <id>] [--thresholds 0.5,0.6,0.7] [--json]  # read-only score report; see below
 ```
 
 `audit` reports decision-less events, unmarked dispatches to Squad agents, unpaired
 pre/post events, and implementation packets whose body names a planning path
 (`KW-ARB-AUDIT-001`…`-004`), and lists attestations for information. code-reviewer runs
 `audit --plan <PLAN_FILE>` at the end of a run and cites the result.
+
+## Tuning thresholds (`arbiter tune`)
+
+`arbiter tune` reads `decisions.jsonl` and `ledger.jsonl` from the Arbiter directory and writes
+nothing. It scores the step-1 answers so a threshold can be chosen from evidence rather than from
+the shipped defaults. Each step-1 rule gets:
+
+- the count of scored answers, split into shadow and enforced;
+- a confidence histogram in tenths (`confidence (tenths)`);
+- for each candidate threshold, how many answers would change side (`threshold 0.70: 3 flip(s)`);
+- one line per scored answer, with its decision id, score and the `RESULT:` the worker reported.
+
+`--rule <id>` limits the report to one rule. `--thresholds` takes values between 0 and 1 and
+defaults to `0.5,0.6,0.7,0.8,0.9`. `--json` writes the same figures as JSON. A log with no scored
+answers prints `no scored answers.`. A log with a malformed line exits `1` and reads nothing
+partial, so repair or remove the line and run again.
+
+Two limits, both known:
+
+- The report pairs a decision with the `RESULT:` line only. The `TASK_GATE:` outcome and, for
+  `delegate.model`, the chosen profile are not shown yet; that pairing ships with model targeting.
+- Shadow and enforced answers are counted apart, but a threshold's flip count is computed from the
+  scores alone, so a shadow answer that would flip is counted the same way as an enforced one.
+
+### Reading shadow entries
+
+A rule in shadow is evaluated and logged in full. Its entry in `decisions.jsonl` carries
+`"shadow": true` and `would-effect`, the effect it would have contributed if it were enforced. The
+outcome it produced for the dispatch is the family's neutral effect (`keep`, `spawn` or `allow`), so
+a shadow entry never blocked or changed anything. Read it as "this rule would have said X". When
+`would-effect` names `escalate`, `skip`, `verify`, `retarget`, `answer`, `drop` or `duplicate`, the
+rule's answer is the evidence to weigh before turning it on with `shadow: false`.
+
+An entry whose evidence reads `suppressed: primary <outcome>` is a secondary judgement that was not
+delivered because the primary dispatch was not `allow`. It is recorded so you can see what the
+judgement would have said.
+
+### `KW-ARB-MODEL-001`: model targets file missing or stale
+
+`kyber-weave arbiter doctor` raises `KW-ARB-MODEL-001` (warning) when model targeting is not `off`,
+a hooked global target is installed, and its `model-targets.<harness>.json` file is missing,
+unreadable, or older than the Squad lock. The remedy is the one the message names:
+
+```bash
+kyber-weave squad update
+```
+
+The update rewrites the table from the current presets. In phase 1 no hook reads the table to choose a
+model, so a stale table changes nothing at dispatch yet. The warning is early notice for the model
+phase, which reads the table. A project-scope target is not checked by this diagnostic.
 
 ## Recording a harness defect
 

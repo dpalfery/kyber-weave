@@ -277,10 +277,11 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Finding excerpt present at its `file:line` |
-| `KW-ARB-PREEX-001` | `lens.returned` | 0 | Excerpt inside a changed hunk |
+| `KW-ARB-PREEX-001` | `lens.returned` | 0 | Excerpt inside a changed hunk; reads `finding.changed-lines`, so it answers `in-hunk` or `outside-hunk` (annotate) |
 | `KW-ARB-CLAIM-001` | `refute.spawn` | 1 | Quoted code supports the finding's claim |
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | A failed gate already corroborates the finding |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | A changed path matches the gate's `applies-when.paths` |
+| `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one with nothing to judge in a change with no code in it? Answers: `no-code-change`, which skips the lens; any other result is `undecidable`, which allows. Every changed path must be comment-only, rename-only or Markdown, and the changed set must be non-empty. Names six lenses: `correctness`, `test-adequacy`, `performance`, `di-composition`, `duplicate-implementation`, `model-placement`. Never names `security`, `documentation-accuracy` or `blast-radius-revertibility`. Enforced, not shadow. See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002) |
 
 ### Configuration, key, log, binary, guard, parse — `arbiter validate`, `setup`, `status`, `doctor`, `plan`
 
@@ -297,6 +298,11 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-CONFIG-009` | Error | User override holds a key other than `provider` |
 | `KW-ARB-CONFIG-010` | Error | Non-loopback endpoint uses `http` |
 | `KW-ARB-CONFIG-011` | Error | `arbiter.global` is declared in a project config; user-level `arbiter.global.targets` is the only valid global schema |
+| `KW-ARB-CONFIG-012` | Error | `model-targeting.mode` is not `off`, `shadow` or `enforce`, or a `difficulty-profiles` key or value is not a semantic profile. The message lists the valid values |
+| `KW-ARB-CONFIG-013` | Error | `model-targeting.ladder` is empty, repeats a profile, or names a value that is not a semantic profile. The message shows an example ladder |
+| `KW-ARB-CONFIG-014` | Error | `shadow` is set on `KW-ARB-DIFFICULTY-001` or `KW-ARB-LADDER-001`, whose shadow state `model-targeting.mode` owns |
+| `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1, a blank `comment-triage.bot-logins` entry, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
+| `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
 | `KW-ARB-LOG-001` | Warning | `artifacts/arbiter/` is not ignored by git |

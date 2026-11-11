@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -31,6 +31,11 @@ code-refs:
   - FactoryHooksShadowing
   - ArbiterTools
   - ArbiterPluginShim
+  - SecondaryTriggers
+  - ArbiterTriggerFamilies
+  - ArbiterModelTargets
+  - CommentSyntax
+  - RuleEffects
 ---
 
 # Kyber Arbiter architecture
@@ -86,6 +91,9 @@ the answers, and appends one decision record.
   of the Squad's status handoffs; review outcomes render skip/verify/annotation notes for
   code-reviewer.
 
+A trigger's secondary triggers are evaluated behind it, as described in
+[Secondary triggers, families and effects](#secondary-triggers-families-and-effects).
+
 Facts come from `TriggerFactBuilder`: the plan parser over `PLAN_FILE` at evaluation time
 (nothing cached or written), git snapshots and diffs, the gate report, the ledger, and the
 embedded Squad catalog. `HeaderBlock` parses the closed routing-header set
@@ -124,7 +132,8 @@ Limits on those facts:
   question.
 - `arbiter eval` is an offline dry run with no repository state, so these git and file facts
   stay absent there.
-- `review.changed-hunks`, `file.text-at-line` and `gates.report` have no filler yet.
+- Facts that have no filler yet are listed under [Phase 1 facts](#phase-1-facts). A rule that
+  reads one of them answers `undecidable`.
 
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
@@ -148,8 +157,9 @@ A task counts as complete on its worker's own report: no separate reviewer confi
 
 ## The rules
 
-Twenty rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
-thresholds, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids.
+Twenty-one rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
+same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
 | Rule | Trigger | Step | Question |
 |---|---|---|---|
@@ -169,10 +179,11 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Is each finding's excerpt present at its `file:line`? |
-| `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? |
+| `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? It reads `finding.changed-lines`. |
 | `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? |
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
+| `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one that has nothing to judge in a change with no code in it? See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
@@ -218,20 +229,209 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 there, because a dispatch that never reports back would otherwise hold its files for the
 whole session.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-011` and `KW-ARB-INSTALL-001`
-for configuration and scope validation, `KW-ARB-KEY-001` for a missing key,
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-015` and `KW-ARB-INSTALL-001`
+for configuration and scope validation (`-012` to `-015` cover model targeting, the store
+limits, the bot logins and the savings-only keys), `KW-ARB-MODEL-001` for a missing or stale
+model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
 `KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
 and `KW-ARB-HOOK-001` for a fail-closed hook error. See the
 [rule reference](../ci-pipelines/rule-reference.md).
 
+## Secondary triggers, families and effects
+
+Every trigger belongs to one family. `ArbiterTriggerFamilies` fixes the effects the family's
+rules may use, the effect an `undecidable` answer maps to, and how the answers combine. A host
+cannot change any of it.
+
+| Family | Triggers | Effects its rules may use | `undecidable` maps to | Combines to |
+|---|---|---|---|---|
+| Conductor | `delegate`, `delegate.returned`, `delegate.planner`, `delegate.planner.returned` | `allow`, `escalate` | `escalate` | `escalate` when any rule escalates |
+| Investigate | `investigate`, `investigate.returned` | `allow`, `escalate` | `escalate` | `escalate` when any rule escalates |
+| LensSpawn | `lens.spawn` | `allow`, `skip` | `allow` | `skip` when any rule skips |
+| RefuteSpawn | `refute.spawn` | `allow`, `verify`, `drop`, `duplicate` | `allow` | `verify`, else `drop`, else `duplicate`, else `allow` |
+| LensReturned | `lens.returned` | `allow`, `annotate`, `drop` | `allow` | `annotate` when any rule annotates (a `drop` on the same finding is then suppressed and logged), else `drop`, else `allow` |
+| Gate | `gate.select` | `applies`, `not-applicable` | `applies` | `applies` when any rule applies |
+| ModelTarget | `delegate.model` | `keep`, `retarget` | `keep` | `retarget` when any rule retargets, else `keep` |
+| Shortcut | `intake.shortcut`, `triage.shortcut`, `docs-impact.shortcut` | `spawn`, `answer` | `spawn` | `answer` only when every rule answers `answer`, else `spawn` |
+| FailureCluster | `delegate.failure` | `allow`, `same-failure` | `allow` | `same-failure` when any rule answers it, else `allow` |
+| Advice | `sections.select`, `comment.triage` | `keep`, `advise` | `keep` | `advise` only when every rule advises, else `keep` |
+
+The catalogue also accepts the family names `model.target`, `shortcut`, `failure.cluster` and
+`advice` as trigger names. Phase 1 emits none of them.
+
+Phase 1 catalogues the seven new triggers and their facts. Nothing classifies an event into
+`delegate.model`, `intake.shortcut`, `triage.shortcut`, `docs-impact.shortcut`,
+`delegate.failure`, `sections.select` or `comment.triage` yet. Their rules can be dry-run
+offline with `arbiter eval --trigger <t>`, and no live hook reaches them.
+
+A non-allow outcome on a red-flag family is what ends the step-1 call early. The
+short-circuit signal is unchanged: `escalate`, `skip` and `verify` only. The new effects never
+short-circuit, because each removes or changes work and must come from the rule that produced it.
+
+**Secondary triggers.** A secondary trigger is derived from the primary trigger of the same event,
+never classified from its own payload. The evaluator takes the derivation as
+`SecondaryTriggers.For(primaryTrigger, ev)`. In phase 1 that returns no trigger, so every dispatch
+evaluates its primary alone. When a derivation returns one, the evaluator:
+
+1. skips the secondary when the primary's step 0 already short-circuits, and makes no step-1 call;
+2. otherwise sends the primary's and the secondary's step-1 questions in one provider call;
+3. keeps the primary outcome as the event outcome, lists each secondary outcome beside it in the
+   dispatch's `Secondary` list, and writes one decision record per secondary, carrying
+   `primary-ledger-id` back to the primary record;
+4. delivers a secondary outcome only when the primary outcome is `allow`. Otherwise each secondary
+   rule is recorded as neutral, with `would-effect` and the evidence `suppressed: primary <outcome>`.
+
+**Over budget (known gap).** When a batch that includes secondary questions returns `error` or
+`over-budget`, the evaluator sends the primary questions again alone. One event can therefore make
+two provider calls. The design's split, which removes the secondary questions first and keeps one
+call, is not implemented in phase 1.
+
+## Phase 1 facts
+
+These facts are filled on the hook path. Each is `derived` unless noted.
+
+- **`review.changed-hunks`** on `lens.spawn`, `lens.returned` and `refute.spawn`: the ordered
+  `{path, old-start, old-count, start, count}` ranges of the change, measured from the review base
+  against the working tree, untracked files read whole. Never shortened. Absent offline and when
+  the base cannot be read.
+- **`review.comment-only-paths`**: a path is comment-only when every one of its hunks is
+  comment-only under [`CommentSyntax`](#hunk-comment-syntax).
+- **`review.rename-only-paths`**: paths whose only change is a rename at 100% similarity.
+- **`review.no-code-change-paths`**: the union of comment-only paths, rename-only paths and changed
+  `*.md` paths. A code change must never land in it.
+- **`finding.changed-lines`** on `lens.returned`: the new-side line numbers of `finding.file` that
+  fall inside a changed hunk. Absent without a finding file. `KW-ARB-PREEX-001` reads it.
+- **`harness.model-override`** on `delegate.model`: the field name the harness's adapter declares
+  (`model` on Claude), or null where the harness offers no per-dispatch model.
+
+Catalogued but not filled in phase 1, so a rule that reads them answers `undecidable`: `finding.severity`,
+`finding.gate-corroborated`, `delegation.model`, `plan.task.file-kinds`, `review.prior-findings`,
+`ledger.task.prior-attempt`, `model-targeting.ladder.next`, `file.text-at-line` and `gates.report`.
+Their fillers arrive with phases 2 and 3.
+
+### Hunk comment syntax
+
+`CommentSyntax` keys comment rules by file extension. A file is comment-only when every added and
+removed line of every hunk is blank, is a line comment, or lies inside a block comment that opens
+and closes in the same hunk. A `*` continuation line counts only inside such a block, so `*p = x`
+in C, Go or Rust stays code. An unknown extension, an empty hunk or any code line is not
+comment-only.
+
+| Line comment | Block comment | Extensions |
+|---|---|---|
+| `//` | `/* … */` | `.c` `.h` `.cc` `.cpp` `.cxx` `.hpp` `.cs` `.java` `.kt` `.kts` `.swift` `.go` `.rs` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.scala` `.dart` |
+| `#` | none | `.py` `.sh` `.bash` `.yml` `.yaml` `.toml` `.rb` |
+| `#` | `<# … #>` | `.ps1` `.psm1` `.psd1` |
+| `--` | none | `.sql` `.lua` |
+| none | `<!-- … -->` | `.html` `.htm` `.xml` `.xaml` `.csproj` `.props` `.targets` |
+
+## Shadow and the model-targeting switch
+
+**Per-rule shadow.** A host sets `shadow: true` or `shadow: false` on a shipped rule under
+`arbiter.rules`. A shadowed step-1 rule is evaluated and logged in full. Its entry records
+`shadow: true` and the effect it would have had as `would-effect`. The combined outcome uses the
+family's neutral effect (`keep`, `spawn`, `allow`), so no adapter ever sees a shadowed effect.
+Phase 1 ships no rule in shadow; `KW-ARB-LENS-002` enforces.
+
+**Model-targeting switch.** `arbiter.model-targeting.mode` is `off`, `shadow` (the default) or
+`enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which
+ship in phase 2. A `shadow` override on either one fails `KW-ARB-CONFIG-014`, so there is one switch
+to read.
+
+In phase 1 the switch changes one thing: whether `KW-ARB-MODEL-001` runs at doctor time. `off`
+skips it. No shipped rule reads the mode, no hook chooses a model, and no model field is written.
+
+## Fail-safe points
+
+| Situation | Result | Recorded as |
+|---|---|---|
+| Provider `none`, error, over budget, below floor, or undecidable | The family's neutral effect, as before | The existing provider status and `undecidable` |
+| Primary outcome not `allow` | Secondary not delivered | `would-effect` and the evidence `suppressed: primary <outcome>` |
+| No hook and no `serve` call | Nothing runs, nothing logged | None |
+| `serve` call | Outcome labelled advisory | `source: serve` |
+| Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the hook fails closed for the whole hook with `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
+| Model targets table missing or unreadable | The reader returns no table. No hook reads it in phase 1, so no model is chosen. | `KW-ARB-MODEL-001` at doctor time |
+| Store unwritable | The rule that needs the store answers `undecidable` | Run stores ship in phase 3 |
+
+## Model targets
+
+Squad resolves each profile to its model token at render time and writes one table per hooked
+target. The hook host never resolves a profile itself. `ArbiterModelTargetsFile` in
+`KyberWeave.Core.Squad` builds the table with `ResolveToken`, and `ArbiterModelTargets.TryRead` in
+Core parses it with no Squad types. Resolution happens at render time because the hook host cannot
+reference the Squad assemblies, and the bundled model matrix is not on disk at hook time
+([ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md), decision 27).
+
+| Scope | Path | Written when |
+|---|---|---|
+| Project | `artifacts/arbiter/model-targets.<harness>.json`, under the project root | The Arbiter is enabled and the scope is project |
+| Global | `~/.kyber-weave/arbiter/model-targets.<harness>.json`, under the user's home directory | The Arbiter is enabled and the scope is global |
+| Instance | None | Never. Targeting keeps every model. |
+
+A table is written for every hooked target, whatever the `model-targeting.mode` value. Warp and
+ZCode are fallback-only and get none.
+
+```json
+{
+  "schema": "kyber-arbiter.model-targets/v1",
+  "harness": "claude",
+  "preset": { "name": "work", "digest": "…" },
+  "bundle-digest": "…",
+  "profiles": { "fast": "claude-haiku-5-5", "general": "claude-sonnet-5-5", "architect": "opus" },
+  "agents": { "csharp-dev": { "profile": "general", "token": "claude-sonnet-5-5" } }
+}
+```
+
+- `preset.name` is `bundled` when no preset is applied.
+- `profiles` holds the token for each profile; `null` where a profile resolves to `inherit` or is
+  undefined. `agents` holds each rendered agent's profile and the token it was rendered with.
+- `ArbiterModelTargets.SchemaName` is the constant `kyber-arbiter.model-targets/v1`. The instance
+  property `Schema` holds the id the file declares.
+- `TryRead(arbiterDirectory, harness)` fails closed. An absent, unreadable, malformed file, a
+  different schema id, or a different harness returns null. It never throws.
+- `kyber-weave squad preset use` and `squad preset clear` rewrite the table in the same pass as the
+  agent files, so the table cannot lag the agents.
+
+## Per-dispatch model
+
+`IHarnessHookAdapter.ModelOverride` declares whether one dispatch can name its own model. It gives
+the supported flag, the field that carries the model, the accepted value forms and the vendor
+source. The default is unsupported, so an adapter must declare support from vendor documentation.
+
+Only the Claude adapter declares support: the `model` field on the `Agent` input, with the aliases
+`sonnet`, `opus`, `haiku` and `fable`. That declaration is all phase 1 ships. The Claude adapter
+writes no model onto a dispatch, `HookOutcome.ModelToken` exists, and no path sets it. Full model
+ids are not rewritten to aliases; the alias rule arrives with model targeting in phase 2.
+
+The declaration is also copied into the `harness.model-override` fact. The
+[harness facts table](#harness-facts) has a "Per-dispatch model" column with each harness's
+verdict and its source.
+
+## Decision record fields in phase 1
+
+Each decision record in `decisions.jsonl` carries the existing fields plus these phase 1 additions.
+Each is omitted when it has no value.
+
+- `model`: a string, the name of the decision model that answered the step-1 call. It is not the
+  model the dispatch ran on. The design's structured `{profile, token, source, delivered, reason}`
+  object is deferred to phase 2.
+- `substitute`: a boolean. The design's structured `{kind, digest}` object is deferred. No code
+  path writes `substitute` in phase 1.
+- `primary-ledger-id`: on a secondary-trigger record, the ledger id of the primary record. No
+  secondary trigger is derived in phase 1, so no record carries it yet.
+- `duplicate-of`: a string on a `duplicate` outcome. No phase 1 rule produces a `duplicate`, so
+  no record carries it yet.
+- Per rule: `shadow` (boolean, set on shadowed rules), `would-effect` (the suppressed effect), and
+  `candidate` (one `for-each` expansion). No phase 1 shipped rule uses `for-each`.
+
 ## Configuration
 
 The `arbiter:` section is merged by `ArbiterConfigLoader` into the host configuration; with
 no section the Arbiter is disabled, the provider is `none`, and all shipped rules are
 enabled. A host may tune a shipped rule's `enabled`, confidence/probability threshold, and
-`effects` only — anything else is a hint to add a host rule. The per-user
+`effects`, and set `shadow` on the rules that support it. Anything else is a hint to add a host rule. The per-user
 `~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else. The key
 never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_API_KEY`,
 then the OS credential-store entry for the endpoint origin. Full shape and merge rules are
@@ -326,20 +526,20 @@ Devin, and leaves Warp and ZCode fallback-only at project scope, served by [`ser
 The degradation records these outcomes produce are listed once, in the
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy).
 
-| Harness | Phase | What Squad renders | Dispatch tool | Caller identity | Target and prompt |
-|---|---|---|---|---|---|
-| Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` |
-| Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` |
-| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` |
-| OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
-| Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
-| Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` |
-| Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` |
-| Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` |
-| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts |
-| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
-| Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` |
-| Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — |
+| Harness | Phase | What Squad renders | Dispatch tool | Caller identity | Target and prompt | Per-dispatch model |
+|---|---|---|---|---|---|---|
+| Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` | Supported: `model` on the `Agent` input; aliases `sonnet`, `opus`, `haiku`, `fable` [CC-SUB], [CC-HOOK] |
+| Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
+| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
+| OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported: the task tool documents no per-call model; model is agent config [OC-AGENT] |
+| Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported (unverified): no core subagent tool or model field is documented [PI-EXT] |
+| Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
+| Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
+| Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` | Unsupported (unverified): the task tool documents no model [KI-SUB] |
+| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts | Unsupported: `invoke_subagent` has no model field; tier is per custom subagent [AG-SUB], [AG-HOOK] |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, plus a `SubagentStop` group with no matcher (Factory runs `Task` in the background, so the worker report arrives at stop, not at `PostToolUse`), unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported: the docs say the caller cannot choose a model for a single call [FA-DROID], [FA-HOOK] |
+| Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` | Unsupported (unverified): the `run_subagent` schema documents no model [DV-HOOK], [DV-LOG] |
+| Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate_agent_dispatch_or_return` | — | Not applicable: no hooks |
 
 Notes on the table:
 
@@ -356,6 +556,30 @@ trusted workspace plus `chat.useHooks`) are surfaced at install time — see the
 On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
+
+### Per-dispatch model sources
+
+The verdicts in the "Per-dispatch model" column cite these vendor pages. They were read on
+2026-11-10 and carried into this guide from the savings design's research. They were not
+re-read live for this revision, so a changed vendor page is a defect to record, not a silent edit.
+
+- [CC-SUB] Claude Code subagents: https://code.claude.com/docs/en/sub-agents
+- [CC-HOOK] Claude Code hooks: https://code.claude.com/docs/en/hooks
+- [CX-HOOK] Codex hooks: https://learn.chatgpt.com/docs/hooks
+- [CX-SUB] Codex subagents: https://learn.chatgpt.com/docs/agent-configuration/subagents
+- [GH-HOOK] Copilot CLI hooks reference: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-hooks-reference
+- [GH-AGENT] Copilot custom agents configuration: https://docs.github.com/en/copilot/reference/custom-agents-configuration
+- [CU-SUB] Cursor subagents: https://cursor.com/docs/context/subagents
+- [CU-HOOK] Cursor hooks: https://cursor.com/docs/hooks
+- [OC-AGENT] OpenCode agents: https://opencode.ai/docs/agents/
+- [PI-EXT] Pi extensions: https://pi.dev/docs/latest/extensions
+- [KI-SUB] Kilo custom subagents: https://kilo.ai/docs/customize/custom-subagents
+- [AG-HOOK] Antigravity hooks: https://antigravity.google/docs/hooks
+- [AG-SUB] Antigravity subagents: https://antigravity.google/docs/subagents
+- [FA-DROID] Factory custom droids: https://docs.factory.com/cli/configuration/custom-droids
+- [FA-HOOK] Factory hooks reference: https://docs.factory.com/reference/hooks-reference
+- [DV-HOOK] Devin lifecycle hooks: https://docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks
+- [DV-LOG] Devin CLI changelog: https://docs.devin.ai/cli/changelog
 
 ### Delivery and caller notes
 
