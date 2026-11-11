@@ -48,6 +48,13 @@ internal sealed class KyberWeaveYamlDocument
     /// type an operator cannot act on.
     /// </summary>
     public string? StopOnToolFailure { get; set; }
+
+    /// <summary>
+    /// Raw <c>worktree-index-hook:</c> value. Kept a string for the same reason as
+    /// <see cref="StopOnToolFailure"/>: a value outside the two booleans reaches the loader as an error that names
+    /// the setting, not a type-conversion failure.
+    /// </summary>
+    public string? WorktreeIndexHook { get; set; }
 }
 
 /// <summary>

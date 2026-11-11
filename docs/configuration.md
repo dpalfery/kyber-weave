@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 code-refs:
   - KyberWeaveConfig
   - KyberWeaveConfigLoader
@@ -62,6 +62,7 @@ config-reg:
 autonomy: supervised
 onboarding: done
 stop-on-tool-failure: true
+worktree-index-hook: true
 
 squad:
   bundle: full
@@ -259,6 +260,30 @@ It is not published in the `AGENTS.md` Config Reg block, so a portable instructi
 it directly; the CLI and the MCP server are the readers. See
 [the run-start rule](kyber-squad/architecture.md#run-start-documentation-check) and
 [ADR 0061](adr/0061-code-editing-runs-stop-on-unusable-tools.md).
+
+### Worktree index hook
+
+A top-level `worktree-index-hook:` key controls the git post-checkout hook that indexes each new
+worktree in the background, so a `git worktree add` tree is not left without a CodeGraph index:
+
+```yaml
+worktree-index-hook: false
+```
+
+- **Absent means on.** A repository that says nothing gets the hook when `kyber-weave doctor --ensure`
+  runs, which is the default the index relies on.
+- **The values are `true` and `false`.** Anything else is a configuration error (`KW-CONFIG-001`) that
+  names the setting and both values, the same treatment as `stop-on-tool-failure:`. A file that cannot
+  be loaded at all counts as on, so a broken configuration never removes the hook.
+- **`false` removes the block.** `kyber-weave doctor --ensure` takes the marked block out of the shared
+  post-checkout hook, keeping every other line, and deletes the file when nothing else remains. With
+  the setting off, a background run started by the hook exits at once and starts no index.
+- **Where it applies.** Only a repository with governed docs gets the hook. `doctor --check` and
+  `--provision` only report whether the block is present; they never add or remove it.
+
+The hook's behaviour, the `githook.post-checkout` check and its warnings, and how to remove it by hand
+are in the [MCP runbook](docgraph/mcp-runbook.md#the-worktree-index-hook). The decision is in
+[ADR 0068](adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md).
 
 ### Intake assessment
 
