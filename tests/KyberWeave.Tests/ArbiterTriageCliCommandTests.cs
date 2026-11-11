@@ -118,9 +118,12 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
         Assert.Contains("decision", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>A comment body with Spectre markup characters renders literally and does not throw; it is operator text, so it is escaped.</summary>
+    /// <summary>
+    /// A comment body with Spectre markup characters does not throw. The body is no longer echoed, so this pins the
+    /// exit code and the class and decision lines rather than the body text (see <c>ArbiterCommentBodyCliTests</c>).
+    /// </summary>
     [Fact]
-    public void Comment_BodyWithMarkupCharacters_RendersWithoutThrowing()
+    public void Comment_BodyWithMarkupCharacters_DoesNotThrow()
     {
         WriteDocument();
         ArbiterCommentCommand command = new();
@@ -135,7 +138,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Use [red]this[/] and [bogus", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("decision", execution.Output, StringComparison.Ordinal);
     }
 
     private static CommandExecution Capture(Func<int> execute)

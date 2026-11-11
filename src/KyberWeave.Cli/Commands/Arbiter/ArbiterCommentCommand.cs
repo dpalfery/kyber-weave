@@ -67,7 +67,6 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()
             .GetResult();
-        AnsiConsole.MarkupLine($"body {Markup.Escape(settings.Body)}");
         AnsiConsole.MarkupLine($"class [bold]{Markup.Escape(result.Class)}[/]");
         AnsiConsole.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
         return 0;
