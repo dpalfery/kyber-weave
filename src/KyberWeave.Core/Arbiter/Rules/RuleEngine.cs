@@ -64,14 +64,27 @@ public static class RuleEngine
             }
 
             string answer = Decide(rule, facts);
-            string effect = MapAnswerToEffect(rule, answer, family);
-            answers.Add(new ArbiterRuleAnswer(rule.Id, answer, 0, effect));
-            effects.Add(effect);
+            string mapped = MapAnswerToEffect(rule, answer, family);
+            // A shadow rule is log-only: it reports the family's neutral effect, and the effect it
+            // would have had stays on the answer. Its neutral effect can never be a red flag, so it
+            // never short-circuits step 1, and it stays out of the combination so it cannot veto a
+            // real answer.
+            string effect = rule.Shadow ? ArbiterTriggerFamilies.NeutralEffect(family) : mapped;
+            answers.Add(new ArbiterRuleAnswer(
+                rule.Id, answer, 0, effect, rule.Shadow, rule.Shadow ? mapped : null));
+            if (!rule.Shadow)
+            {
+                effects.Add(effect);
+            }
         }
 
-        string combined = effects.Count == 0
-            ? ArbiterTriggerFamilies.UndecidableEffect(family)
-            : ArbiterTriggerFamilies.Combine(family, effects);
+        // No rule at all is undecidable. Only shadow rules is the family's neutral effect, which is what
+        // they are: a log-only rule leaves the trigger proceeding as it does today.
+        string combined = effects.Count > 0
+            ? ArbiterTriggerFamilies.Combine(family, effects)
+            : answers.Count == 0
+                ? ArbiterTriggerFamilies.UndecidableEffect(family)
+                : ArbiterTriggerFamilies.NeutralEffect(family);
         return new ArbiterOutcome(
             trigger,
             family,

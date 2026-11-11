@@ -20,6 +20,7 @@ public sealed record RuleDecideClause(RulePredicate When, string Answer);
 /// <param name="ProbabilityBelow">Ceiling for <c>noul</c>.</param>
 /// <param name="When">Gates the question on step-0 answers (<c>rules.&lt;id&gt;.answer</c>).</param>
 /// <param name="TunedFor">Models the threshold was set for.</param>
+/// <param name="ForEach">A list-fact name; the question is asked once per list item.</param>
 public sealed record RuleAsk(
     string Type,
     IReadOnlyDictionary<string, string> State,
@@ -30,7 +31,8 @@ public sealed record RuleAsk(
     double? ConfidenceAtLeast = null,
     double? ProbabilityBelow = null,
     string? When = null,
-    IReadOnlyList<string>? TunedFor = null);
+    IReadOnlyList<string>? TunedFor = null,
+    string? ForEach = null);
 
 /// <summary>Effect names a rule may use; the trigger family fixes the allowed set.</summary>
 public static class RuleEffects
@@ -55,6 +57,30 @@ public static class RuleEffects
 
     /// <summary>A gate does not apply.</summary>
     public const string NotApplicable = "not-applicable";
+
+    /// <summary>A model target keeps the current model.</summary>
+    public const string Keep = "keep";
+
+    /// <summary>A model target moves the work to another model.</summary>
+    public const string Retarget = "retarget";
+
+    /// <summary>A shortcut is not taken; the full path spawns.</summary>
+    public const string Spawn = "spawn";
+
+    /// <summary>A shortcut is taken and answered directly.</summary>
+    public const string Answer = "answer";
+
+    /// <summary>A failure cluster is the same failure as an earlier one.</summary>
+    public const string SameFailure = "same-failure";
+
+    /// <summary>Advice is given to the caller.</summary>
+    public const string Advise = "advise";
+
+    /// <summary>A lens return is dropped from the findings.</summary>
+    public const string Drop = "drop";
+
+    /// <summary>A refutation duplicates an earlier finding and is not spawned.</summary>
+    public const string Duplicate = "duplicate";
 }
 
 /// <summary>
@@ -70,6 +96,7 @@ public static class RuleEffects
 /// <param name="Decide">Step-0 clauses in priority order.</param>
 /// <param name="Ask">Step-1 question, when the rule asks one.</param>
 /// <param name="Enabled">Disabled rules answer undecidable.</param>
+/// <param name="Shadow">A shadow rule is evaluated and logged but its effect does not gate the trigger.</param>
 public sealed record ArbiterRule(
     string Id,
     string Trigger,
@@ -78,7 +105,8 @@ public sealed record ArbiterRule(
     IReadOnlyDictionary<string, string> Effects,
     IReadOnlyList<RuleDecideClause>? Decide = null,
     RuleAsk? Ask = null,
-    bool Enabled = true)
+    bool Enabled = true,
+    bool Shadow = false)
 {
     /// <summary>Whether the rule asks its step-1 question for this step-0 answer.</summary>
     /// <remarks>

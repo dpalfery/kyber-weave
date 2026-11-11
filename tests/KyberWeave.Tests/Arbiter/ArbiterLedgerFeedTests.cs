@@ -110,15 +110,22 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
             null,
             TestContext.Current.CancellationToken);
 
+    /// <summary>
+    /// The last primary decision. A dispatch also writes a <c>delegate.model</c> secondary record
+    /// after it, so reading the newest record alone would look at the secondary, not the primary.
+    /// </summary>
+    private ArbiterDecisionRecord LastPrimary() =>
+        new DecisionLog(ArbiterDirectory).ReadAll().Last(record => record.Trigger != "delegate.model");
+
     private void AssertLastAllowed()
     {
-        ArbiterDecisionRecord last = new DecisionLog(ArbiterDirectory).ReadAll()[^1];
+        ArbiterDecisionRecord last = LastPrimary();
         string blockers = string.Join(", ", last.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(last.Outcome == "allow", $"outcome {last.Outcome}: {blockers}");
     }
 
     private string Answer(string ruleId) =>
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll()[^1].Rules, rule => rule.Id == ruleId).Answer;
+        Assert.Single(LastPrimary().Rules, rule => rule.Id == ruleId).Answer;
 
     [Fact]
     public async Task WithoutAReturn_DependentTaskWaitsAndHasNoRedEvidence()
@@ -262,7 +269,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     public async Task RefusedDispatch_HoldsNothing()
     {
         await Dispatch("csharp-dev", Prompt("T5"));
-        Assert.Equal("escalate", new DecisionLog(ArbiterDirectory).ReadAll()[^1].Outcome);
+        Assert.Equal("escalate", LastPrimary().Outcome);
 
         await Dispatch("test-dev", Prompt("T1"));
 

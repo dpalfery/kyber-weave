@@ -74,11 +74,22 @@ internal static class LedgerFacts
             return [];
         }
 
-        HashSet<string> refused = decisions.ReadAll()
-            .Where(decision => string.Equals(decision.Outcome, RuleEffects.Escalate, StringComparison.Ordinal))
+        return [.. ledger.InFlightPaths(ledgerId, ev.Session, NotDispatchedLedgerIds(decisions))];
+    }
+
+    /// <summary>
+    /// The ledger ids whose dispatch never ran its worker: refused by an escalation, or answered by a shortcut
+    /// that substituted a digest for the worker. The audit counts a spawn as a dispatch not in this set.
+    /// </summary>
+    /// <param name="decisions">The decision log the ids are read from.</param>
+    public static IReadOnlySet<string> NotDispatchedLedgerIds(DecisionLog decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        return decisions.ReadAll()
+            .Where(decision => string.Equals(decision.Outcome, RuleEffects.Escalate, StringComparison.Ordinal)
+                || string.Equals(decision.Outcome, RuleEffects.Answer, StringComparison.Ordinal))
             .Select(decision => decision.LedgerId)
             .ToHashSet(StringComparer.Ordinal);
-        return [.. ledger.InFlightPaths(ledgerId, ev.Session, refused)];
     }
 
     private static string? Text(ArbiterFactSet facts, string name) =>

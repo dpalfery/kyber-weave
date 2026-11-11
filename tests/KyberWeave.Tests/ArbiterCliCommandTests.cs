@@ -83,6 +83,24 @@ public sealed class ArbiterCliCommandTests : IDisposable
         Assert.Contains("delegate", execution.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The shipped rules are listed with each rule's shadow default and its <c>for-each</c> list,
+    /// and the lens rule shipped for no-code-change reviews is among them.
+    /// </summary>
+    [Fact]
+    public void Rules_ListsShadowDefaultAndForEachForEveryShippedRule()
+    {
+        ArbiterRulesCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = NewDir("arbiter-rules-columns") }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("shadow", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("for-each", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("KW-ARB-LENS-002", execution.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Rules_UnknownTrigger_ExitsNonZero()
     {

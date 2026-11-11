@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks.Adapters;
@@ -31,7 +32,29 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// <summary>The harness token this adapter serves.</summary>
     public const string Token = "claude";
 
+    /// <summary>
+    /// The sub-agents documentation the model-override declaration was read from. The aliases are
+    /// checked against this page, not against the code that lists them.
+    /// </summary>
+    private const string SubAgentsDocs = "https://code.claude.com/docs/en/sub-agents";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Claude sub-agents take the model in the <c>model</c> field and accept four aliases.
+    /// </remarks>
+    public ModelOverrideCapability ModelOverride { get; } = new(
+        true,
+        "model",
+        new HashSet<string>(StringComparer.Ordinal) { "sonnet", "opus", "haiku", "fable" },
+        SubAgentsDocs);
+
     private readonly IHookDecisionEngine _engine;
+
+    /// <summary>
+    /// A test seam: when set, writing the delivered model throws this exception, so the fallback to a
+    /// strip-only allow can be exercised. Never set in production.
+    /// </summary>
+    internal Exception? ModelWriteFault { get; set; }
 
     /// <summary>
     /// Background-launch links by harness tool-call id. In-memory by design: the hook
@@ -212,10 +235,29 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Claude hook event: Agent input carries no prompt.");
-            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+            string? dispatchModel = GetString(toolInput, "model");
+            // The model write happens inside the decision when the engine asks for it, so the decision records
+            // delivered only for a write that held. An engine that never asks gets the write at render time.
+            PendingModelWrite pending = new();
+            HookContext decisionContext = context with
+            {
+                ConfirmModelWrite = token =>
+                {
+                    pending.Input ??= ModelInputOf(toolInput, prompt);
+                    pending.Written = WriteModel(pending.Input, token, context);
+                    return pending.Written.Value;
+                },
+            };
+            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, decisionContext, dispatchModel);
             return outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
+                HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
+                    pending.Input ?? ModelInputOf(toolInput, prompt), outcome.ModelToken, pending.Written, context),
+                // A write the engine asked for that did not hold falls back to today's model allow: the header is
+                // stripped for every target, as the model path always did for a token it was asked to write.
+                HookOutcomeKind.Allow when pending.Written is false => RenderPreAllow(
+                    pending.Input ?? ModelInputOf(toolInput, prompt), _ => { }),
                 HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
                     ? RenderPreAllowStrip(toolInput, prompt)
                     : string.Empty,
@@ -417,13 +459,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        string? dispatchModel)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             return contextual.DecidePreDispatch(
                 Token, caller, target, prompt, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"), dispatchModel);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -532,6 +575,112 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
+
+    /// <summary>
+    /// Renders the allow that writes the delivered model. The write is one <c>updatedInput</c> that keeps
+    /// every field of the tool input, with the header stripped from the prompt. A token the harness does
+    /// not accept, or a write that fails, leaves the model out and logs why: the dispatch still runs.
+    /// </summary>
+    private string RenderPreAllowModel(JsonObject updated, string token, bool? modelWritten, HookContext context)
+    {
+        if (modelWritten is null)
+        {
+            _ = WriteModel(updated, token, context);
+        }
+
+        return RenderPreAllow(updated, _ => { });
+    }
+
+    /// <summary>The model write made during the decision, when the engine asked for it.</summary>
+    private sealed class PendingModelWrite
+    {
+        /// <summary>The tool input the model is written into, built on first use.</summary>
+        public JsonObject? Input { get; set; }
+
+        /// <summary>Whether the write held; null when the engine never asked for one.</summary>
+        public bool? Written { get; set; }
+    }
+
+    /// <summary>The tool input as a JSON object, with the header stripped from the prompt.</summary>
+    private static JsonObject ModelInputOf(JsonElement toolInput, string prompt)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Claude hook event: tool_input is not a JSON object.");
+        updated["prompt"] = HeaderBlock.Strip(prompt);
+        return updated;
+    }
+
+    /// <summary>
+    /// Writes the alias for a model token into the tool input. Returns false when the token is not written
+    /// or the write fails, and logs why either way; the dispatch then runs without the model.
+    /// </summary>
+    private bool WriteModel(JsonObject updated, string token, HookContext context)
+    {
+        try
+        {
+            string? alias = AliasFor(token, context);
+            if (alias is null)
+            {
+                return false;
+            }
+
+            if (ModelWriteFault is { } fault)
+            {
+                throw fault;
+            }
+
+            // The line is written before the model is set, so a line that fails leaves the tool input without the model.
+            context.Log.WriteLine($"model: {OneLine(alias)}; delivered: true");
+            updated["model"] = alias;
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Any other failure of the write or its log line ends here: the dispatch runs without the model.
+            LogWriteFailure(context, ex);
+            return false;
+        }
+    }
+
+    /// <summary>Logs a failed model write. When the log sink fails too there is nowhere to record the reason; the dispatch is still allowed.</summary>
+    private static void LogWriteFailure(HookContext context, Exception ex)
+    {
+        try
+        {
+            context.Log.WriteLine($"model-write-failed: {OneLine($"{ex.GetType().Name}: {ex.Message}")}; delivered: false");
+        }
+        catch (Exception logFault) when (logFault is not OperationCanceledException)
+        {
+            // The log itself has failed, so the reason cannot be written. The return-false path still runs.
+        }
+    }
+
+    /// <summary>
+    /// The harness alias a model token writes as, by the rule the resolver also applies. Logs the derivation
+    /// or the refusal.
+    /// </summary>
+    private string? AliasFor(string token, HookContext context)
+    {
+        IReadOnlySet<string> accepted = ModelOverride.AcceptedAliases ?? new HashSet<string>(StringComparer.Ordinal);
+        string? alias = ModelTokenAliases.AliasFor(token, accepted);
+        if (alias is null)
+        {
+            context.Log.WriteLine($"model.reason: token-not-accepted ({OneLine(token)}); delivered: false");
+        }
+        else if (!string.Equals(alias, token, StringComparison.Ordinal))
+        {
+            context.Log.WriteLine($"model.reason: alias-derived ({OneLine(token)} -> {OneLine(alias)})");
+        }
+
+        return alias;
+    }
+
+    private static string OneLine(string text) => text.ReplaceLineEndings(" ");
 
     private static string RenderPreAllowRaw(string rewrittenInputJson)
     {

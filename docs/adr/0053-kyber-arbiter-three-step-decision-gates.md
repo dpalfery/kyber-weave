@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -19,6 +19,25 @@ Phase 3 Kilo, Antigravity, Factory, Devin, Warp, and ZCode.
 
 Amended 2026-11-08 by the conductor run-speed programme: decision 9's changed-path basis
 becomes committed plus dirty (D44), and decision 23 adds `KW-ARB-PLANREAD-001`.
+
+Amended 2026-11-11 by the arbiter decision-model savings work, phase 1: decisions 24 to 29
+add secondary triggers, the four new trigger families and the two extended ones, per-rule
+shadow with one model-targeting switch, render-time model targets, a per-harness model
+override declaration, and the run-store rule. Decision 9 gains the hunk-level lens skip
+(`KW-ARB-LENS-002`) in decision 30.
+
+Amended 2026-11-11 by the arbiter decision-model savings work, phase 3: decision 9's rule that a
+finding is never dropped on a model answer alone is qualified by the nitpick filter
+(`KW-ARB-NITPICK-001`), which drops only a confident nitpick and only once enforced. Decision 29's run
+stores are implemented under `<arbiter-dir>/stores/`. The triggers `intake.shortcut`,
+`triage.shortcut`, `docs-impact.shortcut`, `delegate.failure`, `sections.select` and `comment.triage`
+are derived as the phase 1 catalogue set out. The `answer`, `same-failure`, `advise`, `drop` and
+`duplicate` effects are live on their rules once enforced. Nine phase 3 rules ship in shadow.
+
+Amended 2026-11-11 by the arbiter decision-model savings closeout (decision 39 of that
+specification): the rule that an unverified capability is unsupported governs the per-dispatch
+model override only. The hook-capability rule above, that undocumented cells count as supported
+until a defect proves otherwise, is unchanged.
 
 ## Context
 
@@ -81,7 +100,7 @@ judgement about meaning is made without a confidence attached.
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Nineteen shipped rules with permanent ids (D14).** Hosts tune shipped rules by id
+12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine, so the count is now thirty-two. Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -147,6 +166,44 @@ judgement about meaning is made without a confidence attached.
     `KW-DOC-TASKS-005`, so the prompt-time ban and the authoring-time check cannot drift apart, and
     it may not fire where dispatch hooks are unconfirmed — a harness with no hook runs no rule, and
     claiming otherwise would report a check that never executed.
+24. **Secondary triggers ride one primary dispatch (D14, D35).** A secondary trigger is derived
+    from the primary trigger of the same event, never classified from its own payload. It is
+    evaluated behind the primary: after a primary step 0 that does not short-circuit, its rules
+    share the event's single step-1 batch, and its outcome is delivered only when the primary
+    outcome is `allow`. Each secondary writes its own decision record, sharing the event's
+    ledger id and naming the primary record. Over budget, the secondary questions are removed
+    before the primary's, so a new rule never pushes a primary rule over budget. Phase 1 ships
+    the mechanism and derives no secondary trigger; its over-budget path re-sends the primary
+    alone (see the architecture guide).
+25. **Families for the new judgements (D14, D15).** ModelTarget (`keep`, `retarget`; undecidable
+    `keep`), Shortcut (`spawn`, `answer`; undecidable `spawn`), FailureCluster (`allow`,
+    `same-failure`; undecidable `allow`) and Advice (`keep`, `advise`; undecidable `keep`) are
+    new families. LensReturned gains `drop` and RefuteSpawn gains `drop` and `duplicate`. Each
+    family fixes its allowed effects and its undecidable mapping, and a host cannot remap either.
+    A host rule may not use an effect that only a shipped rule may use (`KW-ARB-CONFIG-015`).
+26. **Per-rule shadow and one model-targeting switch (D22, D41).** `ArbiterRule` carries a
+    `shadow` flag that a host may set on a shipped rule. A shadowed rule is evaluated and logged
+    in full, but contributes the family's neutral effect to the combined outcome. The two
+    model-targeting rules take their shadow state from `arbiter.model-targeting.mode` alone, so
+    a `shadow` override on either fails `KW-ARB-CONFIG-014`. New step-1 rules ship in shadow
+    until thresholds are measured from the decision log.
+27. **Model profiles resolve at render time (D16, D17).** Squad's render resolves each profile to
+    its model token and writes a per-harness model-targets table. The hook host reads that table
+    and never references the Squad assemblies, so the layering rule holds and no hook process
+    loads the bundled matrix.
+28. **The per-dispatch model capability is declared per adapter (D18, D19, D40).** Each adapter
+    declares whether one dispatch can name its own model, the field that carries it and the
+    accepted value form, from vendor documentation. An undocumented capability is unsupported.
+    This is stricter than the general rule in decision 5, because a wrong model claim is silent
+    and a wrong hook claim is not; decision 5 governs hook behaviour only (D39). A written
+    `delivered: true` means the field was written, not that the model ran.
+29. **Text from earlier events lives only in run stores under the Arbiter directory (D24).** The
+    ledger and decision log keep digests only. Run stores are phase 3; phase 1 ships their size
+    and retention keys and no store.
+30. **Hunk-level lens skipping (D21).** `KW-ARB-LENS-002` is a step-0 rule that skips a lens only
+    when every changed path is comment-only, rename-only or Markdown and the changed set is
+    non-empty. It names six lenses. It never names `security`, `documentation-accuracy` or
+    `blast-radius-revertibility`. An unmeasured change answers `undecidable`, which allows.
 
 Egress follows one rule (R9): a step-1 question declares its state as named facts, and no
 fact outside those declared states leaves the machine.
@@ -164,6 +221,13 @@ fact outside those declared states leaves the machine.
   documentation is reproducible, and defects are recorded against it as they appear.
 - **A `FILES:` routing header.** Having the conductor list editable files per dispatch was
   rejected as over-engineering that takes decisions away from the sub-agent.
+- **Effects on the conductor family** for `retarget` and the skip outcomes. Rejected: the
+  conductor family's `undecidable` is `escalate` and cannot be remapped, so every unsure
+  model or shortcut answer would block a dispatch (decision 24, D15).
+- **Resolving model tokens in the hook host.** Rejected: the hook host may not reference the
+  Squad assemblies, and the bundled matrix is not on disk at hook time (decision 27, D16).
+- **The in-flight ledger as the text store.** Rejected: the ledger is digest-only by contract
+  (decision 29, D24).
 
 ## Consequences
 
@@ -194,14 +258,28 @@ fact outside those declared states leaves the machine.
   `docs validate --merge-ready` reported `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2
   PRs. Each phase PR targeted the long-lived integration branch `integration/kyber-arbiter`,
   and one merge to `main` follows the closeout, which archived the specification.
+- **Phase 1 is a foundation, not a behaviour change.** It ships the trigger families, effects,
+  shadow mechanism, configuration keys, the model-targets table and the per-harness capability
+  declaration. Only `KW-ARB-LENS-002` changes behaviour. No secondary trigger is derived, no
+  rule changes a model, and the hook writes no model field. Each later phase adds its rules
+  and derivations under the decisions above.
+- **Model targets are a persisted file contract.** The table's schema id
+  `kyber-arbiter.model-targets/v1` and its path per scope are permanent once a release
+  writes them.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (19 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+Rule ids `KW-ARB-*` (32 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
 `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
 record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
-headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, and `REFUTE:` are permanent.
+headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, `REFUTE:`, and `REVIEW_RUN:` are permanent.
 Renaming one silently un-suppresses host tuning, receipts, and logs keyed on it.
+
+The savings phase 1 adds `KW-ARB-LENS-002`, `KW-ARB-CONFIG-012` to `KW-ARB-CONFIG-015`, and
+`KW-ARB-MODEL-001`. The ids `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001` shipped in phase 2. The savings phase 3 adds
+`KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`, `KW-ARB-TRIAGE-001`,
+`KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`, `KW-ARB-TRIM-001` and
+`KW-ARB-COMMENT-001`.
 
 ## Related
 

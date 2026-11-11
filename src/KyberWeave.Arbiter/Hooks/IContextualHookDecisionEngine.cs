@@ -30,6 +30,24 @@ public interface IContextualHookDecisionEngine : IHookDecisionEngine
         string? sessionId = null);
 
     /// <summary>
+    /// Decides a pre-dispatch event that also carries the model the dispatch input names for its
+    /// sub-agent. The default forwards to the overload above and drops the model, so an engine that
+    /// predates the model field keeps compiling and decides as it did.
+    /// </summary>
+    /// <param name="dispatchModel">The <c>model</c> the caller put on the dispatch input, or null when it named none.</param>
+    HookOutcome DecidePreDispatch(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId,
+        string? sessionId,
+        string? dispatchModel = null) =>
+        DecidePreDispatch(harness, caller, target, prompt, config, context, toolCallId, sessionId);
+
+    /// <summary>
     /// Decides a post-dispatch (return) event with the harness and repository context.
     /// <paramref name="prompt"/> is the original dispatch prompt, best effort, so the
     /// return classifies to the same trigger family as its dispatch.

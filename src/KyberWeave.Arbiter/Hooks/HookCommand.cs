@@ -126,7 +126,8 @@ public sealed class HookCommand
                 log,
                 adapter.ObservesReturns,
                 effectiveHome,
-                scope);
+                scope,
+                adapter.ModelOverride);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {

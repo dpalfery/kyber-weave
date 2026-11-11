@@ -3,7 +3,25 @@ namespace KyberWeave.Core.Arbiter;
 /// <summary>One dispatch's outcome inside an <see cref="ArbiterEvaluationResult"/>.</summary>
 /// <param name="Trigger">The classified trigger, or null when the dispatch passed with none.</param>
 /// <param name="Outcome">The trigger's combined effect.</param>
-public sealed record ArbiterDispatchEvaluation(string? Trigger, string Outcome);
+public sealed record ArbiterDispatchEvaluation(string? Trigger, string Outcome)
+{
+    /// <summary>The secondary triggers evaluated behind this dispatch, in derivation order.</summary>
+    public IReadOnlyList<ArbiterSecondaryEvaluation> Secondary { get; init; } = [];
+}
+
+/// <summary>One secondary trigger's outcome behind a primary dispatch.</summary>
+/// <remarks>
+/// A secondary outcome is neutral when its rules were shadowed or the primary did not allow:
+/// it then reports the family's neutral effect, and the would-be effect lives on its record.
+/// </remarks>
+/// <param name="Trigger">The secondary trigger.</param>
+/// <param name="Outcome">The secondary trigger's combined effect after shadow and suppression.</param>
+/// <param name="Payload">The answers the secondary rules gave, comma-separated, or null when none did.</param>
+public sealed record ArbiterSecondaryEvaluation(string Trigger, string Outcome, string? Payload)
+{
+    /// <summary>The decision record this secondary wrote, which a substitute digest names.</summary>
+    public string? DecisionId { get; init; }
+}
 
 /// <summary>
 /// The evaluator's answer for one event: the event-level outcome and every
