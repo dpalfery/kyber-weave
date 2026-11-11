@@ -32,6 +32,7 @@ public static partial class SeatOutputParser
     private const string SkippedPrefix = "SKIPPED:";
     private const string IndexFallbackPrefix = "Index fallback:";
     private const string DiscoveryPrefix = "Discovery:";
+    private const string InputSitesPrefix = "Input sites:";
     private const string AttestationPrefix = "REVIEW.md sections checked:";
     private const char FenceCharacter = '`';
     private const int MinimumFenceLength = 3;
@@ -44,6 +45,16 @@ public static partial class SeatOutputParser
         "id", "lens", "severity", "confidence", "file", "line", "excerpt", "claim", "evidence",
         "failure_scenario", "failureScenario", "suggestion"
     };
+
+    /// <summary>
+    /// A list item that opens a finding with any field the seat schema defines. Built from <see cref="TextFields"/>
+    /// plus <c>guidance</c>, the one schema field the parser does not read as text, so a field the reader accepts
+    /// can never open a list this check misses. A prose bullet such as <c>- Note: ...</c> names no schema field and
+    /// stays prose.
+    /// </summary>
+    private static readonly Regex FindingItemStart = new(
+        @"^\s*-\s+(" + string.Join('|', TextFields.Append("guidance").Select(Regex.Escape)) + "):",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
 
     /// <summary>Parses the text a seat wrote for one lens.</summary>
     /// <param name="lens">The lens the seat ran, taken from the file name.</param>
@@ -62,6 +73,7 @@ public static partial class SeatOutputParser
         string? attestation = null;
         string? indexFallback = null;
         SeatDiscovery? discovery = null;
+        SeatInputSites? inputSites = null;
         SeatOutputKind? declared = null;
         int declaredLine = 0;
         List<SeatLine> body = [];
@@ -78,6 +90,8 @@ public static partial class SeatOutputParser
                 indexFallback = trimmed[IndexFallbackPrefix.Length..].Trim();
             else if (line.StartsWith(DiscoveryPrefix, StringComparison.Ordinal))
                 discovery = ReadDiscovery(trimmed);
+            else if (line.StartsWith(InputSitesPrefix, StringComparison.Ordinal))
+                inputSites = ReadInputSites(trimmed);
             else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
                      || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
             {
@@ -108,7 +122,7 @@ public static partial class SeatOutputParser
         // findings, so it is refused.
         if (declared is { } kind)
         {
-            if (yaml.Find(line => FindingItemStart().IsMatch(line.Text)) is { } item)
+            if (yaml.Find(line => FindingItemStart.IsMatch(line.Text)) is { } item)
             {
                 string outcome = kind == SeatOutputKind.NoFindings ? NoFindingsPrefix : SkippedPrefix;
                 int column = item.Text.IndexOf('-', StringComparison.Ordinal) + 1;
@@ -118,7 +132,7 @@ public static partial class SeatOutputParser
                     "not both.");
             }
 
-            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery);
+            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites);
         }
 
         IReadOnlyList<ReviewFinding> findings = ReadFindings(lens, yaml);
@@ -129,7 +143,8 @@ public static partial class SeatOutputParser
                 $"'{SkippedPrefix}' line.");
         }
 
-        return new SeatOutput(lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery);
+        return new SeatOutput(
+            lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery, inputSites);
     }
 
     /// <summary>
@@ -143,6 +158,9 @@ public static partial class SeatOutputParser
     /// </remarks>
     private static List<SeatLine> YamlLines(List<SeatLine> body)
     {
+        // The correctness seat writes its input-site table as Markdown before the list. A table row starts at
+        // column 0 with '|'; a pipe inside a field's block scalar is indented under the field, so it stays content.
+        body = body.FindAll(line => !line.Text.StartsWith('|'));
         if (!body.Exists(line => FenceLength(line.Text) > 0))
             return body;
 
@@ -196,6 +214,20 @@ public static partial class SeatOutputParser
         }
 
         return new SeatDiscovery(codeGraph, docs, reads);
+    }
+
+    /// <summary>The counts on an <c>Input sites:</c> line, or null when the line is not in the agreed shape.</summary>
+    private static SeatInputSites? ReadInputSites(string line)
+    {
+        Match match = InputSitesPattern().Match(line);
+        if (!match.Success
+            || !int.TryParse(match.Groups["traced"].Value, CultureInfo.InvariantCulture, out int traced)
+            || !int.TryParse(match.Groups["none"].Value, CultureInfo.InvariantCulture, out int filesWithNone))
+        {
+            return null;
+        }
+
+        return new SeatInputSites(traced, filesWithNone);
     }
 
     /// <summary>
@@ -359,7 +391,16 @@ public static partial class SeatOutputParser
     }
 
     /// <summary>A value from the seat's text, cut short so a runaway value cannot flood a diagnostic.</summary>
-    private static string Clip(string value) => value.Length <= 200 ? value : value[..200] + "…";
+    /// <remarks>The cut backs off one character rather than split a surrogate pair.</remarks>
+    private static string Clip(string value)
+    {
+        const int limit = 200;
+        if (value.Length <= limit)
+            return value;
+
+        int cut = char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit;
+        return value[..cut] + "…";
+    }
 
     /// <summary>The trimmed text of a scalar field, or null when the field is absent or empty.</summary>
     private static string? Optional(SeatItem item, string key, string where)
@@ -379,11 +420,10 @@ public static partial class SeatOutputParser
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
     private static partial Regex DiscoveryPattern();
 
-    /// <summary>A list item that opens a finding with any field of the seat schema.</summary>
     [GeneratedRegex(
-        @"^\s*-\s+(id|lens|severity|confidence|file|line|excerpt|claim|evidence|failure_scenario|suggestion|guidance):",
+        @"^Input sites:\s*(?<traced>\d+)\s+traced\s*,\s*(?<none>\d+)\s+files?\s+with\s+none",
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
-    private static partial Regex FindingItemStart();
+    private static partial Regex InputSitesPattern();
 }
 
 /// <summary>One line of a seat's output and its one-based line number in the file.</summary>
@@ -434,13 +474,20 @@ public sealed class SeatOutputException : FormatException
 /// <param name="Attestation">The seat's attestation line, when it wrote one.</param>
 /// <param name="IndexFallback">Why the seat fell back from the code index, when it did.</param>
 /// <param name="Discovery">How the seat found its evidence, when it recorded it.</param>
+/// <param name="InputSites">The correctness seat's count of the input sites it traced, when it wrote a readable one.</param>
 public sealed record SeatOutput(
     string Lens,
     SeatOutputKind Kind,
     IReadOnlyList<ReviewFinding> Findings,
     string? Attestation,
     string? IndexFallback,
-    SeatDiscovery? Discovery);
+    SeatDiscovery? Discovery,
+    SeatInputSites? InputSites = null);
+
+/// <summary>The correctness seat's <c>Input sites: N traced, M files with none</c> closing line.</summary>
+/// <param name="Traced">Input sites the seat traced through the hostile-input classes.</param>
+/// <param name="FilesWithNone">Changed code files the seat found no input site in.</param>
+public sealed record SeatInputSites(int Traced, int FilesWithNone);
 
 /// <summary>The outcome a council seat reports.</summary>
 public enum SeatOutputKind

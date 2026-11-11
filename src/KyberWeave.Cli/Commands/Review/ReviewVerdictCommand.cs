@@ -35,6 +35,8 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     private const string DiscoveryGap = "KW-REVIEW-044";
     private const string HandBuiltFindings = "KW-REVIEW-045";
     private const string RefutationCandidates = "KW-REVIEW-046";
+    private const string InputSitesMissing = "KW-REVIEW-047";
+    private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
     private const string Subject = "review";
@@ -253,7 +255,10 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         }
 
         foreach (SeatOutput seat in seats.Where(seat => seat.Kind is not SeatOutputKind.Skipped))
+        {
             ReportDiscoveryGap(seat, report);
+            ReportInputSitesGap(seat, report);
+        }
 
         return !report.HasErrors;
     }
@@ -295,6 +300,28 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             $"{seat.Lens}.md {gap}. The verdict does not depend on it.",
             seat.Lens,
             Hint: "A seat looks code up through the index first, and records its counts on a Discovery line."));
+    }
+
+    /// <summary>
+    /// Warns when the correctness seat ran and wrote no readable <c>Input sites:</c> line, so a reader can see that
+    /// no one recorded tracing the hostile inputs of each parse site. Never a verdict input.
+    /// </summary>
+    /// <remarks>
+    /// Raised whenever the correctness seat ran, not only when a code file changed: the seat folder carries no
+    /// changed paths, and a seat with no input site in any file still says so as <c>0 traced, N files with none</c>.
+    /// </remarks>
+    private static void ReportInputSitesGap(SeatOutput seat, DiagnosticReport report)
+    {
+        if (!string.Equals(seat.Lens, CorrectnessLens, StringComparison.Ordinal) || seat.InputSites is not null)
+            return;
+
+        report.Add(new Diagnostic(
+            InputSitesMissing,
+            Severity.Warning,
+            $"{seat.Lens}.md wrote no readable 'Input sites: N traced, M files with none' line, so its input-site " +
+            "tracing is unrecorded. The verdict does not depend on it.",
+            seat.Lens,
+            Hint: "The correctness seat writes its input-site table and closes with 'Input sites:' above 'Discovery:'."));
     }
 
     private static Dictionary<string, string> ParseNotSeated(IReadOnlyList<string> values, DiagnosticReport report)

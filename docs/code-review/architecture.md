@@ -323,6 +323,9 @@ the policy below:
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
 warning (`KW-REVIEW-044`); it is never a verdict input.
+The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
+`Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that
+ran and wrote no readable `Input sites:` line draws a warning (`KW-REVIEW-047`), never a verdict input.
 
 ```mermaid
 flowchart TD

@@ -241,6 +241,7 @@ failed gate.
 | `KW-REVIEW-044` | Warning | A seat that reported findings or no findings wrote no `Discovery:` line, read files directly with no code index lookup and no `Index fallback:` line, or named an `Index fallback:` mode the seat contract does not define. Never a verdict input |
 | `KW-REVIEW-045` | Warning | `review verdict --findings` read a hand-built findings file, which skips the lens coverage check. Use `--seats` |
 | `KW-REVIEW-046` | Info | The accepted critical and major finding ids, the refutation candidates. Listed only when no blocking gate that ran to a result failed |
+| `KW-REVIEW-047` | Warning | The `correctness` seat reported findings or `NO FINDINGS:` and wrote no readable `Input sites: N traced, M files with none` line, so its tracing of hostile inputs per parse site is unrecorded. A `SKIPPED` seat is exempt. Raised whenever that seat ran, because the seat folder carries no changed paths. A coverage note: never a verdict input |
 
 ### Duplicates — `review duplicates`
 
