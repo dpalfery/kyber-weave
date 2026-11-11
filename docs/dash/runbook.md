@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-10
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
@@ -716,6 +716,22 @@ Two things change on the first launch after an upgrade, both of them deliberate
 The tray now attaches to a running `kyberdash web` server rather than owning one, so if the
 dashboard was already running before the upgrade, the tray joins that server and collection
 continues even after you quit the menu bar.
+
+### 2e.1 Upgrading the store to schema 24 (duplicate record repair)
+
+Schema 24 removes duplicate call records that earlier builds wrote. The first build of this version to open an existing `canon.db` runs it once. That is `dash refresh`, `kyberdash web`, or any other command that opens the store. Back the store up first, as in [§5](#5-store-schema-migration-and-problem-deduplication).
+
+What the upgrade does:
+
+- **Deletes duplicate call rows.** A call read in two refresh windows was stored under two ids. For each call that more than one import wrote, the repair keeps the rows from the latest import and deletes the older hash-backed rows, with their tool rows and provenance rows. A call written by one import is left alone, and so is any row with a native id.
+- **Rebuilds the projection.** The records write marker moves, so the next projection rebuilds all sessions and runs. Nothing else needs running.
+- **Runs once.** A second open finds nothing to delete and changes nothing.
+
+Expected cost. On a 5.6 GB store the scan takes about one to two minutes. `dash refresh` waits for it on its first open. `kyberdash web` runs it in steps that yield, so the engine stays responsive. On a copy of the owner's store measured on 2026-11-10, the 0.1.8-rc.25 build ran out of memory during `dash refresh`. The fixed build's first `dash refresh` removed 15,627 duplicate call rows and 6,222 tool rows, exited 0 in 148 seconds, and peaked at 4.1 GB resident. That run had no harness sources readable. With the sources readable and unchanged, the first refresh after the repair took 203 seconds, peaked at 4.8 GB resident and added no rows, and a second refresh changed no row counts.
+
+The file does not shrink. Freed pages are reused for new rows. Reclaiming them on disk is a separate step, not part of the upgrade.
+
+Rolling back. A build older than this one refuses a schema 24 store. To return to an older build, restore the backup you took before the upgrade.
 
 ### 2f. Seeing a turn's raw packet
 

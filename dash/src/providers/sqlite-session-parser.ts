@@ -355,8 +355,8 @@ export function createSqliteSessionParser(
           seenKeys.add(dedupKey)
           yieldCount++
           yield config.pairingIdFromMessageId === true
-            ? { ...call, pairingId: msg.id }
-            : call
+            ? { ...call, pairingId: msg.id, recordIdentity: msg.id }
+            : { ...call, recordIdentity: msg.id }
         }
 
         if (yieldCount === 0 && messages.length > 0) {

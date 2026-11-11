@@ -1813,3 +1813,61 @@ describe('session title stamping', () => {
     expect((records[0]?.raw as Record<string, unknown> | undefined)?.[SESSION_LABEL_KEY]).toBe(long.slice(0, 200))
   })
 });
+
+// ---------------------------------------------------------------------------
+// Record identity is window-independent
+// ---------------------------------------------------------------------------
+
+describe('record identity is window-independent', () => {
+  const T1 = '2026-08-29T12:00:00.000Z'
+  const T2 = '2026-08-29T12:00:30.000Z'
+  const HASH_SPAN = /^synth:[^:]+:s-hash:[0-9a-f]{16}$/
+
+  // Opaque keys do not start with `${provider}:${sessionId}:` and carry no
+  // turnId, so each record has no stable native id and falls back to the hash.
+  // The batch index is the only thing that can differ between windows.
+  function hashBacked(key: string, timestamp: string, sessionId = 's-hash'): ParsedProviderCall {
+    return call({ provider: 'claude', sessionId, timestamp, deduplicationKey: `opaque-${key}`, tools: [] })
+  }
+
+  const other = hashBacked('other', T1, 's-other')
+  const a = hashBacked('A', T1)
+  const b = hashBacked('B', T2)
+  const c = hashBacked('C', T2)
+
+  it('synthesize: a hash-backed call keeps its span id when earlier calls leave the batch', () => {
+    const wide = new Synthesizer().synthesize([other, a, b, c]).map((record) => record.spanId)
+    const narrow = new Synthesizer().synthesize([b, c]).map((record) => record.spanId)
+
+    expect(wide[2], 'B in the wide batch').toMatch(HASH_SPAN)
+    expect(narrow, 'B and C after the earlier calls left the window').toEqual(wide.slice(2))
+  })
+
+  it('synthesize: two calls at the same instant keep distinct span ids', () => {
+    const [spanB, spanC] = new Synthesizer().synthesize([b, c]).map((record) => record.spanId)
+
+    expect(spanB).not.toBe(spanC)
+  })
+
+  it('synthesizeEnvelopes: a hash-backed call keeps its span id when earlier calls leave the batch', () => {
+    const env = (parsed: ParsedProviderCall) => envelope({ nativeRecordId: undefined, call: parsed })
+    const wide = new Synthesizer()
+      .synthesizeEnvelopes([env(other), env(a), env(b), env(c)])
+      .map((record) => record.spanId)
+    const narrow = new Synthesizer()
+      .synthesizeEnvelopes([env(b), env(c)])
+      .map((record) => record.spanId)
+
+    expect(wide[2], 'B in the wide batch').toMatch(HASH_SPAN)
+    expect(narrow, 'B and C after the earlier calls left the window').toEqual(wide.slice(2))
+  })
+
+  it('synthesizeEnvelopes: two calls at the same instant keep distinct span ids', () => {
+    const env = (parsed: ParsedProviderCall) => envelope({ nativeRecordId: undefined, call: parsed })
+    const [spanB, spanC] = new Synthesizer()
+      .synthesizeEnvelopes([env(b), env(c)])
+      .map((record) => record.spanId)
+
+    expect(spanB).not.toBe(spanC)
+  })
+})

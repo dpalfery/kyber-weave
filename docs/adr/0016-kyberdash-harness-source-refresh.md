@@ -4,7 +4,7 @@ title: Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refr
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-11-10
 ---
 
 # ADR 0016: Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refresh
@@ -29,6 +29,14 @@ Amended 2026-10-16: decision 1's command name is corrected. The public command i
 `kyberdash dash refresh` — the `dash refresh` leaf on the KyberDash CLI — and not
 `kyber-weave dash refresh`, which the separate `kyber-weave` binary does not register. The
 original text named the wrong binary; no behaviour changes, and decisions 2–8 are unaffected.
+
+Amended 2026-11-10 ([plan](../archive/plans/2026-11-10-kyberdash-refresh-out-of-memory.md)): the repair contract gains three rules for calls that have no native id, and decision 7's stable identity now holds for them too. No new decision is recorded; this amendment is the record.
+
+- **Window-independent hash identity.** A hash-backed record's ordinal is its occurrence index among the batch's calls with the same native session id and timestamp, not its index in the windowed batch. A re-read of the same call gets the same id whatever the history window starts at. No parser contract version changes: a unit whose source changed is re-read under the new ids, and an unchanged unit keeps its old ids.
+- **Supersede on commit.** `CanonStore.commitSourceUnit` runs in one transaction. Before it writes, it deletes existing `llm.invoke` rows of the same harness and source key whose session, timestamp and name match a call in the batch, whose span is not in the batch, and whose stored payload is hash-backed (`raw.provenance.recordDigest`). Their `tool.invoke` children and provenance rows go with them. Rows with a stable native id are never touched.
+- **Schema 24 repair.** A store on schema 23 is repaired once, when a build of this version opens it. In each group of call rows that more than one import wrote (same harness, session, timestamp and name), it keeps the latest import's rows and deletes the older hash-backed rows with their children and provenance. A group written by one import is left alone. Older builds refuse a schema 24 store, as they do for every schema step.
+
+Decision 6's additive rule is qualified by the supersede rule: deletions are limited to stale hash-backed copies. The raw payload of a row that stays is still never rewritten by a refresh; a deleted stale copy's payload goes with its row. The architecture passage is [record identity and the window-independent ordinal](../dash/architecture.md#record-identity-and-the-window-independent-ordinal), and the upgrade steps are in the [runbook](../dash/runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair).
 
 ## Context
 

@@ -28,7 +28,7 @@ import type { CanonicalRecord, ContentPart, CostBlock, ExecutionRow, ExecutionTr
 import type { DetectorId, Finding, FindingConfidence, FindingEvidenceLink } from '../analysis/findings.js'
 import { calculateCalibrationCurve, type CalibrationCurveResult, type PredictionRecord } from '../analysis/calibration.js'
 import { DETECTOR_VERSION, METADATA_SQL, RECORDS_WRITE_MARKER_KEY, SCHEMA_SQL, SCHEMA_VERSION, SESSION_TURN_TABLE_SQL, WAL_SIZE_LIMIT_BYTES, createSessionDenormIndex, normalizeHistoryWeeks, normalizeIngestSource, schemaVersionRefusal, toRefreshRunRow } from './store-schema.js'
-import { MIGRATIONS, type MigrationOptions, type SessionDerivedColumns, escapeLike, materializeContextLimitSource, problemIdentity, sessionColumnsMatch, sessionTurnsMatch, splitSessionTurns, storedCount, storedText } from './store-migrations.js'
+import { MIGRATIONS, type MigrationOptions, type SessionDerivedColumns, deleteSupersededSpans, escapeLike, hasRecordDigest, materializeContextLimitSource, problemIdentity, sessionColumnsMatch, sessionTurnsMatch, splitSessionTurns, storedCount, storedText } from './store-migrations.js'
 import { type CandidateRow, DEFAULT_PENDING_PAGE_BYTES, DEFAULT_QUARANTINE_PAGE_BYTES, type ExecutionDbRow, type FindingDbRow, type FindingsListOptions, type HarnessRollupDbRow, type IngestLogEntry, type MetricPointRow, type ModelCallCandidate, type PendingInteractionPromptRow, type PendingLogEntry, type PendingLogMetadata, type PredictionDbRow, type ProjectedSessionRecord, type QuarantineEntry, type QuarantineEntryDetail, type QuarantineMetadata, type QuarantinedLog, type RecordRow, type RunDbRow, type SessionDbRow, type SpanProblem, UPSERT_METRIC_POINT_SQL, UPSERT_RECORD_SQL, compressRaw, decompressRaw, materializeSessionSummary, metadataChangeCount, metricPointDrafts, problemsHarnessWhere, projectedAttributes, quarantineHarnessWhere, readSessionSummaryFigures, systemPromptTextsFromContentColumns, text, toCandidate, toExecutionRow, toFinding, toHarnessRollupRow, toMetricPointRow, toPrediction, toQuarantineEntry, toRecord, toRunRow, toSessionRow, toSpanProblem } from './store-rows.js'
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -537,10 +537,57 @@ export class CanonStore {
     checkpoint: SourceCheckpoint
   }): void {
     this.writeRecords(() => {
+      this.deleteSupersededCopies(input.records, input.checkpoint)
       for (const record of input.records) this.writeRecord(record)
       for (const row of input.provenance) this.writeProvenance(row)
       this.writeCheckpoint(input.checkpoint)
     })
+  }
+
+  /**
+   * Delete the hash-backed copies of the batch's model calls that an earlier
+   * refresh left under other ids: the same source unit, the same session,
+   * instant and name as a call in the batch, a span id outside the batch, and
+   * a record digest in the raw payload. Runs inside the commit's transaction.
+   */
+  private deleteSupersededCopies(records: readonly CanonicalRecord[], checkpoint: SourceCheckpoint): void {
+    const batchIds = new Set(records.map((record) => record.spanId))
+    // A source unit can hold several sessions, so the instant alone does not
+    // identify a call: the session and the name must match too, as they do in
+    // the schema 24 repair's grouping.
+    const callKey = (sessionId: string | null, timestamp: string, name: string): string =>
+      JSON.stringify([sessionId, timestamp, name])
+    const timestamps = new Set<string>()
+    const batchCalls = new Set<string>()
+    for (const record of records) {
+      if (record.op !== 'llm.invoke') continue
+      const timestamp = record.timestamp instanceof Date ? record.timestamp.toISOString() : record.timestamp
+      timestamps.add(timestamp)
+      batchCalls.add(callKey(record.sessionId ?? null, timestamp, record.name))
+    }
+    if (timestamps.size === 0) return
+    const find = this.db.prepare(
+      `SELECT r.span_id AS span_id, r.trace_id AS trace_id, r.session_id AS session_id, r.name AS name, r.raw AS raw
+         FROM record_provenance p JOIN records r ON r.span_id = p.span_id
+        WHERE p.harness_id = ? AND p.source_key = ? AND r.op = 'llm.invoke' AND r.timestamp = ?`,
+    )
+    const doomed: { spanId: string; traceId: string | null }[] = []
+    for (const timestamp of timestamps) {
+      const rows = find.all(checkpoint.harnessId, checkpoint.sourceKey, timestamp) as {
+        span_id: string
+        trace_id: string | null
+        session_id: string | null
+        name: string
+        raw: unknown
+      }[]
+      for (const row of rows) {
+        if (batchIds.has(row.span_id)) continue
+        if (!batchCalls.has(callKey(row.session_id, timestamp, row.name))) continue
+        if (!hasRecordDigest(row.raw)) continue
+        doomed.push({ spanId: row.span_id, traceId: row.trace_id })
+      }
+    }
+    deleteSupersededSpans(this.db, doomed)
   }
 
   /**
@@ -1521,6 +1568,28 @@ export class CanonStore {
       )
       .all(key) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * One session's records as a stream, in timestamp order: the rows of
+   * `recordsForSession`, produced one at a time so a caller that finishes with
+   * each record before taking the next holds one at a time.
+   */
+  *iterateRecordsForSession(key: string): Generator<CanonicalRecord> {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+      )
+      .iterate(key) as IterableIterator<RecordRow>
+    for (const row of rows) yield toRecord(row)
+  }
+
+  /** `recordsForShare` as a stream: one session's records of one canonical harness. */
+  *iterateRecordsForShare(key: string, harness: string): Generator<CanonicalRecord> {
+    const canonical = normalizeHarnessName(harness)
+    for (const record of this.iterateRecordsForSession(key)) {
+      if (canonicalHarnessId(record.harness) === canonical) yield record
+    }
   }
 
   /**

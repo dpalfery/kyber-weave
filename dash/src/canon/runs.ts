@@ -14,7 +14,7 @@ import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measu
 import { measuredCount } from './measured.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
-import { CanonStore, reduceRecordPayloads } from './store.js'
+import { CanonStore, projectedAttributes, reduceRecordPayloads } from './store.js'
 import { notMeasurable } from './types.js'
 import type {
   CanonicalRecord,
@@ -684,18 +684,24 @@ export async function buildRuns(
     // full records, which is the expensive part of this phase.
     await yieldToLoop()
     // Outcome derivation reads content, parts and raw, so the full records are
-    // loaded here — one run at a time — and released before the next run.
-    const outcomeRecords = executions.flatMap((e) => {
-      const sessionId = e.sessionId ?? e.executionId
-      const share = identities.shareOf(sessionId)
-      const records =
-        share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
-      // The outcome derivation reads a few attributes out of each payload, and
-      // a run's payloads are released one record at a time.
-      reduceRecordPayloads(records)
-      return records
-    })
-    store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
+    // streamed here: one record at a time, its payload reduced as it is read
+    // and its parts released by the derivation before the next is taken.
+    const outcomeRecords = function* (): Generator<CanonicalRecord> {
+      for (const e of executions) {
+        const sessionId = e.sessionId ?? e.executionId
+        const share = identities.shareOf(sessionId)
+        const stream =
+          share === undefined
+            ? store.iterateRecordsForSession(sessionId)
+            : store.iterateRecordsForShare(share.key, share.harness)
+        for (const record of stream) {
+          // The outcome derivation reads a few attributes out of each payload.
+          record.raw = projectedAttributes(record.raw)
+          yield record
+        }
+      }
+    }
+    store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords()) })
     builtRunIds.add(run.runId)
 
     // Tag each candidate with the resolved runId before linking

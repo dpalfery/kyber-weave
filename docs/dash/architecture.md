@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-10
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
@@ -1207,6 +1207,22 @@ untouched: re-keying on `harness` for every record would re-stamp other split su
 itself must not be renamed, because `nativeRecordIdentity` slices the deduplication key on the
 provider prefix.
 
+### Record identity and the window-independent ordinal
+
+`nativeRecordIdentity` (`dash/src/synth/synth.ts`) picks a call's record identity from the first of these that exists:
+
+1. the envelope's `nativeRecordId`, which `toEnvelope` sets from `turnId`;
+2. `turnId`;
+3. `ParsedProviderCall.recordIdentity` (`dash/src/providers/types.ts`), an identity-only field. Kilo sets it to the message id on every assistant call, in root and child sessions. Pairing and twin collapse never read it, so `pairingId` and `collapseKey` are unchanged;
+4. the part of the deduplication key after `<provider>:<sessionId>:`;
+5. otherwise a hash of session, timestamp, `llm.invoke` and an ordinal.
+
+Kilo child-session (subagent) messages used to reach step 5. Their key starts with the child's session id, not the root's, so the prefix rule in step 4 missed.
+
+The hash's ordinal is the call's occurrence index among the batch's kept calls with the same harness, the same native session id and the same timestamp, in source order (`synthesizeEnvelopes` and `synthesize` in `synth.ts`). It used to be the call's index in the whole windowed batch. The refresh window is cut by timestamp, so every call that shares a timestamp is either wholly in or wholly out. The ordinal therefore no longer moves when the window's start moves or when another session leaves the batch. Two distinct calls at the same instant still get distinct ids (occurrence 0, 1, …).
+
+Before this change a re-read could mint a new id for the same hash-backed call on each run, and the old row stayed beside it. One Kilo session held 15,136 rows for its calls, up to four copies of each. Commits now supersede stale hash-backed copies, and schema 24 removes the ones already stored: see [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) (amended 2026-11-10) and the [runbook's schema 24 section](runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair).
+
 ## The shared canonical projection
 
 Static dot-folder refresh and live OTLP are two ingress adapters over ONE canonical store,
@@ -1330,6 +1346,12 @@ observed is **split** between them — the plugin rows are its turns, the file r
 counters and, where the transcript has them, its tool calls and duration — and the rule that splits
 it is in
 [the Factory source-precedence rule](#the-factory-source-precedence-rule).
+
+### Run-outcome step memory bound
+
+`buildRuns` (`dash/src/canon/runs.ts`) derives each execution's outcome from its records one at a time. `CanonStore.iterateRecordsForSession` and `iterateRecordsForShare` (`dash/src/canon/store.ts`) yield records from a statement iterator, and `deriveOutcome` (`dash/src/canon/outcome.ts`) accepts any iterable. It reads each record's content and parts in one pass and releases them before the next record. At most one record's inflated parts are live in this step, so its peak memory does not grow with session size. The outcome is the same as for an array of the same records.
+
+The session projection (`buildSessions`) is outside this bound. It keeps a whole session for its twin collapse, so very large sessions still cost memory there. Removing duplicate rows is what keeps them small in practice: on a 5.6 GB store the largest session fell from 15,136 rows to 4,724 after the repair.
 
 ## Normalization layer
 
@@ -1715,6 +1737,8 @@ schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_stat
 schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
 schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22), and
 schema 23 added the metric point's interval start (`metric_point.start_time_unix_nano`) — a column costs a version bump and a migration step where the table's own `CREATE ... IF NOT EXISTS` does not, because a store that already carries the table never gains the column from the `CREATE TABLE`.
+
+Schema 24 removes the duplicate hash-backed call records that earlier refresh windows left behind, once, when a build of this version opens the store. Commits also supersede stale hash-backed copies from then on. See the [runbook's schema 24 section](runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair) and [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing

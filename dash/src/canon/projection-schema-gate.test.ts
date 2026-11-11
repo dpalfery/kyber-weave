@@ -107,7 +107,7 @@ describe('the projection gate watches the store schema version', () => {
 
     // The store carries a different schema version than the last projection
     // saw -- the shape moved under the derived tables.
-    store.setMetadata('schema_version', '24')
+    store.setMetadata('schema_version', '25')
 
     expect(projectionIsCurrent(store)).toBe(false)
   })
@@ -182,7 +182,7 @@ describe('the projection gate watches the store schema version', () => {
     expect(upserts).not.toHaveBeenCalled()
 
     // The store was reshaped: the pass projects again.
-    store.setMetadata('schema_version', '24')
+    store.setMetadata('schema_version', '25')
     upserts.mockClear()
     await runMaintenancePass(store, new Date('2026-10-20T02:00:00.000Z'))
     expect(upserts.mock.calls.length).toBeGreaterThan(0)
