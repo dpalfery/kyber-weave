@@ -253,21 +253,37 @@ public static class ClaudeHookCoverage
         }
     }
 
+    // Reads at most MaxSourceBytes + 1 bytes, so a file that grows after it was listed still costs a bounded
+    // read; one over the cap is not a hook source this check reads.
+    private static string ReadBounded(string path)
+    {
+        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        byte[] buffer = new byte[MaxSourceBytes + 1];
+        int length = 0;
+        int read;
+        while (length < buffer.Length && (read = stream.Read(buffer, length, buffer.Length - length)) > 0)
+        {
+            length += read;
+        }
+
+        if (length > MaxSourceBytes)
+        {
+            throw new InvalidDataException($"'{path}' is larger than {MaxSourceBytes} bytes.");
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer, 0, length);
+    }
+
     private static bool Fires(string path, string eventName, string toolName)
     {
         try
         {
-            if (new FileInfo(path).Length > MaxSourceBytes)
-            {
-                return false;
-            }
-
             IReadOnlyList<HookGroup> groups = string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase)
                 ? FrontmatterGroups(path, eventName)
                 : JsonGroups(path, eventName);
             return groups.Any(group => Matches(group.Matcher, toolName) && group.Commands.Any(IsArbiterClaudeHook));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or YamlException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or YamlException or InvalidDataException)
         {
             // A source that cannot be read or parsed does not fire. It must not stop the dispatch.
             return false;
@@ -276,7 +292,7 @@ public static class ClaudeHookCoverage
 
     private static IReadOnlyList<HookGroup> JsonGroups(string path, string eventName)
     {
-        JsonNode? root = JsonNode.Parse(File.ReadAllText(path));
+        JsonNode? root = JsonNode.Parse(ReadBounded(path));
         if (root is not JsonObject document
             || document["hooks"] is not JsonObject hooks
             || hooks[eventName] is not JsonArray containers)
@@ -312,7 +328,7 @@ public static class ClaudeHookCoverage
 
     private static IReadOnlyList<HookGroup> FrontmatterGroups(string path, string eventName)
     {
-        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(File.ReadAllText(path));
+        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(ReadBounded(path));
         if (!frontmatter.HasFrontmatter)
         {
             return [];

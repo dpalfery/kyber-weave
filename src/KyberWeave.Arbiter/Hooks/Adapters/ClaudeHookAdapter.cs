@@ -144,7 +144,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     {
         string? phase = DispatchPhase(GetString(payload, "hook_event_name"), GetString(payload, "tool_name"));
         string? toolUseId = GetString(payload, "tool_use_id");
-        return phase is null || string.IsNullOrWhiteSpace(toolUseId)
+        return phase is null || string.IsNullOrWhiteSpace(toolUseId) || toolUseId.Length > DispatchClaim.MaxClaimableIdLength
             ? null
             : new DispatchClaimKey(toolUseId, phase);
     }

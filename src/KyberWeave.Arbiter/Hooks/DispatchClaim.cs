@@ -33,9 +33,13 @@ internal static class DispatchClaim
     private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
     private static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
 
-    // A tool use id is a short opaque string. Only this many characters of a longer one are hashed, so an
-    // oversized value in a hook payload cannot cost more than a bounded hash.
-    private const int MaxHashedIdLength = 4096;
+    /// <summary>
+    /// The longest <c>tool_use_id</c> that can be claimed. A longer value is not an id the harness sends, so
+    /// a dispatch carrying one is evaluated without a claim rather than hashed.
+    /// </summary>
+    internal const int MaxClaimableIdLength = 256;
+
+    private const int MaxSafeIdLength = 128;
     private const string PruneMarker = ".last-prune";
 
     private static readonly Regex SafeIdPattern = new(
@@ -57,16 +61,19 @@ internal static class DispatchClaim
         string temp = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
         try
         {
+            // A failure to write the temporary file propagates: the caller evaluates without a claim.
             File.WriteAllText(temp, owner + "\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(temp, path, overwrite: false);
-            return true;
-        }
-        catch (IOException) when (ReadOwner(projectRoot, key) is not null)
-        {
-            // Another hook's claim is in place with its owner written, so that owner decides what this
-            // hook does. Any other failure (a full disk, a path too long) propagates, and the caller
-            // evaluates the dispatch without a claim instead of treating it as covered.
-            return false;
+            try
+            {
+                File.Move(temp, path, overwrite: false);
+                return true;
+            }
+            catch (IOException) when (ReadOwner(projectRoot, key) is not null)
+            {
+                // Another hook's claim is in place with its owner written, so that owner decides what
+                // this hook does. Any other move failure propagates for the same reason.
+                return false;
+            }
         }
         finally
         {
@@ -118,13 +125,11 @@ internal static class DispatchClaim
 
     internal static string ClaimPath(string projectRoot, DispatchClaimKey key)
     {
-        string id = SafeIdPattern.IsMatch(key.ToolUseId)
+        string id = key.ToolUseId.Length <= MaxSafeIdLength && SafeIdPattern.IsMatch(key.ToolUseId)
             ? key.ToolUseId
-            : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Bounded(key.ToolUseId))));
+            : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key.ToolUseId)));
         return Path.Combine(projectRoot, "artifacts", "arbiter", "claims", $"{id}.{key.Phase}");
     }
-
-    private static string Bounded(string id) => id.Length > MaxHashedIdLength ? id[..MaxHashedIdLength] : id;
 
     // Pruning is housekeeping: a file that cannot be deleted now is retried on the next claim, and it
     // must not stop the dispatch that is being claimed.
