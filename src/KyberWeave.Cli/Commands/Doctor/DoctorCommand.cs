@@ -42,9 +42,9 @@ public sealed class DoctorCommand : Command<DoctorSettings>
     /// <summary>The MCP executable. Null uses <see cref="DefaultMcpExecutable"/>.</summary>
     internal string? McpExecutable { get; init; }
 
-    /// <summary>How many of the three mutually exclusive mode options the caller gave.</summary>
+    /// <summary>How many of the mutually exclusive mode options the caller gave: check, provision, ensure and the hook's post-checkout mode.</summary>
     private static int ModesRequested(DoctorSettings settings) =>
-        (settings.Check ? 1 : 0) + (settings.Provision ? 1 : 0) + (settings.Ensure ? 1 : 0);
+        (settings.Check ? 1 : 0) + (settings.Provision ? 1 : 0) + (settings.Ensure ? 1 : 0) + (settings.PostCheckout ? 1 : 0);
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, DoctorSettings settings, CancellationToken cancellationToken)
@@ -53,7 +53,7 @@ public sealed class DoctorCommand : Command<DoctorSettings>
 
         if (ModesRequested(settings) > 1)
         {
-            Console.Error.WriteLine("kyber-weave: error: choose one of --check, --provision or --ensure, not more than one.");
+            Console.Error.WriteLine("kyber-weave: error: choose one of --check, --provision, --ensure or --post-checkout, not more than one.");
             return 2;
         }
 
@@ -69,7 +69,9 @@ public sealed class DoctorCommand : Command<DoctorSettings>
 
         DoctorMode mode;
         bool hint = false;
-        if (settings.Check)
+        if (settings.PostCheckout)
+            mode = DoctorMode.Ensure;
+        else if (settings.Check)
             mode = DoctorMode.Check;
         else if (settings.Ensure)
             mode = DoctorMode.Ensure;
@@ -103,7 +105,10 @@ public sealed class DoctorCommand : Command<DoctorSettings>
         }
 
         IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(options.IndexTimeout);
-        DoctorReport report = RepositoryDoctor.Run(root, mode, options, executor, environment);
+        // The hook's own mode skips the MCP and Copilot probes and installs nothing, so it is routed apart from the doctor run.
+        DoctorReport report = settings.PostCheckout
+            ? RepositoryDoctor.RunPostCheckout(root, options, executor)
+            : RepositoryDoctor.Run(root, mode, options, executor, environment);
 
         if (hint && !settings.Json)
             Console.Out.WriteLine(NonInteractiveHint);

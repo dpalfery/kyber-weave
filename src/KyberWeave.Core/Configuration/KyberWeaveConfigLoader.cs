@@ -19,6 +19,9 @@ public static class KyberWeaveConfigLoader
     /// <summary>The repository setting a run reads to decide whether a broken tool stops it.</summary>
     private const string StopOnToolFailureKey = "stop-on-tool-failure";
 
+    /// <summary>The repository setting the git post-checkout hook reads to decide whether a new worktree is indexed.</summary>
+    private const string WorktreeIndexHookKey = "worktree-index-hook";
+
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
     /// <c>working-directory</c> is refused; use <see cref="Load(string, string?)"/> for that.
@@ -254,8 +257,31 @@ public static class KyberWeaveConfigLoader
                 ReviewConfigLoader.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
-            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
+            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook)
         };
+    }
+
+    /// <summary>
+    /// Reads the top-level <c>worktree-index-hook</c> setting. Absent means on, so a new worktree is indexed by default.
+    /// </summary>
+    /// <remarks>
+    /// Modelled on <see cref="ParseStopOnToolFailure"/>: the raw value is parsed here so a value outside the two booleans
+    /// is refused with the key and both accepted values named. The hook is shared by every worktree of the clone, so a
+    /// silent guess at an unclear value would change behaviour for all of them without the owner noticing.
+    /// </remarks>
+    /// <exception cref="YamlException">The value is present and is neither <c>true</c> nor <c>false</c>.</exception>
+    private static bool ParseWorktreeIndexHook(string? value)
+    {
+        if (value is null)
+            return true;
+
+        if (bool.TryParse(value, out bool enabled))
+            return enabled;
+
+        throw new YamlException(
+            $"{WorktreeIndexHookKey} '{value}' is not a boolean. Use 'true' to index a new worktree on its first " +
+            "checkout, or 'false' to leave the git hook alone, or remove the key; an absent setting is 'true'.");
     }
 
     /// <summary>

@@ -69,6 +69,16 @@ public static class CodeGraphProvisioner
     /// <summary>How long a waiting run sleeps between attempts to take the lock.</summary>
     private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>
+    ///     The tracked files <c>codegraph init</c> writes, repository-relative with forward slashes, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    ///     Measured on a fresh clone: <c>codegraph init .</c> changed no tracked file and created no untracked file other
+    ///     than the git-ignored <c>.codegraph/</c>, so the list is empty. It is kept as a named list so that a future
+    ///     CodeGraph release which writes a tracked file is restored by name rather than by guess.
+    /// </remarks>
+    internal static readonly IReadOnlyList<string> InitConfigFiles = [];
+
     /// <summary>Returns the lock path for a root: a file in <paramref name="lockDirectory"/> named by a hash of the root.</summary>
     /// <param name="root">The repository root.</param>
     /// <param name="lockDirectory">The directory that holds lock files, normally the OS temp directory.</param>
@@ -85,12 +95,18 @@ public static class CodeGraphProvisioner
     /// <param name="options">The budgets and the CodeGraph executable name.</param>
     /// <param name="executor">Runs the CodeGraph child. Production passes an executor bounded by the index timeout.</param>
     /// <param name="lockDirectory">Where the lock file lives.</param>
+    /// <param name="restore">
+    ///     Which tracked files an ensure run restores after writing them. The default restores every file the run
+    ///     wrote; <see cref="CodeGraphRestore.InitConfigFilesOnly"/> restores only <see cref="InitConfigFiles"/> and
+    ///     names every other newly dirty file as left alone. Only the ensure mode reads it.
+    /// </param>
     public static CodeGraphOutcome Run(
         string root,
         DoctorMode mode,
         DoctorOptions options,
         IProcessExecutor executor,
-        string lockDirectory)
+        string lockDirectory,
+        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
     {
         List<DoctorCheck> checks = [];
 
@@ -116,7 +132,7 @@ public static class CodeGraphProvisioner
 
         if (mode == DoctorMode.Ensure)
         {
-            checks.AddRange(Ensure(root, indexDirectory, options, executor, lockDirectory, out bool initialised));
+            checks.AddRange(Ensure(root, indexDirectory, options, executor, lockDirectory, restore, out bool initialised));
             return new CodeGraphOutcome(checks, BinaryMissing: false, initialised);
         }
 
@@ -199,6 +215,7 @@ public static class CodeGraphProvisioner
         DoctorOptions options,
         IProcessExecutor executor,
         string lockDirectory,
+        CodeGraphRestore restore,
         out bool initialised)
     {
         List<DoctorCheck> checks = [];
@@ -241,8 +258,8 @@ public static class CodeGraphProvisioner
         // Only init rewrites tracked files, so only an init leaves something of this run's own to undo. After a sync
         // or a repair, passed or failed, a newly dirty file is someone else's edit in this tree, and restoring it
         // would revert their work: a review syncs a tree others may be in.
-        if (initRan && RestoreWritten(root, dirtyBefore, executor) is { } restore)
-            checks.Add(restore);
+        if (initRan && RestoreWritten(root, dirtyBefore, executor, restore) is { } restoreCheck)
+            checks.Add(restoreCheck);
 
         // A repair already ran, and one is the whole budget. Proving an index that could not be prepared would report
         // the same breakage twice and pay a second child run for it.
@@ -331,10 +348,17 @@ public static class CodeGraphProvisioner
     ///     The <c>codegraph.restore</c> check, or null when the preparation wrote no tracked file or when baseline
     ///     tracked changes could not be read.
     /// </returns>
+    /// <remarks>
+    ///     Under <see cref="CodeGraphRestore.InitConfigFilesOnly"/> the run restores only the files
+    ///     <see cref="InitConfigFiles"/> names. Any other newly dirty file is an edit the run did not cause as a
+    ///     known side effect, so it stays in place and is named in a passing check; the post-checkout hook fires
+    ///     during checkouts where a person may have uncommitted work.
+    /// </remarks>
     private static DoctorCheck? RestoreWritten(
         string root,
         HashSet<string>? dirtyBefore,
-        IProcessExecutor executor)
+        IProcessExecutor executor,
+        CodeGraphRestore restore)
     {
         if (dirtyBefore is null)
             return null;
@@ -355,6 +379,9 @@ public static class CodeGraphProvisioner
 
         written.Sort(StringComparer.Ordinal);
 
+        if (restore == CodeGraphRestore.InitConfigFilesOnly)
+            return RestoreInitConfigFiles(root, written, executor);
+
         List<string> failed = [];
         foreach (string path in written)
         {
@@ -368,12 +395,41 @@ public static class CodeGraphProvisioner
                 true,
                 $"restored the tracked files the index wrote: {string.Join(", ", written)}",
                 null)
-            : new DoctorCheck(
-                RestoreCheckId,
-                false,
-                $"the index wrote tracked files that could not be restored: {string.Join(", ", failed)}",
-                $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
+            : RestoreFailure(failed);
     }
+
+    /// <summary>
+    ///     Restores the newly written files that <see cref="InitConfigFiles"/> names, and names the rest as left alone.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="written">The newly dirty tracked files, sorted ordinally.</param>
+    /// <param name="executor">Runs git.</param>
+    /// <returns>The <c>codegraph.restore</c> check: failing only when a file <c>codegraph init</c> wrote could not be restored.</returns>
+    private static DoctorCheck RestoreInitConfigFiles(string root, List<string> written, IProcessExecutor executor)
+    {
+        List<string> toRestore = written.Where(path => InitConfigFiles.Contains(path, StringComparer.Ordinal)).ToList();
+        List<string> leftAlone = written.Where(path => !toRestore.Contains(path, StringComparer.Ordinal)).ToList();
+
+        List<string> failed = toRestore.Where(path => !RestoreOne(root, path, executor)).ToList();
+        if (failed.Count > 0)
+            return RestoreFailure(failed);
+
+        List<string> parts = [];
+        if (toRestore.Count > 0)
+            parts.Add($"restored the tracked files the index wrote: {string.Join(", ", toRestore)}");
+        if (leftAlone.Count > 0)
+            parts.Add($"left alone, not written by codegraph init: {string.Join(", ", leftAlone)}");
+
+        return new DoctorCheck(RestoreCheckId, true, string.Join("; ", parts), null);
+    }
+
+    /// <summary>The failing <c>codegraph.restore</c> check for files that could not be restored, with the command that restores them by hand.</summary>
+    private static DoctorCheck RestoreFailure(List<string> failed) =>
+        new(
+            RestoreCheckId,
+            false,
+            $"the index wrote tracked files that could not be restored: {string.Join(", ", failed)}",
+            $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
 
     internal static string QuoteShellPath(string path) =>
         QuoteShellPath(path, OperatingSystem.IsWindows());
