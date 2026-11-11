@@ -228,9 +228,10 @@ public sealed class ReviewConfig
 
     /// <summary>Seconds the review council may run its gates before the deadline stops them.</summary>
     /// <remarks>
-    /// Read from <c>review.council-deadline-seconds</c>. It bounds only the full <c>review gates --council</c> run:
-    /// a gate the deadline cuts, and every gate after it, is reported as not run (<c>KW-REVIEW-039</c>) rather
-    /// than failed, so the council returns a verdict on the evidence it has instead of waiting on a slow suite.
+    /// Read from <c>review.council-deadline-seconds</c>. It bounds only a <c>review gates --deadline</c> run, which
+    /// the council passes: a gate the deadline cuts, and every gate after it, is reported as not run
+    /// (<c>KW-REVIEW-039</c>) rather than failed, so the council returns a verdict on the evidence it has instead of
+    /// waiting on a slow suite. Without <c>--deadline</c> no run deadline applies.
     /// </remarks>
     public int CouncilDeadlineSeconds { get; init; } = 600;
 

@@ -65,8 +65,8 @@ internal static partial class SeatFlatYamlReader
             if (start.Success && (item is null || start.Groups["indent"].Length == item.ItemIndent))
             {
                 Close(items, ref item, ref field);
-                item = new ItemBuilder(line.Number, indent + 1, indent, indent + 2);
-                field = item.Open(start.Groups["key"].Value, start.Groups["rest"].Value);
+                item = new ItemBuilder(seatLens, line.Number, indent + 1, indent, indent + 2);
+                field = item.Open(start.Groups["key"].Value, start.Groups["rest"].Value, line.Number);
                 continue;
             }
 
@@ -80,7 +80,7 @@ internal static partial class SeatFlatYamlReader
             Match key = FieldLine().Match(text);
             if (key.Success && indent == item.KeyIndent)
             {
-                field = item.Open(key.Groups["key"].Value, key.Groups["rest"].Value);
+                field = item.Open(key.Groups["key"].Value, key.Groups["rest"].Value, line.Number);
                 continue;
             }
 
@@ -134,7 +134,7 @@ internal static partial class SeatFlatYamlReader
     [GeneratedRegex(@"^(?<style>[|>])[+-]?[0-9]?[+-]?\s*$", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
     private static partial Regex BlockHeader();
 
-    private sealed class ItemBuilder(int line, int column, int itemIndent, int keyIndent)
+    private sealed class ItemBuilder(string seatLens, int line, int column, int itemIndent, int keyIndent)
     {
         private readonly List<FieldBuilder> _fields = [];
 
@@ -142,8 +142,16 @@ internal static partial class SeatFlatYamlReader
 
         public int KeyIndent { get; } = keyIndent;
 
-        public FieldBuilder Open(string key, string rest)
+        /// <summary>Starts a field. A key written twice is refused: keeping either value would lose the other.</summary>
+        public FieldBuilder Open(string key, string rest, int lineNumber)
         {
+            if (_fields.Exists(existing => string.Equals(existing.Key, key, StringComparison.Ordinal)))
+            {
+                throw new SeatOutputException(
+                    $"The finding at line {line} in the {seatLens} seat output writes '{key}' twice; the second is " +
+                    $"at line {lineNumber}, column {KeyIndent + 1}. Keep one.");
+            }
+
             Match block = BlockHeader().Match(rest);
             FieldBuilder field = block.Success
                 ? new FieldBuilder(key, null, block.Groups["style"].Value[0])
@@ -225,7 +233,7 @@ internal static partial class SeatFlatYamlReader
         /// </summary>
         private static string Unquote(string value)
         {
-            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+            if (IsOneQuotedString(value, '"'))
             {
                 return value[1..^1]
                     .Replace("\\\\", "\u0000", StringComparison.Ordinal)
@@ -235,10 +243,43 @@ internal static partial class SeatFlatYamlReader
                     .Replace("\u0000", "\\", StringComparison.Ordinal);
             }
 
-            if (value.Length >= 2 && value[0] == '\'' && value[^1] == '\'')
+            if (IsOneQuotedString(value, '\''))
                 return value[1..^1].Replace("''", "'", StringComparison.Ordinal);
 
             return value;
+        }
+
+        /// <summary>
+        /// Whether the whole value is one quoted string: it opens with <paramref name="quote"/> and the first
+        /// unescaped closing quote is its last character, so <c>"a", "b"</c> is two quoted words, not one value.
+        /// </summary>
+        private static bool IsOneQuotedString(string value, char quote)
+        {
+            if (value.Length < 2 || value[0] != quote)
+                return false;
+
+            for (int index = 1; index < value.Length; index++)
+            {
+                if (quote == '"' && value[index] == '\\')
+                {
+                    index++;
+                    continue;
+                }
+
+                if (value[index] != quote)
+                    continue;
+
+                // In a single-quoted string a doubled quote is an escaped quote, not the end.
+                if (quote == '\'' && index + 1 < value.Length && value[index + 1] == '\'')
+                {
+                    index++;
+                    continue;
+                }
+
+                return index == value.Length - 1;
+            }
+
+            return false;
         }
     }
 }

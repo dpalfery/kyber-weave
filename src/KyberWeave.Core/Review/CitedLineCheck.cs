@@ -71,7 +71,8 @@ public static class CitedLineCheck
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new FileLines(null, $"{path} could not be read: {ex.Message}");
+            // The exception message can carry the absolute path, which does not belong in a review report.
+            return new FileLines(null, $"{path} could not be read ({ex.GetType().Name})");
         }
     }
 

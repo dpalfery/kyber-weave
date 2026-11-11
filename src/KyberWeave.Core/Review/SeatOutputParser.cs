@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Review;
@@ -37,6 +38,13 @@ public static partial class SeatOutputParser
     private const int MinimumConfidence = 1;
     private const int MaximumConfidence = 10;
 
+    /// <summary>The fields the parser reads as text.</summary>
+    private static readonly HashSet<string> TextFields = new(StringComparer.Ordinal)
+    {
+        "id", "lens", "severity", "confidence", "file", "line", "excerpt", "claim", "evidence",
+        "failure_scenario", "failureScenario", "suggestion"
+    };
+
     /// <summary>Parses the text a seat wrote for one lens.</summary>
     /// <param name="lens">The lens the seat ran, taken from the file name.</param>
     /// <param name="text">The seat's output file contents.</param>
@@ -55,6 +63,7 @@ public static partial class SeatOutputParser
         string? indexFallback = null;
         SeatDiscovery? discovery = null;
         SeatOutputKind? declared = null;
+        int declaredLine = 0;
         List<SeatLine> body = [];
 
         // Closing lines are recognised only at the start of a line. An indented one is inside a finding's
@@ -69,10 +78,17 @@ public static partial class SeatOutputParser
                 indexFallback = trimmed[IndexFallbackPrefix.Length..].Trim();
             else if (line.StartsWith(DiscoveryPrefix, StringComparison.Ordinal))
                 discovery = ReadDiscovery(trimmed);
-            else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal))
-                declared ??= SeatOutputKind.NoFindings;
-            else if (line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
-                declared ??= SeatOutputKind.Skipped;
+            else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
+                     || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
+            {
+                if (declared is null)
+                {
+                    declared = line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
+                        ? SeatOutputKind.NoFindings
+                        : SeatOutputKind.Skipped;
+                    declaredLine = index + 1;
+                }
+            }
             else
                 body.Add(new SeatLine(line, index + 1));
         }
@@ -87,9 +103,11 @@ public static partial class SeatOutputParser
             if (yaml.Find(line => FindingItemStart().IsMatch(line.Text)) is { } item)
             {
                 string outcome = kind == SeatOutputKind.NoFindings ? NoFindingsPrefix : SkippedPrefix;
+                int column = item.Text.IndexOf('-', StringComparison.Ordinal) + 1;
                 throw new SeatOutputException(
-                    $"The {lens} seat output declares '{outcome}' but also holds a finding at line {item.Number}, " +
-                    "column 1. A seat reports findings or an outcome line, not both.");
+                    $"The {lens} seat output declares '{outcome}' (line {declaredLine}, column 1) but also holds a " +
+                    $"finding (line {item.Number}, column {column}). A seat reports findings or an outcome line, " +
+                    "not both.");
             }
 
             return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery);
@@ -188,6 +206,11 @@ public static partial class SeatOutputParser
             items = SeatFlatYamlReader.Read(seatLens, yaml);
         }
 
+        // Strict YAML reads a value such as `[Fact]` as a list. A seat that wrote it in a text field meant the text,
+        // so such a seat is read flat, where the value is the text as written.
+        if (items.Any(item => item.Fields.Any(field => field.Value.IsFlow && TextFields.Contains(field.Key))))
+            items = SeatFlatYamlReader.Read(seatLens, yaml);
+
         List<ReviewFinding> findings = new(items.Count);
         for (int index = 0; index < items.Count; index++)
             findings.Add(ReadFinding(seatLens, index + 1, items[index]));
@@ -237,9 +260,13 @@ public static partial class SeatOutputParser
             if (entry.Key is not YamlScalarNode { Value: { } key })
                 continue;
 
-            fields[key] = entry.Value is YamlScalarNode scalar
-                ? new SeatField(scalar.Value, IsText: true)
-                : new SeatField(null, IsText: false);
+            fields[key] = entry.Value switch
+            {
+                YamlScalarNode scalar => new SeatField(scalar.Value, IsText: true),
+                YamlSequenceNode { Style: SequenceStyle.Flow } or YamlMappingNode { Style: MappingStyle.Flow } =>
+                    new SeatField(null, IsText: false, IsFlow: true),
+                _ => new SeatField(null, IsText: false)
+            };
         }
 
         (int line, int column) = SourcePosition(yaml, mapping.Start);
@@ -360,7 +387,8 @@ internal sealed record SeatItem(int Line, int Column, IReadOnlyDictionary<string
 /// <summary>One field's value as read from the seat's YAML.</summary>
 /// <param name="Text">The value text, or null when the field is empty or not text.</param>
 /// <param name="IsText">Whether the value is text rather than a list or a mapping.</param>
-internal sealed record SeatField(string? Text, bool IsText);
+/// <param name="IsFlow">Whether strict YAML read the value as a flow collection, such as <c>[Fact]</c>.</param>
+internal sealed record SeatField(string? Text, bool IsText, bool IsFlow = false);
 
 /// <summary>A council seat's output could not be read; the message says why.</summary>
 public sealed class SeatOutputException : FormatException

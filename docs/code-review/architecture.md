@@ -316,7 +316,8 @@ the policy below:
   findings: it is never counted clean.
 - **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
   its file is moved to the one line that holds its excerpt, or dropped when no single line
-  does. A line inside the file is never moved.
+  does. A line inside the file is never moved. A finding whose file is missing, outside the
+  repository or unreadable is left as written and reported as unverified, one info line per file.
 
 A seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
