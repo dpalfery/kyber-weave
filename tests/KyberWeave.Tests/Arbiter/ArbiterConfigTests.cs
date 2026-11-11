@@ -41,6 +41,7 @@ public sealed class ArbiterConfigTests
         "KW-ARB-LADDER-001",
         "KW-ARB-NITPICK-001",
         "KW-ARB-NITPICK-002",
+        "KW-ARB-DUP-001",
     ];
 
     [Fact]
