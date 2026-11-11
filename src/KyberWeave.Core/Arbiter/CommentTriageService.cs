@@ -12,10 +12,12 @@ namespace KyberWeave.Core.Arbiter;
 public sealed record CommentTriageRequest(string Path, int Line, string Body, string? CommitSha);
 
 /// <summary>The class of one bot review comment and the decision it came from.</summary>
-/// <param name="Class">One of <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>.</param>
+/// <param name="Class">The class the caller acts on: <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>. Always <c>real</c> while the rule is in shadow.</param>
 /// <param name="Confidence">The provider's confidence in the class, when it reported one.</param>
 /// <param name="DecisionId">The id of the decision record written for this classification.</param>
-public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId);
+/// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only and not the model's answer.</param>
+/// <param name="WouldClass">In shadow, the class the model would have delivered without shadow; null when not in shadow or when the model gave no class.</param>
+public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId, bool Shadow, string? WouldClass);
 
 /// <summary>A bot's PR-level summary comment to classify row by row.</summary>
 /// <param name="Body">The summary text, which may carry a findings table.</param>
@@ -29,7 +31,17 @@ public sealed record CommentSummaryRequest(string Body, string? Author);
 /// <param name="Class">One of <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>.</param>
 /// <param name="Confidence">The provider's confidence, when the row was sent to it and it reported one.</param>
 /// <param name="DecisionId">The decision record the row was classified under; empty when the row was never sent.</param>
-public sealed record CommentSummaryItem(string Path, int Line, string Issue, string Class, double? Confidence, string DecisionId);
+/// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only; reported for every row, sent or not.</param>
+/// <param name="WouldClass">In shadow, the class the model would have delivered for the row; null when the row was not answered.</param>
+public sealed record CommentSummaryItem(
+    string Path,
+    int Line,
+    string Issue,
+    string Class,
+    double? Confidence,
+    string DecisionId,
+    bool Shadow,
+    string? WouldClass);
 
 /// <summary>The classified rows of one summary comment, in table order.</summary>
 /// <param name="Items">One item per table row; empty when the comment has no table or a row was malformed.</param>
@@ -43,8 +55,9 @@ public sealed record CommentSummaryResult(IReadOnlyList<CommentSummaryItem> Item
 /// </summary>
 /// <remarks>
 /// The rule ships in shadow, so its effect is recorded as neutral and the class it would have produced as
-/// <c>would-effect</c>. The raw answer the model gave is logged even when the floor refuses it, because threshold
-/// tuning reads exactly that answer.
+/// <c>would-effect</c>. The caller is handed <c>real</c> while the rule is in shadow, so a log-only rule changes no
+/// worker's action; the class it would have given is reported as <c>WouldClass</c>. The raw answer the model gave is
+/// logged even when the floor refuses it, because threshold tuning reads exactly that answer.
 /// </remarks>
 /// <param name="provider">The provider that answers the question; <c>NoneProvider</c> answers nothing.</param>
 /// <param name="repoRoot">The repository root the cited path is read under.</param>
@@ -52,16 +65,24 @@ public sealed record CommentSummaryResult(IReadOnlyList<CommentSummaryItem> Item
 /// <param name="clock">Stamps the decision record and allocates its id.</param>
 /// <param name="ruleSet">The rule-set hash the decision records, when the caller has one; empty otherwise.</param>
 /// <param name="botLogins">The logins of review bots whose summaries are classified. Empty means no summary is classified.</param>
+/// <param name="rules">
+/// The effective rules: the shipped rules with the host configuration's overrides applied, as the loaded configuration
+/// holds them. Null means the shipped rules alone. The rule's shadow state is read from here, so a host that sets
+/// <c>shadow</c> on the rule is the one that decides.
+/// </param>
 public sealed class CommentTriageService(
     IArbiterProvider provider,
     string repoRoot,
     string arbiterDirectory,
     TimeProvider clock,
     string? ruleSet = null,
-    IReadOnlyList<string>? botLogins = null)
+    IReadOnlyList<string>? botLogins = null,
+    IReadOnlyList<ArbiterRule>? rules = null)
 {
     /// <summary>The shipped rule that classifies a comment.</summary>
     public const string CommentRuleId = "KW-ARB-COMMENT-001";
+
+    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfig.ProductDefaults.Rules;
 
     /// <summary>
     /// The most summary rows sent to the classifier in one call. Rows past the cap stay real and unasked, so a long
@@ -84,8 +105,7 @@ public sealed class CommentTriageService(
 
         DateTimeOffset now = clock.GetUtcNow();
         string decisionId = ArbiterRecordId.New(now);
-        ArbiterRule? rule = ArbiterConfig.ProductDefaults.Rules
-            .FirstOrDefault(candidate => string.Equals(candidate.Id, CommentRuleId, StringComparison.Ordinal) && candidate.Ask is not null);
+        ArbiterRule? rule = CommentRule();
         FileExcerpt? excerpt = FileTextFacts.ReadExcerpt(repoRoot, request.Path, request.Line);
 
         ArbiterStep1BatchResult? batch = null;
@@ -130,9 +150,24 @@ public sealed class CommentTriageService(
             answer = given;
         }
 
+        // The decision keeps the answer the rule gave; shadow only changes what the caller is handed back.
         await WriteDecisionAsync(decisionId, now, request, rule, batch, score, given, answer, status, ct).ConfigureAwait(false);
-        return new CommentTriageResult(answer, confidence, decisionId);
+        bool shadow = rule?.Shadow ?? false;
+        if (!shadow)
+        {
+            return new CommentTriageResult(answer, confidence, decisionId, Shadow: false, WouldClass: null);
+        }
+
+        string? wouldClass = given is Real or Nitpick or AlreadyFixed ? answer : null;
+        return new CommentTriageResult(Real, confidence, decisionId, Shadow: true, WouldClass: wouldClass);
     }
+
+    /// <summary>
+    /// The effective <c>KW-ARB-COMMENT-001</c> rule: the one the loaded configuration holds, with any host override applied.
+    /// Null when no such rule is loaded or it has no question to ask.
+    /// </summary>
+    private ArbiterRule? CommentRule() =>
+        _rules.FirstOrDefault(candidate => string.Equals(candidate.Id, CommentRuleId, StringComparison.Ordinal) && candidate.Ask is not null);
 
     /// <summary>
     /// Classifies each row of a bot's summary table through <see cref="ClassifyAsync"/>. Only a summary from a
@@ -148,19 +183,29 @@ public sealed class CommentTriageService(
 
         IReadOnlyList<CommentSummaryRow> rows = CommentSummaryTable.Parse(request.Body) ?? [];
         bool classify = IsBotAuthor(request.Author);
+        // A row never sent to the classifier still reports the rule's shadow state, so every row says the same thing.
+        bool shadow = CommentRule()?.Shadow ?? false;
         List<CommentSummaryItem> items = [];
         for (int index = 0; index < rows.Count; index++)
         {
             CommentSummaryRow row = rows[index];
             if (!classify || index >= MaxSummaryRows)
             {
-                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty));
+                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty, shadow, null));
                 continue;
             }
 
             CommentTriageResult result = await ClassifyAsync(
                 new CommentTriageRequest(row.Path, row.Line, row.Issue, null), ct).ConfigureAwait(false);
-            items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, result.Class, result.Confidence, result.DecisionId));
+            items.Add(new CommentSummaryItem(
+                row.Path,
+                row.Line,
+                row.Issue,
+                result.Class,
+                result.Confidence,
+                result.DecisionId,
+                result.Shadow,
+                result.WouldClass));
         }
 
         return new CommentSummaryResult(items);

@@ -109,7 +109,8 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         Assert.Equal(3, result.Items.Count);
         Assert.Equal(["src/Widget.cs", "src/Gadget.cs", "src/Widget.cs"], result.Items.Select(item => item.Path).ToArray());
         Assert.Equal([12, 8, 20], result.Items.Select(item => item.Line).ToArray());
-        Assert.All(result.Items, item => Assert.Equal(Nitpick, item.Class));
+        Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
+        Assert.All(result.Items, item => Assert.Equal(Nitpick, item.WouldClass));
         Assert.All(result.Items, item => Assert.False(string.IsNullOrEmpty(item.DecisionId)));
         Assert.Equal(3, provider.Calls);
     }
@@ -177,7 +178,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
             .ClassifySummaryAsync(Summary("KILO-CODE-BOT"));
 
-        Assert.All(result.Items, item => Assert.Equal(Nitpick, item.Class));
+        Assert.All(result.Items, item => Assert.Equal(Nitpick, item.WouldClass));
     }
 
     /// <summary>The file, line and range spellings a bot writes all resolve to a path and a start line.</summary>
@@ -284,7 +285,8 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(body, BotLogin));
 
-        Assert.Equal(Nitpick, result.Items[0].Class);
+        Assert.Equal(Real, result.Items[0].Class);
+        Assert.Equal(Nitpick, result.Items[0].WouldClass);
         Assert.Equal(Real, result.Items[1].Class);
     }
 

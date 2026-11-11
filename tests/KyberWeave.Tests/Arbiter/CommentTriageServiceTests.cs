@@ -83,30 +83,38 @@ public sealed class CommentTriageServiceTests : IDisposable
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    /// <summary>A confident nitpick answer classifies the comment as a nitpick and records the decision it came from.</summary>
+    /// <summary>
+    /// A confident nitpick answer is recorded and reported, but the rule ships in shadow, so the class handed back is real
+    /// and the nitpick is named as what the model would have given.
+    /// </summary>
     [Fact]
-    public async Task AConfidentNitpickAnswerClassifiesTheCommentAsANitpick()
+    public async Task AConfidentNitpickAnswerIsRealWhileTheRuleIsInShadow()
     {
         WriteCitedFile();
 
         CommentTriageResult result = await Service(new ScriptedCommentProvider(Nitpick, 0.95))
             .ClassifyAsync(Request());
 
-        Assert.Equal(Nitpick, result.Class);
+        Assert.Equal(Real, result.Class);
+        Assert.True(result.Shadow);
+        Assert.Equal(Nitpick, result.WouldClass);
         Assert.Equal(0.95, result.Confidence);
         Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Id == result.DecisionId);
     }
 
-    /// <summary>When the bot's complaint is already fixed in the current file, the comment is classified so the worker does not redo the fix.</summary>
+    /// <summary>
+    /// When the bot's complaint is already fixed, the shadow rule still hands back real; the would-class names already-fixed.
+    /// </summary>
     [Fact]
-    public async Task AConfidentAlreadyFixedAnswerClassifiesTheCommentAsAlreadyFixed()
+    public async Task AConfidentAlreadyFixedAnswerIsRealWhileTheRuleIsInShadow()
     {
         WriteCitedFile();
 
         CommentTriageResult result = await Service(new ScriptedCommentProvider(AlreadyFixed, 0.95))
             .ClassifyAsync(Request());
 
-        Assert.Equal(AlreadyFixed, result.Class);
+        Assert.Equal(Real, result.Class);
+        Assert.Equal(AlreadyFixed, result.WouldClass);
     }
 
     /// <summary>A confident real answer is passed through as real.</summary>
