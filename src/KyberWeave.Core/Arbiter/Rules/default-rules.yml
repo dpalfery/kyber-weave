@@ -1,4 +1,4 @@
-# The 26 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 30 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -438,6 +438,83 @@ rules:
       confidence-at-least: 0.9
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { same-defect: duplicate, different-defect: allow }
+
+  # A bug-crusher investigate of a defect the Arbiter judges trivial is answered with the substitute report and
+  # the investigator is not spawned. A defect that needs the architect keeps the investigate. Shipped in shadow:
+  # the answer is logged, and the investigator still runs, until calibration is read.
+  - id: KW-ARB-TRIAGE-001
+    trigger: triage.shortcut
+    question: "Is this defect a trivial single-site fix that needs no architect?"
+    answers: [trivial, needs-architect]
+    shadow: true
+    ask:
+      type: choice
+      state: { defect: defect.report }
+      criteria:
+        trivial: "The defect is a single-site fault with an obvious local fix in one file."
+        needs-architect: "The defect spans sites, needs a design choice, or the cause is not clear from the report."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { trivial: answer, needs-architect: keep }
+
+  # A conductor's intake for a plan or a spec is answered with the recommendation and the planner is not spawned.
+  # Only the planner dispatch that carries the INTAKE: marker derives this shortcut. Shipped in shadow.
+  - id: KW-ARB-INTAKE-001
+    trigger: intake.shortcut
+    question: "Does this request call for a written plan or a written specification?"
+    answers: [plan, spec]
+    shadow: true
+    ask:
+      type: choice
+      state: { request: intake.request }
+      criteria:
+        plan: "The request is a bounded change with clear scope that a plan can carry."
+        spec: "The request is a feature with requirements that need a specification first."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { plan: answer, spec: answer }
+
+  # A docs-dev dispatch that declares no documentation change is answered without spawning docs-dev. A change that
+  # touches a governed path always keeps the dispatch, and the provider is never asked. Shipped in shadow.
+  - id: KW-ARB-DOCIMPACT-001
+    trigger: docs-impact.shortcut
+    question: "Does this change need no documentation change?"
+    answers: [touches, no-doc-change, doc-change, unknown]
+    shadow: true
+    decide:
+      - when: { fact: docs.governed-paths-changed, equals: true }
+        answer: touches
+      - when: { fact: docs.governed-paths-changed, exists: false }
+        answer: unknown
+    ask:
+      type: choice
+      state: { changed: review.changed-paths }
+      criteria:
+        no-doc-change: "No governed document describes the changed paths, so no documentation needs to change."
+        doc-change: "A governed document describes the changed paths and would need to change."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { touches: keep, unknown: keep, no-doc-change: answer, doc-change: keep }
+
+  # A rework dispatch whose failure repeats the failure of the same cluster is advised, never denied. The first
+  # failure of a cluster is only recorded. Shipped in shadow: the advisory is logged until calibration is read.
+  - id: KW-ARB-FAILURE-001
+    trigger: delegate.failure
+    question: "Is the current failure the same failure as the previous attempt of this cluster?"
+    answers: [same, different, first]
+    shadow: true
+    decide:
+      - when: { fact: failure.previous-text, exists: false }
+        answer: first
+    ask:
+      type: choice
+      state: { previous: failure.previous-text, current: failure.current-text }
+      criteria:
+        same: "The current failure reports the same error at the same place as the previous attempt."
+        different: "The current failure reports a different error, or the same place for another reason."
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { same: same-failure, different: allow, first: allow }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

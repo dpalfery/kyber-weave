@@ -124,7 +124,7 @@ public static class ArbiterTriggerFamilies
         },
         ArbiterTriggerFamily.Shortcut => new HashSet<string>(StringComparer.Ordinal)
         {
-            Rules.RuleEffects.Spawn, Rules.RuleEffects.Answer,
+            Rules.RuleEffects.Spawn, Rules.RuleEffects.Answer, Rules.RuleEffects.Keep,
         },
         ArbiterTriggerFamily.FailureCluster => new HashSet<string>(StringComparer.Ordinal)
         {

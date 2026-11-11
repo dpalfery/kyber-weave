@@ -235,8 +235,14 @@ public sealed class ArbiterEvaluator
             return new ArbiterDispatchEvaluation(null, RuleEffects.Allow);
         }
 
+        // The primary's decision record id, allocated up front: a stored failure names the decision that judged it.
+        string recordId = ArbiterRecordId.New(_clock.GetUtcNow());
+
         // Derived once: the bag declares the facts of every secondary, and the loop below plans them.
-        IReadOnlyList<string> secondaryNames = _secondaryTriggers(trigger, ev);
+        // The derivation reads this dispatch's own target and prompt, so a marker on one batched dispatch never derives
+        // a shortcut for another.
+        IReadOnlyList<string> secondaryNames = _secondaryTriggers(
+            trigger, ev with { Target = classification.Target, Prompt = prompt });
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
         facts = _gitFacts.Enrich(facts, classification, ev);
@@ -280,6 +286,28 @@ public sealed class ArbiterEvaluator
         string? planDigest = facts.TryGet("plan.digest", out ArbiterFact? digestFact)
             ? digestFact.Value as string
             : null;
+
+        // A rework dispatch reads the failure its cluster stored last, then stores this one, so the next rework of
+        // the cluster has a prior to compare. The store is written on every evaluation but a dry run.
+        string? priorDecisionId = null;
+        if (string.Equals(trigger, FailureFacts.Trigger, StringComparison.Ordinal)
+            && FailureFacts.ClusterOf(prompt) is { } cluster
+            && FailureFacts.CurrentTextOf(prompt) is { } currentFailure)
+        {
+            classification.Headers.TryGetValue("PLAN_FILE", out string? failurePlan);
+            ArbiterRunStore failures = ReviewStore(config);
+            FailureRecord? prior = FailureFacts.LastFor(failures.ReadFailures(failurePlan, planDigest, ev.Session), cluster);
+            facts = facts
+                .With(FailureFacts.PreviousText, prior?.Text, ArbiterFactLabel.Derived)
+                .With(FailureFacts.CurrentText, currentFailure, ArbiterFactLabel.Derived);
+            priorDecisionId = prior?.DecisionId;
+            if (!effective.DryRun)
+            {
+                await failures.AppendFailureAsync(
+                    failurePlan, planDigest, ev.Session,
+                    FailureFacts.Stored(cluster, recordId, currentFailure), cancellationToken).ConfigureAwait(false);
+            }
+        }
 
         // Primary and secondary read one fact set and one candidate map, so their questions
         // can share a single provider call.
@@ -354,8 +382,9 @@ public sealed class ArbiterEvaluator
         }
 
         // One decision record per dispatch: every finding's rules sit on it, tagged with the finding they judged.
-        string recordId = ArbiterRecordId.New(_clock.GetUtcNow());
-        List<JudgedFinding> judged = judgements.Select(judgement => JudgeFinding(judgement, recordId, refutedSlug)).ToList();
+        List<JudgedFinding> judged = judgements
+            .Select(judgement => JudgeFinding(judgement, recordId, refutedSlug, priorDecisionId))
+            .ToList();
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
             classification, ev, primaryJudgement, judged, recordId, config, rules, effective, ledgerId, planDigest,
             elapsed, cancellationToken).ConfigureAwait(false);
@@ -390,7 +419,12 @@ public sealed class ArbiterEvaluator
             secondaryResults.Add(evaluated);
         }
 
-        return new ArbiterDispatchEvaluation(trigger, primaryOutcome) { Secondary = secondaryResults };
+        // An answered shortcut is the one secondary effect that gates: it withholds the primary's worker, so the
+        // dispatch is answered when the primary allowed it. Every other secondary outcome leaves the primary's alone.
+        bool answered = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal)
+            && secondaryResults.Any(result => string.Equals(result.Outcome, RuleEffects.Answer, StringComparison.Ordinal));
+        string dispatchOutcome = answered ? RuleEffects.Answer : primaryOutcome;
+        return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
     }
 
     /// <summary>Plans one trigger: its step-0 answers, and the step-1 questions the step-0 answers leave open.</summary>
@@ -639,11 +673,15 @@ public sealed class ArbiterEvaluator
     /// candidate) keeps one entry per rule: the first candidate whose answer has an effect, else the first candidate.
     /// A lens finding's entries are tagged with that finding's id, so the record says which finding each judged.
     /// </summary>
-    private static JudgedFinding JudgeFinding(FindingJudgement judgement, string recordId, string? refutedSlug)
+    private static JudgedFinding JudgeFinding(
+        FindingJudgement judgement,
+        string recordId,
+        string? refutedSlug,
+        string? priorDecisionId)
     {
         ArbiterTriggerFamily family = judgement.Plan.Family;
-        List<ArbiterDecisionRule> rules = Step0Rules(judgement.Plan.Step0);
-        List<string> effects = new(judgement.Plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<ArbiterDecisionRule> rules = Step0Rules(judgement.Plan);
+        List<string> effects = new(Step0EffectsOf(judgement.Plan));
         List<(string RuleId, string? Candidate, bool Decisive, ArbiterDecisionRule Entry)> rows = [];
         HashSet<string> decisiveRules = new(StringComparer.Ordinal);
         foreach (Question question in judgement.Plan.Questions)
@@ -660,7 +698,9 @@ public sealed class ArbiterEvaluator
                 && refutedSlug is not null
                 && EarlierIdOf(question.Candidate) is { } earlierId
                 ? ArbiterFindingNotices.DuplicateLine(refutedSlug, earlierId, recordId)
-                : null;
+                : string.Equals(mapped, RuleEffects.SameFailure, StringComparison.Ordinal) && priorDecisionId is not null
+                    ? ArbiterFailureNotices.SameFailureLine(priorDecisionId, recordId)
+                    : null;
             ArbiterDecisionRule entry = Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence);
             bool decisive = !string.Equals(mapped, RuleEffects.Allow, StringComparison.Ordinal);
             if (decisive && question.Candidate is not null)
@@ -785,8 +825,8 @@ public sealed class ArbiterEvaluator
     {
         string neutral = SecondaryTriggers.NeutralEffect();
         bool primaryAllows = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal);
-        List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
-        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<ArbiterDecisionRule> rules = Step0Rules(plan);
+        List<string> effects = new(Step0EffectsOf(plan));
         List<string> payload = [];
         foreach (Question question in plan.Questions)
         {
@@ -836,19 +876,58 @@ public sealed class ArbiterEvaluator
         }
 
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
+        string secondaryRecordId = ArbiterRecordId.New(_clock.GetUtcNow());
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, primaryLedgerId: ledgerId,
-            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken, model: model)
+            effective, ledgerId, planDigest, config, effectiveRules, elapsed, cancellationToken, model: model,
+            recordId: secondaryRecordId)
             .ConfigureAwait(false);
         string? answered = payload.Count == 0 ? null : string.Join(",", payload);
-        return new ArbiterSecondaryEvaluation(plan.Trigger, outcome, model?.Token ?? answered);
+        return new ArbiterSecondaryEvaluation(plan.Trigger, outcome, model?.Token ?? answered)
+        {
+            DecisionId = secondaryRecordId,
+        };
     }
 
-    private static List<ArbiterDecisionRule> Step0Rules(ArbiterOutcome step0)
+    /// <summary>
+    /// The step-0 effects a plan contributes to its outcome. A shortcut's undecidable step-0 answer is not a verdict
+    /// when step 1 asks that rule: the step-1 answer decides it, so the step-0 spawn it would map to must not block an answer.
+    /// </summary>
+    private static List<string> Step0EffectsOf(TriggerPlan plan)
     {
-        List<ArbiterDecisionRule> rules = new(step0.RuleAnswers.Count);
-        foreach (ArbiterRuleAnswer answer in step0.RuleAnswers)
+        List<string> effects = [];
+        foreach (ArbiterRuleAnswer answer in plan.Step0.RuleAnswers)
         {
+            if (!DecidedByStepOne(plan, answer))
+            {
+                effects.Add(answer.Effect);
+            }
+        }
+
+        return effects;
+    }
+
+    /// <summary>
+    /// Whether a rule's undecidable step-0 answer is superseded by the step-1 question the same rule asked. Only the
+    /// shortcut and same-failure families hold this shape: their undecidable maps to a spawn or an allow that must
+    /// not stand in for the answer step 1 gives.
+    /// </summary>
+    private static bool DecidedByStepOne(TriggerPlan plan, ArbiterRuleAnswer answer) =>
+        (plan.Family == ArbiterTriggerFamily.Shortcut || plan.Family == ArbiterTriggerFamily.FailureCluster)
+        && string.Equals(answer.Answer, RuleEngine.Undecidable, StringComparison.Ordinal)
+        && plan.Questions.Any(question => string.Equals(question.RuleId, answer.RuleId, StringComparison.Ordinal));
+
+    /// <summary>The step-0 decision entries of a plan, without the undecidable entry a step-1 question superseded.</summary>
+    private static List<ArbiterDecisionRule> Step0Rules(TriggerPlan plan)
+    {
+        List<ArbiterDecisionRule> rules = new(plan.Step0.RuleAnswers.Count);
+        foreach (ArbiterRuleAnswer answer in plan.Step0.RuleAnswers)
+        {
+            if (DecidedByStepOne(plan, answer))
+            {
+                continue;
+            }
+
             rules.Add(new ArbiterDecisionRule(
                 answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], null,
                 shadow: answer.Shadow ? true : null,
@@ -857,6 +936,7 @@ public sealed class ArbiterEvaluator
 
         return rules;
     }
+
 
     /// <summary>One step-1 rule's decision entry: its answer, its effect, and the score when it was scored.</summary>
     private static ArbiterDecisionRule Step1Rule(

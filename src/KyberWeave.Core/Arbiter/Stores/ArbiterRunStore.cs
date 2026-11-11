@@ -114,11 +114,33 @@ public sealed class ArbiterRunStore
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(text);
+        string directory = FailureDirectory(planFile, planDigest, session);
+        return AppendAsync(directory, FailuresFileName, text, ct);
+    }
+
+    /// <summary>
+    /// Reads the worker failures stored for a plan, or for a session when no plan is known, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Returns an empty list when the store is missing or unreadable. The key is the one
+    /// <see cref="AppendFailureAsync"/> writes under, so a read finds what an append wrote.
+    /// </remarks>
+    /// <param name="planFile">The plan file the failures belong to, or null.</param>
+    /// <param name="planDigest">The digest of that plan file, or null.</param>
+    /// <param name="session">The session that failed, used as the key when there is no plan.</param>
+    /// <returns>The stored texts, in append order.</returns>
+    public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
+    {
+        string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
+        return ReadItems(path);
+    }
+
+    private string FailureDirectory(string? planFile, string? planDigest, string? session)
+    {
         string key = planFile is not null
             ? planFile + (planDigest ?? string.Empty)
             : session ?? string.Empty;
-        string directory = Path.Combine(_storesDirectory, "run-" + Digest(key));
-        return AppendAsync(directory, FailuresFileName, text, ct);
+        return Path.Combine(_storesDirectory, "run-" + Digest(key));
     }
 
     /// <summary>Reads the findings stored for <paramref name="reviewRun"/>, oldest first.</summary>

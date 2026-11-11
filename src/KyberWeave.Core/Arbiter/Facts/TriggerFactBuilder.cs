@@ -192,6 +192,10 @@ public static class TriggerFactBuilder
                 "delegation.target-class" => targetClass,
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
+                // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
+                // find, and the intake request the planner was asked to assess.
+                "defect.report" => stripped,
+                "intake.request" => stripped,
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling

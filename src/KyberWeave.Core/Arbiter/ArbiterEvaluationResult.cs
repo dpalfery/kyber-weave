@@ -17,7 +17,11 @@ public sealed record ArbiterDispatchEvaluation(string? Trigger, string Outcome)
 /// <param name="Trigger">The secondary trigger.</param>
 /// <param name="Outcome">The secondary trigger's combined effect after shadow and suppression.</param>
 /// <param name="Payload">The answers the secondary rules gave, comma-separated, or null when none did.</param>
-public sealed record ArbiterSecondaryEvaluation(string Trigger, string Outcome, string? Payload);
+public sealed record ArbiterSecondaryEvaluation(string Trigger, string Outcome, string? Payload)
+{
+    /// <summary>The decision record this secondary wrote, which a substitute digest names.</summary>
+    public string? DecisionId { get; init; }
+}
 
 /// <summary>
 /// The evaluator's answer for one event: the event-level outcome and every

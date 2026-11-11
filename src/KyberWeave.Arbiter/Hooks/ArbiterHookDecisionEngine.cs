@@ -33,6 +33,10 @@ namespace KyberWeave.Arbiter.Hooks;
 public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
 {
     private const string ModelTrigger = "delegate.model";
+    private const string TriageShortcutTrigger = "triage.shortcut";
+    private const string IntakeShortcutTrigger = "intake.shortcut";
+    private const string DocsImpactShortcutTrigger = "docs-impact.shortcut";
+    private const string IntakeMarkerPrefix = "INTAKE:";
     private const string ModelTargetingOff = "off";
 
     private readonly Func<KyberWeaveConfig, IArbiterProvider> _providerFactory;
@@ -264,6 +268,36 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 ModelBlock: targeting ? block : null);
         }
 
+        // A same-failure advisory never denies: the rework proceeds, with the one line naming the prior failure beside it.
+        if (string.Equals(result.Outcome, RuleEffects.SameFailure, StringComparison.Ordinal))
+        {
+            string? advisory = DecisionWithOutcome(arbiterDirectory, result.LedgerId, RuleEffects.SameFailure)?.Rules
+                .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.SameFailure, StringComparison.Ordinal)
+                    && rule.Evidence is not null)?.Evidence;
+            return new HookOutcome(HookOutcomeKind.AllowWithNote, advisory ?? "ARBITER_SAME_FAILURE: yes");
+        }
+
+        // An answered shortcut withholds its worker: the dispatch is denied with the substitute digest the worker's
+        // report would have carried, so the caller takes that digest as the result.
+        if (string.Equals(result.Outcome, RuleEffects.Answer, StringComparison.Ordinal))
+        {
+            ArbiterDecisionRecord? answered = DecisionWithOutcome(arbiterDirectory, result.LedgerId, RuleEffects.Answer);
+            string? digest = answered is null ? null : SubstituteDigestFor(answered, prompt);
+            if (answered is null || digest is null)
+            {
+                return AllowLoudly(
+                    harness,
+                    "the shortcut answered with no substitute digest; the dispatch continues.",
+                    context.NewDecisionId(),
+                    context);
+            }
+
+            context.Log.WriteLine($"Arbiter {answered.Trigger} answer: withholding the worker for '{answered.Target ?? "<none>"}'.");
+            return isPost
+                ? new HookOutcome(HookOutcomeKind.PostBlock, digest)
+                : new HookOutcome(HookOutcomeKind.Deny, digest);
+        }
+
         ArbiterDecisionRecord? record = string.IsNullOrEmpty(result.LedgerId)
             ? null
             : new DecisionLog(arbiterDirectory).ReadAll()
@@ -332,6 +366,61 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         return isPost
             ? new HookOutcome(HookOutcomeKind.PostBlock, reason)
             : new HookOutcome(HookOutcomeKind.Deny, reason);
+    }
+
+    /// <summary>
+    /// The last decision on the ledger event that carries <paramref name="outcome"/>, or null when none does. A
+    /// secondary shares the primary's ledger id, so the record that answered is found by its outcome, not its position.
+    /// </summary>
+    private static ArbiterDecisionRecord? DecisionWithOutcome(string arbiterDirectory, string ledgerId, string outcome)
+    {
+        if (string.IsNullOrEmpty(ledgerId))
+        {
+            return null;
+        }
+
+        return new DecisionLog(arbiterDirectory).ReadAll()
+            .LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
+                && string.Equals(decision.Outcome, outcome, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The substitute digest an answered shortcut hands back, named by the decision that answered it, or null when
+    /// the trigger is not a shortcut or its answer names no recommendation.
+    /// </summary>
+    private static string? SubstituteDigestFor(ArbiterDecisionRecord answered, string prompt)
+    {
+        if (string.Equals(answered.Trigger, TriageShortcutTrigger, StringComparison.Ordinal))
+        {
+            return SubstituteDigests.Triage(answered.Id);
+        }
+
+        if (string.Equals(answered.Trigger, DocsImpactShortcutTrigger, StringComparison.Ordinal))
+        {
+            return SubstituteDigests.DocsImpact(answered.Id);
+        }
+
+        if (!string.Equals(answered.Trigger, IntakeShortcutTrigger, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string? recommendation = answered.Rules
+            .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.Answer, StringComparison.Ordinal))?.Answer;
+        return recommendation is null
+            ? null
+            : SubstituteDigests.Intake(IntakeInputOf(prompt), recommendation.ToUpperInvariant(), answered.Id);
+    }
+
+    /// <summary>The request text an intake marker carries: the text after <c>INTAKE:</c> on the first body line.</summary>
+    private static string IntakeInputOf(string prompt)
+    {
+        string? marked = HeaderBlock.Strip(prompt)
+            .Split('\n')
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.StartsWith(IntakeMarkerPrefix, StringComparison.Ordinal));
+        string input = marked is null ? string.Empty : marked[IntakeMarkerPrefix.Length..].Trim();
+        return input.Length > 0 ? input : "unspecified";
     }
 
     /// <summary>
