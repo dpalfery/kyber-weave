@@ -110,9 +110,11 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             }
 
             string targetsPath = Path.Combine(arbiterDirectory, $"model-targets.{token}.json");
-            bool readable = ArbiterModelTargets.TryRead(arbiterDirectory, token) is not null;
-            bool stale = readable && File.Exists(lockPath)
-                && File.GetLastWriteTimeUtc(targetsPath) < File.GetLastWriteTimeUtc(lockPath);
+            DateTime targetsWritten = default;
+            bool readable = ArbiterModelTargets.TryRead(arbiterDirectory, token) is not null
+                && TryGetWriteTimeUtc(targetsPath, out targetsWritten);
+            bool stale = readable && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
+                && targetsWritten < lockWritten;
             if (readable && !stale)
             {
                 continue;
@@ -128,6 +130,29 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
                 targetsPath,
                 Hint: SquadUpdateHint));
         }
+    }
+
+    /// <summary>
+    /// Reads a file's last write time in UTC, or reports that there is none. A missing file reads as the
+    /// file-time epoch rather than an error, and an unreadable one throws, so both come back as false and
+    /// the check degrades to its warning instead of crashing <c>doctor</c>.
+    /// </summary>
+    /// <param name="path">The file to stat.</param>
+    /// <param name="writtenUtc">The last write time in UTC when the file exists and can be stat'ed.</param>
+    /// <returns>True when a real write time was read; false when the file is missing or cannot be stat'ed.</returns>
+    internal static bool TryGetWriteTimeUtc(string path, out DateTime writtenUtc)
+    {
+        writtenUtc = default;
+        try
+        {
+            writtenUtc = File.GetLastWriteTimeUtc(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return writtenUtc != DateTime.FromFileTimeUtc(0);
     }
 
     /// <summary>

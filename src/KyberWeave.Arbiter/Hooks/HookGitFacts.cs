@@ -120,9 +120,12 @@ internal sealed class HookGitFacts(
             }
         }
 
-        if (needsReviewChangedPaths)
+        // Resolved once and reused: a fetch or branch switch between two resolutions would measure the
+        // changed paths and the hunks from different bases.
+        string? baseRef = needsReviewChangedPaths || needsChangeSet ? ResolveBase(cwd) : null;
+
+        if (needsReviewChangedPaths && baseRef is not null)
         {
-            string baseRef = ResolveBase(cwd);
             IReadOnlyList<string> changed = [.. GitFacts.GetChangedPathsSinceBase(cwd, baseRef)];
             facts = facts.With("review.changed-paths", changed, ArbiterFactLabel.Derived);
             facts = facts.With("review.base-ref", baseRef, ArbiterFactLabel.Derived);
@@ -133,9 +136,9 @@ internal sealed class HookGitFacts(
             }
         }
 
-        if (needsChangeSet)
+        if (needsChangeSet && baseRef is not null)
         {
-            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, ResolveBase(cwd)));
+            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, baseRef));
         }
 
         return facts;
@@ -205,20 +208,45 @@ internal sealed class HookGitFacts(
     }
 
     /// <summary>
+    /// The most new-side lines the fact lists. A finding names one line, so a change past this bound is
+    /// left absent rather than listed in full or cut short.
+    /// </summary>
+    private const int MaxFindingChangedLines = 100_000;
+
+    /// <summary>
     /// The new-side lines of the finding's file that fall inside a changed hunk: the lines a finding can
     /// honestly claim the change touched. Absent without a finding file, because there is nothing to
     /// intersect with the hunks.
     /// </summary>
-    private static ArbiterFactSet WithFindingChangedLines(ArbiterFactSet facts, ChangeSet change)
+    /// <remarks>
+    /// Line 0 is never listed: a pure deletion reports a zero count there and names no line. A hunk that
+    /// starts before line 1 with lines in it cannot come from git, so the fact stays absent. The total is
+    /// counted before any line is listed, so a huge hunk is refused without being expanded.
+    /// </remarks>
+    internal static ArbiterFactSet WithFindingChangedLines(ArbiterFactSet facts, ChangeSet change)
     {
         if (!facts.TryGet("finding.file", out ArbiterFact? file) || file.Value is not string path)
         {
             return facts;
         }
 
-        List<int> lines = change.Hunks
-            .Where(measured => string.Equals(measured.Hunk.Path, path, StringComparison.Ordinal) && measured.Hunk.Count > 0)
-            .SelectMany(measured => Enumerable.Range(measured.Hunk.Start, measured.Hunk.Count))
+        List<ChangedHunk> hunks = change.Hunks
+            .Select(measured => measured.Hunk)
+            .Where(hunk => string.Equals(hunk.Path, path, StringComparison.Ordinal) && hunk.Count > 0)
+            .ToList();
+        if (hunks.Any(hunk => hunk.Start < 1 || (long)hunk.Start + hunk.Count - 1 > int.MaxValue))
+        {
+            return facts;
+        }
+
+        long total = hunks.Sum(hunk => (long)hunk.Count);
+        if (total > MaxFindingChangedLines)
+        {
+            return facts;
+        }
+
+        List<int> lines = hunks
+            .SelectMany(hunk => Enumerable.Range(hunk.Start, hunk.Count))
             .Distinct()
             .Order()
             .ToList();

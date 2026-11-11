@@ -617,27 +617,46 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// </summary>
     private bool WriteModel(JsonObject updated, string token, HookContext context)
     {
-        string? alias = AliasFor(token, context);
-        if (alias is null)
-        {
-            return false;
-        }
-
         try
         {
+            string? alias = AliasFor(token, context);
+            if (alias is null)
+            {
+                return false;
+            }
+
             if (ModelWriteFault is { } fault)
             {
                 throw fault;
             }
 
+            // The line is written before the model is set, so a line that fails leaves the tool input without the model.
+            context.Log.WriteLine($"model: {OneLine(alias)}; delivered: true");
             updated["model"] = alias;
-            context.Log.WriteLine($"model: {alias}; delivered: true");
             return true;
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        catch (OperationCanceledException)
         {
-            context.Log.WriteLine($"model-write-failed: {OneLine(ex.Message)}; delivered: false");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Any other failure of the write or its log line ends here: the dispatch runs without the model.
+            LogWriteFailure(context, ex);
             return false;
+        }
+    }
+
+    /// <summary>Logs a failed model write. When the log sink fails too there is nowhere to record the reason; the dispatch is still allowed.</summary>
+    private static void LogWriteFailure(HookContext context, Exception ex)
+    {
+        try
+        {
+            context.Log.WriteLine($"model-write-failed: {OneLine($"{ex.GetType().Name}: {ex.Message}")}; delivered: false");
+        }
+        catch (Exception logFault) when (logFault is not OperationCanceledException)
+        {
+            // The log itself has failed, so the reason cannot be written. The return-false path still runs.
         }
     }
 
@@ -655,7 +674,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
         else if (!string.Equals(alias, token, StringComparison.Ordinal))
         {
-            context.Log.WriteLine($"model.reason: alias-derived ({token} -> {alias})");
+            context.Log.WriteLine($"model.reason: alias-derived ({OneLine(token)} -> {OneLine(alias)})");
         }
 
         return alias;
