@@ -546,32 +546,44 @@ export class CanonStore {
 
   /**
    * Delete the hash-backed copies of the batch's model calls that an earlier
-   * refresh left under other ids: the same source unit, the same instant, a
-   * span id outside the batch, and a record digest in the raw payload. Runs
-   * inside the commit's transaction.
+   * refresh left under other ids: the same source unit, the same session,
+   * instant and name as a call in the batch, a span id outside the batch, and
+   * a record digest in the raw payload. Runs inside the commit's transaction.
    */
   private deleteSupersededCopies(records: readonly CanonicalRecord[], checkpoint: SourceCheckpoint): void {
     const batchIds = new Set(records.map((record) => record.spanId))
+    // A source unit can hold several sessions, so the instant alone does not
+    // identify a call: the session and the name must match too, as they do in
+    // the schema 24 repair's grouping.
+    const callKey = (sessionId: string | null, timestamp: string, name: string): string =>
+      JSON.stringify([sessionId, timestamp, name])
     const timestamps = new Set<string>()
+    const batchCalls = new Set<string>()
     for (const record of records) {
       if (record.op !== 'llm.invoke') continue
-      timestamps.add(record.timestamp instanceof Date ? record.timestamp.toISOString() : record.timestamp)
+      const timestamp = record.timestamp instanceof Date ? record.timestamp.toISOString() : record.timestamp
+      timestamps.add(timestamp)
+      batchCalls.add(callKey(record.sessionId ?? null, timestamp, record.name))
     }
     if (timestamps.size === 0) return
     const find = this.db.prepare(
-      `SELECT r.span_id AS span_id, r.trace_id AS trace_id, r.raw AS raw
+      `SELECT r.span_id AS span_id, r.trace_id AS trace_id, r.session_id AS session_id, r.name AS name, r.raw AS raw
          FROM record_provenance p JOIN records r ON r.span_id = p.span_id
         WHERE p.harness_id = ? AND p.source_key = ? AND r.op = 'llm.invoke' AND r.timestamp = ?`,
     )
-    const doomed: { spanId: string; traceId: string }[] = []
+    const doomed: { spanId: string; traceId: string | null }[] = []
     for (const timestamp of timestamps) {
       const rows = find.all(checkpoint.harnessId, checkpoint.sourceKey, timestamp) as {
         span_id: string
-        trace_id: string
+        trace_id: string | null
+        session_id: string | null
+        name: string
         raw: unknown
       }[]
       for (const row of rows) {
-        if (batchIds.has(row.span_id) || !hasRecordDigest(row.raw)) continue
+        if (batchIds.has(row.span_id)) continue
+        if (!batchCalls.has(callKey(row.session_id, timestamp, row.name))) continue
+        if (!hasRecordDigest(row.raw)) continue
         doomed.push({ spanId: row.span_id, traceId: row.trace_id })
       }
     }

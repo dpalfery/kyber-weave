@@ -564,10 +564,19 @@ function duplicateCallGroups(db: Database): DuplicateCallGroup[] {
   }))
 }
 
-/** True when a records row's raw payload carries `provenance.recordDigest`. */
+/**
+ * True when a records row's raw payload carries `provenance.recordDigest`.
+ * A payload that cannot be read is not hash-backed: the row is kept, so one
+ * damaged row cannot abort the commit or the repair that asked.
+ */
 export function hasRecordDigest(raw: unknown): boolean {
   if (!(raw instanceof Uint8Array)) return false
-  const payload = decompressRaw(raw)
+  let payload: unknown
+  try {
+    payload = decompressRaw(raw)
+  } catch {
+    return false
+  }
   if (typeof payload !== 'object' || payload === null) return false
   const provenance = (payload as { provenance?: unknown }).provenance
   if (typeof provenance !== 'object' || provenance === null) return false
@@ -580,9 +589,13 @@ export function hasRecordDigest(raw: unknown): boolean {
  * them. A child is a `tool.invoke` row whose parent is one of the spans, in
  * the parent's trace (the trace index keeps the lookup off a table scan).
  */
-export function deleteSupersededSpans(db: Database, spans: readonly { spanId: string; traceId: string }[]): void {
+export function deleteSupersededSpans(
+  db: Database,
+  spans: readonly { spanId: string; traceId: string | null }[],
+): void {
+  // `IS` rather than `=`: a parent stored without a trace has children without one.
   const findChildren = db.prepare(
-    "SELECT span_id FROM records WHERE trace_id = ? AND parent_span_id = ? AND op = 'tool.invoke'",
+    "SELECT span_id FROM records WHERE trace_id IS ? AND parent_span_id = ? AND op = 'tool.invoke'",
   )
   const deleteRecord = db.prepare('DELETE FROM records WHERE span_id = ?')
   const deleteProvenance = db.prepare('DELETE FROM record_provenance WHERE span_id = ?')
@@ -607,7 +620,7 @@ function repairDuplicateGroup(db: Database, group: DuplicateCallGroup): number {
     )
     .all(group.harness, group.sessionId, group.timestamp, group.name, `${FILE_SOURCE_PREFIX}%`) as {
     span_id: string
-    trace_id: string
+    trace_id: string | null
     raw: unknown
     imported: string
   }[]

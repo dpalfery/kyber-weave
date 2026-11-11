@@ -165,4 +165,17 @@ describe('commitSourceUnit supersedes hash-backed copies', () => {
     ).toBe('span-other-t1')
     store.close()
   })
+
+  it('keeps a hash-backed call of another session in the same source unit at the same instant', () => {
+    const store = new CanonStore(':memory:')
+    const otherSession = { ...llmCall('span-other-session', T1, { hashBacked: true }), sessionId: 'agent-other' }
+    const otherName = { ...llmCall('span-other-name', T1, { hashBacked: true }), name: 'pi:model-2' }
+    commitUnit(store, SOURCE_KEY, [otherSession, otherName])
+
+    commitUnit(store, SOURCE_KEY, [llmCall('span-new', T1, { hashBacked: true })])
+
+    expect(store.get('span-other-session')?.spanId, 'another session is not a copy').toBe('span-other-session')
+    expect(store.get('span-other-name')?.spanId, 'another model name is not a copy').toBe('span-other-name')
+    store.close()
+  })
 })
